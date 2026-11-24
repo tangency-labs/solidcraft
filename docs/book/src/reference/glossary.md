@@ -494,6 +494,21 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
 
+### noise (pattern)
+
+How a random pattern spreads its instances over a face, named by the colour of the noise that
+places them.
+
+*White* noise places each instance independently, equally likely anywhere on the face's area.
+*Blue* noise is random but evenly spread, with no clumps and no gaps. *Pink* and *brown* noise
+cluster the instances, brown in larger clusters with bare patches between them.
+
+- **In SolidCraft:** `solid.pattern.face`'s `random` (`count`, `seed`, `noise`: `white`, `blue`,
+  `pink`, `brown`); the Random layout of Pattern on Face.
+- **Don't use:** jitter, scatter type.
+- **Elsewhere:** random distribution, Poisson-disk sampling (for blue noise).
+- **For translators:** the colours name noise spectra, not appearance colours.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
@@ -559,20 +574,16 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
-### noise (pattern)
+### pattern extent
 
-How a random pattern spreads its instances over a face, named by the colour of the noise that
-places them.
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
 
-*White* noise places each instance independently, equally likely anywhere on the face's area.
-*Blue* noise is random but evenly spread, with no clumps and no gaps. *Pink* and *brown* noise
-cluster the instances, brown in larger clusters with bare patches between them.
-
-- **In SolidCraft:** `solid.pattern.face`'s `random` (`count`, `seed`, `noise`: `white`, `blue`,
-  `pink`, `brown`); the Random layout of Pattern on Face.
-- **Don't use:** jitter, scatter type.
-- **Elsewhere:** random distribution, Poisson-disk sampling (for blue noise).
-- **For translators:** the colours name noise spectra, not appearance colours.
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
 
 ### pattern instance
 
@@ -884,3 +895,7 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Gusset
+
+A reinforcing plate fitted between two structural support faces. SolidCraft keeps it as a separate fabrication body with its own dimensions and persistent attachments.

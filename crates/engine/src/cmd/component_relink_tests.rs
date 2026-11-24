@@ -259,6 +259,56 @@ fn volume(s: &mut Session) -> f64 {
     run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
 }
 
+/// #16829: a design open in the session that has no file yet can be inserted in another
+/// design. The body comes in with the names of its faces, its material and its properties,
+/// and the link is recorded with no file: `component.links` reports it as a link with no
+/// file, and `component.update_links` leaves it alone (it keeps its bodies).
+#[test]
+fn a_design_held_in_the_session_is_inserted_without_being_saved_first() {
+    // The design the caller holds: a part with a material, a look and a property, never saved.
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut source, "material.assign", json!({"bodies": ["Cube"], "material": "Steel"}));
+    source.doc_mut().appearances.bodies.insert("Cube".into(), solidcraft_doc::appearance::Look::custom([12, 34, 56], 0.4));
+    run(&mut source, "document.metadata.set", json!({"values": {"part_number": "P-1", "revision": "A"}}));
+    assert!(source.path.is_none(), "the design has no file yet");
+    let faces: Vec<String> = {
+        let state = source.world_state().unwrap();
+        let body = state.bodies.iter().find(|b| b.name == "Cube").expect("the design has its body");
+        solidcraft_doc::naming::face_names(body).as_ref().clone()
+    };
+
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"document": source.doc.to_json()}));
+    let component = inserted["component"].as_u64().unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    // The body comes in as the design has it: its name, its faces, its material and its look.
+    assert_eq!(inserted["bodies"], json!(["Cube"]), "{inserted}");
+    let mut carried: Vec<String> = s.doc.feature(feature).unwrap().link_faces[0].iter().filter(|n| !n.is_empty()).cloned().collect();
+    let mut want: Vec<String> = faces.iter().filter(|n| !n.is_empty()).cloned().collect();
+    carried.sort();
+    want.sort();
+    assert!(!carried.is_empty(), "the faces come in named");
+    assert_eq!(carried, want, "the faces keep the names the design gives them");
+    assert_link_properties(&mut s, component, "Steel", 7.85, [12, 34, 56]);
+    // The design's properties come in too.
+    assert_eq!(part_property(&s, component, "part_number").as_deref(), Some("P-1"));
+    assert_eq!(part_property(&s, component, "revision").as_deref(), Some("A"));
+
+    // The link names no file: there is none.
+    assert_eq!(s.doc.links[&component].path, "");
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"][0]["path"], "", "{links}");
+    assert_eq!(links["links"][0]["file"], "", "{links}");
+    assert!(links["links"][0]["found"].is_null(), "{links}");
+    // Update Links leaves it alone: it has no file to read, and keeps its bodies.
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!([]), "{updated}");
+    assert_eq!(updated["unchanged"], json!([]), "{updated}");
+    assert_eq!(updated["failed"], json!([]), "{updated}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"].as_array().map(Vec::len), Some(1));
+}
+
 fn properties_part(path: &Path, material: &str, density: Option<f64>, color: [u8; 3]) -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
@@ -348,6 +398,33 @@ fn linked_design_properties_do_not_replace_conflicting_custom_materials() {
     assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
     assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
     assert_eq!(s.doc.user_materials.len(), 2);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21182: every body that brings the same conflicting custom material shares one `(linked N)`
+/// copy, rather than each adding its own until the design runs out of custom materials.
+#[test]
+fn linked_bodies_with_one_conflicting_material_share_its_copy() {
+    let dir = folder("properties-custom-shared");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let mut assigned = Vec::new();
+    for _ in 0..3 {
+        let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+        let p = run(&mut s, "component.properties", json!({"component": c}));
+        assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
+        assigned.push(p["bodies"][0]["material"].as_str().unwrap().to_string());
+    }
+    assert_eq!(s.doc.user_materials.len(), 2, "{assigned:?}");
+    assert!(assigned.iter().all(|m| *m == assigned[0] && m != "Custom alloy"), "{assigned:?}");
+    assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -1432,5 +1509,72 @@ fn insert_design_accepts_matrix_and_rotation_placement() {
     assert!(s.execute("component.insert_design", &json!({"path": file, "to_matrix": to_m, "translate": [1, 0, 0]})).is_err());
     assert!(s.execute("component.insert_design", &json!({"path": file, "matrix": to_m, "axis": [0, 0, 1]})).is_err());
 
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #20890: deleting a component removes its own placements of a linked part; a link another
+/// component still places stays, with its bodies, and goes with the last placement.
+#[test]
+fn deleting_a_component_keeps_a_linked_part_another_component_still_places() {
+    let dir = folder("delete-shared-link");
+    let file = dir.join("part.sc");
+    part(&file, 30);
+    let mut s = Session::default();
+    let route1 = run(&mut s, "component.create", json!({"name": "Route 1", "grounded": false}))["component"].as_u64().unwrap();
+    let first = run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": false, "translate": [500, 0, 0]}));
+    let elbow = first["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let route2 = run(&mut s, "component.create", json!({"name": "Route 2", "grounded": false}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": true, "translate": [1000, 0, 0]}));
+    assert_eq!(second["component"], first["component"]);
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    let deleted = run(&mut s, "component.delete", json!({"component": "Route 1"}));
+    let gone: Vec<u64> = deleted["deleted"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
+    assert_eq!(gone, vec![route1], "{deleted}");
+    assert!(s.doc.components.iter().any(|c| c.id == elbow), "the link another component places stays");
+    assert!(s.doc.links.contains_key(&elbow));
+    let kept = second["occurrence"].as_u64().unwrap();
+    let placed: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == elbow).collect();
+    assert_eq!(placed.len(), 1, "only Route 2's placement is left");
+    assert_eq!((placed[0].id, placed[0].parent), (kept, route2));
+    assert_linked_bounds(&mut s, kept, [1000.0, 0.0, 0.0], [1010.0, 20.0, 30.0]);
+    assert_eq!(s.model.state().bodies.len(), 1, "the part's body is still there");
+    let owner = s.doc.components.iter().find(|c| c.id == elbow).map(|c| c.parent);
+    assert!(
+        owner.is_some_and(|p| p == 0 || p == route2 || s.doc.components.iter().any(|c| c.id == p)),
+        "the kept link is not left under a deleted component"
+    );
+
+    // The last placement takes the link with it.
+    let deleted = run(&mut s, "component.delete", json!({"component": "Route 2"}));
+    let gone: Vec<u64> = deleted["deleted"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
+    assert!(gone.contains(&route2) && gone.contains(&elbow), "{deleted}");
+    assert!(s.doc.links.is_empty());
+    assert!(s.doc.occurrences.is_empty());
+    assert!(s.model.state().bodies.is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #20890: a kept linked part moves up to the component the deleted one sat in, not to the root.
+#[test]
+fn a_kept_linked_part_moves_up_to_the_component_the_deleted_one_sat_in() {
+    let dir = folder("delete-shared-link-nested");
+    let file = dir.join("part.sc");
+    part(&file, 30);
+    let mut s = Session::default();
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}))["component"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.components.iter().find(|c| c.id == inner).map(|c| c.parent), Some(outer));
+    let first = run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": false, "translate": [500, 0, 0]}));
+    let elbow = first["component"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Other", "grounded": false}));
+    run(&mut s, "component.insert_design", json!({"path": file, "name": "Elbow", "reuse": true, "translate": [1000, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    run(&mut s, "component.delete", json!({"component": "Inner"}));
+    assert!(s.doc.components.iter().all(|c| c.id != inner));
+    assert_eq!(s.doc.components.iter().find(|c| c.id == elbow).map(|c| c.parent), Some(outer));
     let _ = std::fs::remove_dir_all(dir);
 }

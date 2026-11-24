@@ -10,7 +10,7 @@ When a kernel operation fails for a user, three things must reach whoever fixes 
 
 | Piece | Where | What it gives |
 |---|---|---|
-| `ErrorKind` | `crates/solidcore/src/error.rs` | A stable numeric code per kind of failure: 1 to 9 general, 90 and up solidcore's own, 100 to 131 the blend classes, 200 and up offset. Codes never change meaning once released. |
+| `ErrorKind` | `crates/solidcore/src/error.rs` | A stable numeric code per kind of failure: 1 to 9 general, 90 and up solidcore's own, 100 to 133 the blend classes, 200 and up offset. Codes never change meaning once released. |
 | `SolidError::operation()` | same | The `&'static str` path of the routine that failed (`"blend::fillet_executive::…"`). |
 | `SolidError::site()` | same, `Site` | The edge, face or vertex of the caller's body the failure is about, and the point, where the error names one. |
 | ops `Error` | `crates/solidcore-ops/src/error.rs` | What applications see. `status()` maps every `SolidError` to it. |

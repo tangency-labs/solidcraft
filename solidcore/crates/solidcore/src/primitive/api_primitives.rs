@@ -183,9 +183,9 @@ pub fn create_plane(k: &mut Kernel, origin: Point3, x: f64, y: f64) -> Result<Br
     let frame = xy_frame(origin);
     let mut brep = p1::create_rectangle(k, 1.0e-5, x, y, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_plane",
-            "the rectangle has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -218,9 +218,9 @@ pub fn create_planar_circle(k: &mut Kernel, origin: Point3, radius: f64) -> Resu
     let frame = xy_frame(origin);
     let mut brep = p1::create_circle(k, 1.0e-5, radius, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             "primitive::api_primitives::create_planar_circle",
-            "the disc has no face",
+            crate::error::primitive::PrimitiveFailure::SheetHasNoFace,
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)

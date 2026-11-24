@@ -294,7 +294,7 @@ impl<'a> PointDistance<'a> {
     /// # Errors
     /// [`KernelError::Invalid`] for a point that is not finite; [`KernelError::Failed`] where the
     /// kernel cannot take the body or no distance could be measured.
-    pub fn distance(&self, at: Vec3) -> Result<f64> {
+    pub fn measure(&self, at: Vec3) -> Result<f64> {
         if !at.is_finite() {
             return Err(KernelError::Invalid("the point must be finite".into()));
         }
