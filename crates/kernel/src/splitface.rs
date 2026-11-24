@@ -45,7 +45,7 @@ pub enum SplitTool<'a> {
 }
 
 /// Most segments a sketch tool may hold.
-const MAX_SEGMENTS: usize = 4096;
+pub(crate) const MAX_SEGMENTS: usize = 4096;
 
 fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
@@ -432,7 +432,7 @@ fn smlib_tools(groups: &[Vec<Patch>], reach: &Aabb3) -> Result<Vec<solidcraft_sm
 }
 
 /// A result checked by SMLib and brought back with its history over `[body]`.
-fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
+pub(crate) fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
     let check = r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed(name, e))?;
     if !check.is_valid() {
         return Err(failed(name, format!("SMLib's check refuses the result: {check}")));
@@ -445,7 +445,7 @@ fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, 
 }
 
 /// `body` in SMLib, tagged as operand 0, with its record's order.
-fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
+pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
     let (sb, ob) = crate::native::smlib_body_ordered(body)?;
     let ob = ob.ok_or_else(|| failed(name, "SMLib numbers the body's faces unlike its record"))?;
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
@@ -645,7 +645,9 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 }
 
 /// `tool`, a prism through the surface of `face` of `target` (run on past it), cut at that
-/// surface (extended), keeping the pieces that start at `start`: the planar faces square to
+/// surface (extended) where it crosses it the way it does at `near`, a point of the face
+/// ([`split_at_facing_side`]: on a cylinder the half the face lies on, #20389), keeping the
+/// pieces that start at `start`: the planar faces square to
 /// `plane`'s normal at that height along it. Whether the start lies in air or inside the
 /// target's material does not matter, and a piece never passes the face.
 ///
@@ -658,12 +660,13 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 ///
 /// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
 /// the distance between them.
-pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
     let target_form = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
     let (ops_target, order) = &*target_form;
     let n = plane.normal();
     let mut out = Vec::new();
-    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+    let travel = if far > start { n } else { n * -1.0 };
+    for part in split_at_facing_side(tool, target, face, near, travel)? {
         let own = part.record().tolerance;
         let cut = solidcore_ops::cap::PrismCut {
             origin: a3(plane.origin),
@@ -688,6 +691,43 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Pl
         }
     }
     Ok(Some(out))
+}
+
+/// `tool`, a prism run along `travel`, cut at the surface of face `face` of `sheet` where it
+/// crosses that surface the way it does at `near` (a point of the face): the pieces, as
+/// [`split_body`] gives them. A cylinder, extended, meets a line along the travel twice, once on
+/// each half of it either side of its axis, and only the half the face's pick lies on ends the
+/// tool there (#20389): the tool is cut by that half, its long edges carried on tangentially
+/// along the travel (back the way it came where the tool leaves the cylinder at the pick, on
+/// ahead where it goes in), a smooth sheet a line along the travel crosses once at most; the
+/// sheet reaches past the tool every way. Every other surface (and a travel along the axis, or a
+/// pick on the cylinder's edge as seen along the travel) splits at the face's surface extended,
+/// as [`split_body`] does.
+pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, travel: Vec3) -> Result<Vec<Body>> {
+    let whole = SplitTool::Face { body: sheet, face };
+    let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::face_surface(sheet, face) else {
+        return split_body(tool, &whole);
+    };
+    let b = tool.exact_bounds()?;
+    let Some(t) = solidcore_ops::facing_trough::facing_trough(a3(origin), a3(axis.vec()), radius, a3(near), a3(travel), a3(b.min), a3(b.max)) else {
+        return split_body(tool, &whole);
+    };
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let v2 = |[x, y]: [f64; 2]| Vec2::new(x, y);
+    // The frame across the axis: x along the travel, its normal along the axis.
+    let plane = Plane { origin: v3(t.origin), x: v3(t.x), y: v3(t.y) };
+    let chain = vec![
+        Seg2::Line { a: v2(t.wing_top), b: v2(t.top) },
+        Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: t.radius, start: t.start, sweep: t.sweep },
+        Seg2::Line { a: v2(t.bottom), b: v2(t.wing_bottom) },
+    ];
+    let trough = crate::extrude_sheet(&plane, &[chain], -t.reach, t.reach)?;
+    // Named by its round face: were the sheet not taken whole, that face's surface extended
+    // is the whole cylinder again, never a plane of the sheet.
+    let round = (0..trough.face_count())
+        .find(|&f| matches!(crate::face_surface(&trough, f), Some(crate::FaceSurface::Cylinder { .. })))
+        .ok_or_else(|| invalid("the sheet across the round has no round face"))?;
+    split_body(tool, &SplitTool::Face { body: &trough, face: round })
 }
 
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
@@ -1240,5 +1280,36 @@ mod tests {
         let pl = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
         assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
+    }
+
+    /// #20389: a bar run along the travel up to a quarter of a cylinder (axis z through (30, 20),
+    /// radius 10, the quarter toward +x +y) is cut where it crosses the cylinder the way it does at
+    /// the pick, not where it first meets the cylinder extended. The bar covers y 22…28 and z 0…4,
+    /// where the cylinder spans x = 30 ∓ √(100 − (y − 20)²). From x = −10 along +x it leaves the
+    /// cylinder at the quarter: the piece at the start runs to the far crossing,
+    /// 4 · (6 · 40 + ∫₂⁸ √(100 − u²) du). From x = 60 along −x it goes in there: the piece at the
+    /// start runs to the near crossing, 4 · (6 · 30 − ∫₂⁸ √(100 − u²) du).
+    #[test]
+    fn a_bar_is_cut_where_it_crosses_the_cylinder_as_at_the_pick() {
+        let quarter = vec![Seg2::Arc { center: Vec2::new(30.0, 20.0), radius: 10.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[quarter], -5.0, 10.0).unwrap();
+        let h = 10.0 / 2f64.sqrt();
+        let near = Vec3::new(30.0 + h, 20.0 + h, 2.0);
+        let primitive = |u: f64| u / 2.0 * (100.0 - u * u).sqrt() + 50.0 * (u / 10.0).asin();
+        let segment = primitive(8.0) - primitive(2.0);
+        for (from, to, travel, want) in [(-10.0, 60.0, Vec3::X, 4.0 * (240.0 + segment)), (60.0, -10.0, -Vec3::X, 4.0 * (180.0 - segment))] {
+            let bar = crate::box_solid(Vec3::new(f64::min(from, to), 22.0, 0.0), Vec3::new(f64::max(from, to), 28.0, 4.0)).unwrap();
+            let parts = split_at_facing_side(&bar, &sheet, 0, near, travel).unwrap();
+            // The piece at the start: the one reaching `from`.
+            let start = parts
+                .iter()
+                .find(|p| {
+                    let b = p.exact_bounds().unwrap();
+                    (b.min.x - from).abs() < 1e-6 || (b.max.x - from).abs() < 1e-6
+                })
+                .unwrap();
+            let got = measure(start).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "from {from}: {got} vs {want}");
+        }
     }
 }

@@ -53,6 +53,21 @@ pub trait Protocol: Send + Sync {
     /// version has, for a client to find out before it relies on it (an older app answers
     /// `control.capabilities` with "unknown method").
     fn capabilities(&self) -> Value;
+    /// Work the app runs for no connection's request in particular (a plugin package job, say) that
+    /// still holds something the others need. `control.pending` and `control.running` list it, so a
+    /// client that is refused can see what holds the app. Each entry is a JSON object.
+    fn background(&self) -> Vec<Value> {
+        Vec::new()
+    }
+}
+
+/// `result` with the app's background work added as `background`, when there is any.
+fn with_background(mut result: Value, protocol: &dyn Protocol) -> Value {
+    let jobs = protocol.background();
+    if !jobs.is_empty() {
+        result["background"] = Value::Array(jobs);
+    }
+    result
 }
 
 /// An app's control server: its [`Protocol`], how it wakes the window for a request, and the
@@ -836,7 +851,7 @@ impl Hub {
                         }
                     });
                     let mut r = if method == "control.running" {
-                        json!({"ok": true, "result": running.result(connection)})
+                        json!({"ok": true, "result": with_background(running.result(connection), &*self.protocol)})
                     } else if method == "control.capabilities" {
                         json!({"ok": true, "result": self.protocol.capabilities()})
                     } else if method == "control.cancel" {
@@ -845,12 +860,12 @@ impl Hub {
                         r
                     } else if method == "control.pending" {
                         match (pending.take(), late) {
-                            (None, _) => json!({"ok": true, "result": {"pending": null}}),
+                            (None, _) => json!({"ok": true, "result": with_background(json!({"pending": null}), &*self.protocol)}),
                             (Some(p), Some(reply)) => {
-                                json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": true, "reply": reply}})
+                                json!({"ok": true, "result": with_background(json!({"pending": p.id, "method": p.method, "done": true, "reply": reply}), &*self.protocol)})
                             }
                             (Some(p), None) => {
-                                let r = json!({"ok": true, "result": {"pending": p.id, "method": p.method, "done": false}});
+                                let r = json!({"ok": true, "result": with_background(json!({"pending": p.id, "method": p.method, "done": false}), &*self.protocol)});
                                 pending = Some(p);
                                 r
                             }
@@ -984,6 +999,42 @@ mod tests {
         fn capabilities(&self) -> Value {
             json!({})
         }
+    }
+
+    /// An app with a job of its own running: `control.pending` and `control.running` name it.
+    struct Busy;
+
+    impl Protocol for Busy {
+        fn summary(&self, method: &str, p: &Value) -> Summary {
+            Plain.summary(method, p)
+        }
+        fn document(&self) -> &'static str {
+            "design"
+        }
+        fn change_event(&self) -> &'static str {
+            "design.changed"
+        }
+        fn revision_method(&self) -> &'static str {
+            "document.revision"
+        }
+        fn docs(&self) -> &'static str {
+            "docs/control-protocol.md"
+        }
+        fn capabilities(&self) -> Value {
+            json!({})
+        }
+        fn background(&self) -> Vec<Value> {
+            vec![json!({"job": "package", "command": "plugin.install"})]
+        }
+    }
+
+    #[test]
+    fn background_work_is_listed_only_when_there_is_some() {
+        let plain = with_background(json!({"pending": null}), &Plain);
+        assert_eq!(plain, json!({"pending": null}));
+        let busy = with_background(json!({"pending": null}), &Busy);
+        assert_eq!(busy["background"][0]["command"], "plugin.install", "{busy}");
+        assert_eq!(busy["pending"], Value::Null);
     }
 
     /// A server for [`Plain`] with these waits and this document watch.

@@ -804,3 +804,25 @@ fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
         assert!(seg_extent(&bad, V::new(1., 0.)).is_err() && conic_share(w).is_err(), "{w}");
     }
 }
+
+#[test]
+fn mounting_plate_regions_have_exact_areas_and_hole_centres() {
+    let shape = PlateShape::Rectangle { width: "100".into(), height: "80".into() };
+    let holes = PlateHoles::Rectangle { diameter: "10".into(), pitch_x: "70".into(), pitch_y: "50".into() };
+    let number = |e: &Expr| Ok(e.parse::<f64>().unwrap());
+    let r = plate_region(&shape, &holes, number, 0.).unwrap();
+    close(r.area(), 8000. - 4. * PI * 25., "four-hole plate area");
+    assert_eq!(r.holes.len(), 4);
+    for (hole, (x, y)) in r.holes.iter().zip([(-35., -25.), (35., -25.), (35., 25.), (-35., 25.)]) {
+        assert!(matches!(hole.segs[0],Seg2::Arc{center,..} if center.dist(Vec2::new(x,y))<1e-10));
+    }
+    let r = plate_region(
+        &PlateShape::Round { diameter: "120".into() },
+        &PlateHoles::Circle { diameter: "10".into(), pitch_diameter: "90".into(), count: 6, angle: "0".into() },
+        number,
+        0.,
+    )
+    .unwrap();
+    close(r.area(), PI * (3600. - 6. * 25.), "six-hole round plate area");
+    assert_eq!(r.holes.len(), 6);
+}

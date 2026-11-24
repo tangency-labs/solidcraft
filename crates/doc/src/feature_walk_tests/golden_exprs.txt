@@ -98,14 +98,14 @@ cylinder
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
-  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+  expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z, 0, 0, 1
 cylinder_references
   inputs:
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
     Reference distance = cyl.reference1 (Length)
     Reference distance = cyl.reference2 (Length)
-  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0, 0, 0, 1
 sphere
   inputs:
     Radius = sph.radius (Length)
@@ -267,6 +267,21 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_plate
+  inputs:
+    Angle = plate.angle (Angle)
+    Offset = plate.offset (Length)
+    Width = plate.width (Length)
+    Height = plate.height (Length)
+    Hole Diameter = plate.hole (Length)
+    Bolt Circle Diameter = plate.pitch (Length)
+    Bolt Pattern Angle = plate.hole_angle (Angle)
+    Thickness = plate.thickness (Length)
+    Offset = plate.offset (Length)
+    X Offset = plate.x (Length)
+    Y Offset = plate.y (Length)
+    Rotation = plate.angle (Angle)
+  expressions: plate.angle, plate.offset, plate.width, plate.height, plate.hole, plate.pitch, plate.hole_angle, plate.thickness, plate.offset, plate.x, plate.y, plate.angle, 0, 0, 0
 emboss
   inputs:
     Depth = emboss.depth (Length)
@@ -339,6 +354,7 @@ sheet_path
   inputs:
     Bend radius = path.radius (Length)
   expressions: path.radius
+sheet_tab
 sheet_unfold
 sheet_convert
 sheet_surface_convert
@@ -472,6 +488,7 @@ mesh_convert
   inputs:
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
+mesh_reduce
 mesh_import
 repair
   inputs:

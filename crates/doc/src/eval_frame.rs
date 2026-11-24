@@ -103,7 +103,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     let FeatureKind::FrameMember { body_name, names, corner, flip, corners, fit_ends, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre } = layout(doc, vals, f, st)?;
+    let Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, .. } = layout(doc, vals, f, st)?;
     if corners.iter().flat_map(|c| &c.members).any(|m| m.feature.as_ref().is_some_and(|n| *n != f.name)) {
         return Err(DocError::Invalid("not supported yet: a corner with a member of another frame".into()));
     }
@@ -1834,6 +1834,8 @@ struct Layout {
     planes: Vec<MemberPlane>,
     turns: BTreeMap<String, f64>,
     centre: Vec2,
+    /// The profile's own origin, which `locate` is measured from.
+    origin: Vec2,
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
@@ -1877,7 +1879,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre })
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, origin })
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -1969,6 +1971,77 @@ pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<V
     let m = doc.component_transform(f.component);
     let place = |p: Vec3| crate::apply_point(&m, p);
     Ok(segments(doc, &doc.evaluation_values(), f, st)?.0.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
+}
+
+/// A member's section as a dialog shows it before the member is made: the section of the member
+/// on the feature's first line, in world coordinates, laid out by the same code that makes the
+/// body, so what the dialog shows is where the member goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionView {
+    /// The first line's start, where the section sits, and its end.
+    pub start: Vec3,
+    pub end: Vec3,
+    /// The section's axes (unit, x × y along the line).
+    pub x: Vec3,
+    pub y: Vec3,
+    /// The section's regions in its own coordinates, mirrored when the member is.
+    pub regions: Vec<Region2>,
+    /// The section point that sits on the line.
+    pub at: Vec2,
+    /// The profile's own origin, which `locate` is measured from.
+    pub origin: Vec2,
+    pub mirror: bool,
+}
+
+impl SectionView {
+    /// The world point of section point `p`.
+    pub fn world(&self, p: Vec2) -> Vec3 {
+        self.start + self.x * (p.x - self.at.x) + self.y * (p.y - self.at.y)
+    }
+
+    /// The section point at world point `q` (projected onto the section's plane).
+    pub fn section_point(&self, q: Vec3) -> Vec2 {
+        let d = q - self.start;
+        Vec2::new(self.at.x + d.dot(self.x), self.at.y + d.dot(self.y))
+    }
+
+    /// The `locate` that puts section point `p` on the line: measured from the profile's own
+    /// origin, before the mirror, as the member reads it.
+    pub fn locate_of(&self, p: Vec2) -> [f64; 2] {
+        let q = if self.mirror { Vec2::new(-p.x, p.y) } else { p };
+        [q.x - self.origin.x, q.y - self.origin.y]
+    }
+
+    /// Every anchor's section point, in [`frame::Anchor::ALL`] order.
+    pub fn anchors(&self) -> Vec<(frame::Anchor, Vec2)> {
+        frame::Anchor::ALL.iter().map(|a| (*a, frame::anchor_point(&self.regions, *a))).collect()
+    }
+}
+
+/// The section member feature `f` (not made yet: no Rotate step turns it) puts on its first line
+/// (see [`SectionView`]), carried to world by `placed` (the component's frame as shown: the active
+/// occurrence's, with its pending move); an error when the feature could not be made as it stands.
+pub fn section_view(doc: &Document, st: &ModelState, f: &Feature, placed: &crate::Mat) -> Result<SectionView> {
+    let FeatureKind::FrameMember { corner, corners, gap, mirror, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let (vals, _) = doc.param_values();
+    let Layout { segments, regions, at, turn, sketch_x, drawn, planes, origin, .. } = layout(doc, &vals, f, st)?;
+    let (line, a, b) = segments.first().cloned().ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
+    // The axes as the body is made ([`member_pivot`]'s way): under Auto they follow the frame's plan.
+    let gap = gap_value(&vals, gap.as_ref(), "`gap`")?;
+    let corners = &overrides(*corner, (&segments, &planes, &drawn, sketch_x), corners, Some((&vals, gap)))?;
+    let (plan, crossing) = plans(*corner, &segments, &planes, corners, &drawn)?;
+    let (segments, planes, _) = pieced(segments, planes, drawn, plan.as_ref().or(crossing.as_ref()))?;
+    // The piece from the first line's start keeps the line's id.
+    let m = segments.iter().position(|s| s.0 == line).ok_or_else(|| DocError::Invalid("the member feature has no lines".into()))?;
+    let (axes, _) = section_axes(&segments, &planes, plan.as_ref(), turn, &vec![0.0; segments.len()])?;
+    let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid("the first line has no length".into()))?;
+    // The whole carried to world as the component is shown.
+    let t = placed;
+    let unit = |v: Vec3| crate::apply_vector(t, v).normalized().ok_or_else(|| DocError::Invalid("the component frame is degenerate".into()));
+    let (x, y) = (unit(x)?, unit(y)?);
+    Ok(SectionView { start: crate::apply_point(t, a), end: crate::apply_point(t, b), x, y, regions, at, origin, mirror: *mirror })
 }
 
 /// The member of feature `f` with id `line` (a line, a pair, or a piece of a line cut where tubes cross, [`pieced`]),

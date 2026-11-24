@@ -18,7 +18,7 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve};
+use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
@@ -779,8 +779,15 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.extend([d.x, d.y]);
         }
         Midpoint { p, l } => {
-            let (a, b) = s.line(l);
-            let d = s.p(p) - (a + b) * 0.5;
+            // A line's middle is its ends' mean; an arc's is the point halfway along it, which
+            // is not the middle of its chord.
+            let middle = if matches!(s.sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
+                s.along(l, 0.5)
+            } else {
+                let (a, b) = s.line(l);
+                (a + b) * 0.5
+            };
+            let d = s.p(p) - middle;
             out.extend([d.x, d.y]);
         }
         Symmetric { p, q, l } => {
@@ -1144,6 +1151,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     use Ref::{Curve as C, Line as L, Point as P, Round as R};
     let is = |c: usize, f: fn(&CurveKind) -> bool| sk.curves.get(c).is_some_and(|x| f(&x.kind));
     let line = |c: usize| is(c, |k| matches!(k, CurveKind::Line { .. }));
+    let arc = |c: usize| is(c, |k| matches!(k, CurveKind::Arc { .. }));
     let freeform = |c: usize| is(c, CurveKind::is_freeform);
     // A tangency reads a free-form curve as such, else a line and a round, or two rounds.
     let tangent = |a: usize, b: usize| {
@@ -1172,6 +1180,8 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             | DistanceX { p, q, .. }
             | DistanceY { p, q, .. } => vec![P(p), P(q)],
             PointOnCurve { p, c } | PointAlong { p, c, .. } => vec![P(p), C(c)],
+            // The middle of an arc depends on its centre and both ends, as a point along it does.
+            Midpoint { p, l } if arc(l) => vec![P(p), C(l)],
             Midpoint { p, l } | PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => vec![P(p), L(l)],
             LineCircleDistance { l, c, .. } => vec![L(l), R(c)],
             PointCircleDistance { p, c, .. } => vec![P(p), R(c)],
@@ -1470,6 +1480,11 @@ fn lm_run(
     // The sum of squares at the start of each iteration, while giving up is allowed.
     let mut costs = Vec::new();
     for it in 0..max_iters {
+        if cancelled() {
+            #[cfg(feature = "solver-profiling")]
+            profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+            return Some((it, max_abs(&r)));
+        }
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
@@ -1548,9 +1563,14 @@ fn lm_run(
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = lin_solve(m, rhs);
+            let step = solve_unless(m, rhs, &mut 0.0, &cancelled);
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
+            if cancelled() {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
             let Some(step) = step else {
                 #[cfg(feature = "solver-profiling")]
                 profiling::record_trial(run, it, _attempt, lambda, f, None, &g, &j, None, Decision::LinearFailure);
@@ -1600,6 +1620,11 @@ fn lm_run(
     #[cfg(feature = "solver-profiling")]
     profiling::finish_run(run, StopReason::IterationLimit, max_abs(&r));
     Some((max_iters, max_abs(&r)))
+}
+
+/// Whether the work this solve runs for was cancelled ([`crate::cancel`]).
+fn cancelled() -> bool {
+    crate::cancel::is_cancelled()
 }
 
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
@@ -3331,7 +3356,22 @@ fn solve_sensed(
         .filter(|(_, t)| matches!(t, Turn::Mirror { .. }))
         .flat_map(|(arc, _)| before.iter().find(|b| b.arc == *arc).map(|b| b.lines.iter().map(|l| l.2).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    let folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    let mut folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    // A swap puts the arc on the other side of its chord: a point held at its middle would now sit
+    // at the opposite end of the circle while the solve reported success. Read it again.
+    for (arc, t) in &turns {
+        if !matches!(t, Turn::Swap) {
+            continue;
+        }
+        for (ci, c) in sk.constraints.iter().enumerate() {
+            if matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == *arc)
+                && constraint_residual(sk, ci).is_some_and(|r| r > 1e-6)
+                && !folded.contains(&c.id)
+            {
+                folded.push(c.id.clone());
+            }
+        }
+    }
     if folded.is_empty() {
         return report;
     }
@@ -3360,6 +3400,25 @@ fn solve_inner(
     let _timer = profiling::timer(Phase::Solve);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
+    // Cancelled: the work this solve was for is no longer wanted. Nothing is solved, and the
+    // geometry stays as it was. (An edit's continuation and its retries each solve again, and
+    // each would otherwise still construct its start.)
+    if cancelled() {
+        return SolveReport {
+            status: SolveStatus::Failed,
+            dof: 0,
+            iterations: 0,
+            max_residual: f64::MAX,
+            failing: Vec::new(),
+            folded: Vec::new(),
+            continuations: 0,
+            point_determined: Vec::new(),
+            curve_determined: Vec::new(),
+            redundant: Vec::new(),
+            oversized: None,
+            wires: None,
+        };
+    }
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
@@ -3609,6 +3668,8 @@ fn solve_inner(
         }
     }
 
+    // A cancelled solve's report is not shown: it only says whether it solved.
+    let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
@@ -3991,17 +4052,17 @@ mod typed_dimension_tests {
         assert_eq!(sk.points, points);
     }
 
-    /// A constraint read on a curve of the wrong kind (a midpoint of an arc, pushed past
+    /// A constraint read on a curve of the wrong kind (a midpoint of a circle, pushed past
     /// validation) reads constants for it: its component is tied to them, not floating, and the
     /// pinned analysis agrees with the dense one (checked in every test solve).
     #[test]
     fn a_curve_read_as_another_kind_ties_its_component() {
         let mut sk = Sketch::new();
-        let arc = sk.add_arc(Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0), Vec2::new(5.0, 15.0), [None, None, None], None).unwrap();
+        let circle = sk.add_circle(Vec2::new(5.0, 5.0), 10.0, None, None).unwrap();
         let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
         sk.constraints.push(crate::model::Constraint {
             id: "m".into(),
-            kind: ConstraintKind::Midpoint { p, l: arc },
+            kind: ConstraintKind::Midpoint { p, l: circle },
             param: None,
             driven: false,
             text: None,
@@ -4009,7 +4070,50 @@ mod typed_dimension_tests {
         let rep = solve(&mut sk);
         assert!(rep.ok(), "{rep:?}");
         assert!(rep.point_determined[p], "the midpoint of the constant line: {rep:?}");
-        assert_eq!(rep.dof, 5, "the arc's centre and ends, less its equal radii: {rep:?}");
+        assert_eq!(rep.dof, 3, "the circle's centre and radius: {rep:?}");
+    }
+
+    /// The middle of an arc is halfway along it, not the middle of its chord, for a short arc and
+    /// for one of more than half a turn.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_sits_halfway_along_it() {
+        let r = 10.0;
+        for (end, middle_angle) in [(Vec2::new(0.0, 10.0), 45.0_f64), (Vec2::new(0.0, -10.0), 135.0)] {
+            let mut sk = Sketch::new();
+            let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), end, [None, None, None], None).unwrap();
+            sk.curves[arc].fixed = true;
+            let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
+            sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+            let rep = solve(&mut sk);
+            assert!(rep.ok(), "{rep:?}");
+            let want = Vec2::new(r * middle_angle.to_radians().cos(), r * middle_angle.to_radians().sin());
+            assert!(sk.points[p].pos.dist(want) < 1e-6, "{:?} should be {want:?}", sk.points[p].pos);
+            assert!(rep.point_determined[p], "{rep:?}");
+            assert_eq!(rep.dof, 0, "{rep:?}");
+        }
+    }
+
+    /// The point keeps the middle when the arc changes: its radius is dimensioned afterwards.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_follows_its_radius() {
+        let mut sk = Sketch::new();
+        let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), [None, None, None], None).unwrap();
+        let p = sk.add_point(Vec2::new(7.0, 7.0), None).unwrap();
+        sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+        sk.curves[arc].fixed = false;
+        sk.add_constraint(ConstraintKind::Radius { c: arc, value: 20.0 }, None).unwrap();
+        let rep = solve(&mut sk);
+        assert!(rep.ok(), "{rep:?}");
+        let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!("the curve is an arc") };
+        let (centre, start, end) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
+        assert!((centre.dist(start) - 20.0).abs() < 1e-6, "radius 20: {}", centre.dist(start));
+        let mut sweep = (end - centre).angle() - (start - centre).angle();
+        while sweep <= 0.0 {
+            sweep += std::f64::consts::TAU;
+        }
+        let half = (start - centre).angle() + sweep / 2.0;
+        let want = centre + Vec2::new(20.0 * half.cos(), 20.0 * half.sin());
+        assert!(sk.points[p].pos.dist(want) < 1e-5, "{:?} should be {want:?}", sk.points[p].pos);
     }
 
     #[test]

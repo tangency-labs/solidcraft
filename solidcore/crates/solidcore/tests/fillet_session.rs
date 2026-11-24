@@ -4,9 +4,18 @@ use solidcore::blend::fillet_corner::p3::FilletCornerKind;
 use solidcore::blend::fillet_executive::p3::VertexEntry;
 use solidcore::blend::fillet_executive::session::{FilletBody, FilletObject, FilletSession};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGenerator;
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::ids;
-use solidcore::math::{Point3, PI};
+use solidcore::kernel::UpstreamFixes;
+use solidcore::math::{Point3, Vec3, PI};
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+use solidcore::nurbs::math::CPoint;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::query::api_queries::edge_closest_point;
+use solidcore::surface::procedural_blend::BlendCounts;
+use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
 use solidcore::{EntityRef, Kernel};
 
@@ -670,4 +679,142 @@ fn actual_box_shared_constructor_builds_and_stitches_native_intermediate_body() 
     assert_eq!(session.attributes().users(marker).unwrap().len(), 4);
     assert_eq!(error_info.code, 0);
     assert!(!k.context.doing_boolean());
+}
+
+/// tangency-labs/solidcraft#18294: the closed spline outline of the issue's script as
+/// SolidCraft stores it (four cubic Bézier spans through (100, 0), (0, 60), (-100, 0) and
+/// (0, -60)), extruded 50 along z, its top edge rounded r 3 by one session, either through
+/// `do_fillet` or step by step (`create_corners`, then `do_filleting`, as solidcore-ops
+/// runs a pass). The rounded body's face, edge and vertex counts, and the kernel's blend
+/// counts of the rounding.
+#[allow(clippy::unwrap_used)] // a test helper
+fn spline_outline_top_rounded(step_by_step: bool) -> ((usize, usize, usize), BlendCounts) {
+    let points = [
+        (100.0, 0.0),
+        (100.0, 30.0),
+        (50.0, 60.0),
+        (0.0, 60.0),
+        (-50.0, 60.0),
+        (-100.0, 30.0),
+        (-100.0, 0.0),
+        (-100.0, -30.0),
+        (-50.0, -60.0),
+        (0.0, -60.0),
+        (50.0, -60.0),
+        (100.0, -30.0),
+        (100.0, 0.0),
+    ];
+    let knots = [0.0, 1.0, 2.0, 3.0, 4.0]
+        .into_iter()
+        .flat_map(|t| std::iter::repeat_n(t, if t == 0.0 || t == 4.0 { 4 } else { 3 }))
+        .collect();
+    let outline = Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(
+            points
+                .iter()
+                .map(|&(x, y)| CPoint::new(x, y, 0.0, 1.0))
+                .collect(),
+            3,
+            knots,
+        )
+        .unwrap(),
+        3,
+        false,
+    ));
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut body = create_linear_sweep(&mut k, &[Some(&outline)], Vec3::Z, 50.0, true).unwrap();
+    // the top edge: the seam's vertical edge also ends at (100, 0, 50), so it is picked
+    // where only the top edge passes
+    let top = body
+        .edge_list()
+        .iter()
+        .copied()
+        .find(|&e| {
+            edge_closest_point(&k, &body, e, Point3::new(0.0, 60.0, 50.0))
+                .unwrap()
+                .closest
+                .distance
+                < body.tolerance()
+        })
+        .unwrap();
+    k.blend_counts.set(BlendCounts::default());
+    {
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[top], 3.0, 1, 1, 1.0)
+            .unwrap();
+        if step_by_step {
+            session.create_corners(&k, None).unwrap();
+            session.do_filleting(&mut k, None).unwrap();
+        } else {
+            session.do_fillet(&mut k).unwrap();
+        }
+    }
+    let counts = k.blend_counts.get();
+    // the round is kept as its definition (a procedural blend on its certified net)
+    let rounds = body
+        .face_list()
+        .iter()
+        .filter(|&&f| {
+            body.face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .is_some_and(|s| s.procedural_blend().is_some())
+        })
+        .count();
+    assert_eq!(rounds, 1, "step by step: {step_by_step}");
+    // a valid body (the trim curves span their edges, Edgeuse tests 25 and 26)
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "step by step: {step_by_step}: {lines:?}");
+    (
+        (
+            body.face_list().len(),
+            body.edge_list().len(),
+            body.vertex_list().len(),
+        ),
+        counts,
+    )
+}
+
+/// tangency-labs/solidcraft#18294: a session run step by step builds its round to the
+/// target's approximation tolerance as `do_fillet` does, so a round kept as its definition
+/// is read through its certified net wherever the net's bound is within that tolerance
+/// (tangency-labs/solidcore#2510). Before, the steps ran outside that scope: merging the
+/// new round into the outline solved its definition station by station, where
+/// `do_fillet` reads the net.
+#[test]
+fn a_session_run_step_by_step_reads_its_rounds_as_do_fillet_does() {
+    let (whole, whole_counts) = spline_outline_top_rounded(false);
+    let (steps, step_counts) = spline_outline_top_rounded(true);
+    // faces: bottom, side, top and the round; edges: the bottom outline, the round's two
+    // rails, the side's seam and the round's own seam; vertices: one where each of the
+    // three closed loops meets the seams
+    assert_eq!(whole, (4, 5, 3));
+    assert_eq!(steps, whole);
+    assert_eq!(
+        (
+            step_counts.evaluations,
+            step_counts.solves,
+            step_counts.newton_steps,
+            step_counts.net_evaluations,
+        ),
+        (
+            whole_counts.evaluations,
+            whole_counts.solves,
+            whole_counts.newton_steps,
+            whole_counts.net_evaluations,
+        ),
+        "step by step {step_counts:?}, do_fillet {whole_counts:?}"
+    );
+    // both read the round through its net
+    assert!(
+        whole_counts.net_evaluations > 0,
+        "do_fillet {whole_counts:?}"
+    );
 }
