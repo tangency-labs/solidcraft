@@ -58,8 +58,7 @@ pub const MAX_CURVES: usize = 4096;
 pub const MAX_PICKS: usize = 10_000;
 
 /// Why [`trim_by_dropped_curves`] refuses a curve the kernel's drop lands on no face.
-const CURVE_LANDS_NOWHERE: &str =
-    "a curve drops onto no face of the body (a curve across the seam of a closed face is not dropped yet)";
+const CURVE_LANDS_NOWHERE: &str = "a curve drops onto no face of the body";
 
 /// Why [`trim_by_dropped_curves`] refuses a point that picks no one region.
 const PICK_ON_A_CUT: &str =
@@ -394,9 +393,7 @@ fn cut_dropped(
             }
         }
     }
-    // A curve the kernel drops onto no face is no part of any cut. The kernel's drop gives no
-    // curve for one that leaves a face's parameter box, which a curve across the seam of a
-    // closed face does.
+    // A curve the kernel drops onto no face is no part of any cut.
     if landed.iter().flatten().any(|seen| !seen) {
         return Ok(Err(Error::Unsupported(CURVE_LANDS_NOWHERE)));
     }

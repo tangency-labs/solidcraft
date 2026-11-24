@@ -17,6 +17,7 @@
 # blend.fillet_executive_p1, topology.edge, topology.face_p3: main's files with the rows whose gap-cache flags go from 1 to 0 where edge::set_interval now clears the gaps of the old interval (#20939): 3, 43 and 20 rows, no other value moved
 # topology.brep_p1: main's file with the 141 SetSize rows whose kernel-context columns keep the defaults (50, 1e-5, 1000) after a B-rep size setter, which no longer writes the context (tangency-labs/solidcraft#20938)
 # blend.fillet_executive_p3, corpus.parity, surface.trim_srf_cache, topology.brep_p10, topology.face_p3: the point test follows the face (#20179): the digests are this branch's files with the rows put back (fillet_executive_p3 and face_p3 on top of #18490's lines above, both moving the same sphere_diff_3cylinders cases, blessed again on the merged kernel; fillet_executive_p3 also holds #20237's law-cube and law-box lines, the line above). Lines moved against this main: fillet_executive_p3's 6 sphere_diff_3cylinders rows (UV trims on five edges, 1 to 2; wr493_rows proves them), surface.trim_srf_cache's 7 editing-mode native_face rows (point tests agree with the face's classification), and the Fillet/sphere_diff_3cylinders.smb reads of corpus.parity (1), topology.face_p3 (22) and topology.brep_p10 (read_Fillet_sphere_diff_3cylinders and gen0026: +5 classified trims), each main's row hash once tolsub::replay puts the trims back (CLASSIFIED_READ_ROWS). gen0026's row moves its 12 values 85 places on (a uniform shift: each new value occurs exactly at its row's 12 positions; brep_p10's certificate re-checks every entity on the new body) and gains 10: attaching the five classified trims (SetUVTrimCurve's 2x margin, #20912) raises edges 20, 22, 27, 31 and 33 from 1e-5 to twice each trim's raise distance and vertices 12, 13, 14, 18 and 19 with them, each derived by DROP_MARGIN (drop_margin_raise: the drop replayed on main's read gives the tolerance bit for bit); edges 20 and 33 stay open as UNCOVERED, their face-3/4 trims past main's 1e-5 too (#20906)
+# intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -127,7 +128,7 @@ intersect.curve_class_p9	0b4e73f8539ea534
 intersect.point_class	7987e83088e89cb6
 intersect.ray_tracer	ce63de70cd21ace6
 intersect.surface_drop_curve	ee0183329c02962f
-intersect.surface_drop_lib_p1	2cf06152abbf3ea8
+intersect.surface_drop_lib_p1	9caefa02b77701ff
 intersect.surface_drop_lib_p2	e638190d664c28c3
 intersect.surface_drop_lib_p3	9ae5b84422221af2
 intersect.surface_intersector_p1	c15dc4e9c25559c9
