@@ -2787,6 +2787,28 @@ fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
         assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Brass"), "{copy}");
         assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
     }
+
+    // 4) Switching to an unstyled seed body while keeping explicit copy names clears stale
+    // material and appearance entries from the previous seed.
+    let mut clear = Session::default();
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Styled"}));
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 40, 5], "operation": "new", "body_name": "Plain"}));
+    run(&mut clear, "material.assign", json!({"bodies": ["Styled"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["Styled"], "color": [40, 120, 200]}));
+    let named_pat =
+        run(&mut clear, "solid.pattern.rectangular", json!({"bodies": ["Styled"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30}))["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"body_names": ["CopyA", "CopyB"]}}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Styled"]}}));
+    // Re-seed from Styled -> CopyA/CopyB carry Steel and appearance; now switch to Plain.
+    run(&mut clear, "material.assign", json!({"bodies": ["CopyA", "CopyB"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["CopyA", "CopyB"], "color": [40, 120, 200]}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Plain"], "body_names": ["CopyA", "CopyB"]}}));
+    for copy in ["CopyA", "CopyB"] {
+        assert_eq!(clear.doc.materials.get(copy), None, "{copy}");
+        assert_eq!(clear.doc.appearances.bodies.get(copy), None, "{copy}");
+    }
 }
 
 /// #12199: a path whose curves are listed out of chain order is the same path as in chain order.

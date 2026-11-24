@@ -3203,9 +3203,13 @@ pub(super) fn copy_keeps_appearance_for(
             }
             if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            } else {
+                s.doc_mut().appearances.bodies.remove(copy);
             }
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
+            } else {
+                s.doc_mut().materials.remove(copy);
             }
         }
     }
