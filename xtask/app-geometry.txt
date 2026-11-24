@@ -107,7 +107,6 @@ crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
-crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
@@ -143,11 +142,11 @@ crates/doc/src/eval_frame.rs:add_corner dot,normalized
 crates/doc/src/eval_frame.rs:along dot
 crates/doc/src/eval_frame.rs:built dot
 crates/doc/src/eval_frame.rs:cut_members dot
-crates/doc/src/eval_frame.rs:member_section dot,normalized
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
 crates/doc/src/eval_frame.rs:section_view normalized
 crates/doc/src/eval_frame.rs:straight dot,normalized
+crates/doc/src/eval_frame.rs:untrimmed_member_section dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
 crates/doc/src/eval_more.rs:cone cross,normalized
@@ -435,7 +434,7 @@ crates/engine/src/cmd/browser.rs:keep_facing dot
 crates/engine/src/cmd/canvas_sketch.rs:segments atan2
 crates/engine/src/cmd/clearance.rs:clearance triangles
 crates/engine/src/cmd/clipboard_foreign.rs:onto_plane dot
-crates/engine/src/cmd/clipboard_foreign.rs:paste dot
+crates/engine/src/cmd/clipboard_foreign.rs:reframe_wires dot
 crates/engine/src/cmd/compare.rs:compare_bodies triangles
 crates/engine/src/cmd/compare.rs:enclosed_volume cross,dot,triangles
 crates/engine/src/cmd/component.rs:absolute_target normalized
@@ -482,7 +481,6 @@ crates/engine/src/cmd/features.rs:extrude_reach dot
 crates/engine/src/cmd/features.rs:hole normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
-crates/engine/src/cmd/features.rs:move_turn_about cross,normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
 crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
@@ -553,8 +551,6 @@ crates/engine/src/cmd/sketch.rs:arc_center normalized
 crates/engine/src/cmd/sketch.rs:dimension_result atan2,cross,dot,normalized
 crates/engine/src/cmd/sketch.rs:edge_direction normalized
 crates/engine/src/cmd/sketch.rs:ellipse_half_axis cross,dot
-crates/engine/src/cmd/sketch.rs:face_contains cross,dot,normalized,triangles
-crates/engine/src/cmd/sketch.rs:face_triangles triangles
 crates/engine/src/cmd/sketch.rs:infer_at_start dot,normalized
 crates/engine/src/cmd/sketch.rs:polygon_edge normalized
 crates/engine/src/cmd/sketch.rs:rect_edge_center dot
@@ -584,7 +580,7 @@ crates/engine/src/cmd/sketch_drag.rs:Dragged::at dot
 crates/engine/src/cmd/sketch_drag.rs:LineGrab::new cross,dot
 crates/engine/src/cmd/sketch_drag.rs:drag_entity dot
 crates/engine/src/cmd/sketch_drag.rs:plan cross,normalized
-crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized,triangles
+crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized
 crates/engine/src/cmd/sketch_freeform.rs:support_hits normalized
 crates/engine/src/cmd/sketch_inspect.rs:closest_on_triangle cross,dot
 crates/engine/src/cmd/sketch_inspect.rs:face_at closest_on_triangle,triangles
@@ -652,6 +648,7 @@ crates/engine/src/mesh_lines/scene.rs:Shared::new triangles
 crates/engine/src/mesh_lines/scene.rs:drawing triangles
 crates/engine/src/mesh_lines/scene.rs:edge_on dot,triangles
 crates/engine/src/mesh_lines/scene.rs:triangle triangles
+crates/engine/src/pick_pieces.rs:grouped_selection_in triangles
 crates/engine/src/point_cloud_pick.rs:pick_cloud_ray dot,normalized
 crates/engine/src/point_cloud_pick.rs:pick_cloud_screen dot,normalized
 crates/engine/src/render_lights.rs:patch cross
@@ -1176,7 +1173,7 @@ crates/kernel/src/surfaces.rs:imp::cutting_planes cross,normalized
 crates/kernel/src/surfaces.rs:imp::mitre dot,normalized
 crates/kernel/src/surfaces.rs:imp::turn_of atan2,cross,dot
 crates/kernel/src/surfaces.rs:nearest_face triangles
-crates/kernel/src/surfaces.rs:revolve_sheet cross,dot,normalized
+crates/kernel/src/surfaces.rs:revolved_sheet cross,dot,normalized
 crates/kernel/src/surfaces.rs:smooth_runs dot
 crates/kernel/src/surfaces.rs:swept_from dot
 crates/kernel/src/sweep_path.rs:controlled_stations cross,dot,normalized
@@ -1208,13 +1205,14 @@ crates/ui-egui/src/browser_canvas.rs:on_image dot
 crates/ui-egui/src/canvas.rs:MoveRotation::point cross
 crates/ui-egui/src/canvas.rs:along dot
 crates/ui-egui/src/canvas.rs:anchor normalized
-crates/ui-egui/src/canvas.rs:chamfer_face_dirs cross,dot,normalized
+crates/ui-egui/src/canvas.rs:chamfer_face_dirs dot
 crates/ui-egui/src/canvas.rs:drag_arrow_to normalized
 crates/ui-egui/src/canvas.rs:draw dot,normalized
 crates/ui-egui/src/canvas.rs:draw_move_rotation cross
 crates/ui-egui/src/canvas.rs:draw_revolve cross,dot
 crates/ui-egui/src/canvas.rs:edge_bisector normalized
 crates/ui-egui/src/canvas.rs:edge_concave dot
+crates/ui-egui/src/canvas.rs:edge_face_dirs cross,dot,normalized
 crates/ui-egui/src/canvas.rs:edge_sides cross,normalized,triangles
 crates/ui-egui/src/canvas.rs:measure_components normalized
 crates/ui-egui/src/canvas.rs:nearest_on_polyline dot
@@ -1504,7 +1502,6 @@ crates/ui-egui/src/viewport.rs:current_face dot
 crates/ui-egui/src/viewport.rs:edge_normals dot
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot
-crates/ui-egui/src/viewport.rs:grouped_selection_in triangles
 crates/ui-egui/src/viewport.rs:keeps_distances dot
 crates/ui-egui/src/viewport.rs:lies_on_section cross,dot,normalized
 crates/ui-egui/src/viewport.rs:look_part triangles
