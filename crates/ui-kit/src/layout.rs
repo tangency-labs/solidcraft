@@ -882,6 +882,17 @@ pub fn note_height(ui: &Ui, text: &str) -> f32 {
     note_galley(ui, text).size().y + Tokens::get().space_4 * 2.0
 }
 
+/// Take the room [`text`] would take in the `Text::Hint` style at the current width: the same
+/// allocation [`text`] would make, so the rows under a hint whose words are only shown some of the
+/// time stay where they are while the words are hidden. Nothing is painted, and no handle or
+/// widget info is published: the row is not there to be found.
+pub fn hint_space(ui: &mut Ui, text: &str) {
+    let t = Tokens::get();
+    let width = dimension(ui.available_width());
+    let galley = ui.painter().layout(text.to_owned(), egui::FontId::proportional(t.font_body), t.form_dim, width);
+    ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
+}
+
 pub fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     text_impl(ui, text, style, None)
 }

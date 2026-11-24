@@ -39,12 +39,7 @@ enum Source {
     Sample(fn() -> Value),
 }
 
-/// Designs of the corpus left out: a kind of feature another design names as well, at many
-/// times the cost. One build of oracle 77's variable linear round took 35.6 s (see
-/// [`HEAVIEST`]); oracle 78's variable round to zero names a variable-radius blend in under 3.6 s.
-const LEFT_OUT: [&str; 1] = ["oracle/77-fillet-variable-linear"];
-
-/// Every design of the corpus but [`LEFT_OUT`]: (`<group>/<design>`, where it comes from).
+/// Every design of the corpus: (`<group>/<design>`, where it comes from).
 fn designs() -> Vec<(String, Source)> {
     let root = root();
     let mut out = Vec::new();
@@ -63,8 +58,8 @@ fn designs() -> Vec<(String, Source)> {
     add("regressions", root.join("examples/regressions"), "json");
     add("demo", root.join("examples/demo"), "json");
     add("typical", root.join("tests/action_matrix/designs"), "json");
-    add("demo", root.join("tests/action_matrix/designs"), "solidcraft");
-    add("fixtures", root.join("crates/engine/src/tests/fixtures"), "solidcraft");
+    add("demo", root.join("tests/action_matrix/designs"), solidcraft_engine::io::DESIGN_EXT);
+    add("fixtures", root.join("crates/engine/src/tests/fixtures"), solidcraft_engine::io::DESIGN_EXT);
     add("hole_matrix", root.join("tests/hole_matrix/old-0.9"), "json");
     add("taper", root.join("tests/taper/before-1014"), "json");
     add("projection", root.join("tests/projection/before-1508"), "json");
@@ -78,16 +73,16 @@ fn designs() -> Vec<(String, Source)> {
         let stem: String = sample.name.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-");
         out.push((format!("samples/{stem}"), Source::Sample(sample.script)));
     }
-    out.retain(|(name, _)| !LEFT_OUT.contains(&name.as_str()));
     out
 }
 
-/// Build a design: a design file (also a design saved as JSON) is opened, a script is run.
+/// Builds a design. A design file (also a design saved as JSON) is opened, and a script is run. A
+/// `.sc` file (or one of an older extension) is opened whether it holds a container or JSON.
 fn load(source: &Source) -> Result<Session, String> {
     let mut s = Session::default();
     let script = match source {
         Source::Sample(script) => script(),
-        Source::File(path) if path.extension().is_some_and(|x| x == "solidcraft") => {
+        Source::File(path) if solidcraft_engine::io::is_design_container_path(path) => {
             s.execute("doc.open", &json!({"path": path.to_string_lossy()})).map_err(|e| e.to_string())?;
             return Ok(s);
         }
@@ -402,17 +397,37 @@ const UNSTABLE: [(&str, &str); 1] = [(
 )];
 
 /// The designs that take longest to build, heaviest first, with one build's time (ci profile,
-/// CLI `run`, one design at a time, on P-cores, 2026-11-10). The test hands them out first, and
-/// each design's two builds go to two workers, so a heavy design is never built twice in a row on
-/// one worker while the rest wait. Every other design took under 3.6 s. Only the order of the
-/// work depends on this list: a stale entry makes the test slower, never wrong. Re-measure when a
-/// design here gets much faster, or one not listed takes over 5 s.
-const HEAVIEST: [&str; 5] = [
-    "oracle/83-boundary-loop-thicken",    // 12.4 s
-    "regressions/closed_sweep_torus_cut", // 6.8 s
-    "oracle/41-tube-radial-holes",        // 4.6 s
-    "oracle/42-overlapping-patterns",     // 4.2 s
-    "oracle/35-fillet-curved-curved",     // 3.2 s
+/// `load` and `build` of this test with one worker, 2026-11-21). Each of the 38 designs that took
+/// over 5 s in a full parallel run was timed this way, and the list keeps the 23 that took over
+/// 3.5 s. The slowest design left off took 2.9 s. The test hands them out first, and each design's
+/// two builds go to two workers, so a heavy design is never built twice in a row on one worker
+/// while the rest wait. Only the order of the work depends on this list. A stale entry makes the
+/// test slower, never wrong. Re-measure when a design here gets much faster, or one not listed
+/// takes over 5 s.
+const HEAVIEST: [&str; 23] = [
+    "oracle/81-fillet-spline-radius",                  // 29.6 s
+    "regressions/fins_joined_into_their_hub",          // 24.8 s
+    "oracle/83-boundary-loop-thicken",                 // 17.4 s
+    "regressions/round_pieces_swept_under_a_degree",   // 15.9 s
+    "fixtures/revolve-360-cut",                        // 12.1 s
+    "demo/enclosure_steps",                            // 11.0 s
+    "regressions/battery_case_pleats",                 // 10.4 s
+    "regressions/fuzz_seed_141_boolean_cut",           // 8.7 s
+    "fixtures/battery-tpu-case-v2",                    // 8.2 s
+    "examples/sensor_enclosure",                       // 7.4 s
+    "regressions/closed_sweep_torus_cut",              // 7.3 s
+    "demo/pi-case-0.8",                                // 6.8 s
+    "oracle/35-fillet-curved-curved",                  // 6.6 s
+    "regressions/oblique_cuts_through_chamfered_ring", // 6.2 s
+    "oracle/47-draft-curved-pocket",                   // 5.9 s
+    "oracle/59-enclosure-base",                        // 5.5 s
+    "fixtures/battery-tpu-case",                       // 5.0 s
+    "demo/pi-case",                                    // 4.9 s
+    "oracle/41-tube-radial-holes",                     // 4.6 s
+    "typical/filleted-shelled-box",                    // 4.1 s
+    "regressions/front_triangle_hull_triangle",        // 3.9 s
+    "oracle/42-overlapping-patterns",                  // 3.9 s
+    "oracle/60-pipe-flange",                           // 3.7 s
 ];
 
 #[test]

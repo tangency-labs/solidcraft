@@ -17,11 +17,27 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<EditJointParams>(),
-        &["a", "angle", "b", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
+        &["a", "a_alignment", "angle", "b", "b_alignment", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
     );
     assert_keys(
         input_schema_for::<CreateJointParams>(),
-        &["a", "angle", "b", "flip", "limits", "name", "offset", "offset_x", "offset_y", "quiet", "type", "value", "values"],
+        &[
+            "a",
+            "a_alignment",
+            "angle",
+            "b",
+            "b_alignment",
+            "flip",
+            "limits",
+            "name",
+            "offset",
+            "offset_x",
+            "offset_y",
+            "quiet",
+            "type",
+            "value",
+            "values",
+        ],
     );
     assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
     assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
@@ -46,6 +62,66 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
     assert_keys(input_schema_for::<CamParams>(), &["a", "b", "flip", "follower", "link", "profile", "quiet", "radius", "tip"]);
+}
+
+#[test]
+fn secondary_construction_axis_x_is_in_the_origin_contract() {
+    let p = json!({"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}});
+    assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_ok());
+    let schema = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    assert!(conforms(&schema, &schema, &p));
+    for x in [
+        json!({"reference": {"type": "construction", "feature": 0}}),
+        json!({"reference": {"type": "construction", "feature": 17}, "face": "F1"}),
+        json!({"reference": {"type": "construction", "feature": 17, "extra": true}}),
+    ] {
+        let bad = json!({"occurrence": 0, "plane": "XY", "x": x});
+        assert!(serde_json::from_value::<MakeJointOriginParams>(bad.clone()).is_err());
+        assert!(!conforms(&schema, &schema, &bad));
+    }
+}
+
+#[test]
+fn secondary_alignment_edit_contract_distinguishes_omission_reference_and_clear() {
+    let omitted: EditJointParams = serde_json::from_value(json!({"joint":1})).unwrap();
+    assert!(omitted.a_alignment.is_none());
+    for value in [Value::Null, json!({"face":"F1:+x","reverse":true}), json!({"reference":{"type":"construction","feature":17},"occurrence":2})] {
+        let wire = json!({"joint":1,"a_alignment":value});
+        let parsed: EditJointParams = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(parsed.a_alignment.unwrap().0, value);
+        let schema = serde_json::to_value(input_schema_for::<EditJointParams>()).unwrap();
+        assert!(conforms(&schema, &schema, &wire), "{wire}");
+    }
+    for value in [
+        json!({"reference":{"type":"construction","feature":0}}),
+        json!({"face":"F1","reference":{"type":"origin_axis","axis":"X"}}),
+        json!({"face":"F1","reverse":1}),
+    ] {
+        let wire = json!({"joint":1,"a_alignment":value});
+        assert!(serde_json::from_value::<EditJointParams>(wire.clone()).is_err());
+        let schema = serde_json::to_value(input_schema_for::<EditJointParams>()).unwrap();
+        assert!(!conforms(&schema, &schema, &wire), "{wire}");
+    }
+}
+
+#[test]
+fn secondary_construction_axis_contract_refuses_unsupported_primaries() {
+    let schema = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": 17}});
+    for mut p in [json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}), json!({"edge": [1, 2, 3], "z": [0, 0, 1]}), json!({"edge": [1, 2, 3]})] {
+        p["occurrence"] = json!(0);
+        p["x"] = x.clone();
+        assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_err(), "{p}");
+        assert!(!conforms(&schema, &schema, &p), "{p}");
+        assert!(serde_json::from_value::<CreateJointParams>(json!({"type": "rigid", "a": p, "b": {"occurrence": 2, "plane": "XY"}})).is_err());
+        assert!(serde_json::from_value::<EditJointParams>(json!({"joint": 1, "a": p})).is_err());
+    }
+    let p = json!({"occurrence": 0, "point": [0, 0, 0],
+        "x": {"x": 1, "y": 0, "z": 0, "reference": {"type": "construction", "feature": 17}}});
+    assert!(serde_json::from_value::<MakeJointOriginParams>(p.clone()).is_err());
+    assert!(!conforms(&schema, &schema, &p));
+    assert!(serde_json::from_value::<CreateJointParams>(json!({"type": "rigid", "a": p, "b": {"occurrence": 2, "plane": "XY"}})).is_err());
+    assert!(serde_json::from_value::<EditJointParams>(json!({"joint": 1, "a": p})).is_err());
 }
 
 #[test]

@@ -3,6 +3,38 @@ use crate::scenario::Harness;
 use egui::Color32;
 use solidcraft_engine::Session;
 
+#[test]
+fn scoped_render_projection_uses_pending_view_options_before_paint() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.ui.perspective = false;
+    app.ui.auto_ortho_faces = false;
+    let ground = app.docs.views.active().id;
+    let render = app.docs.views.open(solidcraft_views::ViewKind::Render, None, false);
+    app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(Camera::default()));
+    app.docs.views.activate(ground);
+    crate::documents::with_view_look(&mut app, render, |app| app.ui.perspective = true);
+    for perspective in [true, false] {
+        crate::documents::with_view_look(&mut app, render, |app| {
+            app.ui.perspective = perspective;
+            app.ui.up_axis = solidcraft_viewport::UpAxis::Y;
+            with_tile_camera(app, |app| {
+                assert_eq!(app.ui.perspective, perspective);
+                assert_eq!(app.cam.fov > 0.0, perspective);
+                assert_eq!(app.cam.up, solidcraft_viewport::UpAxis::Y);
+                let frame_projection = crate::viewport::projection(app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0)));
+                assert_eq!(frame_projection.cam.fov > 0.0, perspective);
+            });
+        });
+        assert!(!app.ui.perspective, "Render navigation leaves the ground unchanged");
+    }
+    let authored = Camera { fov: 0.42, ..Camera::default() };
+    app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(authored));
+    crate::documents::with_view_look(&mut app, render, |app| {
+        app.ui.perspective = true;
+        with_tile_camera(app, |app| assert_eq!(app.cam.fov, authored.fov));
+    });
+}
+
 fn click_render_check(h: &mut Harness) {
     h.app.run("view.render_select", json!({"kind":"check"})).unwrap();
     h.frames(3);
@@ -16611,4 +16643,191 @@ fn render_backend_save_failure_does_not_schedule_a_restart() {
     assert_eq!(h.app.preferences.graphics_backend, "auto");
     assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
     assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn render_canvas_tab_can_reach_the_finished_sketch_notice_without_toggling_focus_mode() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let owner = h.app.docs.views.active().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(h.app.run("solid.extrude", json!({"distance":0})).is_err());
+    let event = h.app.sketch_notices.latest_for(h.app.session.uid, 0).unwrap().clone();
+    enter(&mut h.app, true).unwrap();
+    h.app.sketch_notices.enqueue(h.app.session.uid, 0, event);
+    h.frames(3);
+    let link = h
+        .output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::Link && node.label() == Some(h.app.tr("sketch_finish.edit")))
+        .map(|(id, _)| *id)
+        .expect("visible notice exposes a link");
+    h.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let buttons = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button).count();
+    assert!(buttons > 120, "the real appearance catalogue makes sequential traversal too long for a six-second notice");
+    let tap = |h: &mut Harness, modifiers| {
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers },
+        ]);
+    };
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(!h.app.shell.render_focus, "Tab enters the notice while it is visible");
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "the first Tab from the canvas reaches the actual notice link"
+    );
+    // Once a widget owns focus, normal traversal resumes: go to the preceding
+    // control and back to the exact same accessible notice link.
+    tap(&mut h, egui::Modifiers::SHIFT);
+    h.frame();
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() != link)),
+        "Shift+Tab leaves the notice through ordinary widget order"
+    );
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "ordinary Tab returns from the preceding control to the notice"
+    );
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert_eq!(h.app.session.sketching_view, Some(owner));
+}
+
+#[test]
+fn render_views_keep_product_and_completed_image_framing_through_focus_changes() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert_ne!(first, second);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let model_camera = h.app.cam;
+    let first_camera = Camera { yaw: 0.4, fov: 0.0, ..model_camera };
+    let second_camera = Camera { yaw: 1.2, fov: 0.6, ..model_camera };
+    // Setup only: each Render view is left with its own lens and the projection option that goes
+    // with it (as a user leaves it), so a hidden card paints the lens it was left with.
+    for (id, camera) in [(first, first_camera), (second, second_camera)] {
+        assert!(crate::documents::view_activate(&mut h.app, id));
+        h.app.cam = camera;
+        h.app.ui.perspective = camera.fov > 0.0;
+        assert!(crate::documents::view_activate(&mut h.app, model));
+    }
+    assert_eq!(h.app.cam, model_camera);
+    h.app.docs.views.set_spec(first, solidcraft_viewport::ViewSpec::new(first_camera));
+    h.app.docs.views.set_spec(second, solidcraft_viewport::ViewSpec::new(second_camera));
+
+    crate::documents::with_view_look(&mut h.app, first, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam, first_camera);
+            app.cam.yaw = 0.7;
+            app.render_workspace.view.result_camera.distance = 42.0;
+            app.render_workspace.view.result_scale = ResultScale::Free;
+        })
+    });
+    assert_eq!(h.app.cam, model_camera, "painting a Render card leaves Model framing alone");
+    assert_eq!(h.app.docs.views.get(first).unwrap().spec.unwrap().camera.yaw, 0.7, "the outer look scope must retain card navigation");
+    crate::documents::with_view_look(&mut h.app, second, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam, second_camera);
+            assert_ne!(app.render_workspace.view.result_camera.distance, 42.0);
+            app.cam.yaw = 1.6;
+            app.render_workspace.view.result_camera.distance = 87.0;
+            app.render_workspace.view.result_scale = ResultScale::Free;
+        })
+    });
+    crate::documents::with_view_look(&mut h.app, first, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam.yaw, 0.7);
+            assert_eq!(app.render_workspace.view.result_camera.distance, 42.0);
+        })
+    });
+    assert_eq!(h.app.cam, model_camera);
+    assert!(crate::documents::view_activate(&mut h.app, first));
+    assert_eq!(h.app.cam.yaw, 0.7);
+    assert_eq!(h.app.cam.fov, 0.0);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 42.0);
+    assert!(crate::documents::view_activate(&mut h.app, second));
+    assert_eq!(h.app.cam.yaw, 1.6);
+    assert_eq!(h.app.cam.fov, 0.6);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 87.0);
+}
+
+#[test]
+fn render_card_scopes_preserve_the_ground_image_navigation_response() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let ground = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let card = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, ground));
+    let rect = egui::Rect::from_min_size(egui::pos2(40.0, 70.0), egui::vec2(300.0, 200.0));
+    let response_id = egui::Id::unique("ground_render_result_navigation");
+    let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        let response = ui.interact(rect, response_id, egui::Sense::drag());
+        h.app.render_workspace.result_navigation = Some((rect, response, true));
+        crate::documents::with_view_look(&mut h.app, card, |app| {
+            with_tile_camera(app, |app| {
+                assert!(app.render_workspace.result_navigation.is_none());
+            })
+        });
+        let (kept_rect, kept_response, captured) = h.app.render_workspace.result_navigation.as_ref().unwrap();
+        assert_eq!(*kept_rect, rect);
+        assert_eq!(kept_response.id, response_id);
+        assert!(*captured);
+    });
+}
+
+#[test]
+fn an_inline_legacy_render_does_not_reset_its_image_framing() {
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    h.app.render_workspace.view.result_camera.distance = 123.0;
+    focus_view_framing(&mut h.app, model);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 123.0);
+    assert!(h.app.render_workspace.view.framing_view.is_none());
+    assert!(h.app.render_workspace.view.framings.is_empty());
+}
+
+#[test]
+fn a_closed_render_canvas_cannot_borrow_the_model_camera_for_another_render_view() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let closed = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let surviving = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let expected = Camera { yaw: 1.3, ..h.app.cam };
+    h.app.docs.views.set_spec(surviving, solidcraft_viewport::ViewSpec::new(expected));
+    h.app.render_workspace.tile_canvas = Some((h.app.session.uid, closed, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))));
+    assert!(h.app.docs.views.close(closed));
+    let model_camera = h.app.cam;
+    with_tile_camera(&mut h.app, |app| assert_eq!(app.cam, expected));
+    assert_eq!(h.app.cam, model_camera);
+    assert!(!h.app.render_workspace.view.framings.contains_key(&closed));
+}
+
+#[test]
+fn a_restored_render_projection_is_selected_before_its_first_card_paint() {
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let render = crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let camera = Camera { fov: 0.0, yaw: 0.8, ..h.app.cam };
+    h.app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(camera));
+    h.app.ui.perspective = true;
+    assert!(crate::documents::view_activate(&mut h.app, render));
+    assert_eq!(h.app.cam, camera);
+    assert!(!h.app.ui.perspective, "the navigation toggle must reflect the restored Render lens immediately");
+    assert_eq!(h.app.ui.up_axis, camera.up);
 }

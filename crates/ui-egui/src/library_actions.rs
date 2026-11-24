@@ -113,7 +113,7 @@ fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
             });
         }
         Action::Move => {
-            app.pick_folder(move |app, folder| {
+            app.pick_folder("", move |app, folder| {
                 let Some(folder) = folder else { return };
                 let destination = std::path::Path::new(&folder).join(&entry.name);
                 execute(app, &entry, action, Some(&destination));
@@ -394,7 +394,7 @@ mod tests {
     fn entry(h: &Harness) -> Entry {
         let path = h.dir.join("MenuTest.solidcraft");
         std::fs::write(&path, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Menu Test")).unwrap()).unwrap();
-        Entry { path, name: "MenuTest.solidcraft".into(), folder: false }
+        Entry { path, name: "MenuTest.solidcraft".into(), folder: false, modified: None }
     }
 
     #[test]
@@ -402,7 +402,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.preferences.show_document_browser = true;
         h.app.home.open = false;
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         let e = entry(&h);
         let before = std::fs::read(&e.path).unwrap();
         h.app.library.set_root(h.dir.clone());
@@ -461,7 +461,7 @@ mod tests {
             let mut h = Harness::new();
             h.app.preferences.show_document_browser = true;
             h.call("ui.set", json!({"layout":mode}));
-            h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+            h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
             let e = entry(&h);
             h.app.library.set_root(h.dir.clone());
             for _ in 0..200 {
@@ -502,7 +502,7 @@ mod tests {
     fn canceled_pickers_and_rename_keep_saved_file_and_unsaved_design() {
         let mut h = Harness::new();
         let e = entry(&h);
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.app.run("solid.box", json!({"length":10,"width":12,"height":14})).unwrap();
         let before = h.app.session.doc.to_json();
         perform(&mut h.app, e.clone(), Action::Move);

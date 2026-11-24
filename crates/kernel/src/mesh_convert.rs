@@ -363,7 +363,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     }
     let perimeter: f64 = loops.iter().flat_map(|lp| &lp.segs).map(|s| s.length()).sum();
     let original = mesh.to_mesh().measure().volume;
-    let rebuilt = crate::measure(&body)?.volume;
+    let rebuilt = body.validated_volume()?;
     if !original.is_finite() || original <= 0. || (rebuilt - original).abs() > perimeter * height * tolerance + epsilon * bounds.size().len().powi(2)
     {
         return Err(invalid("reconstructed volume is inconsistent with the source mesh"));
@@ -537,7 +537,7 @@ fn faceted_solid(mesh: &crate::meshbody::TriMesh) -> Result<Body> {
     // The sewn solid's faces are the mesh's own facets, so its volume is the mesh's; a seam
     // that does not close the same shell shows up here.
     let original = mesh.to_mesh().measure().volume;
-    let rebuilt = crate::measure(&body)?.volume;
+    let rebuilt = body.validated_volume()?;
     if !original.is_finite() || original <= 0. || (rebuilt - original).abs() > original.abs() * 1e-6 + COPLANAR * size * size {
         return Err(invalid("reconstructed volume is inconsistent with the source mesh"));
     }
@@ -1109,6 +1109,46 @@ mod tests {
         // The polyhedron's own volume, Σ a · (b × c) / 6 over its triangles.
         let polyhedron = crate::measure(&mesh).unwrap().volume;
         assert!((m.volume - polyhedron).abs() < 1e-9 * polyhedron, "{} of {polyhedron}", m.volume);
+    }
+
+    /// #18458: a faceted solid's volume is checked exactly, from its facets, not by integrating
+    /// its mass properties (twice: the validity check measured it as well), which took most of a
+    /// conversion. The exact volume is the mesh's own, its facets being the mesh's triangles, and
+    /// the integration agrees with it to its accuracy.
+    #[test]
+    fn a_faceted_solids_volume_is_checked_from_its_facets() {
+        let mesh = mesh_of(&crate::sphere(Vec3::new(3., -2., 40.), 10.).unwrap());
+        let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
+        assert!(converted.validity().is_empty());
+        let exact = solidcore_ops::faceted_volume(converted.record()).unwrap().expect("a faceted solid has an exact volume");
+        assert_eq!(converted.validated_volume().unwrap(), exact);
+        let triangles = mesh.mesh.as_ref().unwrap().to_mesh().measure().volume;
+        assert!((exact - triangles).abs() < 1e-9 * triangles, "{exact} against the mesh's {triangles}");
+        let integrated = crate::measure_mass(&converted).unwrap().volume;
+        assert!((integrated - exact).abs() < 1e-4 * exact, "{integrated} against {exact}");
+        // A box, made rather than converted, is faceted too: its volume is exact.
+        let block = crate::box_solid(Vec3::new(1., -2., 3.), Vec3::new(3., 1., 7.)).unwrap();
+        assert!((block.validated_volume().unwrap() - 24.).abs() < 1e-12);
+        // A box with a closed void inside it: two shells, the void's normals into it. Its volume
+        // counts against the material's, as the integration has it.
+        let inner = crate::box_solid(Vec3::new(1.5, -1.5, 4.), Vec3::new(2.5, 0.5, 6.)).unwrap();
+        let hollow = crate::boolean(&block, &inner, crate::BoolOp::Cut).unwrap().unwrap();
+        assert_eq!(hollow.shell_count(), 2);
+        let exact = hollow.validated_volume().unwrap();
+        assert!((exact - 20.).abs() < 1e-12, "{exact}");
+        assert!((crate::measure_mass(&hollow).unwrap().volume - exact).abs() < 1e-4 * exact);
+        // A face left out of its shell: no closed shell, so no faceted mesh.
+        let mut open = block.record().clone();
+        if let Some(solidcore_record::brep::Shell::Faces { faces, .. }) = open.shells.first_mut() {
+            faces.pop();
+        }
+        if let Ok(open) = crate::Body::from_record(open) {
+            assert_eq!(solidcore_ops::faceted_volume(open.record()).unwrap(), None);
+        }
+        // A body with curved faces has none: it is measured by integration, as before.
+        let round = crate::sphere(Vec3::ZERO, 10.).unwrap();
+        assert_eq!(solidcore_ops::faceted_volume(round.record()).unwrap(), None);
+        assert_eq!(round.validated_volume().unwrap(), round.measured_volume().unwrap());
     }
 
     /// #358, #12281: a part whose section changes with height — a chamfered box, which no axis

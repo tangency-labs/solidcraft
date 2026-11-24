@@ -84,6 +84,20 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #14182: a region bounded in part by two arcs that cross almost tangentially, 0.44 micron apart,
+/// was found with the lens between the two crossings in it, so its loop used one arc twice and
+/// SMLib's check refused the extrude (Bad Gap). The lens is no part of the region: the extrude builds.
+#[test]
+fn a_region_by_two_arcs_crossing_almost_tangentially_extrudes() {
+    let mut s = Session::default();
+    s.set_validation(solidcraft_kernel::Validation::EachStep);
+    s.run_script(&serde_json::from_str(include_str!("../../../examples/regressions/near_tangent_arcs_lens_profile.json")).unwrap()).unwrap();
+    let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let v = volume(&s, "Body3");
+    assert!((v - 1_733_713.898_7).abs() < 1e-3, "{v}");
+}
+
 /// #18039: a 360° revolve cut whose sketch is in the same plane as the body it cuts (a body
 /// revolved a whole turn in that plane) was refused: SMLib's boolean split the two seam edges
 /// the solids of revolution share and left an edge near the seam, which its check refuses ("Face
@@ -1766,6 +1780,53 @@ fn pattern_of_an_untargeted_cut_still_cuts_its_own_components_body() {
     assert!((plate - plate2 - 9.0 * hole).abs() < 0.02 * hole, "Plate2 cut: {plate} -> {plate2}");
 }
 
+/// Main Body, not grounded, with Body1 (x, y −50..50, z 0..20) and Extrude62, an untargeted cut
+/// of a circle of radius 4 at x 30, 10 deep; then Other, created in the root and active.
+fn untargeted_cut_in_main_body(s: &mut Session) {
+    let mut run = |command: &str, params: Value| s.execute(command, &params).unwrap();
+    run("component.create", json!({"name": "Main Body", "grounded": false}));
+    run("sketch.create", json!({"plane": "XY"}));
+    run("sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Body1"}));
+    run("sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run("sketch.circle.center", json!({"center": [30, 0], "radius": 4}));
+    run("sketch.finish", json!({}));
+    run("solid.extrude", json!({"distance": "10 mm", "direction": "negative", "operation": "cut", "name": "Extrude62"}));
+    run("component.activate", json!({"component": "root"}));
+    run("component.create", json!({"name": "Other"}));
+}
+
+/// #19451: copies of an untargeted cut into the pattern's own component's body are checked where
+/// they cut it: with the cut's part moved 200 mm along x, they miss Plate2 and say so.
+#[test]
+fn pattern_of_an_untargeted_cut_from_a_moved_part_says_its_copies_miss() {
+    let mut s = Session::default();
+    untargeted_cut_in_main_body(&mut s);
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "solid.box", json!({"corner": [-50, -50, 0], "length": 100, "width": 100, "height": 20, "operation": "new", "body_name": "Plate2"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Main Body:1", "translate": [200, 0, 0]}));
+    let r = run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    assert!(r["warning"].as_str().is_some_and(|w| w.contains("9 of 9 cut copies remove no material")), "{r}");
+    assert!((volume(&s, "Plate2") - 200_000.0).abs() < 1e-6, "{}", volume(&s, "Plate2"));
+}
+
+/// #19451: copies of an untargeted cut that work on its own part's body read nothing that moves
+/// with that part: driving a joint that turns it evaluates nothing again, as for a mirror (#14271).
+#[test]
+fn pattern_of_an_untargeted_cut_in_a_component_stays_while_a_joint_turns_it() {
+    let mut s = Session::default();
+    untargeted_cut_in_main_body(&mut s);
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    let pan = json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Main Body", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}});
+    run(&mut s, "joint.as_built", pan);
+    for angle in [20, -35, 60] {
+        run(&mut s, "joint.drive", json!({"joint": "Pan", "value": angle, "quiet": true}));
+        assert_eq!(s.model.last_recomputed + s.model.last_restored, 0, "at {angle}°");
+    }
+}
+
 /// #7317: a cut that opens on no face leaves a closed cavity and says so, with the void's volume.
 /// A cut that opens on the outside, one that touches no material and a cup shelled on purpose
 /// say nothing.
@@ -1954,6 +2015,42 @@ fn cut_removes_a_target_inside_its_tools() {
             assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
         }
     }
+}
+
+/// #15727: a 2 mm cut up into the underside of a disc 1.5 thick with a 0.5 deep recess inside
+/// r 12.3, from a rounded rectangle whose sketch plane is tilted 9e-12 off the underside, as a
+/// sketch on a revolved body's face is. One rounded corner crosses the recess wall. The cut came
+/// back empty and was refused as removing all of the body; it takes what the flat cut takes.
+#[test]
+fn cut_from_a_plane_a_hair_off_a_recessed_underside_keeps_the_body() {
+    let cut = |tilt: f64| {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("solid.cylinder", json!({"center": [0, 0, 0], "radius": 17.3, "height": 1.5, "body_name": "Body1"})),
+            ("solid.cylinder", json!({"center": [0, 0, 0], "radius": 12.3, "height": 0.5, "operation": "cut", "targets": ["Body1"]})),
+            ("sketch.create", json!({"name": "C", "plane": {"origin": [0, 0, 0], "x_dir": [1.0, 0.0, tilt], "y_dir": [0, -1, 0]}})),
+            ("sketch.rectangle.rounded", json!({"p0": [-7.9, -28.5], "p1": [7.9, -8.5], "radius": 1})),
+            ("sketch.finish", json!({})),
+        ] {
+            s.execute(command, &params).unwrap();
+        }
+        let before = volume(&s, "Body1");
+        let r = s.execute("solid.extrude", &json!({"sketch": "C", "distance": 2, "direction": "negative", "operation": "cut", "targets": ["Body1"]}));
+        (s, before, r)
+    };
+    let (flat, before, r) = cut(0.0);
+    r.unwrap();
+    let want = volume(&flat, "Body1");
+    assert!(want > 0.0 && want < before - 100.0, "the flat cut takes the notch: {before} -> {want} mm³");
+    let (s, _, r) = cut(-8.95794308348415e-12);
+    assert!(r.is_ok(), "{r:?}");
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1"]);
+    let body = &state.body("Body1").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-6 * want, "the tilted cut leaves {got} mm³, the flat one {want}");
 }
 
 /// A long thin ellipse extruded off a flipped plane is a solid with positive volume. Its sketch

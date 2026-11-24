@@ -911,10 +911,9 @@ fn a_setback_corner_left_open_returns_its_hole() {
 /// does, r² (cot(α/2) - (π - α)/2) per unit length on a wedge α (solidcore#2261): on a 40 x 30 x 20
 /// box with its top back edge chamfered 5, r 2 along the chamfer's top edge (α 135°) takes
 /// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call are
-/// refused: every edge takes the first one's thumbweight, so the other would take 17% too little
-/// or 21% too much (solidcore#2250's comment 6563419897), whichever order they come in.
+/// built, each with its own in either order and G2 to its faces (#13930); this corner is refused.
 #[test]
-fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() {
+fn a_curvature_round_takes_each_wedges_equal_area_in_one_call() {
     let r = 2.0;
     let cut = |alpha: f64| r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
     let chamfered =
@@ -933,11 +932,28 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
         let want = 40.0 * picks.len() as f64 * cut(alpha);
         assert!(rel(removed, want) < 1e-6, "{removed} vs {want}");
     }
+    let want = 40.0 * cut(0.75 * PI) + 40.0 * cut(0.5 * PI);
     for both in [[a, b], [b, a]] {
-        let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
-        assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
-        assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
+        let round = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).unwrap();
+        let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
+        let removed = v0 - volume(&round, 1e-8).unwrap();
+        assert!(rel(removed, want) < 1e-6, "{both:?}: {removed} vs {want}");
+        let (_, order) = round.to_record().unwrap();
+        let tol = solidcore_ops::continuity::ContinuityTolerances {
+            gap_mm: 1e-3,
+            angle_rad: PI / 180.0,
+            curvature_per_mm: 1e-2,
+            curvature_change_per_mm2: 1e-3,
+            curvature_change_rate_per_mm3: 1e-4,
+        };
+        let report = round.continuity_report(&order, &[], 9, tol).unwrap();
+        let rails: Vec<_> = report.seams.iter().filter(|s| s.order_at_stations >= Some(1)).map(|s| s.order_at_stations).collect();
+        assert_eq!(rails.len(), 4, "{both:?}: {rails:?}");
+        assert!(rails.iter().all(|o| *o >= Some(2)), "{both:?}: every rail G2: {rails:?}");
     }
+    let corner = [a, [40.0, 27.5, 17.5]];
+    assert!(blend(&chamfered, Blend::Curvature, &corner, &[r], TOL, &[], &[], Corners::Filled).is_err());
     // A pick that misses is still named first.
     assert_eq!(blend(&chamfered, Blend::Curvature, &[[90.0; 3]], &[r], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }

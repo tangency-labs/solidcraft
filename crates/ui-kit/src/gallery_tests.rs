@@ -1672,6 +1672,12 @@ pub const ELEMENTS: &[Element] = &[
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
     }),
+    element!("expandable_cell_preview", "gallery:comment-preview", Some("gallery:comment-preview:expand"), |ui, s| {
+        expandable_cell_preview(ui, ui.scope_id().with("comment-preview"), &s.value, "gallery:comment-preview");
+    }),
+    element!("expandable_cell_editor", "gallery:comment", Some("gallery:comment:expand"), |ui, s| {
+        expandable_cell_editor(ui, ui.scope_id().with("comment"), &mut s.value, "Comment", "gallery:comment");
+    }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
     }),
