@@ -916,9 +916,11 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
         "face" | "circle" => {
             let pick = local(world);
             // The face's name, which it is found by from then on (a circle's is its wall's).
-            let face = joints::face_name_at(&s.doc, &st, component, pick, what == "circle");
+            // A `face` pick on a cylindrical face resolves as a round reference (same as `circle`),
+            // so concentric/tangent constraints accept cylindrical face picks (#21549).
+            let (face, is_round) = joints::face_pick_at(&s.doc, &st, component, pick, what == "circle");
             let x = x_param(s, v, component, &inv, cmd)?;
-            if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } }
+            if what == "circle" || is_round { Snap::CircleCenter { pick, face, end: None, x } } else { Snap::FaceCenter { pick, face, x } }
         }
         "edge" => {
             let (on, corner) = (v.get("on").and_then(vec3).map(local), v.get("corner").and_then(vec3).map(local));
@@ -1049,7 +1051,7 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
         return Err(bad(cmd, format!("a face name is 1…{MAX_FACE_NAME} characters")));
     }
     let st = s.model.state();
-    let (component, pick) = joints::named_face_spot(&s.doc, &st, str_(v, "body"), name).map_err(|why| {
+    let (component, pick, is_round) = joints::named_face_pick(&s.doc, &st, str_(v, "body"), name).map_err(|why| {
         if s.doc.assembly.origins.iter().any(|o| o.name == name) {
             bad(cmd, format!("`{name}` is a joint origin: pass it as the whole origin, not as a `{what}` name"))
         } else {
@@ -1070,7 +1072,7 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
     let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
     let x = x_param(s, v, component, &inv, cmd)?;
     let face = Some(name.to_string());
-    let snap = if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } };
+    let snap = if what == "circle" || is_round { Snap::CircleCenter { pick, face, end: None, x } } else { Snap::FaceCenter { pick, face, x } };
     settle(s, JointOrigin::new(occurrence, snap), v, cmd)
 }
 

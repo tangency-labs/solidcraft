@@ -892,3 +892,76 @@ fn assembly_constraints_keep_their_reference_axes_when_given_lateral_offsets() {
         assert_eq!(s.doc.assembly.joints[0].offset_xy, [2.0, 3.0]);
     }
 }
+
+/// Regression (#21549): `assembly.constraint.create` with `concentric` accepts a `{"face": ...}`
+/// reference pointing at a cylindrical face (both by world coordinates and by face name), while
+/// a `face` pick on a planar/hole rim still prefers the planar face for `mate` and a cylindrical
+/// wall pick is still rejected by `mate`.
+#[test]
+fn concentric_constraint_accepts_cylindrical_face_picks_while_rim_face_picks_stay_planar() {
+    // 1) Coordinate picks on cylindrical walls (shank and head) succeed for concentric.
+    for b_pick in [json!([54, 10, 10]), json!([56.5, 10, 26])] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Washer"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 8, "height": 2}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 4.2, "height": 2, "operation": "cut"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "Screw"}));
+        run(&mut s, "solid.cylinder", json!({"base": [50, 10, 0], "axis": [0, 0, 1], "radius": 4, "height": 22}));
+        run(&mut s, "solid.cylinder", json!({"base": [50, 10, 22], "axis": [0, 0, 1], "radius": 6.5, "height": 8, "operation": "join"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let washer = occ(&s, "Washer");
+        run(&mut s, "occurrence.ground", json!({"occurrence": washer, "grounded": true}));
+
+        // A cylindrical face pick is still refused by `mate`.
+        let err = s
+            .execute(
+                "assembly.constraint.create",
+                &json!({
+                    "type": "mate",
+                    "a": {"occurrence": "Washer", "face": [6, 0, 2]},
+                    "b": {"occurrence": "Screw", "face": b_pick},
+                }),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("mate needs two planar faces"), "{err}");
+
+        let r = constrain(
+            &mut s,
+            "concentric",
+            json!({"occurrence": "Washer", "circle": [4.2, 0, 0]}),
+            json!({"occurrence": "Screw", "face": b_pick}),
+            json!({}),
+        );
+        assert!(clean(&r), "{r}");
+        let axis_pt = place(&s, "Screw", Vec3::new(50.0, 10.0, 10.0));
+        assert!(axis_pt.x.abs() < 1e-6 && axis_pt.y.abs() < 1e-6, "screw axis aligned to washer: {axis_pt:?}");
+    }
+
+    // 2) Named cylindrical face via `{"face": "<name>"}` works for concentric, and a `face` pick
+    // right on the rim between a planar top face and a hole wall stays planar for `mate`.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 6, "center": [0, 0, 3]}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 4, "height": 6, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Pin"}));
+    run(&mut s, "solid.cylinder", json!({"base": [40, 20, 10], "axis": [0, 0, 1], "radius": 4, "height": 15}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let plate = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+
+    let pin_comp = s.doc.find_component("Pin").unwrap();
+    let pin_wall = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), pin_comp, Vec3::new(44.0, 20.0, 17.5), true)
+        .expect("pin cylindrical face has a name");
+    let r =
+        constrain(&mut s, "concentric", json!({"occurrence": "Plate", "face": [4, 0, 3]}), json!({"occurrence": "Pin", "face": pin_wall}), json!({}));
+    assert!(clean(&r), "{r}");
+    let p = place(&s, "Pin", Vec3::new(40.0, 20.0, 10.0));
+    assert!(p.x.abs() < 1e-6 && p.y.abs() < 1e-6, "pin axis aligned: {p:?}");
+
+    // Picking on the rim `[4, 0, 6]` with `face` prefers the planar top face so `mate` succeeds.
+    let r = constrain(&mut s, "mate", json!({"occurrence": "Plate", "face": [4, 0, 6]}), json!({"occurrence": "Pin", "face": [0, 0, 10]}), json!({}));
+    assert!(clean(&r), "{r}");
+}

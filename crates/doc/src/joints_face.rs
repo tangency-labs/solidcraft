@@ -457,14 +457,21 @@ pub(super) fn x_axis(doc: &Document, st: &ModelState, component: u64, x: Option<
 /// lets them be told apart, to the face's own surface (a point on a thin plate's hole wall lies
 /// as near the facets of the plate's face round the rim). `round` prefers a cylinder on a tie
 /// (a pick on a hole's rim names its wall). `None`: no named face there.
-pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3, round: bool) -> Option<String> {
-    let mut best: Option<(f64, &ModelBody, usize)> = None;
+/// The name of the face at `pick` (component coordinates) on a body of `component`. Compares by
+/// true distance to the surface when the face is a plane or a cylinder (so a pick on a cylinder's
+/// wall beats an adjacent planar face even when its triangles stand off the curve, and a hole's
+/// rim beats the plate's face round it). `prefer_round` picks a cylinder on a tie (a circle pick
+/// on a hole's rim names its wall); otherwise a planar face wins a tie (so a `face` pick near a
+/// hole rim stays planar). Returns `(face_name, is_cylindrical)`.
+pub fn face_pick_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3, prefer_round: bool) -> (Option<String>, bool) {
+    let mut best: Option<(f64, &ModelBody, usize, bool)> = None;
     for b in component_bodies(doc, st, component) {
         if b.body.is_mesh() {
             continue;
         }
         let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
-        let p = apply_point(&mat_inverse(&offset)?, pick);
+        let Some(inv) = mat_inverse(&offset) else { continue };
+        let p = apply_point(&inv, pick);
         let mesh = b.mesh();
         let tol = (b.body.size() * 1e-3).max(1e-3).max(b.display_tol());
         let mut near: BTreeMap<usize, f64> = BTreeMap::new();
@@ -478,21 +485,26 @@ pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3,
             continue;
         }
         for (f, d) in near.into_iter().filter(|(_, d)| *d <= nearest + tol) {
-            let (off, cylinder) = match solidcraft_kernel::face_surface(&b.body, f) {
-                Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) => (d.min((p - point).dot(normal).abs()), false),
+            let (off, plane, cylinder) = match solidcraft_kernel::face_surface(&b.body, f) {
+                Some(solidcraft_kernel::FaceSurface::Plane { normal, point }) => (d.min((p - point).dot(normal).abs()), true, false),
                 Some(solidcraft_kernel::FaceSurface::Cylinder { .. }) => {
-                    (solidcraft_kernel::cylinder_face(&b.body, &mesh, f).map_or(d, |c| d.min(c.off(p))), true)
+                    (solidcraft_kernel::cylinder_face(&b.body, &mesh, f).map_or(d, |c| d.min(c.off(p))), false, true)
                 }
-                _ => (d, false),
+                _ => (d, false, false),
             };
-            let score = if round && cylinder { off - tol } else { off };
+            let score = if (prefer_round && cylinder) || (!prefer_round && plane) { off - tol } else { off };
             if best.as_ref().is_none_or(|(s, ..)| score < *s) {
-                best = Some((score, b, f));
+                best = Some((score, b, f, cylinder));
             }
         }
     }
-    let (_, b, f) = best?;
-    crate::naming::face_names(b).get(f).filter(|n| !n.is_empty()).cloned()
+    let Some((_, b, f, cylinder)) = best else { return (None, false) };
+    (crate::naming::face_names(b).get(f).filter(|n| !n.is_empty()).cloned(), cylinder)
+}
+
+/// The name of the face at `pick` (component coordinates) on a body of `component`, or `None`.
+pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3, round: bool) -> Option<String> {
+    face_pick_at(doc, st, component, pick, round).0
 }
 
 /// A circle-centre snap for the round end of a component's cylindrical face centred at
@@ -555,10 +567,17 @@ pub fn end_faces(doc: &Document, st: &ModelState, component: u64, snap: &Snap) -
 /// The face `model.faces` calls `name` (on the body called `body`, or any body): the component
 /// it belongs to and a point on it in that component's coordinates, for a joint origin given by
 /// a face's name. `Err` says why there is no one such face.
-pub fn named_face_spot(doc: &Document, st: &ModelState, body: Option<&str>, name: &str) -> std::result::Result<(u64, Vec3), String> {
+/// The component, pick point, and whether the face is cylindrical for a face named `name`.
+pub fn named_face_pick(doc: &Document, st: &ModelState, body: Option<&str>, name: &str) -> std::result::Result<(u64, Vec3, bool), String> {
     let hit = crate::name_lookup::locate_one(st, body, name)?;
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
     let spot = crate::naming::face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    let cylinder = matches!(solidcraft_kernel::face_surface(&b.body, hit.face), Some(solidcraft_kernel::FaceSurface::Cylinder { .. }));
     let offset = doc.model_body_offset(b).copied().unwrap_or(IDENTITY);
-    Ok((doc.model_body_component(b), apply_point(&offset, spot.point)))
+    Ok((doc.model_body_component(b), apply_point(&offset, spot.point), cylinder))
+}
+
+pub fn named_face_spot(doc: &Document, st: &ModelState, body: Option<&str>, name: &str) -> std::result::Result<(u64, Vec3), String> {
+    let (comp, pick, _) = named_face_pick(doc, st, body, name)?;
+    Ok((comp, pick))
 }

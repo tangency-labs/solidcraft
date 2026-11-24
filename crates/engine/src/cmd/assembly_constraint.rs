@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
             "type: mate|flush|distance|concentric|insert|parallel|perpendicular|angle|tangent|point_on_axis; a, b: references, as joint.create's \
-         origins (a face or a datum plane for a plane, a circle or an axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
+         origins (a planar face or a datum plane for a plane, a cylindrical face, circle or axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
          angle?: deg or an expression (needed for angle); flip?: turn b over; name? (default: the rule and a number, Mate1); quiet?. \
          Kept as a joint of the kind the rule needs (mate and flush planar, distance planar or point on plane, concentric cylindrical, \
          insert revolute, tangent line on plane, point on axis point on line), made where the parts are, so b moves no further than the \
