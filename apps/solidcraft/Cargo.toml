@@ -44,10 +44,7 @@ solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 # "clipboard" is not a default here: eframe 0.37 builds egui-winit without it, and then every
 # Copy and Paste on the desktop silently does nothing (see src/clipboard_tests.rs).
-# "system_fonts" is not a default here either: with it a character none of SolidCraft's faces has
-# (bundled, chosen, or found by `solidcraft_ui_egui::fonts`) is asked of the operating system's own
-# font fallback, so text in a script nobody listed is drawn instead of empty boxes (#20005).
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard", "system_fonts"] }
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

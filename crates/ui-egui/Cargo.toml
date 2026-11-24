@@ -78,6 +78,7 @@ proc-macro2 = { workspace = true }
 # egui-winit's clipboard.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+fontdb = { workspace = true }
 lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

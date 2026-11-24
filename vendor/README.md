@@ -15,8 +15,8 @@ in it), tooling and rules: SolidCraft's checks do not apply to it, and the works
 `vendor/`.
 
 Every egui crate SolidCraft builds is patched to it in the workspace `Cargo.toml`: `ecolor`,
-`eframe`, `egui`, `egui-wgpu`, `egui-winit`, `egui_glow`, `egui_system_font_provider`, `emath`,
-`epaint` and `epaint_default_fonts`. egui's own crates build and test there, for example
+`eframe`, `egui`, `egui-wgpu`, `egui-winit`, `egui_glow`, `emath`, `epaint` and
+`epaint_default_fonts`. egui's own crates build and test there, for example
 `cargo test --manifest-path vendor/egui/Cargo.toml -p egui -p eframe --lib`.
 
 ### Images upstream keeps in Git LFS

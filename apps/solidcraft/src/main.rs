@@ -1543,6 +1543,9 @@ fn main() -> eframe::Result {
             settings.as_ref().map(|d| d.join("app.ron"))
         },
         persist_window: !safe_mode,
+        // SolidCraft finds a missing character in the installed fonts itself
+        // (`fonts::add_system_font_fallback`), so eframe's stand-in, which only logs, stays out.
+        system_font_fallback: false,
         wgpu_options,
         ..Default::default()
     };
@@ -1597,6 +1600,7 @@ fn main() -> eframe::Result {
             mark("window and device ready");
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
+            solidcraft_ui_egui::fonts::add_system_font_fallback(&cc.egui_ctx);
             mark("fonts");
             let dialog_folder = DialogFolder::default();
             // The file chooser that opens may not be the desktop's own: the session bus is asked
