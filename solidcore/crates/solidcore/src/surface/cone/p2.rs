@@ -3227,7 +3227,21 @@ mod tests {
     /// angles and the centre line of an untilted one, which were all the rebuild
     /// checked, so it rebuilt as a cylinder the NURB is not. The top normal is now
     /// checked against the axis with the rule the bottom one meets (1e-3 degrees): a
-    /// tilt of 0.01 degrees is refused with the cone unchanged, 1e-4 degrees passes.
+    /// tilt of 0.01 degrees is refused with the cone unchanged, 1e-4 degrees passes
+    /// those checks.
+    ///
+    /// #17228: the 1e-4 degree net is then refused by the cylinder certificate, cone
+    /// unchanged. Its radii are equal (the `EFF_ZERO` branch, which recorded the
+    /// cylinder unchecked), but the tilted top circle is no section of a right
+    /// cylinder: tilted by `t` = 1.745e-6 rad about x, its point at 90 degrees is
+    /// `(0, 9 cos t, 3 + 9 sin t)`, `9 sin^2 t / 2 = 1.37e-11` inside radius 9. That
+    /// point is an interpolated control point (weight 1) of the end row, and radial
+    /// scaling leaves it (the fitted top circle has radius 9, so the scale is 1), so
+    /// the implicit `x^2 + y^2 - 81` has the Bernstein coefficient
+    /// `-81 sin^2 t = -2.47e-10` there, against the certificate's rounding allowance
+    /// (`implicit`: `gamma_64` for these degree (2, 1) patches, 7.1e-15, times the
+    /// squared size of the patch, a few hundred here: about 1e-12): outside it, so
+    /// `lies_on` refuses, as the mean-radius branch already did since #16982.
     #[test]
     fn rebuild_refuses_a_tilted_top_circle() {
         let k = kernel();
@@ -3252,27 +3266,29 @@ mod tests {
                     }
                     let before = c.clone();
                     let result = c.rebuild_step_from_nurb_parameters(&k);
-                    assert_eq!(result.is_err(), refused, "{tilt_deg} {swap} {inside}");
                     // the tilted row is the NURB's last; with swap and inside the rebuild
                     // reads it as its bottom or its top arc, so one of the two
-                    // square-to-axis checks refuses it
-                    if let Err(e) = &result {
-                        assert!(
-                            matches!(
-                                e.surface_failure(),
-                                Some(&SurfaceFailure::NurbNotAnalytic {
-                                    check: AnalyticCheck::BottomNotSquareToAxis
-                                        | AnalyticCheck::TopNotSquareToAxis
-                                })
-                            ),
-                            "{swap} {inside}: {e}"
-                        );
-                    }
-                    if refused {
-                        assert_eq!(c.base_radius(), before.base_radius());
-                        assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
-                        assert_eq!(c.rev().position(), before.rev().position());
-                    }
+                    // square-to-axis checks refuses it; the 1e-4 degree tilt passes
+                    // them and is refused by the cylinder certificate (#17228)
+                    let e = result.expect_err(&format!("{tilt_deg} {swap} {inside}"));
+                    let check = if refused {
+                        matches!(
+                            e.surface_failure(),
+                            Some(&SurfaceFailure::NurbNotAnalytic {
+                                check: AnalyticCheck::BottomNotSquareToAxis
+                                    | AnalyticCheck::TopNotSquareToAxis
+                            })
+                        )
+                    } else {
+                        e.surface_failure()
+                            == Some(&SurfaceFailure::NurbNotAnalytic {
+                                check: AnalyticCheck::NetOffCylinder,
+                            })
+                    };
+                    assert!(check, "{tilt_deg} {swap} {inside}: {e}");
+                    assert_eq!(c.base_radius(), before.base_radius());
+                    assert_eq!(c.semi_angle_deg(), before.semi_angle_deg());
+                    assert_eq!(c.rev().position(), before.rev().position());
                 }
             }
         }
