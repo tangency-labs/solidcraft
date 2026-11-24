@@ -1539,6 +1539,18 @@ mod tests {
         "vase_rev.smb_1_f5_op9",
     ];
 
+    fn moved_rows() -> Vec<Case> {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        cases
+            .into_iter()
+            .filter(|c| MOVED.contains(&c.name.as_str()))
+            .collect()
+    }
+
     /// The unit's cases named in `names`.
     fn rows(names: &[&str]) -> Vec<Case> {
         let ctx = CaseContext {
@@ -1677,7 +1689,27 @@ mod tests {
 
     #[test]
     fn seam_move_rows_keep_the_tolerances_the_geometry_needs() {
-        let problems = replay(&MOVED);
+        let rows = moved_rows();
+        assert_eq!(rows.len(), MOVED.len(), "every moved row is a case");
+        let golden =
+            crate::golden::read(&crate::golden::default_dir(), "topology.face_p1").expect("golden");
+        let mut problems = Vec::new();
+        for case in &rows {
+            AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = None);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let out = run_rust(&inputs).expect("row runs");
+            // the checks before the op take the B-rep `&mut`; the row must still be the
+            // committed golden one, so they changed nothing the row records
+            if golden.get(&case.name) != Some(&crate::golden::encode(&case.name, &out)) {
+                problems.push(format!("{}: the replay is not the committed golden row", case.name));
+            }
+            match AFTER_MOVE_SEAM.with(|c| c.borrow_mut().take()) {
+                Some(found) => {
+                    problems.extend(found.into_iter().map(|p| format!("{}: {p}", case.name)));
+                }
+                None => problems.push(format!("{}: MoveSeam did not run", case.name)),
+            }
+        }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
