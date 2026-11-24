@@ -2964,12 +2964,13 @@ fn short_end_span_is_pole(cpts: &[CPoint], degree: usize, head: bool, tail: bool
 /// segment out ([`Curve::remove_segs`]), so the rest of the curve runs at the parameters
 /// the edge's other curves have, as when every short span went that way; an affine remap
 /// of the rest onto the interval moved every interior parameter, and a shell's loop then
-/// kept a gap (issue_1818_mated_shell_wall). Every other span, however short, stays. A
-/// span is judged on the restriction that would keep it ([`crv_trim`]): cutting a pole
-/// span off moves the first control point of the next span, which can make that span a
-/// pole too. Each removed span moves that end along the curve by at most twice the pole
-/// tolerance when the weights are positive, as the span lies in the hull of its control
-/// points, all within the pole tolerance of its first. Not upstream (#2129, #21524).
+/// kept a gap (issue_1818_mated_shell_wall). Every other span, however short, stays. Each
+/// span is judged on the curve that removal leaves without the spans before it: the
+/// removal keeps the end control point, so the next span's first control point changes,
+/// which can make that span a pole too. The curve keeps its end points (the removal keeps
+/// the end control point); the spans next to a removed run change shape as upstream's
+/// removal changes them, which moves the curve's end knot onto them, a rational curve's
+/// with the end point's weight. Not upstream (#2129, #21524).
 fn without_pole_end_spans(cur: &Curve, zone_tol_3d: f64) -> Result<Curve> {
     // the distinct knots, which bound the spans
     let mut bounds: Vec<f64> = Vec::new();
@@ -2994,27 +2995,23 @@ fn without_pole_end_spans(cur: &Curve, zone_tol_3d: f64) -> Result<Curve> {
         }
         lo += usize::from(head);
         hi = hi.saturating_sub(usize::from(tail));
-        let (Some(&a), Some(&b)) = (bounds.get(lo), bounds.get(hi)) else {
-            return Err(invalid(OP_TRIM, "pole end spans outside the knots"));
+        // the runs found so far: [start, bounds[lo]] and [bounds[hi], end]
+        let mut runs = Vec::new();
+        if let Some(&a) = bounds.get(lo).filter(|_| lo > 0) {
+            runs.push((start, a));
+        }
+        if let Some(&b) = bounds.get(hi).filter(|_| hi + 1 < bounds.len()) {
+            runs.push((b, end));
+        }
+        let removal = cur
+            .remove_segs(runs, zone_tol_3d)
+            .map_err(SolidError::nurbs_routine(OP_TRIM))?;
+        kept = match removal {
+            Some(r) => copy_nurb_curve(&r.curve),
+            None => return Err(invalid(OP_TRIM, "pole end spans not removed")),
         };
-        kept = crv_trim(cur, a, b).map_err(SolidError::nurbs_routine(OP_TRIM))?;
     }
-    // the runs found go as upstream's removal takes out a degenerate segment, so the
-    // parameters along the rest stay where they were for the partner curves
-    let mut runs = Vec::new();
-    if let Some(&a) = bounds.get(lo).filter(|_| lo > 0) {
-        runs.push((start, a));
-    }
-    if let Some(&b) = bounds.get(hi).filter(|_| hi + 1 < bounds.len()) {
-        runs.push((b, end));
-    }
-    if runs.is_empty() {
-        return Ok(cur.clone());
-    }
-    let removal = cur
-        .remove_segs(runs, zone_tol_3d)
-        .map_err(SolidError::nurbs_routine(OP_TRIM))?;
-    Ok(removal.map_or_else(|| cur.clone(), |r| copy_nurb_curve(&r.curve)))
+    Ok(kept)
 }
 
 /// Whether the `degree + 1` control points of the span starting at control point
@@ -3935,16 +3932,17 @@ mod tests {
         k.fixes.bspline_trim_preserves_uv_spans = true;
         let pole_tol = ZONE_TOL_3D / 10.0;
         // (curve, where the first span that is no pole starts); the trim's end at 0.9
-        // moves only the last two control points. In the first curve
-        // the second span is no pole on the curve's control points, but cutting the
-        // first span off moves its first control point to C(1e-4) = (0.4e-6, 0), and
-        // then it is one. In the second the second span is a pole longer than the
-        // zone tolerance mapped to the parameter (1e-5 / 0.18 at the start).
+        // moves only the last two control points. In the first curve the second span is
+        // no pole on the curve's control points (0, 0, 1.1e-6), and it would be none on
+        // the exact restriction either, which starts at C(1e-4) = (0, 0); but the removal
+        // keeps the end control point (0.8e-6, 0), and then it is one. In the second the
+        // second span is a pole longer than the zone tolerance mapped to the parameter
+        // (1e-5 / 0.18 at the start).
         let cases = [
             (
                 uv_curve_on_u_axis(
                     &[0.0, 0.0, 0.0, 1e-4, 2e-4, 0.5, 1.0, 1.0, 1.0],
-                    &[0.0, 0.0, 0.8e-6, 1.1e-6, 0.5, 1.0],
+                    &[0.8e-6, 0.0, 0.0, 1.1e-6, 0.5, 1.0],
                 ),
                 2e-4,
             ),

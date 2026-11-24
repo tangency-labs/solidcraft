@@ -872,14 +872,31 @@ impl Curve {
 
     /// The removal step of [`Curve::remove_degen_segs`] (`N_CrvRemoveDegenSegs`) for the
     /// given segments instead of those [`Curve::degen_segs`] finds at `tol`: `segs` are
-    /// parameter intervals `[u1, u2]` between knots, ascending and disjoint, as
-    /// [`Curve::degen_segs`] returns them; `tol` bounds the knot removal of a curve the
-    /// segments cover whole. Not upstream as a routine of its own (#21524).
+    /// parameter intervals `[u1, u2]` from knot to knot, `u1 < u2`, ascending and not
+    /// overlapping (touching ones form one run), as [`Curve::degen_segs`] returns them; `tol` bounds the
+    /// knot removal of a curve that consecutive segments cover whole. As there, a single
+    /// segment that is the whole curve, or a curve of one span, leaves the curve (`None`).
+    /// Not upstream as a routine of its own (#21524).
     ///
-    /// Errors as [`Curve::remove_degen_segs`].
-    pub fn remove_segs(&self, segs: Vec<(f64, f64)>, tol: f64) -> Result<Option<DegenSegRemoval>> {
+    /// Errors with `InvalidInput` for segments that are not such intervals, else as
+    /// [`Curve::remove_degen_segs`].
+    pub(crate) fn remove_segs(
+        &self,
+        segs: Vec<(f64, f64)>,
+        tol: f64,
+    ) -> Result<Option<DegenSegRemoval>> {
         const OP: &str = "nurbs::crv_tool::p2::Curve::remove_degen_segs";
         let up = self.knots();
+        let mut last = f64::NEG_INFINITY;
+        for &(u1, u2) in &segs {
+            if !(last <= u1 && u1 < u2 && up.contains(&u1) && up.contains(&u2)) {
+                return Err(SolidError::InvalidInput {
+                    operation: "nurbs::crv_tool::p2::Curve::remove_segs",
+                    reason: "segments must run from knot to knot, ascending and disjoint",
+                });
+            }
+            last = u2;
+        }
         let pu = self.degree();
         check_short_degree(pu, OP)?;
         let p = sx(pu, OP)?;
@@ -1806,6 +1823,60 @@ mod tests {
     #[test]
     fn remove_degen_segs_none_found() {
         assert_eq!(cubic().remove_degen_segs(1e-9).unwrap(), None);
+    }
+
+    /// The removal step on its own: given the segments the search finds it removes as the
+    /// whole routine does, it removes only the segments it is given, and it refuses segments
+    /// that are not knot-to-knot intervals in order.
+    #[test]
+    fn remove_segs_removes_the_given_segments_and_refuses_others() {
+        // a quadratic with a point span at each end, [0, 1e-4] and [0.9999, 1]
+        let c = Curve::new(
+            vec![
+                pt(0.0, 0.0, 0.0),
+                pt(0.0, 0.0, 0.0),
+                pt(0.0, 0.0, 0.0),
+                pt(1.0, 1.0, 0.0),
+                pt(2.0, 0.0, 0.0),
+                pt(2.0, 0.0, 0.0),
+                pt(2.0, 0.0, 0.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1e-4, 0.5, 0.6, 0.9999, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let tol = 1e-6;
+        let found = c.degen_segs(tol).unwrap();
+        assert_eq!(found, vec![(0.0, 1e-4), (0.9999, 1.0)]);
+        let whole = c.remove_degen_segs(tol).unwrap().unwrap();
+        assert_eq!(c.remove_segs(found, tol).unwrap().unwrap(), whole);
+        let distinct = |u: &[f64]| {
+            let mut d = u.to_vec();
+            d.dedup();
+            d
+        };
+        // both point spans go: two interior knots are left
+        assert_eq!(distinct(whole.curve.knots()).len(), 4);
+        // only the head goes: the tail span stays, still shorter than 2e-4
+        let head = c.remove_segs(vec![(0.0, 1e-4)], tol).unwrap().unwrap();
+        let knots = distinct(head.curve.knots());
+        assert_eq!(knots.len(), 5, "{knots:?}");
+        assert!(knots[4] - knots[3] < 2e-4, "{knots:?}");
+        for bad in [
+            vec![(0.0, 0.0)],
+            vec![(1e-4, 0.0)],
+            vec![(0.0, 0.25)],
+            vec![(f64::NAN, 1e-4)],
+            vec![(0.0, f64::INFINITY)],
+            vec![(0.9999, 1.0), (0.0, 1e-4)],
+            vec![(0.0, 0.5), (1e-4, 1.0)],
+        ] {
+            let r = c.remove_segs(bad.clone(), tol);
+            assert!(
+                matches!(r, Err(SolidError::InvalidInput { .. })),
+                "{bad:?}: {r:?}"
+            );
+        }
     }
 
     /// Fuzz regression: a huge degree overflowed `2 * p` in the knot removal.
