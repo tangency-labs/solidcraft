@@ -141,11 +141,19 @@ pub fn polygon_area(corners: &[Point3]) -> Result<f64> {
             reason: "every corner must be finite",
         });
     }
+    // Measured from the first corner, so the products follow the polygon's size and not its
+    // distance from the origin (the sum is the same in exact arithmetic: the terms in the
+    // origin's cross product cancel round a closed polygon).
+    let Some(&o) = corners.first() else {
+        return Ok(0.0);
+    };
     let next = corners.iter().cycle().skip(1);
     let sum = corners
         .iter()
         .zip(next)
-        .fold(Vec3::new(0.0, 0.0, 0.0), |s, (a, b)| s + a.cross(*b));
+        .fold(Vec3::new(0.0, 0.0, 0.0), |s, (a, b)| {
+            s + (*a - o).cross(*b - o)
+        });
     Ok(sum.length() * 0.5)
 }
 
@@ -344,6 +352,19 @@ mod tests {
         let tri = [v(0.0, 0.0, 0.0), v(2.0, 0.0, 0.0), v(0.0, 2.0, 2.0)];
         assert!((polygon_area(&tri).unwrap() - 2.0 * 2.0_f64.sqrt()).abs() < 1e-12);
         assert_eq!(polygon_area(&rect[..2]).unwrap(), 0.0);
+        assert_eq!(polygon_area(&[]).unwrap(), 0.0);
+        // A unit square 2^27 from the origin has area 1, as it has at the origin.
+        let far = 2.0_f64.powi(27);
+        let square = |l: f64| {
+            [
+                v(l, l, 0.0),
+                v(l + 1.0, l, 0.0),
+                v(l + 1.0, l + 1.0, 0.0),
+                v(l, l + 1.0, 0.0),
+            ]
+        };
+        assert_eq!(polygon_area(&square(0.0)).unwrap(), 1.0);
+        assert_eq!(polygon_area(&square(far)).unwrap(), 1.0);
         assert!(polygon_area(&[v(f64::NAN, 0.0, 0.0), rect[1], rect[2]]).is_err());
     }
 
