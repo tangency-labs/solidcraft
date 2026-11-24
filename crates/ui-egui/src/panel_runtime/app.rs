@@ -1513,9 +1513,14 @@ impl crate::SolveApp {
             self.shell.cards = cards;
             self.shell.status_bar = status_bar;
         }
+        // Home can open a document after the services tick. Bind the restored panel
+        // visibility to that document before the host delivers its lifecycle events.
+        let restoring = self.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|prefs| prefs.pending.is_some());
+        let refresh = if restoring { super::production::refresh_production(self) } else { Ok(()) };
         match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
+                    refresh?;
                     integration.sync_native_direction(direction)?;
                     integration.set_keyboard_shortcuts(shortcuts);
                     if let Some(host) = &mut integration.host {
