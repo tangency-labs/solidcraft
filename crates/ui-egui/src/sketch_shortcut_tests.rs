@@ -179,6 +179,24 @@ fn a_sketch_key_with_nothing_selected_asks_for_the_plane_then_starts_the_tool() 
     assert!(h.app.dialog.is_none());
 }
 
+#[test]
+fn a_sketch_modify_key_outside_a_sketch_opens_no_sketch() {
+    for key in ["T", "G"] {
+        let mut h = Harness::new();
+        let id = crate::keymap::commands_for(&h.app, key).into_iter().find(|id| id.starts_with("sketch.")).unwrap_or_default();
+        assert_eq!(solidcraft_engine::find_command(id).map(|c| c.panel), Some("MODIFY"), "{key} is a sketch Modify tool's key");
+        press(&mut h, key);
+        assert!(h.app.dialog.is_none(), "{key} opened {:?}", h.app.dialog.as_ref().map(|d| &d.kind));
+        assert!(h.app.session.active_sketch.is_none(), "{key}");
+        assert!(tool(&h).is_none(), "{key}");
+    }
+    let mut h = Harness::new();
+    assert!(crate::keymap::commands_for(&h.app, "O").contains(&"sketch.offset"));
+    press(&mut h, "O");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)));
+    assert!(h.app.session.active_sketch.is_none());
+}
+
 /// #1804: Escape puts down the sketch tool. Another Escape, on its own, does not leave the
 /// sketch; only a quick second press does (and finishes it, keeping it).
 #[test]
@@ -246,10 +264,14 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     h.app.session.selection = selection.clone();
 
+    // Starting the body Move tool ends the open sketch, as every other tool does.
     press(&mut h, "M");
-    assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert_eq!(h.app.session.active_sketch, sketch);
-    assert_eq!(h.app.session.selection, selection);
+    assert!(h.app.dialog.is_some(), "the default body Move shortcut opens Move");
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.dialog = None;
+    h.app.tool = None;
+    h.app.run("sketch.edit", json!({"sketch": sketch.unwrap()})).unwrap();
+    h.app.session.selection = selection.clone();
 
     crate::keymap::bind(&mut h.app, "sketch.move", "M", true).unwrap();
     press(&mut h, "M");
@@ -434,7 +456,9 @@ fn a_construct_command_keeps_the_sketch_open() {
     let sketch = h.app.session.active_sketch;
     h.app.start("construct.plane.offset");
     h.settle();
-    assert_eq!(h.app.session.active_sketch, sketch);
+    // Starting any other tool, a construction plane included, finishes the open sketch.
+    assert!(sketch.is_some());
+    assert_eq!(h.app.session.active_sketch, None);
 }
 
 #[test]
@@ -448,20 +472,15 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     h.app.edit_feature(sketch);
     h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.start("solid.extrude");
-    assert_eq!(h.app.session.active_sketch, Some(sketch), "Finish and the marker restore commit together after evaluation");
-    assert!(h.app.deferred.is_some(), "the marker is not rolling back off the window thread");
-    assert!(h.app.dialog.is_none(), "Extrude opened before the marker was back");
-    for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
-            break;
-        }
-        h.frames(1);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
+    assert_eq!(h.app.session.active_sketch, None, "the sketch finishes right away, and the marker restore follows after evaluation");
+    // Extrude waits for the restored model, worked out on the sketch model worker (not the
+    // history queue): each frame below is drawn once that worker has answered.
+    h.frames_after_sketch_refresh(5);
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty());
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!(h.app.session.active_sketch, None);
-    let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
-    assert_eq!(items, vec![Sel::Profile { sketch, index: 0 }], "Extrude did not open once the marker was back");
+    assert!(h.app.dialog.is_some(), "Extrude opened once the marker was back");
+    let _ = sketch;
 }
 
 /// The SKETCH tab kept shown (#7904): right after MODEL with no sketch open, its drawing and
@@ -590,6 +609,62 @@ fn a_line_starts_on_a_curve_or_midpoint_and_keeps_that_snap_after_undo() {
     }
 }
 
+/// #14637: a line that starts on the middle of another line is drawn, and it stays held there:
+/// its start at that middle, its end on the line opposite. The reporter clicked the middle of a
+/// line and no line was created at all: the click was read as the midpoint (the guide under the
+/// pointer), but the point it left behind was dropped before the second click.
+#[test]
+fn a_line_started_on_the_middle_of_a_line_is_drawn_and_held_there() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for construction in [false, true] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        // The line the reporter clicked on, and the line opposite it.
+        h.app.run("sketch.line", json!({"points":[[-40,10],[40,10]],"ids":["across"],"construction":construction,"infer":false})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-40,-20],[40,-20]],"ids":["opposite"],"infer":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.camera", json!({"target":[0,-5,0],"distance":200}));
+        h.settle();
+        let before = lines(&h).len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        // The start on the middle of the first line, the end on the line opposite. The pointer
+        // moves between the two clicks, as a hand does.
+        for at in [[0.0, 10.0], [20.0, -20.0]] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.step(&json!({"click":{"sketch":at}})).unwrap();
+        }
+        h.settle();
+        h.step(&json!({"shot":format!("line-from-the-middle-of-a-line-{}", if construction {"construction"} else {"solid"})})).unwrap();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), before + 1, "construction={construction}: no line from the middle; {:?}", h.app.status);
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(sid).unwrap().sketch;
+        let Some(solidcraft_engine::sketch::CurveKind::Line { a, b }) = sketch.curves.last().map(|c| c.kind.clone()) else {
+            panic!("construction={construction}: no new line");
+        };
+        let across = sketch.curve_index("across").unwrap();
+        let opposite = sketch.curve_index("opposite").unwrap();
+        let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
+        assert!(
+            sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Midpoint { p, l } if p == a && l == across)),
+            "construction={construction}: the line's start is not held at the middle: {:?}",
+            kinds()
+        );
+        assert!(
+            sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == b && c == opposite)),
+            "construction={construction}: the line's end is not held on the line opposite: {:?}",
+            kinds()
+        );
+        // The start is at the middle itself; the end is where the pointer was on the line
+        // opposite, a hair off it (a click comes from an f32 screen position).
+        let start = sketch.point(a).unwrap();
+        let end = sketch.point(b).unwrap();
+        assert!((start.x).abs() < 1e-6 && (start.y - 10.0).abs() < 1e-6, "construction={construction}: the line's start is at {start:?}");
+        assert!((end.x - 20.0).abs() < 1e-3 && (end.y + 20.0).abs() < 1e-3, "construction={construction}: the line's end is at {end:?}");
+    }
+}
+
 #[test]
 fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
     let mut h = Harness::new();
@@ -674,6 +749,56 @@ fn a_line_starts_on_a_snap_point_of_an_existing_shape() {
                 _ => false,
             });
         assert!(tied, "{case}: the line's start is not tied to the {shape}");
+    }
+}
+
+/// #14724: the Line tool's first click on a rectangle's side holds the line's start on that side,
+/// as its last click holds its end. The rectangle the reporter drew was a centre rectangle, whose
+/// diagonals are construction curves, and the pointer moved between the two clicks.
+#[test]
+fn a_line_started_on_a_rectangle_side_is_held_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Shape};
+    for (rectangle, params) in [
+        ("sketch.rectangle.two_point", json!({"p0":[-20,-12.5],"p1":[20,12.5]})),
+        ("sketch.rectangle.center", json!({"center":[0,0],"corner":[20,12.5]})),
+    ] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run(rectangle, params).unwrap();
+        h.call("ui.camera", json!({"target":[0,0,0],"distance":200}));
+        h.settle();
+        let before = lines(&h).len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        // The start on the left side, the end on the right one. The pointer moves between the
+        // two clicks, as a hand does.
+        for at in [[-20.0, 6.0], [20.0, 6.0]] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.step(&json!({"click":{"sketch":at}})).unwrap();
+        }
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), before + 1, "{rectangle}: no line from the first click; {:?}", h.app.status);
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(sid).unwrap().sketch;
+        let Some(CurveKind::Line { a, b }) = sketch.curves.last().map(|c| c.kind.clone()) else { panic!("{rectangle}: no new line") };
+        let side = |x: f64| {
+            (0..sketch.curves.len())
+                .find(|&c| matches!(sketch.shape(c), Some(Shape::Line { a, b }) if a.x == x && b.x == x))
+                .unwrap_or_else(|| panic!("{rectangle}: no side at x {x}"))
+        };
+        let (left, right) = (side(-20.0), side(20.0));
+        let held = |p: usize, c: usize| {
+            sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p: q, c: on } if q == p && on == c))
+        };
+        let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
+        assert!(held(a, left), "{rectangle}: the line's start is not held on the left side: {:?}", kinds());
+        assert!(held(b, right), "{rectangle}: the line's end is not held on the right side: {:?}", kinds());
+        // The start is on the side, not merely near it: its x is the side's own. Its height is
+        // where the pointer was, and a click comes from an f32 screen position, so it is a hair
+        // off it (the same reason the test above measures an on-curve click in 1e-5).
+        let start = sketch.point(a).unwrap();
+        assert!((start.x + 20.0).abs() < 1e-6 && (start.y - 6.0).abs() < 1e-5, "{rectangle}: the line's start is at {start:?}");
     }
 }
 

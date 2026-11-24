@@ -9,7 +9,7 @@
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::revision::{RevisionRecord, Tag, TagText};
-use solidcraft_sketch::PaperFonts;
+use solidcraft_sketch::{PaperFonts, TextStyle};
 
 use crate::drawing_dimension_paper::{GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed, text_box};
 
@@ -29,7 +29,7 @@ pub fn tag_group(tag: &Tag, shows: &str, line_mm: f64, lettering: &PaperFonts) -
     let outline = (0..3).map(|i| Seg2::Line { a: corners[i], b: corners[(i + 1) % 3] }).collect();
     let items = vec![Item::Stroke { path: outline, closed: true, width_mm: line_mm, pattern: None }];
     let group = Group { object: tag.id, kind: ObjectKind::RevisionTag, items };
-    let measured = Text::set(Some(shows), TEXT_MM, lettering);
+    let measured = Text::set(Some(shows), TEXT_MM, lettering, &TextStyle::default());
     let mut on = OnPaper { group, fonts: Vec::new(), why: measured.why, pending: measured.pending, layout: Layout::default() };
     if measured.runs.is_empty() {
         return on;
@@ -46,7 +46,7 @@ pub fn tag_group(tag: &Tag, shows: &str, line_mm: f64, lettering: &PaperFonts) -
         on.why = Some(format!("its side is too short for its text: it needs a side of at least {holds} mm"));
         return on;
     }
-    let text = Text::set(Some(shows), cap, lettering);
+    let text = Text::set(Some(shows), cap, lettering, &TextStyle::default());
     // From a gap over the base to the highest the sloping edges allow, as near the centroid as it can.
     let lowest = base + GAP_MM + text.half.y;
     let highest = base + height - 2.0 * GAP_MM - root3 * text.half.x - text.half.y;

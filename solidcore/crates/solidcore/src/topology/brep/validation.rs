@@ -32,9 +32,9 @@ pub use assert_valid::{
     CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
 };
 pub(crate) use pointers::validate_geometry;
-pub(crate) use pointers::validate_pointers_excluding;
 pub(crate) use pointers::GROWTH_PAST_RATIO;
 pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
+pub(crate) use pointers::{validate_pointers_excluding, validate_pointers_traced};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 pub use wide_vertices::update_tolerances_after_boolean;
@@ -133,6 +133,15 @@ impl Reports<'_> {
         value: f64,
     ) -> Result<bool> {
         self.record(b, index, passed, owner.into(), tol, value)
+    }
+
+    /// Not upstream (#21105): a warning of list 1 ([`crate::geom::assert_array::labels::WARNINGS`]),
+    /// reported (`!m_bOK`) without failing the pass.
+    fn warning(&mut self, b: &Brep, index: u64, owner: impl Into<Object>) -> Result<()> {
+        let failed = self.failed;
+        self.record(b, index, false, owner.into(), UNDEF_DOUBLE, UNDEF_DOUBLE)?;
+        self.failed = failed;
+        Ok(())
     }
 
     /// A report of list 1 (`SmBrep`'s pointer tests), which names no other object.

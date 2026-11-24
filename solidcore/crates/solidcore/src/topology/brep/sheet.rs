@@ -22,6 +22,7 @@
 use std::collections::BTreeSet;
 
 use crate::curve::curve::CurveKind;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::USE_DEFAULT;
@@ -218,8 +219,9 @@ pub struct Merged {
 ///
 /// # Errors
 ///
-/// Those of the copy, the merge and the edge queries; [`SolidError::topology_failed`] for a
-/// group of merged faces that does not leave exactly one face.
+/// Those of the copy, the merge and the edge queries;
+/// [`TopologyFailure::MergedGroupNotOneFace`] for a group of merged faces that does not
+/// leave exactly one face.
 pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     use crate::topology::brep::p1::{edges, faces};
     use crate::topology::EdgeId;
@@ -232,16 +234,19 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_edges = Vec::new();
     for oe in edges(b, None)? {
         let Some(EntityRef::Edge(ce)) = copy_of(EntityRef::Edge(oe))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "an edge without its copy",
+                TopologyFailure::Defect {
+                    why: "an edge has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         let record = c.edge(ce)?;
         let curve = record
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP_MERGED, "an edge's curve"))?;
+            .ok_or_else(|| SolidError::topology(OP_MERGED, TopologyFailure::EdgeWithoutCurve))?;
         let middle = curve.evaluate_point(k, record.interval.mid())?;
         let mut on = Vec::new();
         for eu in crate::topology::edge::edgeuses(&c, ce, None, None)? {
@@ -256,9 +261,12 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_faces = Vec::new();
     for of in faces(b, None)? {
         let Some(EntityRef::Face(cf)) = copy_of(EntityRef::Face(of))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "a face without its copy",
+                TopologyFailure::Defect {
+                    why: "a face has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         copied_faces.push((of, cf));
@@ -269,7 +277,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
 
     let live_edges = edges(&c, None)?;
     let live_faces = faces(&c, None)?;
-    let near = 10.0 * c.tolerance().max(1e-9);
+    // A removed edge is the live edge it was joined to only within the body's tolerance. A seam
+    // between two faces can lie inside the old ten-tolerance window and is not that edge (#16634).
+    let near = c.tolerance().max(1e-9);
     // each edge: itself, else the edge through its middle, else gone
     let mut edge_map = Vec::new();
     let mut removed: Vec<&[FaceId]> = Vec::new();
@@ -320,9 +330,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
             .iter()
             .filter(|&f| label.get(f).copied() == group);
         let (Some(&now), None) = (survivors.next(), survivors.next()) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "merged faces that do not leave exactly one face",
+                TopologyFailure::MergedGroupNotOneFace,
             ));
         };
         face_map.push((of, now));
@@ -1021,6 +1031,38 @@ mod tests {
 
     fn mapped(m: &Merged, e: EdgeId) -> Option<EdgeId> {
         m.edges.iter().find(|(o, _)| *o == e).unwrap().1
+    }
+
+    /// tangency-labs/solidcraft#16634: a seam 5e-6 mm from the sheet's boundary, on a body with a
+    /// 1e-6 tolerance, is not the boundary edge. It is gone, so the two faces it joined merge.
+    #[test]
+    fn a_seam_within_ten_tolerances_of_a_boundary_edge_is_gone_and_its_faces_merge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[5e-7], &[], 1e-6).unwrap();
+        assert_eq!(b.face_list().len(), 2);
+        let m = merged_faces(&mut k, &b).expect("the seam is gone, so the two faces merge");
+        assert_eq!(faces(&m.brep, None).unwrap().len(), 1);
+    }
+
+    /// A real join still maps after the ten-tolerance window is narrowed (#16634). The tiny
+    /// boundary pieces of a sheet cut ten tolerances from its edge are five tolerances from that
+    /// edge's start; they lie on the joined edge, so they map to it. Only the parallel seam, ten
+    /// tolerances from the boundary, is gone.
+    #[test]
+    fn a_joined_boundary_piece_at_five_tolerances_still_maps_to_its_joined_edge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[1e-6], &[], 1e-6).unwrap();
+        let tiny_bottom = edge_through(&k, &b, [5e-6, 0.0, 0.0]);
+        let tiny_top = edge_through(&k, &b, [5e-6, 4.0, 0.0]);
+        let seam = edge_through(&k, &b, [1e-5, 2.0, 0.0]);
+        let m = merged_faces(&mut k, &b).unwrap();
+        let bottom = edge_through(&k, &m.brep, [5.0, 0.0, 0.0]);
+        let top = edge_through(&k, &m.brep, [5.0, 4.0, 0.0]);
+        assert_eq!(mapped(&m, tiny_bottom), Some(bottom));
+        assert_eq!(mapped(&m, tiny_top), Some(top));
+        assert_eq!(mapped(&m, seam), None);
     }
 
     #[test]
