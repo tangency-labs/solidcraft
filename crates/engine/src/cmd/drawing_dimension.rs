@@ -53,7 +53,7 @@ const ON_CENTRE_MM: f64 = 1e-6;
 const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
+    CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -82,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. This is the way to dimension a view, never a free line or text note; drawing.dimension.from_model brings the model's own dimensions in. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
+    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -97,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
-    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair))
+    CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair)).begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()
@@ -474,7 +474,7 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Re
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(cmd, e.to_string()))?;
     let r = read.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, cmd).map_err(|why| bad(cmd, why))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, cmd).map_err(|why| bad(cmd, why))?;
     let lettering = PaperFonts::new(&d.font, &d.language, false);
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
@@ -733,7 +733,7 @@ fn alone_on_sheet(
 ) -> std::result::Result<(crate::drawing_dimension_paper::OnPaper, Vec2, Scene), Option<String>> {
     // The view draws from where the design places its parts, as the sheet does; a dimension reads the
     // same either way, as it reads the model, not the session's moves.
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT).map_err(|why| Some(why.to_string()))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, INSPECT).map_err(|why| Some(why.to_string()))?;
     let centre = on.centre;
     // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
     let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {

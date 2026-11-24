@@ -7,34 +7,48 @@
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
 # blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
 # offset.offset_executive_p2, surface.surface_cache_p1: main's files with the three rows the retired zero-row-batch flags move (surface_cache_p1 gen0168 and gen0222, the lowest continuity of the V knots; offset_executive_p2 boolean_domain_problemShell12_face0_round, result.geometry[3] by 1.3e-16)
+# surface.surface_p5: main's file with five fixed parameters outside the requested region refused (#20378)
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
 # surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
+# blend.fillet_executive_p3, offset.offset_geometry_creation, topology.api_files, topology.brep_local_operation, topology.edgeuse_p3, topology.face_p3: main's file with the rows #18490 moves (the sphere drop subdivides the spans proved off its curve)
+# blend.fillet_executive_p3, blend.fillet_intersector, blend.fillet_solver_p4: main's files without the `fillet_point_step` key, which recorded the retired step latch (#18916); every other value unchanged
+# boolean.api_brep: main's file with torus_guard_major_2x_eff_zero recording the constructor's refusal of its torus, whose tube crosses its axis (#20227): ints.record [] -> [2]
+# primitive.api_primitives: main's file with the 40 spheres of negative radius refused, each `{"rec":[1007.0]}` (#20227); the 14 of them that had rows (gen0244, gen0416, gen0419, gen0585, gen0598, gen0621, gen0769, gen0790, gen0893, gen0897, gen0957, gen1094, gen1206, gen1252) lose their rows, and gen0244's and gen0893's `rounding-bound` entries leave the open list, since a refused case has no body
+# blend.fillet_executive_p3, blend.fillet_geom_p2: main's files with the plane crossing's refit (tangency-labs/solidcraft#20237): p2's eight generated cases fitted with other stations, p3's four law-cube cases one result-geometry value 1e-9 to 3e-9 off, and the two law-box edge-map cases' lines with the lowered tolerances their rows hold
+# blend.fillet_executive_p1, topology.edge, topology.face_p3: main's files with the rows whose gap-cache flags go from 1 to 0 where edge::set_interval now clears the gaps of the old interval (#20939): 3, 43 and 20 rows, no other value moved
+# topology.brep_p1: main's file with the 141 SetSize rows whose kernel-context columns keep the defaults (50, 1e-5, 1000) after a B-rep size setter, which no longer writes the context (tangency-labs/solidcraft#20938)
+# blend.fillet_executive_p3, corpus.parity, surface.trim_srf_cache, topology.brep_p10, topology.face_p3: the point test follows the face (#20179): the digests are this branch's files with the rows put back (fillet_executive_p3 and face_p3 on top of #18490's lines above, both moving the same sphere_diff_3cylinders cases, blessed again on the merged kernel; fillet_executive_p3 also holds #20237's law-cube and law-box lines, the line above). Lines moved against this main: fillet_executive_p3's 6 sphere_diff_3cylinders rows (UV trims on five edges, 1 to 2; wr493_rows proves them), surface.trim_srf_cache's 7 editing-mode native_face rows (point tests agree with the face's classification), and the Fillet/sphere_diff_3cylinders.smb reads of corpus.parity (1), topology.face_p3 (22) and topology.brep_p10 (read_Fillet_sphere_diff_3cylinders and gen0026: +5 classified trims), each main's row hash once tolsub::replay puts the trims back (CLASSIFIED_READ_ROWS). gen0026's row moves its 12 values 85 places on (a uniform shift: each new value occurs exactly at its row's 12 positions; brep_p10's certificate re-checks every entity on the new body) and gains 10: attaching the five classified trims (SetUVTrimCurve's 2x margin, #20912) raises edges 20, 22, 27, 31 and 33 from 1e-5 to twice each trim's raise distance and vertices 12, 13, 14, 18 and 19 with them, each derived by DROP_MARGIN (drop_margin_raise: the drop replayed on main's read gives the tolerance bit for bit); edges 20 and 33 stay open as UNCOVERED, their face-3/4 trims past main's 1e-5 too (#20906)
+# primitive.api_trim_ops: main's file with the row the WR-469 step moves now that it is always on (tangency-labs/solidcraft#17985): gen0072's step vertex 1e-5 -> 2x its end gap (1.0736511129039172e-5); no other value moved
+# blend.fillet_executive_p3: the glue keeps a trim curve only when it spans the surviving edge (#18294): the digest is this branch's file with the rows put back. Seven issue-880 rows are this branch's lines (half-arc-rim-whole-offsets-1-1, -1-2, -1.4437-1.4437 and tilted-cylinder-rim-offsets-1-1, -1-2, setbacks-1-1, -1-2: the centroid's y and two products of inertia within 6.1e-11, whole-offsets-1-1's two edges swapped); none is a ROWS case, and no ROWS tolerance moves. The two half-arc-rim-0-setbacks rows it moves are FILLET_UV_CHANGES, put back before the digest
+# blend.fillet_executive_p3: a variable round's span follows the fillet solved at its test shares (WR-646, tangency-labs/solidcraft#18917): the digest is this branch's file with the rows put back. The seven law rows of a smooth or linear radius law are this branch's lines (volume, mass and geometry only; status and counts unchanged); the two law-box edge-map rows' lowered tolerances move 4.852094517696912e-5 -> 4.884070562533064e-5 and 4.166766991111495e-5 -> 4.192993148410815e-5, still below the rows' old values 5.957125873966091e-5 and 5.0819176600091676e-5, and each new value is certified over its trims on this branch's body by certify::trim_tolerance::fillet_executive_p3
+# blend.fillet_executive_p3, offset.offset_executive_p2: every shell ends with its exact analytic edges (WR-545's flag retired): the digests are this branch's files with the rows put back. fillet_executive_p3 lines moved against this main: real-box-fillet1v-r3-shell-closed and real-box-fillet4v-r3-shell-closed (the rim's edges exact arcs and lines, its vertices on them, the shell's area nearer its closed form; wr545_moved_rows_are_exact proves them); their rows lose the 26 rounding entries of vertex coordinates the exact edges move (6 and 20), and keep every moved tolerance. offset_executive_p2 lines moved: its 62 rows (59 lines where B-spline edges were, the vertex bounds of 36 of them moved by at most 1.7e-12, all proved by wr545_moved_rows_are_exact).
+# topology.face_p1: a seam move needs a closed direction (UB-138, tangency-labs/solidcraft#21368): the digest is this branch's file. Its 62 MoveSeam rows move (the 37 UB-137 rows on vase_rev.smb and 25 op9/p5 rows), each replayed and checked by topology_face_p1::tests::seam_move_rows_keep_the_tolerances_the_geometry_needs; no other value moved
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
 blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
-blend.fillet_executive_p1	86854330a700f392
+blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	01bd061d3eaea1f0
+blend.fillet_executive_p3	be2e67021a9d3656
 blend.fillet_geom_p1	82c1f975f967a59d
-blend.fillet_geom_p2	b536f37946629dc4
+blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
 blend.fillet_geom_p4	9137b943cfc62a3a
 blend.fillet_geom_p5	a0729d892f49cfa9
 blend.fillet_geom_p6	9aa079e2ec8daa4b
-blend.fillet_intersector	08f9ddcb22ced73a
+blend.fillet_intersector	86fe8489b8c12932
 blend.fillet_removal	157659e7ac959b87
 blend.fillet_solver_p1	12290b86d065d83e
 blend.fillet_solver_p2	f443bb49d42e8636
 blend.fillet_solver_p3	1538c605eb4dcb47
-blend.fillet_solver_p4	e85d4b261c82d1e2
+blend.fillet_solver_p4	0905c6ebc3407321
 blend.fillet_solver_p5	872c5100402aeb0a
 blend.fillet_standard_solver_p1	fcd2f44f6127b6b5
 blend.fillet_standard_solver_p2	9b97d9fbe57a37e9
 blend.hcr	a705633d84e1c3b4
 blend.identify_fillet	47f73eabb1499edd
-boolean.api_brep	7c637a6aa039be0c
+boolean.api_brep	9e85ef5f95f90792
 boolean.merge_p1	f6ed153954de93fa
 boolean.merge_p2	1d11ada3d7bc45f9
 boolean.merge_p3	0a6b36b7967dcf31
@@ -43,7 +57,7 @@ boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
 boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	6047fab1fddd550d
-corpus.parity	8acf1f90618ef76c
+corpus.parity	6b612bf10f3da914
 curve.composite_curve_p1	1b0a64a4a148983b
 curve.composite_curve_p2	4fa0f15e4b4a048b
 curve.conic	4955fffee7af9409
@@ -182,13 +196,13 @@ nurbs.b_spline_surface_p2	f6eae99ab71257f5
 nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
-offset.offset_executive_p2	f2d62f772f5ebd2f
-offset.offset_geometry_creation	2c440b64ff708928
+offset.offset_executive_p2	c6012e3e9432cae6
+offset.offset_geometry_creation	e8c98d82f6680670
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
-primitive.api_primitives	eeb3268ad6487712
+primitive.api_primitives	135f2a1c6d123a62
 primitive.api_surface_ops	ac33d130cc4294e6
-primitive.api_trim_ops	47800bedbb5aa14a
+primitive.api_trim_ops	853b9688cca8e37b
 primitive.primitive_creation_p1	1ee2418a9fa4c07b
 primitive.primitive_creation_p2	f71ee96379f4ff95
 primitive.primitive_creation_p3	175c8ac5f97453e0
@@ -232,7 +246,7 @@ surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35
 surface.surface_p3	dd67a7038520b511
 surface.surface_p4	08286ee77b021cb0
-surface.surface_p5	4053a16013112073
+surface.surface_p5	042c445fcc24a14e
 surface.surface_p6	2b213a42de8cade5
 surface.surface_p7	6619493f96d9d624
 surface.surface_p8	8c429b3fc714a3d3
@@ -241,7 +255,7 @@ surface.surface_point_solve_p1	4c854434083b74bd
 surface.surface_point_solve_p2	44853fdb11f55ee8
 surface.surface_point_solve_p3	47b41b54631f9cd9
 surface.torus	3bc22a9cc79e4e78
-surface.trim_srf_cache	655dddeca4f5ba3b
+surface.trim_srf_cache	adfcec4a0fa8d7ed
 surface.twist_volume	185622854f391b03
 surface.unbend_volume	94c42caa7f6f0475
 surface.volume_p1	abd24d71681331bd
@@ -251,7 +265,7 @@ sweep.api_surfaces	a46bb969a19dac47
 sweep.rotational_sweep_geometry	57f788664cc53347
 sweep.topology_sweep	a8bdd96fe6dc7b61
 sweep.trans_sweep_geometry	d85c69dbbc2574b4
-topology.api_files	4ae4e04239c92a42
+topology.api_files	ffb949079ea871c5
 topology.api_projection	bfeb43d364a8f619
 topology.assert_valid	8c458efc020a7500
 topology.brep_cache	41208a4f463da33e
@@ -260,8 +274,8 @@ topology.brep_cutting	3e7e099756bce8b5
 topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	00c1f7e94a38480a
 topology.brep_mirror	718965df3039bddd
-topology.brep_p1	5f0dfd9dc7c0575b
-topology.brep_p10	f99cdbfd5bb734b6
+topology.brep_p1	6e3289ecf3e20a67
+topology.brep_p10	67db17d74e288cb1
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
 topology.brep_p4	2b2814e782d110c9
@@ -273,13 +287,13 @@ topology.brep_p9	d9233137f377380a
 topology.brep_planar_section	a976f4fa434ae901
 topology.brep_validation	29cd4704562201a9
 topology.database_io	262a4cfd7e00c533
-topology.edge	90c4e2112d651d63
+topology.edge	96413b54eba12702
 topology.edgeuse_p1	8d285f9e2eb6f32d
 topology.edgeuse_p2	4b628e0b414efcc0
-topology.edgeuse_p3	2fa671be5fe983ba
-topology.face_p1	eae7279ae1704f4d
+topology.edgeuse_p3	7c0b8d580d2a7b12
+topology.face_p1	aa482091622a15f7
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	100eae05c5608203
+topology.face_p3	99ab9055de228b11
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3

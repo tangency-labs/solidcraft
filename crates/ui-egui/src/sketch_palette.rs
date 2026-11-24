@@ -46,7 +46,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
 /// Does the sketch hold any geometry of its own: a drawn curve or a 3D curve? Projected curves
 /// and the origin are held in place and do not count.
 pub fn has_geometry(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
-    !sketch.curves.is_empty() || !sketch.wires.is_empty()
+    sketch.curves.iter().any(|c| c.link.is_none()) || sketch.wires.iter().any(|w| w.link.is_none())
 }
 
 /// Nothing the user added: no curve, 3D curve, constraint or dimension, pattern, projection,
@@ -93,20 +93,36 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
 /// switch construction mode on or off.
 pub fn toggle_construction(app: &mut SolveApp) {
     let curves = selected_curves(app);
-    if curves.is_empty() && app.session.active_sketch.is_none() {
+    // Selected points switch too (#18448); the origin is the sketch's own and stays as it is.
+    let points: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel))
+        .filter(|id| *id != "origin")
+        .map(str::to_string)
+        .collect();
+    if curves.is_empty() && points.is_empty() && app.session.active_sketch.is_none() {
         app.set_status("Construction mode is for drawing in a sketch: edit a sketch first", false);
-    } else if curves.is_empty() {
+    } else if curves.is_empty() && points.is_empty() {
         let m = if mode(app) == 1 { 0 } else { 1 };
         set_mode(app, m);
     } else {
-        let _ = app.run("sketch.construction", json!({ "curves": curves }));
+        let mut params = json!({});
+        if !curves.is_empty() {
+            params["curves"] = json!(curves);
+        }
+        if !points.is_empty() {
+            params["points"] = json!(points);
+        }
+        let _ = app.run("sketch.construction", params);
     }
 }
 
@@ -249,7 +265,8 @@ const LINE_TYPES: [(&str, &str, &str); 4] = [
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+    crate::workspace::tool_receives_input(app)
+        && app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Is the Canvas or Decal tool running? The palette then shows the tool's frame mode (#18405),
@@ -1132,6 +1149,26 @@ mod tests {
         assert!(h.widget("Fully constrained").is_none());
         assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,5]})).unwrap();
+        h.settle();
+        assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
+    }
+
+    /// A new sketch on a face holds only the face's projected outline, which is fixed: it says
+    /// there is no geometry yet rather than "Fully constrained", until a curve is drawn.
+    #[test]
+    fn a_new_sketch_on_a_face_is_not_reported_fully_constrained() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+        h.settle();
+        let line = |h: &crate::scenario::Harness| {
+            let st = h.app.session.world_state().unwrap();
+            let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
+            assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()), "the face outline is projected");
+            dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
+        };
+        assert_eq!(line(&h), "No geometry yet");
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[15,10]})).unwrap();
         h.settle();
         assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
     }

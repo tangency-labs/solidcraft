@@ -172,6 +172,34 @@ fn an_edit_keeps_a_located_point() {
     assert_eq!(*locate, Some([10.0, 5.0]));
 }
 
+/// Each group keeps its own located point through an edit, while another group is shown and
+/// after the edit runs.
+#[test]
+fn an_edit_keeps_each_groups_located_point() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let profile = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let groups = json!([{"lines": [&lines[0]], "locate": [10, 5]}, {"lines": [&lines[1]], "angle": "90 deg"}]);
+    app.run("frame.member", json!({"sketch": "Frame", "profile": profile, "groups": groups})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    if let Kind::Frame(m) = &mut e.kind {
+        m.show(1, &mut e.inputs);
+        m.name = "Post".into();
+        m.show(0, &mut e.inputs);
+        assert_eq!(m.locate, Some([10.0, 5.0]));
+    }
+    let c = apply_commands(&app, &e).unwrap();
+    let sent = &c[0].1["params"];
+    assert!(sent.get("locate").is_none(), "{sent}");
+    assert_eq!(sent["groups"][0]["locate"], json!([10.0, 5.0]), "{sent}");
+    assert!(sent["groups"][1].get("locate").is_none(), "{sent}");
+    run_all(&mut app, c);
+    let groups = frame::member_groups(&app.session.doc.feature(f).unwrap().kind);
+    assert_eq!(groups.iter().map(|g| g.locate).collect::<Vec<_>>(), [Some([10.0, 5.0]), None]);
+    assert_eq!(groups[1].body_name.as_deref(), Some("Post"));
+}
+
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
 #[test]
 fn missing_or_mixed_picks_are_refused() {
@@ -2773,4 +2801,349 @@ fn a_crossing_where_a_tube_also_ends_is_a_crossing_override() {
     let other = cut(&h.app);
     assert_eq!(other.len(), 1, "{other:?}");
     assert_ne!(plain, other, "Flip keeps the other diagonal whole");
+}
+
+#[test]
+fn switching_groups_keeps_picks_and_placement_through_an_edit() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines[..1]);
+    let m = member(&mut d);
+    m.all = true;
+    m.name = "Rail".into();
+    m.angle = "15 deg".into();
+    if let Kind::Frame(m) = &mut d.kind {
+        m.add_group(&mut d.inputs);
+        assert!(!m.all);
+        assert!(d.inputs[0].items.is_empty());
+        m.name = "Post".into();
+        m.angle = "90 deg".into();
+        m.mirror = true;
+        d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: sketch_id(&app, "Frame"), id: lines[1].clone() }];
+        m.show(0, &mut d.inputs);
+        assert_eq!((m.name.as_str(), m.angle.as_str(), m.mirror), ("Rail", "15 deg", false));
+        assert_eq!(d.inputs[0].items.len(), 1);
+        m.show(1, &mut d.inputs);
+        assert_eq!((m.name.as_str(), m.angle.as_str(), m.mirror), ("Post", "90 deg", true));
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    let original = c[0].1.clone();
+    assert_eq!(original["groups"][0]["lines"], json!([lines[0]]));
+    assert_eq!(original["groups"][1]["lines"], json!([lines[1]]));
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app), ["Rail", "Post"]);
+    let feature = app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&app, feature, None).unwrap();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["groups"], original["groups"]);
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app), ["Rail", "Post"]);
+}
+
+#[test]
+fn group_buttons_stay_visible_and_new_group_is_clickable_at_default_dialog_width() {
+    use crate::scenario::Harness;
+    use solidcraft_ui_registry::{handle_at, rect_of};
+
+    for (width, height) in [(1280, 720), (800, 600)] {
+        for count in [1, 3] {
+            let mut h = Harness::new();
+            h.app = frame_app();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            let lines = frame_lines(&h.app);
+            let mut d = dialog_on(&mut h.app, &lines[..1]);
+            if let Kind::Frame(m) = &mut d.kind {
+                for _ in 1..count {
+                    m.add_group(&mut d.inputs);
+                }
+                m.show(0, &mut d.inputs);
+            }
+            h.app.dialog = Some(d);
+            h.frames(3);
+
+            let visible = rect_of("dialog:card").unwrap().intersect(h.ctx.content_rect());
+            let row = rect_of("dialog:row:Groups").unwrap();
+            if count == 1 {
+                assert!(rect_of("dialog:row:All Lines").unwrap().bottom() <= row.top());
+            }
+            for label in (1..=count).map(|k| format!("Group {k}")).chain(["New Group".into()]) {
+                let key = format!("dialog:button:Groups:{label}");
+                let rect = rect_of(&key).unwrap();
+                assert!(
+                    visible.contains_rect(rect) && row.contains_rect(rect),
+                    "{width}x{height}, {count} groups: {key} {rect:?}, row {row:?}, visible {visible:?}"
+                );
+                assert!(visible.contains(handle_at(&key).unwrap()));
+            }
+            for k in 1..=count {
+                crate::test_support::click(&mut h, &format!("dialog:button:Groups:Group {k}"));
+                assert_eq!(member(h.app.dialog.as_mut().unwrap()).current, k - 1);
+            }
+            crate::test_support::click(&mut h, "dialog:button:Groups:New Group");
+            let d = h.app.dialog.as_mut().unwrap();
+            assert_eq!(member(d).groups.len(), count + 1, "{width}x{height}, {count} groups: New Group must respond to a click");
+            assert_eq!(member(d).current, count);
+            assert!(d.inputs[0].items.is_empty());
+        }
+    }
+}
+
+#[test]
+fn removing_the_shown_group_keeps_its_neighbours_values() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines[..1]);
+    member(&mut d).name = "Removed".into();
+    if let Kind::Frame(m) = &mut d.kind {
+        m.add_group(&mut d.inputs);
+        m.name = "Kept".into();
+        m.angle = "45 deg".into();
+        d.inputs[0].items = vec![Sel::ExternalSketchCurve { sketch: sketch_id(&app, "Frame"), id: lines[1].clone() }];
+        m.show(0, &mut d.inputs);
+        m.remove_group(&mut d.inputs);
+        assert_eq!(m.groups.len(), 1);
+        assert_eq!((m.name.as_str(), m.angle.as_str()), ("Kept", "45 deg"));
+        m.remove_group(&mut d.inputs);
+        assert_eq!(m.groups.len(), 1, "the last group cannot be removed");
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("groups").is_none());
+    assert_eq!(c[0].1["lines"], json!([lines[1]]));
+    assert_eq!(c[0].1["body_name"], "Kept");
+    run_all(&mut app, c);
+    assert_eq!(body_names(&app), ["Kept"]);
+}
+
+#[test]
+fn adding_groups_refuses_joined_corners_without_resetting_flat_frame_controls() {
+    let mut app = frame_app();
+    let lines = frame_lines(&app);
+    let mut d = dialog_on(&mut app, &lines[..1]);
+    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
+    m.corner = corner_type("auto");
+    m.coped = true;
+    m.gap = "2 mm".into();
+    m.add_group(&mut d.inputs);
+    let err = apply_commands(&app, &d).unwrap_err();
+    assert!(err.contains("not supported yet: frame member groups with joined corners"), "{err}");
+    let Kind::Frame(m) = &mut d.kind else { panic!("not a frame member") };
+    assert_eq!(m.corner, corner_type("auto"));
+    assert!(m.coped);
+    assert_eq!(m.gap, "2 mm");
+    m.remove_group(&mut d.inputs);
+    let commands = apply_commands(&app, &d).unwrap();
+    let p = &commands[0].1;
+    assert!(p.get("groups").is_none());
+    assert_eq!(p["corner"], "auto");
+    assert_eq!(p["coped"], true);
+    assert_eq!(p["gap"], "2 mm");
+    assert_eq!(p["fit_ends"], true);
+}
+
+#[test]
+fn continuous_member_dialog_preserves_path_order_and_edit_intent() {
+    let d = 100.0 / 2f64.sqrt();
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Chassis"})),
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [d, d], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+        ("sketch.finish", json!({})),
+    ]);
+    let id = sketch_id(&app, "Chassis");
+    let ids: Vec<_> = app.session.doc.sketch(id).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let mut d = dialog_on(&mut app, &ids);
+    member(&mut d).continuous = true;
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["continuous"], true);
+    assert_eq!(commands[0].1["lines"], json!(ids));
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(member(&mut edit).continuous);
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["continuous"], true);
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    member(&mut edit).all = true;
+    assert!(apply_commands(&app, &edit).unwrap_err().contains("path order"));
+}
+
+/// Preselect two exact support faces as a user would before starting the dialog.
+fn gusset_with_picked_supports() -> SolveApp {
+    let mut app = app_with(&[
+        ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
+        ("solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"})),
+    ]);
+    for (name, point, normal) in [("Post", [20., 0., 100.], [1., 0., 0.]), ("Rail", [100., 0., 40.], [0., 0., 1.])] {
+        let st = app.session.model.state();
+        let body = st.body(name).unwrap();
+        let point = solidcore_record::Vec3::new(point[0], point[1], point[2]);
+        let normal = solidcore_record::Vec3::new(normal[0], normal[1], normal[2]);
+        let index = (0..body.body.face_count())
+            .find(|i| body.body.planar_face(*i).is_some_and(|p| p.normal().dot(normal) > 0.999 && (p.origin - point).dot(normal).abs() < 1e-6))
+            .unwrap();
+        app.session.selection.push(Sel::Face { body: name.into(), index, point });
+    }
+    app
+}
+
+#[test]
+/// Preselection, preview and Edit Feature preserve the picks and rebuild the changed plate.
+fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+    let mut app = gusset_with_picked_supports();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    assert!(d.previews());
+    assert_eq!(d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 1]);
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.leg1 = "80 mm".into();
+    g.leg2 = "100 mm".into();
+    let preview = crate::dialogs::preview_commands(&app, &d).unwrap();
+    assert_eq!(preview[0].0, "frame.gusset");
+    assert!(preview[0].1["supports"][0]["index"].is_number());
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(edit.inputs.iter().all(|i| i.items.len() == 1));
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.leg2, "100 mm");
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+    let state = app.session.model.state();
+    let body = state.bodies.iter().find(|b| b.feature == fid).unwrap();
+    assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
+}
+
+/// The outline follows the evaluated clip, and editing thickness preserves its expression.
+#[test]
+fn gusset_edit_restores_the_outline_from_the_clip_expression() {
+    let mut app = gusset_with_picked_supports();
+    app.session.execute("parameters.add", &json!({"name":"tip","expression":"0.0 mm"})).unwrap();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.clip = "tip".into();
+    g.profile = 1;
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 0);
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].1["params"]["clip"], "tip");
+    run_all(&mut app, c);
+    app.session.execute("parameters.change", &json!({"name":"tip","expression":"10 mm"})).unwrap();
+    let edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 1);
+}
+
+#[test]
+/// Click each icon and verify both the resulting plate bounds and translated accessible names.
+fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = gusset_with_picked_supports();
+    h.app.home.open = false;
+    h.app.start("frame.gusset");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:segments:Thickness Placement").is_some(), "placement is a visible icon strip");
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for label in ["Negative Side", "Centered", "Positive Side"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label)), "accessible icon: {label}");
+    }
+    for (label, placement, min, max) in
+        [("Negative Side", "negative", 0., 6.), ("Centered", "center", -3., 3.), ("Positive Side", "positive", -6., 0.)]
+    {
+        crate::test_support::click(&mut h, &format!("dialog:Thickness Placement:{label}"));
+        let d = h.app.dialog.as_ref().unwrap();
+        let commands = crate::dialogs::preview_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["placement"], placement);
+        let mut preview = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
+        let result = preview.execute(&commands[0].0, &commands[0].1).unwrap();
+        let state = preview.model.state();
+        let body = state.bodies.iter().find(|b| b.feature == result["feature"].as_u64().unwrap()).unwrap();
+        let bounds = body.mesh().bounds();
+        assert!((bounds.min.y - min).abs() < 1e-6 && (bounds.max.y - max).abs() < 1e-6, "{label}: {bounds:?}");
+    }
+    // Icon-only controls still have translated names for keyboard/screen-reader users.
+    h.app.preferences.language = "de".into();
+    h.frames(3);
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for id in ["ui.gusset.negative", "ui.gusset.center", "ui.gusset.positive"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr(id))), "{id}");
+    }
+}
+
+fn plate_app() -> (SolveApp, Sel) {
+    let app = app_with(&[
+        ("sketch.create", json!({"plane":"XY","name":"Post"})),
+        ("sketch.options", json!({"sketch_3d":true})),
+        ("sketch.line3d", json!({"points":[[0,0,0],[0,0,300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch":"Post","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0},"body_name":"Post"})),
+    ]);
+    let state = app.session.world_state().unwrap();
+    let body = state.body("Post").unwrap();
+    let face = body.body.faces(0.001).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.999)).unwrap();
+    let mesh = body.mesh();
+    let (tri, _) = mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, i)| **i as usize == face.index).unwrap();
+    let [a, b, c] = mesh.tri(tri).unwrap();
+    let pick = Sel::Face { body: body.name.clone(), index: face.index, point: (a + b + c) / 3. };
+    (app, pick)
+}
+
+#[test]
+fn mounting_plate_dialog_preselects_previews_and_edits_a_bolt_circle() {
+    let (mut app, pick) = plate_app();
+    app.session.selection = vec![pick.clone()];
+    app.start("frame.plate");
+    let mut dialog = app.dialog.clone().unwrap();
+    assert_eq!(dialog.inputs[0].items, [pick]);
+    let Kind::FramePlate(plate) = &mut dialog.kind else { panic!("plate dialog") };
+    plate.shape = 1;
+    plate.diameter = "120 mm".into();
+    plate.pattern = 2;
+    plate.count = "6".into();
+    plate.pitch_diameter = "90 mm".into();
+    plate.pattern_angle = "15 deg".into();
+    let commands = apply_commands(&app, &dialog).unwrap();
+    let before = app.session.doc.to_json();
+    let preview = app.session.preview_visible_world(&commands).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "preview leaves the document alone");
+    assert_eq!(preview.after.bodies.len(), 2);
+    run_all(&mut app, commands);
+    let feature = app.session.doc.features.last().unwrap().id;
+    let mut edited = edit_dialog(&app, feature, None).unwrap();
+    assert_eq!(edited.inputs[0].items.len(), 1, "support face restored on material, not in the tube's bore");
+    let Kind::FramePlate(plate) = &mut edited.kind else { panic!("plate dialog") };
+    assert_eq!((plate.shape, plate.pattern, plate.count.as_str()), (1, 2, "6"));
+    assert_eq!(plate.pattern_angle, "15 deg");
+    plate.thickness = "10 mm".into();
+    let commands = apply_commands(&app, &edited).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    run_all(&mut app, commands);
+    assert_eq!(app.session.world_state().unwrap().bodies.len(), 2, "editing replaces the plate");
+    let FeatureKind::FramePlate { thickness, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("plate feature") };
+    assert_eq!(thickness.as_str(), "10 mm");
+}
+
+#[test]
+fn mounting_plate_dialog_requires_a_face_and_whole_hole_count() {
+    let (mut app, pick) = plate_app();
+    app.start("frame.plate");
+    let mut dialog = app.dialog.clone().unwrap();
+    assert!(apply_commands(&app, &dialog).is_err());
+    dialog.inputs[0].items = vec![pick];
+    let Kind::FramePlate(plate) = &mut dialog.kind else { panic!("plate dialog") };
+    plate.pattern = 2;
+    plate.count = "4.5".into();
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("whole number"));
 }
