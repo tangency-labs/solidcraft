@@ -1306,7 +1306,8 @@ fn surface_flat_json_with_summary(sk: &solidcraft_doc::SurfaceSheet, summary: bo
         out["outline_shapes"] = json!(sk.regions.iter().map(|r| loop_shape(&r.outer)).collect::<Vec<_>>());
     } else {
         out["outline"] = Value::Array(loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect());
-        out["cutouts"] = Value::Array(sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect());
+        out["cutouts"] =
+            Value::Array(sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect());
     }
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);

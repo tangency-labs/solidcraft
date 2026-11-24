@@ -1115,9 +1115,14 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                 }
                 let n = normal.map(|x| x / length);
                 let faces = exec(b, "model.faces", p.clone())?;
-                result["faces"] = faces["faces"].as_array().into_iter().flatten().filter(|f| {
-                    xyz(&f["plane_normal"]).is_some_and(|v| dot(v, n) >= 1.0 - 1e-6)
-                }).cloned().collect::<Vec<Value>>().into();
+                result["faces"] = faces["faces"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|f| xyz(&f["plane_normal"]).is_some_and(|v| dot(v, n) >= 1.0 - 1e-6))
+                    .cloned()
+                    .collect::<Vec<Value>>()
+                    .into();
             } else if str_arg(a, "faces") == Some("all") {
                 let faces = exec(b, "model.faces", p.clone())?;
                 result["faces"] = faces["faces"].clone();
@@ -1138,9 +1143,14 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     return Err("min_length must not exceed max_length".into());
                 }
                 let edges = exec(b, "model.edges", p)?;
-                result["edges"] = edges["edges"].as_array().into_iter().flatten().filter(|e| {
-                    e["length"].as_f64().is_some_and(|length| length >= min && length <= max)
-                }).cloned().collect::<Vec<Value>>().into();
+                result["edges"] = edges["edges"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| e["length"].as_f64().is_some_and(|length| length >= min && length <= max))
+                    .cloned()
+                    .collect::<Vec<Value>>()
+                    .into();
             }
             Ok(result)
         }
