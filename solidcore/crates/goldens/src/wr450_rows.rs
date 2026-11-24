@@ -241,6 +241,25 @@ fn data_covers_the_moved_rows() {
     let want: BTreeMap<&str, usize> = UNITS.iter().copied().collect();
     assert_eq!(per_unit, want);
     assert_eq!(DATA.len(), 402);
+    // main.jsonl holds main's line for exactly these rows, in order, and every listed
+    // row's committed line differs from main's: each listed row moved.
+    let mains: Vec<Value> = MAIN_LINES
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(mains.len(), DATA.len());
+    for (&(unit_id, name, _), m) in DATA.iter().zip(&mains) {
+        assert_eq!(
+            (m["unit"].as_str(), m["line"]["case"].as_str()),
+            (Some(unit_id), Some(name))
+        );
+        let golden = read(&default_dir(), unit_id).unwrap();
+        assert_ne!(
+            golden.get(name),
+            Some(&m["line"]),
+            "{unit_id} {name} did not move"
+        );
+    }
 }
 
 /// Writes [`DATA`] (`src/wr450_rows/data.rs`) and main's lines (`src/wr450_rows/main.jsonl`):
