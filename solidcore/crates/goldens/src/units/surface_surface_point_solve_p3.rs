@@ -1042,25 +1042,27 @@ mod target_bound_hook_tests {
         let asked = Arc::new(AtomicUsize::new(0));
         let nested = Arc::new(AtomicUsize::new(usize::MAX));
         let (a, n) = (Arc::clone(&asked), Arc::clone(&nested));
-        let mut k = Kernel::default();
-        k.replay = ReplaySeam::target_bound(Box::new(move |b| {
-            a.fetch_add(1, Ordering::Relaxed);
-            let again = b
-                .surface
-                .global_point_solve_1::<NoObject>(
-                    b.kernel,
-                    b.domain,
-                    b.operation,
-                    b.point,
-                    b.tol,
-                    Some(b.target),
-                    SolutionRequested::Single,
-                    None,
-                )
-                .unwrap();
-            n.store(again.len(), Ordering::Relaxed);
-            true
-        }));
+        let k = Kernel {
+            replay: ReplaySeam::target_bound(Box::new(move |b| {
+                a.fetch_add(1, Ordering::Relaxed);
+                let again = b
+                    .surface
+                    .global_point_solve_1::<NoObject>(
+                        b.kernel,
+                        b.domain,
+                        b.operation,
+                        b.point,
+                        b.tol,
+                        Some(b.target),
+                        SolutionRequested::Single,
+                        None,
+                    )
+                    .unwrap();
+                n.store(again.len(), Ordering::Relaxed);
+                true
+            })),
+            ..Kernel::default()
+        };
         let (send, receive) = mpsc::channel();
         std::thread::spawn(move || {
             let surface = geometry(&k, &input).unwrap();
