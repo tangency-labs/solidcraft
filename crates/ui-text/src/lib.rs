@@ -29,8 +29,11 @@ pub const SHARED_ENGLISH: &str = include_str!("../locales/en.json");
 pub struct Catalog {
     pub id: &'static str,
     pub name: &'static str,
-    /// The catalog as JSON.
+    /// The catalog as JSON, for one made with [`Catalog::new`]. Empty for a packed one: read
+    /// [`Catalog::json`], which serves both.
     pub source: &'static str,
+    /// The catalog's JSON, deflated (zlib), for one made with [`Catalog::packed`].
+    packed: &'static [u8],
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
@@ -40,13 +43,36 @@ pub struct Catalog {
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, packed: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+    }
+
+    /// A catalog embedded compressed: `packed` is its JSON as a zlib stream. It is inflated when
+    /// the catalog is first read, so a program that embeds many languages carries each at about
+    /// a quarter of its size and unpacks only the ones it shows (the chosen one and English).
+    pub const fn packed(id: &'static str, name: &'static str, packed: &'static [u8]) -> Self {
+        Self { id, name, source: "", packed, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+    }
+
+    /// The catalog as JSON, inflated if it was packed. A packed catalog that does not inflate to
+    /// text is logged and reads as empty.
+    pub fn json(&self) -> Cow<'static, str> {
+        if self.packed.is_empty() {
+            return Cow::Borrowed(self.source);
+        }
+        let mut json = String::new();
+        match std::io::Read::read_to_string(&mut flate2::read::ZlibDecoder::new(self.packed), &mut json) {
+            Ok(_) => Cow::Owned(json),
+            Err(error) => {
+                log::error!("invalid packed {} message catalog: {error}", self.id);
+                Cow::Borrowed("{}")
+            }
+        }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
     /// reads as empty.
     pub fn messages(&'static self) -> &'static Messages {
-        self.messages.get_or_init(|| match serde_json::from_str(self.source) {
+        self.messages.get_or_init(|| match serde_json::from_str(&self.json()) {
             Ok(messages) => messages,
             Err(error) => {
                 log::error!("invalid embedded {} message catalog: {error}", self.id);
@@ -439,6 +465,34 @@ mod tests {
 
     fn installed() {
         install(LOCALES);
+    }
+
+    fn deflated(json: &str) -> &'static [u8] {
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, json.as_bytes()).unwrap();
+        Box::leak(packer.finish().unwrap().into_boxed_slice())
+    }
+
+    /// A packed catalog reads as the JSON it was packed from.
+    #[test]
+    fn a_packed_catalog_reads_as_its_json() {
+        let json = r#"{"ui.cancel":"キャンセル","dialog.selected_count":"{count} 件を選択"}"#;
+        let packed: &'static Catalog = Box::leak(Box::new(Catalog::packed("ja", "日本語", deflated(json))));
+        let plain: &'static Catalog = Box::leak(Box::new(Catalog::new("ja", "日本語", json)));
+        assert_eq!(packed.json(), json);
+        assert_eq!(packed.messages(), plain.messages());
+        assert_eq!(packed.messages().get("ui.cancel").map(String::as_str), Some("キャンセル"));
+        assert_eq!(plain.json(), json);
+    }
+
+    /// Bytes that are no zlib stream, or one cut short, read as an empty catalog and never panic.
+    #[test]
+    fn a_broken_packed_catalog_reads_as_empty() {
+        let whole = deflated(r#"{"ui.cancel":"Cancel"}"#);
+        for broken in [&b"not a zlib stream"[..], &whole[..whole.len() / 2], &[0xff; 4]] {
+            let catalog: &'static Catalog = Box::leak(Box::new(Catalog::packed("en", "English", broken)));
+            assert!(catalog.messages().is_empty());
+        }
     }
 
     #[test]

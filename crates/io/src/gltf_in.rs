@@ -57,6 +57,9 @@ pub struct PlanPlace {
     pub slot: usize,
     pub parent: Option<usize>,
     pub transform: Mat,
+    /// The occurrence's own name (a KiCad footprint's reference, such as `R33`); `None`: the
+    /// component's name and a number, as any occurrence.
+    pub name: Option<String>,
 }
 
 /// How a glTF file's nodes become components below the import's own: `slots` are the
@@ -580,7 +583,7 @@ impl<'d> Reader<'d, '_, '_> {
             {
                 own.clone_from(mesh);
             }
-            self.plan.places.push(PlanPlace { slot, parent, transform: place });
+            self.plan.places.push(PlanPlace { slot, parent, transform: place, name: None });
             return Ok(());
         }
         let slot = self.plan.slots.len();
@@ -588,7 +591,7 @@ impl<'d> Reader<'d, '_, '_> {
         let name = name.or_else(|| node.mesh().and_then(|m| m.name().map(clean_name)).filter(|n| !n.is_empty()));
         self.plan.slots.push(name.unwrap_or_else(|| format!("Node {index}")));
         self.slot_meshes.push(node.mesh().and_then(|m| m.name().map(clean_name)).filter(|n| !n.is_empty()));
-        self.plan.places.push(PlanPlace { slot, parent, transform: place });
+        self.plan.places.push(PlanPlace { slot, parent, transform: place, name: None });
         self.keys.insert(key, slot);
         self.node_meshes(index, Some(slot), &rest)?;
         let children: Vec<usize> = node.children().map(|c| c.index()).collect();
