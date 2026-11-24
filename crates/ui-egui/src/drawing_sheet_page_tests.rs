@@ -6,6 +6,14 @@ use solidcraft_engine::{Sel, geom::Loop2Geom};
 use super::*;
 use crate::scenario::Harness;
 
+/// One frame of `ctx` outside the harness. Its texture changes (glyphs, sheet pictures) have no
+/// renderer here, so they are taken as applied: egui checks that none are dropped unhandled.
+fn frame_on(ctx: &egui::Context, input: egui::RawInput, ui: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+    let mut out = ctx.run_ui(input, ui);
+    out.textures_delta.clear();
+    out
+}
+
 #[test]
 fn cell_fit_keeps_paper_inside_tiny_and_odd_cells_and_preserves_manual_framing() {
     let paper = Vec2::new(420.0, 297.0);
@@ -60,7 +68,7 @@ fn sheet_page_cameras_are_independent_and_passive_paint_restores_the_command_rec
     let doc = h.app.session.doc.clone();
     let undo = h.app.session.undo.len();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
         for id in [first, second] {
             ui.push_id(id, |ui| {
                 crate::documents::with_view_look(&mut h.app, id, |app| {
@@ -136,7 +144,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
     let ctx = h.ctx.clone();
     let canvas = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0));
     let mut frame = |time, events| {
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
         });
         assert_eq!(h.app.session.selection, selection, "a passive drawing cannot prune the focused drawing's pick");
@@ -153,7 +161,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
             phase: egui::TouchPhase::Move,
         },
     ];
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
         ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
     });
     assert_ne!(h.app.drawing_workspace.pages.get(&second).unwrap().scale, before, "the passive wheel actually runs camera navigation");
@@ -269,7 +277,8 @@ fn inactive_child_sheet_scope_restores_picks_focus_and_history_but_targeted_comm
     let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.session.history_part());
     let focus = h.app.session.view_context.clone();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(
+    let _ = frame_on(
+        &ctx,
         egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), focused: false, ..Default::default() },
         |ui| {
             crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
@@ -1921,7 +1930,7 @@ fn panning_a_tiny_fitted_sheet_keeps_its_zoom_on_the_next_frame() {
     let mut time = 0.0;
     let mut frame = |app: &mut crate::SolveApp, events| {
         time += 1.0 / 60.0;
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             assert!(show_view(app, ui, id));
         });
     };
@@ -2244,7 +2253,7 @@ fn picture_scene(source: u64, rect: Aabb2, opacity: f64, clip: Option<Clip>) -> 
 fn painted(ctx: &egui::Context, marks: &Marks, pictures: &PictureTextures) -> Vec<egui::epaint::ClippedShape> {
     let at = OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 10.0 };
     let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
-    ctx.run_ui(egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
+    frame_on(ctx, egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
 }
 
 /// Each text shape's words in `shapes`.
@@ -2428,7 +2437,7 @@ fn fills_and_pictures_paint_in_the_scenes_order() {
 fn picture_upload_timing() {
     let ctx = egui::Context::default();
     // A desktop GPU's largest side, so the 16 Mpx picture is one texture, as `sync` is told.
-    let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
+    let _ = frame_on(&ctx, egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
     for (w, h) in [(4096u32, 4096u32), (1181, 945)] {
         let p = hand_picture(1, w, h, true, None);
         let start = std::time::Instant::now();
@@ -2453,6 +2462,7 @@ fn picture_upload_timing() {
             }
             println!("  meshes, clip {clip:?}: {:.2} us a frame", start.elapsed().as_secs_f64() * 1e4);
         }
+        let _ = frame_on(&ctx, egui::RawInput::default(), |_| {});
     }
 }
 
@@ -2591,11 +2601,7 @@ fn a_drags_preview_leaves_a_details_callout_where_it_is() {
     let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
     // The preview's camera: the view 30 mm to the right, as the drag's offset shifts the paper.
     let shifted = OnScreen { centre: Pos2::ZERO, target: Vec2::new(-30.0, 0.0), scale: 10.0 };
-    let run = |paint: &dyn Fn(&egui::Painter)| {
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter()));
-        out.textures_delta.clear();
-        out.shapes
-    };
+    let run = |paint: &dyn Fn(&egui::Painter)| frame_on(&ctx, egui::RawInput::default(), |ui| paint(ui.painter())).shapes;
     let moving = run(&|painter| marks.paint_moving(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
     let drawn = paths(&moving);
     assert_eq!(drawn.len(), 1, "only the view's own line moves, not the callout: {drawn:?}");
