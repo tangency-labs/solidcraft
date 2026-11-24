@@ -166,6 +166,67 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
     }
 }
 
+/// The History bar's Back and Forward controls are click-only, so they carry no key. The same
+/// steps are commands, which is what the shortcut editor binds: one feature at a time, staying at
+/// either end of the history, and taking no parameters.
+#[test]
+fn history_steps_are_commands_moving_the_marker_one_feature() {
+    let mut s = Session::default();
+    for name in ["A", "B", "C"] {
+        run(&mut s, "solid.box", json!({"name": name, "length": 10, "width": 10, "height": 10}));
+    }
+    // The end of the history is "no marker", not a position.
+    run(&mut s, "timeline.roll_to", json!({}));
+    assert_eq!(s.doc.features.len(), 3);
+    assert!(s.doc.marker.is_none(), "a new design sits at the end of its history");
+
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 2);
+    assert_eq!(s.doc.marker, Some(2));
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 1);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 2);
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none(), "stepping past the last feature is the end again");
+
+    // Either end stays put instead of wrapping around.
+    assert_eq!(run(&mut s, "timeline.step_forward", json!({}))["marker"], 3);
+    assert!(s.doc.marker.is_none());
+    for _ in 0..5 {
+        run(&mut s, "timeline.step_back", json!({}));
+    }
+    assert_eq!(s.doc.marker, Some(0), "back stops at the first feature");
+    assert_eq!(run(&mut s, "timeline.step_back", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0));
+
+    // Both ends are reachable by key too. A keybinding cannot pass `position`, so `roll_to`'s
+    // start needs a command of its own.
+    run(&mut s, "timeline.roll_to_end", json!({}));
+    assert!(s.doc.marker.is_none(), "roll_to_end builds the whole history");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0);
+    assert_eq!(s.doc.marker, Some(0), "roll_to_start rolls every feature back");
+    assert_eq!(run(&mut s, "timeline.roll_to_start", json!({}))["marker"], 0, "at the start it stays");
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3);
+    assert_eq!(run(&mut s, "timeline.roll_to_end", json!({}))["marker"], 3, "at the end it stays");
+
+    // A step clears the selection, as the marker commands do.
+    let id = s.doc.features[0].id;
+    assert_eq!(run(&mut s, "select.set", json!({"items": [{"type": "feature", "id": id}]}))["selected"], 1);
+    run(&mut s, "timeline.step_forward", json!({}));
+    assert!(s.selection.is_empty(), "a step clears the selection");
+
+    // They are registry commands, which is what makes them bindable and searchable.
+    for id in ["timeline.step_back", "timeline.step_forward", "timeline.roll_to_start", "timeline.roll_to_end"] {
+        let spec = crate::find_command(id).unwrap_or_else(|| panic!("{id} is a command"));
+        assert!(spec.undoable, "{id} is an undoable marker move, as roll_to is");
+    }
+
+    // No parameters: a position is refused, not silently ignored.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let e = strict.execute("timeline.step_back", &json!({"position": 1})).unwrap_err().to_string();
+    assert!(e.contains("timeline.step_back"), "named as asked: {e}");
+    assert!(strict.doc.marker.is_none(), "the refused call changed nothing");
+}
+
 /// #7077: Repeat Last Command is a command (its key can change, command search finds it), but
 /// only the app has a tool to start, so a script's call is refused and changes nothing.
 #[test]

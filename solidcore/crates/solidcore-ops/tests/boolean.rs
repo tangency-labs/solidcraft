@@ -18,7 +18,7 @@ use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
     Error, PointClass,
 };
-use solidcore_record::brep::Brep as Record;
+use solidcore_record::brep::{Brep as Record, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 fn all_fixes() {
@@ -3822,6 +3822,134 @@ fn a_short_edge_joined_onto_a_body_read_coarser_is_kept() {
     }
 }
 
+/// The lower rim of the clipped sphere has radius sqrt(10² − 6²) = 8. A bore starting
+/// in that face opens to the exterior even when its rim is only one tolerance inside.
+/// The volume alone cannot distinguish the opening from a sealed cylindrical void.
+/// Once the rims are farther apart than their coincidence tolerance, an inner bore
+/// leaves an annulus and an outer bore meets the sphere at z = −sqrt(10² − radius²).
+#[test]
+fn a_bore_starting_at_a_clipped_spheres_rim_opens_the_bottom() {
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    let sphere = make_sphere([0.0; 3], 10.0).unwrap();
+    let above = make_box([-11.0, -11.0, 7.0], [22.0, 22.0, 11.0]).unwrap();
+    let upper = boolean(sphere, above, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    check_clipped_sphere_bores(
+        &upper,
+        -6.0,
+        &[
+            -1e-5, -1e-4, -2e-5, -1.5e-5, -1.25e-5, -5e-6, 0.0, 1.01e-5, 1.1e-5, 1.25e-5, 1.5e-5,
+            2e-5,
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    // Rotating the seam rotates the rational tangent hull outside the face box.
+    // The bottom face still has the analytic annular area checked below.
+    check_clipped_sphere_bores(&upper, -6.0, &[-2e-5], [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0]);
+    // At z = −8 the true section is within a tolerance of the cutter's cap,
+    // while the old rim is more than a tolerance from the cutter's wall.
+    check_clipped_sphere_bores(&upper, -8.0, &[1.25e-5], [1.0, 0.0, 0.0]);
+}
+
+#[allow(clippy::disallowed_methods)] // the test's closed forms
+fn check_clipped_sphere_bores(upper: &Body, base_z: f64, offsets: &[f64], reference: [f64; 3]) {
+    let z = [0.0, 0.0, 1.0];
+    let below = make_box([-11.0, -11.0, base_z - 11.0], [22.0, 22.0, 11.0]).unwrap();
+    let target = boolean(upper.copy().unwrap(), below, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let target_volume = volume(&target);
+    let rim = (100.0 - base_z * base_z).sqrt();
+    for &offset in offsets {
+        let radius = rim + offset;
+        let circle = Curve::Arc {
+            center: [0.0, 0.0, base_z],
+            axis: z,
+            reference,
+            radius,
+            start: 0.0,
+            end: TAU,
+        };
+        let bore = extrude(&[circle], z, -base_z, 0.0, DraftCorner::default(), true).unwrap();
+        let cut = boolean(target.copy().unwrap(), bore, BooleanOp::Subtract)
+            .map_err(|error| (base_z, offset, error))
+            .unwrap()
+            .unwrap();
+        let (record, order) = cut
+            .to_record()
+            .map_err(|error| (base_z, offset, error))
+            .unwrap();
+        if offset.abs() > 1e-5 {
+            let bottom: Vec<_> = record
+                .faces
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| match &face.surface {
+                    Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                        (origin[2] - base_z).abs() < 1e-8
+                    }
+                    _ => false,
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if offset < 0.0 {
+                let area: f64 = bottom
+                    .iter()
+                    .map(|&face| cut.face_area(&order, face, 1e-10).unwrap())
+                    .sum();
+                let want = PI * (rim * rim - radius * radius);
+                assert!(
+                    (area - want).abs() < 1e-8,
+                    "z={base_z}, offset {offset}: bottom area {area}, expected {want}"
+                );
+            } else {
+                assert!(
+                    bottom.is_empty(),
+                    "z={base_z}, offset {offset}: bottom faces {bottom:?}"
+                );
+                let lowest = record
+                    .vertices
+                    .iter()
+                    .map(|v| v.point[2])
+                    .fold(f64::INFINITY, f64::min);
+                let height = -(100.0 - radius * radius).sqrt();
+                assert!(
+                    (lowest - height).abs() < 1e-8,
+                    "z={base_z}, offset {offset}: lowest vertex {lowest}, expected {height}"
+                );
+            }
+        }
+        // Both rays see the ceiling except where the wider inset leaves material at the rim.
+        let near_rim = rim - 5e-5;
+        let rim_hit_z = if near_rim > radius { base_z } else { 0.0 };
+        for (x, height) in [(0.0, 0.0), (near_rim, rim_hit_z)] {
+            let hit = cut
+                .face_hit_by_ray(&order, [x, 0.0, base_z - 1.0], z)
+                .unwrap()
+                .unwrap();
+            assert!(
+                (hit.point[2] - height).abs() < 1e-8,
+                "z={base_z}, offset {offset}, x {x}: {:?}",
+                hit.point
+            );
+        }
+        assert_eq!(record.shells.len(), 1, "z={base_z}, offset {offset}");
+        // Beyond the rim the tool includes a thin slice outside the sphere.
+        let z0 = (100.0 - radius * radius).sqrt().min(-base_z);
+        let h = -base_z - z0;
+        let want = target_volume + PI * radius * radius * base_z + PI * h * h * (z0 + h / 3.0);
+        assert!(near(volume(&cut), want), "z={base_z}, offset {offset}");
+        let check = cut.check(CheckLevel::All).unwrap();
+        assert!(
+            check.is_valid(),
+            "z={base_z}, offset {offset}: {}",
+            check.text
+        );
+    }
+}
+
 /// The area two circles of radii `a` and `b` whose centres are `d` apart have in common.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn circles_common_area(a: f64, b: f64, d: f64) -> f64 {
@@ -4033,4 +4161,130 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     let want = 400.0 - 28.0 / 3.0;
     let got = volume(&r);
     assert!(near(got, want), "volume {got} vs closed form {want}");
+}
+
+/// The length of the line through (x, z) parallel to y that lies in the cube −20..20 less a
+/// Ø18 hole along each axis through its centre and Ø8 holes along x at y = −10 and y = 10
+/// (z = 0): 40 less the union of the y intervals the holes take. A hole along y (x² + z² < 81)
+/// takes the whole line.
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn drilled_cube_chord(x: f64, z: f64) -> f64 {
+    if x * x + z * z < 81.0 {
+        return 0.0;
+    }
+    let mut taken = [
+        (0.0, 81.0 - z * z),
+        (0.0, 81.0 - x * x),
+        (-10.0, 16.0 - z * z),
+        (10.0, 16.0 - z * z),
+    ]
+    .map(|(centre, r2): (f64, f64)| {
+        let h = r2.max(0.0).sqrt();
+        ((centre - h).max(-20.0), (centre + h).min(20.0))
+    });
+    taken.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut length, mut lo, mut hi) = (0.0, taken[0].0, taken[0].1);
+    for &(a, b) in &taken[1..] {
+        if a <= hi {
+            hi = hi.max(b);
+        } else {
+            length += hi - lo;
+            (lo, hi) = (a, b);
+        }
+    }
+    40.0 - (length + hi - lo)
+}
+
+/// acid-4's crossfire: a 40 mm cube about the origin drilled by Ø18 holes along x, y and z
+/// and by Ø8 holes along x at y = ±10, then cut by a Ø8 hole along y at x = −10 whose axis
+/// passes 1e-5 above the two Ø8 x holes' axes. Equal holes whose axes cross a hair apart meet
+/// in curves that nearly pinch: each hole's lens in the other's wall ends in a tip 0.009 mm
+/// across, and the two lenses' tips are 0.018 mm apart, the walls within 1e-5 of each other
+/// between them. A face of the new hole runs through that neck, and the midpoint of its edge
+/// round a lens tip, where the radial sector classified it first, lies in the neck: the walls
+/// leave the edge there 0.13 degrees apart, the steps off the edge ran across the neck and on
+/// past the other lens's tip, where the walls have crossed back, and read the face as lying
+/// in the holes' space. Copied into the outside, the face's edges found no face use in the
+/// solid, and the cut was refused. A point of the edge nearer its ends, where the walls cross
+/// at a clear angle (36 degrees at the ends), now decides at the edge, before any point is
+/// stepped off.
+///
+/// The cubes and holes are built as SolidCraft builds them: each hole an extrusion of a circle
+/// starting 0.6131 rad round from its plane's x axis (its seam). The volume the cut removes is
+/// the integral over the hole's section of [`drilled_cube_chord`], by the midpoint rule on a
+/// polar grid (2000 rings of 8000 cells); the rule gives 471.3501 on half that grid each way
+/// and 471.3519 on this one, so 0.01 bounds its error with room.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's reference integral, not ops computing geometry
+fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
+    all_fixes();
+    let seam = 0.6131;
+    let hole = |origin: [f64; 3], x: [f64; 3], y: [f64; 3], r: f64| {
+        let v = |p: [f64; 3]| solidcore_record::Vec3::new(p[0], p[1], p[2]);
+        let plane = Plane {
+            origin: v(origin),
+            x: v(x),
+            y: v(y),
+        };
+        let region = Region2 {
+            outer: Loop2::circle_from(Vec2::new(0.0, 0.0), r, seam),
+            holes: vec![],
+        };
+        extrude_planar_regions(&plane, &[region], 0.0, 42.0).unwrap()
+    };
+    let (ex, ey, ez, mx) = (
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0],
+    );
+    let mut part = make_box([-20.0; 3], [40.0; 3]).unwrap();
+    for tool in [
+        hole([-21.0, 0.0, 0.0], ey, ez, 9.0),
+        hole([0.0, -21.0, 0.0], mx, ez, 9.0),
+        hole([0.0, 0.0, -21.0], ex, ey, 9.0),
+        hole([-21.0, -10.0, 0.0], ey, ez, 4.0),
+        hole([-21.0, 10.0, 0.0], ey, ez, 4.0),
+    ] {
+        part = boolean(part, tool, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let before = volume(&part);
+    let cut = boolean(
+        part,
+        hole([-10.0, -21.0, 1e-5], mx, ez, 4.0),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(cut.is_manifold_solid().unwrap());
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    let (rings, cells) = (2000_u32, 8000_u32);
+    let mut want = 0.0;
+    for i in 0..rings {
+        let rho = 4.0 * (f64::from(i) + 0.5) / f64::from(rings);
+        for j in 0..cells {
+            let t = TAU * (f64::from(j) + 0.5) / f64::from(cells);
+            want += drilled_cube_chord(-10.0 + rho * t.cos(), 1e-5 + rho * t.sin()) * rho;
+        }
+    }
+    want *= (4.0 / f64::from(rings)) * (TAU / f64::from(cells));
+    let removed = before - volume(&cut);
+    assert!(
+        (removed - want).abs() <= 0.01,
+        "removed {removed}, the integral gives {want}"
+    );
+    // Inside the new hole, where it crosses the x hole at y = 10 and where it runs through
+    // material on its own; material beside it.
+    assert_eq!(
+        cut.classify_point([-10.0, 10.0, 3.0]).unwrap(),
+        PointClass::Outside
+    );
+    assert_eq!(
+        cut.classify_point([-10.0, 16.0, 0.0]).unwrap(),
+        PointClass::Outside
+    );
+    assert_eq!(
+        cut.classify_point([-15.0, 16.0, 0.0]).unwrap(),
+        PointClass::Inside
+    );
 }
