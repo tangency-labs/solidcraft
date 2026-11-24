@@ -666,8 +666,9 @@ impl Frame {
 /// outside or a tangent edge); [`BlendFailure::SizeBelowResolution`]
 /// naming the edge for a leg below the smallest size a fillet builds on `target` (eight
 /// times its tolerance), whether given or computed from an angle;
-/// [`NoRoomReason::BeadCutsFace`] with the sagitta that fits for a bead past its bound
-/// ([`BeadDefinition::new`]) and
+/// [`NoRoomReason::BeadCutsFace`] for a bead past its bound ([`BeadDefinition::new`]), with the
+/// smallest sagitta that fits over all of `edges` and naming that edge, so a retry at it
+/// builds on every edge; and
 /// [`NoRoomReason::LegPastFace`] with the leg that fits, naming the face, for a toe past its
 /// face's trims; [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
 /// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
@@ -707,16 +708,31 @@ pub fn beads_apart(
             }
         }
     }
-    // every frame first, so a refused edge leaves nothing built
-    let frames = edges
-        .iter()
-        .zip(sizes)
-        .enumerate()
-        .map(|(i, (&e, &size))| {
-            let along = along.get(i).copied().flatten();
-            frame(k, target, e, size, sagitta, along)
-        })
-        .collect::<Result<Vec<_>>>()?;
+    // every frame first, so a refused edge leaves nothing built; a sagitta too large is
+    // refused with the smallest fit over all edges, so a retry at it builds on every one
+    let sagitta_fit = |e: &SolidError| {
+        e.fit()
+            .filter(|f| matches!(f.measure, FitMeasure::Sagitta))
+            .map(|f| f.size)
+    };
+    let mut frames = Vec::new();
+    let mut sagitta_refusal: Option<(f64, SolidError)> = None;
+    for (i, (&e, &size)) in edges.iter().zip(sizes).enumerate() {
+        let along = along.get(i).copied().flatten();
+        match frame(k, target, e, size, sagitta, along) {
+            Ok(f) => frames.push(f),
+            Err(err) => match sagitta_fit(&err) {
+                Some(fit) if sagitta_refusal.as_ref().is_none_or(|(kept, _)| fit < *kept) => {
+                    sagitta_refusal = Some((fit, err));
+                }
+                Some(_) => {}
+                None => return Err(err),
+            },
+        }
+    }
+    if let Some((_, err)) = sagitta_refusal {
+        return Err(err);
+    }
     frames.iter().map(|f| f.sweep(k, 0.0, f.length)).collect()
 }
 

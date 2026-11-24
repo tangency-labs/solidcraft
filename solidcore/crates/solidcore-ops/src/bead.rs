@@ -49,7 +49,8 @@ pub enum Joint {
 /// [`MAX_SIZE`]; [`Error::TooLarge`] with the largest leg that builds ([`FitKind::Leg`]: `at`
 /// the middle of its edge, `face` a point on the face its toe runs off, so the leg to shrink
 /// is the one along that face) or the largest sagitta that builds ([`FitKind::Sagitta`], a
-/// magnitude, `at` the middle of the edge it was found on); `size` 0 where none builds;
+/// magnitude: the smallest over all the joints of the call, `at` the middle of the edge that
+/// sets it, so a retry at it builds on every joint); [`Error::NoRoom`] where no leg builds;
 /// [`Error::BlendFailed`] with the kernel's statement for joints it does not build yet (two
 /// beads meeting at a vertex, an edge not straight between two planes, an obtuse toe) and a
 /// leg below the body's resolution; [`Error::Refused`] for an edge listed twice or not in an
@@ -69,6 +70,9 @@ pub fn beads(bodies: &[&Body], joints: &[Joint], sagitta: f64) -> Result<Vec<Bod
         }
     }
     let mut made: Vec<(usize, Body)> = Vec::with_capacity(joints.len());
+    // a sagitta too large is refused with the smallest fit over every body's joints, so a
+    // retry at it builds on all of them
+    let mut sagitta_refusal: Option<(f64, Error)> = None;
     for (i, body) in bodies.iter().enumerate() {
         let on: Vec<(usize, Joint)> = joints
             .iter()
@@ -79,8 +83,28 @@ pub fn beads(bodies: &[&Body], joints: &[Joint], sagitta: f64) -> Result<Vec<Bod
         if on.is_empty() {
             continue;
         }
-        let beads = measure_body("beads", body, |k, b| on_body(k, b, &on, sagitta))??;
-        made.extend(on.iter().map(|(j, _)| *j).zip(beads));
+        match measure_body("beads", body, |k, b| on_body(k, b, &on, sagitta))? {
+            Ok(beads) => made.extend(on.iter().map(|(j, _)| *j).zip(beads)),
+            Err(e) => {
+                let Error::TooLarge {
+                    size,
+                    kind: FitKind::Sagitta,
+                    ..
+                } = e
+                else {
+                    return Err(e);
+                };
+                if sagitta_refusal
+                    .as_ref()
+                    .is_none_or(|(kept, _)| size < *kept)
+                {
+                    sagitta_refusal = Some((size, e));
+                }
+            }
+        }
+    }
+    if let Some((_, e)) = sagitta_refusal {
+        return Err(e);
     }
     made.sort_by_key(|(j, _)| *j);
     Ok(made.into_iter().map(|(_, bead)| bead).collect())
@@ -143,6 +167,10 @@ fn refused(k: &Kernel, b: &Brep, e: SolidError) -> solidcore::Result<Error> {
             _ => None,
         };
         if let Some(kind) = kind {
+            // no size builds: nothing to retry with
+            if fit.size <= 0.0 {
+                return Ok(Error::NoRoom);
+            }
             let site = e.site();
             let edge = fit.edge.or_else(|| site.and_then(|s| s.edge));
             let too_large = Error::TooLarge {
@@ -156,4 +184,32 @@ fn refused(k: &Kernel, b: &Brep, e: SolidError) -> solidcore::Result<Error> {
         }
     }
     crate::blend::failure(&e).ok_or(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::blend::fillet_executive::NoRoomReason;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{Failure, Fit};
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::Point3;
+
+    /// A fit of 0 (the kernel's "no size builds") is no room, not a size to retry with: a
+    /// face narrower than its own tolerance is not a part a test can build, so the refusal is
+    /// made as the kernel makes it.
+    #[test]
+    fn a_fit_of_zero_is_no_room() {
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        for (reason, measure) in [
+            (NoRoomReason::LegPastFace, FitMeasure::Leg),
+            (NoRoomReason::BeadCutsFace, FitMeasure::Sagitta),
+        ] {
+            let e = Failure::new("test", BlendFailure::NoRoom(reason))
+                .with_fit(Fit::new(0.0, measure, None))
+                .into_error();
+            assert!(matches!(refused(&k, &b, e), Ok(Error::NoRoom)));
+        }
+    }
 }

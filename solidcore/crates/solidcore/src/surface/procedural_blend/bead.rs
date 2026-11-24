@@ -44,7 +44,8 @@ const OP: &str = "surface::procedural_blend::bead";
 pub struct SagittaRefused {
     /// The sagitta asked.
     pub asked: f64,
-    /// The largest `|h|` on the asked side that builds: the open bound.
+    /// The open bound on `|h|` on the asked side: every `|h|` below it builds, the bound
+    /// itself does not.
     pub bound: f64,
 }
 

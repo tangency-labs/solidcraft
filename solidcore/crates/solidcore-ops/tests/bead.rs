@@ -172,8 +172,10 @@ fn a_leg_past_its_face_is_refused_with_the_leg_that_fits_and_its_face() {
         panic!("{got:?}")
     };
     assert_eq!(kind, FitKind::Leg);
-    // 45 less the face's tolerance
-    assert!(size < 45.0 && size > 45.0 - 1e-5, "{size}");
+    // the kernel halves the leg down until its bracket is 1e-7 (1 + 60) = 6.1e-6 wide, below
+    // the toe's limit, 45 plus the face's tolerance (a toe holds up to it past the face's
+    // edge), then takes that tolerance off: 45 - 6.1e-6 <= fit <= 45
+    assert!((45.0 - 6.1e-6..=45.0).contains(&size), "{size}");
     assert!(at.is_some());
     // the toe at that leg, on the base's top: the leg along the base is the one to shrink
     assert!(
@@ -240,7 +242,7 @@ fn each_joint_s_along_orders_its_own_legs_only() {
 }
 
 #[test]
-fn the_kernel_s_refusals_of_its_input_come_through() {
+fn the_kernel_s_refusals_of_its_input_come_through_with_its_reasons() {
     let t = tee(0.0);
     let (e, _, web) = left_corner(&t);
     let right = edge_at(&t, [55.0, 50.0, 10.0]);
@@ -252,19 +254,71 @@ fn the_kernel_s_refusals_of_its_input_come_through() {
         legs: [LEG, LEG],
         along: Some(web),
     };
-    for (joints, what) in [
+    for (joints, want) in [
         (
             vec![joint(0, e, [LEG, LEG]), joint(0, e, [LEG, LEG])],
-            "an edge twice",
+            "each edge is listed once",
         ),
-        (vec![joint(0, top, [LEG, LEG])], "an outside edge"),
-        (vec![off], "an along off its edge"),
+        (
+            vec![joint(0, top, [LEG, LEG])],
+            "a weld bead lies in an inside corner (a concave edge) only, not on an outside or a tangent edge",
+        ),
+        (
+            vec![off],
+            "a bead's first leg runs along one of its edge's two faces",
+        ),
     ] {
         let got = beads(&[&t], &joints, 0.0);
-        assert!(matches!(got, Err(Error::Refused { .. })), "{what}: {got:?}");
+        assert!(
+            matches!(got, Err(Error::Refused { reason, .. }) if reason == want),
+            "{want}: {got:?}"
+        );
     }
     let got = beads(&[&t], &[joint(0, e, [1e-9, LEG])], 0.0);
-    assert!(matches!(got, Err(Error::BlendFailed { .. })), "{got:?}");
+    let Err(Error::BlendFailed {
+        class,
+        status,
+        phrase,
+    }) = &got
+    else {
+        panic!("{got:?}")
+    };
+    assert_eq!(*class, solidcore::error::ErrorKind::InvalidInput);
+    assert_eq!(*status, 1007);
+    assert!(
+        phrase.contains("is below eight times the body's tolerance"),
+        "{phrase}"
+    );
+}
+
+/// Two joints whose sagitta bounds differ (legs 6 and 6, legs 4 and 8), on one body and on
+/// two: the refusal names the smaller of the two fits, whichever joint or body comes first,
+/// and a retry at it builds both beads.
+#[test]
+fn a_sagitta_too_large_for_several_joints_is_refused_with_the_smallest_fit() {
+    let (a, b) = (tee(0.0), tee(200.0));
+    let (left, _, _) = left_corner(&a);
+    let right = edge_at(&a, [55.0, 50.0, 10.0]);
+    let other = edge_at(&b, [245.0, 50.0, 10.0]);
+    let fit_of = |bodies: &[&Body], joints: &[Joint]| match beads(bodies, joints, 20.0) {
+        Err(Error::TooLarge {
+            size,
+            kind: FitKind::Sagitta,
+            ..
+        }) => size,
+        got => panic!("{got:?}"),
+    };
+    let wide = fit_of(&[&a], &[joint(0, left, [LEG, LEG])]);
+    let narrow = fit_of(&[&a], &[joint(0, right, [4.0, 8.0])]);
+    assert!(narrow < wide, "{narrow} {wide}");
+    // one body, the wider joint first
+    let one = [joint(0, left, [LEG, LEG]), joint(0, right, [4.0, 8.0])];
+    assert_eq!(fit_of(&[&a], &one).to_bits(), narrow.to_bits());
+    assert_eq!(beads(&[&a], &one, narrow).unwrap().len(), 2);
+    // two bodies, the wider body first
+    let two = [joint(0, left, [LEG, LEG]), joint(1, other, [4.0, 8.0])];
+    assert_eq!(fit_of(&[&a, &b], &two).to_bits(), narrow.to_bits());
+    assert_eq!(beads(&[&a, &b], &two, narrow).unwrap().len(), 2);
 }
 
 #[test]
@@ -281,7 +335,11 @@ fn beads_meeting_at_a_vertex_are_refused_and_the_part_left() {
         &[joint(0, a, [LEG, LEG]), joint(0, b, [LEG, LEG])],
         0.0,
     );
-    assert!(matches!(got, Err(Error::BlendFailed { .. })), "{got:?}");
+    assert!(
+        matches!(&got, Err(Error::BlendFailed { phrase, .. })
+            if phrase.ends_with("weld beads that meet at a vertex are not built yet (their corner, #17916)")),
+        "{got:?}"
+    );
     assert_eq!(part.to_smb(false).unwrap(), before, "the part changed");
 }
 
