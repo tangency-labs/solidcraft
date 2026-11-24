@@ -482,7 +482,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    let mine = enabled.iter().find(|id| scope(id) == here);
+    // Saved custom keys must take precedence over a newly introduced default in the
+    // same mode. Existing preferences may already bind M to a different sketch tool.
+    let mine = enabled
+        .iter()
+        .find(|id| scope(id) == here && app.keymap.custom.get(**id).is_some_and(|keys| keys.iter().any(|binding| binding == key)))
+        .or_else(|| enabled.iter().find(|id| scope(id) == here));
     if app.preferences.sketch_keys_only && here != Scope::Render {
         mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
     } else {
@@ -1183,6 +1188,22 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_custom_sketch_mirror_key_outweighs_new_move_default() {
+        let mut a = app();
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        assert_eq!(command_for(&a, "M"), Some("sketch.move"), "fresh sketch uses the new Move default");
+        // A preference saved before Move acquired M still owns that key (#18794).
+        a.keymap.load(&json!({"sketch.mirror":"M"}));
+        assert!(commands_for(&a, "M").contains(&"sketch.mirror"), "the custom key was loaded");
+        assert_eq!(command_for(&a, "M"), Some("sketch.mirror"), "saved binding takes precedence");
+        let persisted = a.keymap.prefs();
+        a.keymap.load(&persisted);
+        assert_eq!(command_for(&a, "M"), Some("sketch.mirror"), "precedence survives a reload");
+        a.keymap.custom.remove("sketch.mirror");
+        assert_eq!(command_for(&a, "M"), Some("sketch.move"), "reset restores the new default");
+    }
 
     #[test]
     fn shortcut_recording_row_uses_selection_and_read_only_rows_have_no_hover() {
@@ -1911,7 +1932,9 @@ mod tests {
         let e = bind(&mut a, "solid.revolve", "M", false).unwrap_err();
         assert!(e.contains("already used by Move/Copy"), "{e}");
         bind(&mut a, "solid.revolve", "M", true).unwrap();
-        assert_eq!(commands_for(&a, "M"), vec!["solid.revolve"]);
+        // Sketch Move retains M: its sketch scope does not clash with model Revolve.
+        assert_eq!(commands_for(&a, "M"), vec!["sketch.move", "solid.revolve"]);
+        assert_eq!(command_for(&a, "M"), Some("solid.revolve"));
         assert_eq!(effective(&a, "solid.move"), None);
         assert!(bind(&mut a, "solid.revolve", "Ctrl+Z", false).is_err(), "reserved");
         // Kept between runs.
