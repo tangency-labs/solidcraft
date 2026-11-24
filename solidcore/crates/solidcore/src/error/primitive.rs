@@ -9,14 +9,14 @@
 //!
 //! | Rust                                   | Status difftest compares      |
 //! |----------------------------------------|-------------------------------|
-//! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
-//! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
-//! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
 //! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
-//! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
 //! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`], [`PrimitiveFailure::ClosestPointNotFound`] | `SM_ERR_NULL_POINTER` |
+//! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
 //! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`], [`PrimitiveFailure::NoProfiles`], [`PrimitiveFailure::SectionNotFinite`], [`PrimitiveFailure::SectionLoopNoInterval`], [`PrimitiveFailure::SectionLayersDiffer`], [`PrimitiveFailure::OffsetMapMissing`], [`PrimitiveFailure::OffsetMapIndexOutOfRange`], [`PrimitiveFailure::OffsetFacesMissing`], [`PrimitiveFailure::RuledSidesTooShort`], [`PrimitiveFailure::ProfileSlotEmpty`], [`PrimitiveFailure::ProfileMakesNoWire`], [`PrimitiveFailure::CappedSweepNoRepetition`], [`PrimitiveFailure::CappedRevolutionRepeats`] | `SM_ERR` |
+//! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
+//! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
+//! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //!
 //! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -39,27 +39,54 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum PrimitiveFailure {
-    /// The routine could not continue, as the phrase says (for example "a cone side has
-    /// zero length").
-    Failed(&'static str),
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// face's surface").
-    Missing(&'static str),
-    /// The fitted helix strays from the analytic helix by more than the caller's
-    /// tolerance.
-    HelixDeviates {
-        /// The largest distance found between the fitted and the analytic helix.
-        deviation: f64,
-        /// The caller's tolerance.
-        tolerance: f64,
-    },
+    /// The caller's curve cannot be revolved about the axis into one analytic face.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    AnalyticSweepRefused(AnalyticSweepRefusal),
     /// A revolution's axis runs inside the face it would turn, so the revolved solid
     /// would cross itself.
     AxisInsideFace,
-    /// A planar 2D boolean's face lies on a plane that cannot be grown to cover the
-    /// other faces, so the faces rebuilt on it would carry edges far off their surface
-    /// (not upstream: WR-536's fix refuses these, where upstream builds them).
-    PlaneCannotCover,
+    /// The caller asked for a capped partial revolution repeated other than once.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CappedRevolutionRepeats {
+        /// The caller's repetitions.
+        repetitions: u64,
+    },
+    /// The caller asked for a capped repeated sweep with no repetitions.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CappedSweepNoRepetition,
+    /// The circle or its planar face could not be made (the constructor's error is the
+    /// cause). Class `failed`, status `SM_ERR`.
+    CircleNotMade,
+    /// The closest point on the caller's scale reference curve was not found. Class
+    /// `failed`, status `SM_ERR_NULL_POINTER`.
+    ClosestPointNotFound,
+    /// Both of the caller's cone radii are within the tolerance, so the profile has no
+    /// side away from the axis. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    ConeHasNoRadius {
+        /// The base radius as built (the base's distance from the axis).
+        base: f64,
+        /// The top radius as built.
+        top: f64,
+        /// The radius one of them must exceed (the profile's scaled zero).
+        minimum: f64,
+    },
+    /// A side of the cone's profile, from the caller's height and radii, is no longer
+    /// than the tolerance. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    ConeSideTooShort {
+        /// The side's length.
+        length: f64,
+        /// The length a side must exceed (the profile's scaled zero).
+        minimum: f64,
+    },
+    /// The elliptic-ended cone's surface could not be made from the caller's ends (the
+    /// constructor's error is the cause). Class `failed`, status `SM_ERR`.
+    ConeSurfaceNotMade,
+    /// The caller's curves were ordered, and none of them closes a loop.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CurvesMakeNoLoop,
+    /// The cylinder could not be bounded to the caller's height (the bound's error is the
+    /// cause). Class `failed`, status `SM_ERR`.
+    CylinderDomainNotSet,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -71,9 +98,15 @@ pub enum PrimitiveFailure {
     /// An edge of the caller's body has no curve. [`ErrorKind::InvalidInput`], status
     /// `SM_ERR_NULL_POINTER`.
     EdgeWithoutCurve,
-    /// The caller gave no curve to build from. [`ErrorKind::InvalidInput`], status
+    /// An edge of the caller's body that the other body shares bounds no face (a wire
+    /// edge). [`ErrorKind::InvalidInput`], status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutFace,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`], status
     /// `SM_ERR_NULL_POINTER`.
-    NoCurveGiven,
+    FaceWithoutSurface,
+    /// The routine could not continue, as the phrase says (for example "a cone side has
+    /// zero length").
+    Failed(&'static str),
     /// The caller's height is below the zero tolerance. [`ErrorKind::InvalidInput`],
     /// status `SM_ERR`.
     HeightTooSmall {
@@ -82,77 +115,82 @@ pub enum PrimitiveFailure {
         /// The smallest height that passes (`SM_EFF_ZERO`).
         minimum: f64,
     },
+    /// The fitted helix strays from the analytic helix by more than the caller's
+    /// tolerance.
+    HelixDeviates {
+        /// The largest distance found between the fitted and the analytic helix.
+        deviation: f64,
+        /// The caller's tolerance.
+        tolerance: f64,
+    },
+    /// The fitted helix could not be evaluated where its deviation is measured (the
+    /// evaluation's error is the cause). Class `failed`, status `SM_ERR`.
+    HelixNotEvaluated,
+    /// A merge's Boolean returned without a result B-rep. Class `failed`, status
+    /// `SM_ERR_NULL_POINTER`.
+    MergeGaveNoBrep,
+    /// A merge stage was given no operand on one side (`other` is false for the
+    /// primary): an earlier stage's Boolean consumed it, or the merge released it. Class
+    /// `failed`, status `SM_ERR_NULL_POINTER`.
+    MergeOperandMissing {
+        /// The missing operand is the other (second) one.
+        other: bool,
+    },
+    /// Something the routine needs is missing, as the phrase says (for example "the
+    /// face's surface").
+    Missing(&'static str),
+    /// The caller gave no curve to build from. [`ErrorKind::InvalidInput`], status
+    /// `SM_ERR_NULL_POINTER`.
+    NoCurveGiven,
+    /// The caller gave no profile to sweep. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    NoProfiles,
     /// There is no region to build the primitive's faces in: the primitive creation was
     /// made without one, or the caller's B-rep has no infinite region.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR_NULL_POINTER`.
     NoRegion,
-    /// The caller's Boolean tree leaves more B-reps than it was given: it names a B-rep
-    /// twice and combines neither leaf. [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    TreeLeavesMoreBreps {
-        /// The B-reps the tree leaves.
-        left: usize,
-        /// The B-reps it was given.
-        given: usize,
+    /// The offset curve's faces are missing: its generator is already married, or the
+    /// caller said so. Class `failed`, status `SM_ERR`.
+    OffsetFacesMissing,
+    /// The untrimmed offset of the taper's profile makes no curves (every offset curve
+    /// failed its B-spline approximation). Class `failed`, status `SM_ERR`.
+    OffsetMakesNoCurves,
+    /// The offset of the caller's surface by the caller's distance collapses, so it makes
+    /// no surface (for example a cone offset past its apex). [`ErrorKind::Degenerate`],
+    /// status `SM_ERR`.
+    OffsetMakesNoSurface,
+    /// An index of the caller's offset map is outside its curves.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    OffsetMapIndexOutOfRange {
+        /// The map's index.
+        index: u64,
+        /// The number of curves the index must stay under.
+        len: usize,
     },
-    /// A slot the caller's Boolean tree leaves holds no B-rep: a Boolean of the tree gave
-    /// no result, or the tree names a B-rep twice. Class `failed`, status
-    /// `SM_ERR_NULL_POINTER`.
-    TreeLeftNoBrep,
+    /// The caller's offset curve carries no offset map. [`ErrorKind::InvalidInput`],
+    /// status `SM_ERR`.
+    OffsetMapMissing,
     /// The caller's path turns back on itself at a corner, within 2 degrees, where no
     /// mitre can be cut (not upstream: WR-793). [`ErrorKind::Unsupported`], status
     /// `SM_ERR`.
     PathTurnsBack,
-    /// The sweep of the caller's closed profile meant as a solid does not close, for
-    /// example at a corner too sharp for its mitre (not upstream: WR-793).
-    /// [`ErrorKind::Unsupported`], status `SM_ERR`.
-    SweepDoesNotClose,
-    /// The swept pieces bound a manifold whose regions are all void. Class `failed`,
-    /// status `SM_ERR`.
-    SweepEnclosesNoMaterial,
-    /// The caller's sweep angle is below the zero tolerance. [`ErrorKind::InvalidInput`],
-    /// status `SM_ERR`.
-    SweepAngleTooSmall {
-        /// The caller's sweep angle, in degrees.
-        angle: f64,
-        /// The smallest angle that passes (`SM_EFF_ZERO`).
-        minimum: f64,
-    },
-    /// A side of the cone's profile, from the caller's height and radii, is no longer
-    /// than the tolerance. [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    ConeSideTooShort {
-        /// The side's length.
-        length: f64,
-        /// The length a side must exceed (the profile's scaled zero).
-        minimum: f64,
-    },
-    /// Both of the caller's cone radii are within the tolerance, so the profile has no
-    /// side away from the axis. [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    ConeHasNoRadius {
-        /// The base radius as built (the base's distance from the axis).
-        base: f64,
-        /// The top radius as built.
-        top: f64,
-        /// The radius one of them must exceed (the profile's scaled zero).
-        minimum: f64,
-    },
+    /// A planar difference had an operand with no faces, so it made no B-rep (the offset
+    /// profile collapsed to nothing). [`ErrorKind::Degenerate`], status
+    /// `SM_ERR_NULL_POINTER`.
+    PlanarDifferenceEmpty,
+    /// A planar 2D boolean's face lies on a plane that cannot be grown to cover the
+    /// other faces, so the faces rebuilt on it would carry edges far off their surface
+    /// (not upstream: WR-536's fix refuses these, where upstream builds them).
+    PlaneCannotCover,
+    /// A side of the polygon could not be made from its two corners (the line's error is
+    /// the cause, and decides defect or refusal). Class `failed`, status `SM_ERR`.
+    PolygonSideNotMade,
     /// The frame of the revolved profile, from the caller's frame and start angle, is
     /// degenerate (the frame's error is the cause). [`ErrorKind::InvalidInput`], status
     /// `SM_ERR`.
     ProfileFrameDegenerate,
-    /// The caller gave a skin fewer than two profiles. [`ErrorKind::InvalidInput`],
-    /// status `SM_ERR`.
-    TooFewProfiles {
-        /// The caller's profiles.
-        profiles: usize,
-    },
-    /// A profile of the caller's skin is not of the first profile's kind: it bounds no
-    /// planar face where the first does (that construction's error is the cause), or it
-    /// is open where the profiles are closed wires. [`ErrorKind::InvalidInput`], status
-    /// `SM_ERR`.
-    ProfilesDoNotMatch {
-        /// The profile's index among the caller's.
-        profile: usize,
-    },
+    /// A profile curve could not be made a wire edge (the wire's error is the cause).
+    /// Class `failed`, status `SM_ERR`.
+    ProfileMakesNoWire,
     /// A planar profile of the caller's skin bounds more than one face.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
     ProfileMakesSeveralFaces {
@@ -165,116 +203,18 @@ pub enum PrimitiveFailure {
         /// The composite curves they make.
         composites: usize,
     },
-    /// The untrimmed offset of the taper's profile makes no curves (every offset curve
-    /// failed its B-spline approximation). Class `failed`, status `SM_ERR`.
-    OffsetMakesNoCurves,
-    /// A cone wall's seam pcurve has a weight that is not positive in one of the cone's
-    /// spans, so it is no rational B-spline. Class `failed`, status `SM_ERR`.
-    SeamWeightNotPositive {
-        /// The weight.
-        weight: f64,
-    },
-    /// A piece of a cone wall's seam pcurve leaves the span of the cone it was cut for.
-    /// Class `failed`, status `SM_ERR`.
-    SeamLeavesSpan {
-        /// The piece's parameter across its span, outside 0 to 1.
-        tau: f64,
-    },
-    /// The caller's curves were ordered, and none of them closes a loop.
+    /// A slot of the caller's profile curves is empty, where the profile is made of wire
+    /// edges (the `SM_ERR` of that path; [`PrimitiveFailure::NoCurveGiven`] elsewhere).
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    CurvesMakeNoLoop,
-    /// The offset of the caller's surface by the caller's distance collapses, so it makes
-    /// no surface (for example a cone offset past its apex). [`ErrorKind::Degenerate`],
-    /// status `SM_ERR`.
-    OffsetMakesNoSurface,
-    /// The fitted helix could not be evaluated where its deviation is measured (the
-    /// evaluation's error is the cause). Class `failed`, status `SM_ERR`.
-    HelixNotEvaluated,
-    /// A side of the polygon could not be made from its two corners (the line's error is
-    /// the cause, and decides defect or refusal). Class `failed`, status `SM_ERR`.
-    PolygonSideNotMade,
-    /// A merge stage was given no operand on one side (`other` is false for the
-    /// primary): an earlier stage's Boolean consumed it, or the merge released it. Class
-    /// `failed`, status `SM_ERR_NULL_POINTER`.
-    MergeOperandMissing {
-        /// The missing operand is the other (second) one.
-        other: bool,
+    ProfileSlotEmpty,
+    /// A profile of the caller's skin is not of the first profile's kind: it bounds no
+    /// planar face where the first does (that construction's error is the cause), or it
+    /// is open where the profiles are closed wires. [`ErrorKind::InvalidInput`], status
+    /// `SM_ERR`.
+    ProfilesDoNotMatch {
+        /// The profile's index among the caller's.
+        profile: usize,
     },
-    /// A merge's Boolean returned without a result B-rep. Class `failed`, status
-    /// `SM_ERR_NULL_POINTER`.
-    MergeGaveNoBrep,
-    /// A planar difference had an operand with no faces, so it made no B-rep (the offset
-    /// profile collapsed to nothing). [`ErrorKind::Degenerate`], status
-    /// `SM_ERR_NULL_POINTER`.
-    PlanarDifferenceEmpty,
-    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`], status
-    /// `SM_ERR_NULL_POINTER`.
-    FaceWithoutSurface,
-    /// An edge of the caller's body that the other body shares bounds no face (a wire
-    /// edge). [`ErrorKind::InvalidInput`], status `SM_ERR_NULL_POINTER`.
-    EdgeWithoutFace,
-    /// The sheet's constructor returned a B-rep without a face: the rectangle's ignores its
-    /// face constructor's status, as upstream, and the disc's face maker found no face.
-    /// Class `failed`, status `SM_ERR`.
-    SheetHasNoFace,
-    /// The circle or its planar face could not be made (the constructor's error is the
-    /// cause). Class `failed`, status `SM_ERR`.
-    CircleNotMade,
-    /// The cylinder could not be bounded to the caller's height (the bound's error is the
-    /// cause). Class `failed`, status `SM_ERR`.
-    CylinderDomainNotSet,
-    /// The elliptic-ended cone's surface could not be made from the caller's ends (the
-    /// constructor's error is the cause). Class `failed`, status `SM_ERR`.
-    ConeSurfaceNotMade,
-    /// The caller's curve cannot be revolved about the axis into one analytic face.
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    AnalyticSweepRefused(AnalyticSweepRefusal),
-    /// The analytic surface of the revolved curve could not be made (its constructor's
-    /// status is ignored as upstream). Class `failed`, status `SM_ERR`.
-    SweptSurfaceNotMade,
-    /// The face on the revolved curve's surface could not be made (the face's error is
-    /// the cause). Class `failed`, status `SM_ERR`.
-    SweptFaceNotMade,
-    /// The drop of a band patch's edge onto a cap patch of the pole-less sphere found no
-    /// UV curve at the caller's tolerance. Class `failed`, status `SM_ERR_NULL_POINTER`.
-    SphereEdgeNotDropped {
-        /// The caller's tolerance the drop used.
-        tolerance: f64,
-    },
-    /// The caller gave no profile to sweep. [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    NoProfiles,
-    /// A section of the caller's skin gives a non-finite centroid or correspondence
-    /// distance (its coordinates overflow, or its area all but vanishes).
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    SectionNotFinite,
-    /// A section loop of the caller's skin, joined, has no finite parameter interval of
-    /// positive length. [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    SectionLoopNoInterval,
-    /// The caller's skin sections have different numbers of loops.
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    SectionLayersDiffer {
-        /// The first section's loops.
-        first: usize,
-        /// This section's loops.
-        this: usize,
-    },
-    /// The closest point on the caller's scale reference curve was not found. Class
-    /// `failed`, status `SM_ERR_NULL_POINTER`.
-    ClosestPointNotFound,
-    /// The caller's offset curve carries no offset map. [`ErrorKind::InvalidInput`],
-    /// status `SM_ERR`.
-    OffsetMapMissing,
-    /// An index of the caller's offset map is outside its curves.
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    OffsetMapIndexOutOfRange {
-        /// The map's index.
-        index: u64,
-        /// The number of curves the index must stay under.
-        len: usize,
-    },
-    /// The offset curve's faces are missing: its generator is already married, or the
-    /// caller said so. Class `failed`, status `SM_ERR`.
-    OffsetFacesMissing,
     /// Both sides of the ruled surface are shorter than twice the tolerance.
     /// [`ErrorKind::Degenerate`], status `SM_ERR`.
     RuledSidesTooShort {
@@ -283,22 +223,82 @@ pub enum PrimitiveFailure {
         /// The shortest length that passes (twice the tolerance).
         minimum: f64,
     },
-    /// A slot of the caller's profile curves is empty, where the profile is made of wire
-    /// edges (the `SM_ERR` of that path; [`PrimitiveFailure::NoCurveGiven`] elsewhere).
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    ProfileSlotEmpty,
-    /// A profile curve could not be made a wire edge (the wire's error is the cause).
+    /// A piece of a cone wall's seam pcurve leaves the span of the cone it was cut for.
     /// Class `failed`, status `SM_ERR`.
-    ProfileMakesNoWire,
-    /// The caller asked for a capped repeated sweep with no repetitions.
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    CappedSweepNoRepetition,
-    /// The caller asked for a capped partial revolution repeated other than once.
-    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
-    CappedRevolutionRepeats {
-        /// The caller's repetitions.
-        repetitions: u64,
+    SeamLeavesSpan {
+        /// The piece's parameter across its span, outside 0 to 1.
+        tau: f64,
     },
+    /// A cone wall's seam pcurve has a weight that is not positive in one of the cone's
+    /// spans, so it is no rational B-spline. Class `failed`, status `SM_ERR`.
+    SeamWeightNotPositive {
+        /// The weight.
+        weight: f64,
+    },
+    /// The caller's skin sections have different numbers of loops.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionLayersDiffer {
+        /// The first section's loops.
+        first: usize,
+        /// This section's loops.
+        this: usize,
+    },
+    /// A section loop of the caller's skin, joined, has no finite parameter interval of
+    /// positive length. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionLoopNoInterval,
+    /// A section of the caller's skin gives a non-finite centroid or correspondence
+    /// distance (its coordinates overflow, or its area all but vanishes).
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionNotFinite,
+    /// The sheet's constructor returned a B-rep without a face: the rectangle's ignores its
+    /// face constructor's status, as upstream, and the disc's face maker found no face.
+    /// Class `failed`, status `SM_ERR`.
+    SheetHasNoFace,
+    /// The drop of a band patch's edge onto a cap patch of the pole-less sphere found no
+    /// UV curve at the caller's tolerance. Class `failed`, status `SM_ERR_NULL_POINTER`.
+    SphereEdgeNotDropped {
+        /// The caller's tolerance the drop used.
+        tolerance: f64,
+    },
+    /// The caller's sweep angle is below the zero tolerance. [`ErrorKind::InvalidInput`],
+    /// status `SM_ERR`.
+    SweepAngleTooSmall {
+        /// The caller's sweep angle, in degrees.
+        angle: f64,
+        /// The smallest angle that passes (`SM_EFF_ZERO`).
+        minimum: f64,
+    },
+    /// The sweep of the caller's closed profile meant as a solid does not close, for
+    /// example at a corner too sharp for its mitre (not upstream: WR-793).
+    /// [`ErrorKind::Unsupported`], status `SM_ERR`.
+    SweepDoesNotClose,
+    /// The swept pieces bound a manifold whose regions are all void. Class `failed`,
+    /// status `SM_ERR`.
+    SweepEnclosesNoMaterial,
+    /// The face on the revolved curve's surface could not be made (the face's error is
+    /// the cause). Class `failed`, status `SM_ERR`.
+    SweptFaceNotMade,
+    /// The analytic surface of the revolved curve could not be made (its constructor's
+    /// status is ignored as upstream). Class `failed`, status `SM_ERR`.
+    SweptSurfaceNotMade,
+    /// The caller gave a skin fewer than two profiles. [`ErrorKind::InvalidInput`],
+    /// status `SM_ERR`.
+    TooFewProfiles {
+        /// The caller's profiles.
+        profiles: usize,
+    },
+    /// The caller's Boolean tree leaves more B-reps than it was given: it names a B-rep
+    /// twice and combines neither leaf. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    TreeLeavesMoreBreps {
+        /// The B-reps the tree leaves.
+        left: usize,
+        /// The B-reps it was given.
+        given: usize,
+    },
+    /// A slot the caller's Boolean tree leaves holds no B-rep: a Boolean of the tree gave
+    /// no result, or the tree names a B-rep twice. Class `failed`, status
+    /// `SM_ERR_NULL_POINTER`.
+    TreeLeftNoBrep,
 }
 
 /// Why the caller's curve cannot be revolved about the axis into one analytic face
@@ -306,15 +306,15 @@ pub enum PrimitiveFailure {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum AnalyticSweepRefusal {
-    /// The line lies on the axis.
-    LineOnAxis,
-    /// The line is skew to the axis: it sweeps a hyperboloid, not a cone (not upstream,
-    /// WR-776).
-    LineSkewToAxis,
+    /// The arc is neither a half nor a full circle.
+    ArcNotHalfOrFull {
+        /// The arc's angle, in degrees.
+        angle: f64,
+    },
     /// The curve crosses the axis inside its ends.
     CrossesAxis,
-    /// The curve runs along the axis.
-    RunsAlongAxis,
+    /// The full circle meets the axis.
+    FullCircleMeetsAxis,
     /// An end of the half circle is off the axis by more than the B-rep's tolerance.
     HalfCircleEndOffAxis {
         /// The end's distance from the axis.
@@ -322,26 +322,25 @@ pub enum AnalyticSweepRefusal {
         /// The B-rep's tolerance, the largest distance that passes.
         tolerance: f64,
     },
-    /// The full circle meets the axis.
-    FullCircleMeetsAxis,
-    /// The arc is neither a half nor a full circle.
-    ArcNotHalfOrFull {
-        /// The arc's angle, in degrees.
-        angle: f64,
-    },
+    /// The line lies on the axis.
+    LineOnAxis,
+    /// The line is skew to the axis: it sweeps a hyperboloid, not a cone (not upstream,
+    /// WR-776).
+    LineSkewToAxis,
     /// The curve is neither a line nor an arc.
     NotLineOrArc,
+    /// The curve runs along the axis.
+    RunsAlongAxis,
 }
 
 impl core::fmt::Display for AnalyticSweepRefusal {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::LineOnAxis => f.write_str("the line lies on the axis"),
-            Self::LineSkewToAxis => {
-                f.write_str("the line is skew to the axis: it sweeps a hyperboloid, not a cone")
+            Self::ArcNotHalfOrFull { angle } => {
+                write!(f, "the arc of {angle} degrees is neither a half nor a full circle")
             }
             Self::CrossesAxis => f.write_str("the curve crosses the axis inside its ends"),
-            Self::RunsAlongAxis => f.write_str("the curve runs along the axis"),
+            Self::FullCircleMeetsAxis => f.write_str("the full circle meets the axis"),
             Self::HalfCircleEndOffAxis {
                 distance,
                 tolerance,
@@ -349,11 +348,12 @@ impl core::fmt::Display for AnalyticSweepRefusal {
                 f,
                 "an end of the half circle is {distance} off the axis, more than the tolerance {tolerance}"
             ),
-            Self::FullCircleMeetsAxis => f.write_str("the full circle meets the axis"),
-            Self::ArcNotHalfOrFull { angle } => {
-                write!(f, "the arc of {angle} degrees is neither a half nor a full circle")
+            Self::LineOnAxis => f.write_str("the line lies on the axis"),
+            Self::LineSkewToAxis => {
+                f.write_str("the line is skew to the axis: it sweeps a hyperboloid, not a cone")
             }
             Self::NotLineOrArc => f.write_str("the curve is neither a line nor an arc"),
+            Self::RunsAlongAxis => f.write_str("the curve runs along the axis"),
         }
     }
 }
@@ -362,61 +362,61 @@ impl PrimitiveFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::HeightTooSmall { .. }
-            | Self::TreeLeavesMoreBreps { .. }
-            | Self::PathTurnsBack
-            | Self::SweepDoesNotClose
-            | Self::SweepEnclosesNoMaterial
-            | Self::SweepAngleTooSmall { .. }
-            | Self::ConeSideTooShort { .. }
+            Self::AnalyticSweepRefused(_)
+            | Self::CappedRevolutionRepeats { .. }
+            | Self::CappedSweepNoRepetition
+            | Self::CircleNotMade
             | Self::ConeHasNoRadius { .. }
+            | Self::ConeSideTooShort { .. }
+            | Self::ConeSurfaceNotMade
+            | Self::CurvesMakeNoLoop
+            | Self::CylinderDomainNotSet
+            | Self::Defect { .. }
+            | Self::Failed(_)
+            | Self::HeightTooSmall { .. }
+            | Self::HelixNotEvaluated
+            | Self::NoProfiles
+            | Self::OffsetFacesMissing
+            | Self::OffsetMakesNoCurves
+            | Self::OffsetMakesNoSurface
+            | Self::OffsetMapIndexOutOfRange { .. }
+            | Self::OffsetMapMissing
+            | Self::PathTurnsBack
+            | Self::PolygonSideNotMade
             | Self::ProfileFrameDegenerate
-            | Self::TooFewProfiles { .. }
-            | Self::ProfilesDoNotMatch { .. }
+            | Self::ProfileMakesNoWire
             | Self::ProfileMakesSeveralFaces { .. }
             | Self::ProfileNotOneComposite { .. }
-            | Self::OffsetMakesNoCurves
-            | Self::SeamWeightNotPositive { .. }
-            | Self::SeamLeavesSpan { .. }
-            | Self::CurvesMakeNoLoop
-            | Self::OffsetMakesNoSurface
-            | Self::HelixNotEvaluated
-            | Self::PolygonSideNotMade
-            | Self::SheetHasNoFace
-            | Self::CircleNotMade
-            | Self::CylinderDomainNotSet
-            | Self::ConeSurfaceNotMade
-            | Self::AnalyticSweepRefused(_)
-            | Self::SweptSurfaceNotMade
-            | Self::SweptFaceNotMade
-            | Self::NoProfiles
-            | Self::SectionNotFinite
-            | Self::SectionLoopNoInterval
-            | Self::SectionLayersDiffer { .. }
-            | Self::OffsetMapMissing
-            | Self::OffsetMapIndexOutOfRange { .. }
-            | Self::OffsetFacesMissing
-            | Self::RuledSidesTooShort { .. }
             | Self::ProfileSlotEmpty
-            | Self::ProfileMakesNoWire
-            | Self::CappedSweepNoRepetition
-            | Self::CappedRevolutionRepeats { .. } => SM_ERR,
-            Self::Missing(_)
+            | Self::ProfilesDoNotMatch { .. }
+            | Self::RuledSidesTooShort { .. }
+            | Self::SeamLeavesSpan { .. }
+            | Self::SeamWeightNotPositive { .. }
+            | Self::SectionLayersDiffer { .. }
+            | Self::SectionLoopNoInterval
+            | Self::SectionNotFinite
+            | Self::SheetHasNoFace
+            | Self::SweepAngleTooSmall { .. }
+            | Self::SweepDoesNotClose
+            | Self::SweepEnclosesNoMaterial
+            | Self::SweptFaceNotMade
+            | Self::SweptSurfaceNotMade
+            | Self::TooFewProfiles { .. }
+            | Self::TreeLeavesMoreBreps { .. } => SM_ERR,
+            Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
+            Self::ClosestPointNotFound
             | Self::EdgeWithoutCurve
+            | Self::EdgeWithoutFace
+            | Self::FaceWithoutSurface
+            | Self::MergeGaveNoBrep
+            | Self::MergeOperandMissing { .. }
+            | Self::Missing(_)
             | Self::NoCurveGiven
             | Self::NoRegion
-            | Self::TreeLeftNoBrep
-            | Self::MergeOperandMissing { .. }
-            | Self::MergeGaveNoBrep
             | Self::PlanarDifferenceEmpty
-            | Self::FaceWithoutSurface
-            | Self::EdgeWithoutFace
             | Self::SphereEdgeNotDropped { .. }
-            | Self::ClosestPointNotFound => SM_ERR_NULL_POINTER,
+            | Self::TreeLeftNoBrep => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
-            Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
             Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
         }
     }
@@ -432,48 +432,48 @@ impl PrimitiveFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::EdgeWithoutCurve
-            | Self::NoCurveGiven
-            | Self::HeightTooSmall { .. }
-            | Self::NoRegion
-            | Self::TreeLeavesMoreBreps { .. }
-            | Self::SweepAngleTooSmall { .. }
-            | Self::ConeSideTooShort { .. }
+            Self::AnalyticSweepRefused(_)
+            | Self::CappedRevolutionRepeats { .. }
+            | Self::CappedSweepNoRepetition
             | Self::ConeHasNoRadius { .. }
+            | Self::ConeSideTooShort { .. }
+            | Self::CurvesMakeNoLoop
+            | Self::EdgeWithoutCurve
+            | Self::EdgeWithoutFace
+            | Self::FaceWithoutSurface
+            | Self::HeightTooSmall { .. }
+            | Self::NoCurveGiven
+            | Self::NoProfiles
+            | Self::NoRegion
+            | Self::OffsetMapIndexOutOfRange { .. }
+            | Self::OffsetMapMissing
             | Self::ProfileFrameDegenerate
-            | Self::TooFewProfiles { .. }
-            | Self::ProfilesDoNotMatch { .. }
             | Self::ProfileMakesSeveralFaces { .. }
             | Self::ProfileNotOneComposite { .. }
-            | Self::CurvesMakeNoLoop
-            | Self::FaceWithoutSurface
-            | Self::EdgeWithoutFace
-            | Self::AnalyticSweepRefused(_)
-            | Self::NoProfiles
-            | Self::SectionNotFinite
-            | Self::SectionLoopNoInterval
-            | Self::SectionLayersDiffer { .. }
-            | Self::OffsetMapMissing
-            | Self::OffsetMapIndexOutOfRange { .. }
             | Self::ProfileSlotEmpty
-            | Self::CappedSweepNoRepetition
-            | Self::CappedRevolutionRepeats { .. } => ErrorKind::InvalidInput,
-            Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
+            | Self::ProfilesDoNotMatch { .. }
+            | Self::SectionLayersDiffer { .. }
+            | Self::SectionLoopNoInterval
+            | Self::SectionNotFinite
+            | Self::SweepAngleTooSmall { .. }
+            | Self::TooFewProfiles { .. }
+            | Self::TreeLeavesMoreBreps { .. } => ErrorKind::InvalidInput,
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::ClosestPointNotFound
+            | Self::MergeGaveNoBrep
+            | Self::MergeOperandMissing { .. }
+            | Self::OffsetFacesMissing
+            | Self::OffsetMakesNoCurves
+            | Self::ProfileMakesNoWire
+            | Self::SeamLeavesSpan { .. }
+            | Self::SeamWeightNotPositive { .. }
+            | Self::SphereEdgeNotDropped { .. }
+            | Self::SweepEnclosesNoMaterial
+            | Self::TreeLeftNoBrep => ErrorKind::Failed,
             Self::OffsetMakesNoSurface
             | Self::PlanarDifferenceEmpty
             | Self::RuledSidesTooShort { .. } => ErrorKind::Degenerate,
-            Self::TreeLeftNoBrep
-            | Self::SweepEnclosesNoMaterial
-            | Self::OffsetMakesNoCurves
-            | Self::SeamWeightNotPositive { .. }
-            | Self::SeamLeavesSpan { .. }
-            | Self::MergeOperandMissing { .. }
-            | Self::MergeGaveNoBrep
-            | Self::SphereEdgeNotDropped { .. }
-            | Self::ClosestPointNotFound
-            | Self::OffsetFacesMissing
-            | Self::ProfileMakesNoWire => ErrorKind::Failed,
+            Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -482,9 +482,43 @@ impl PrimitiveFailure {
 impl core::fmt::Display for PrimitiveFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Failed(what) => f.write_str(what),
-            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::AnalyticSweepRefused(refusal) => refusal.fmt(f),
+            Self::AxisInsideFace => {
+                f.write_str("the revolution axis runs inside the face it would turn")
+            }
+            Self::CappedRevolutionRepeats { repetitions } => write!(
+                f,
+                "a capped revolution repeats once, not {repetitions} times"
+            ),
+            Self::CappedSweepNoRepetition => {
+                f.write_str("a capped repeated sweep needs at least one repetition")
+            }
+            Self::CircleNotMade => f.write_str("the circle could not be built"),
+            Self::ClosestPointNotFound => {
+                f.write_str("the closest point on the scale reference was not found")
+            }
+            Self::ConeHasNoRadius { base, top, minimum } => write!(
+                f,
+                "the cone's radii {base} and {top} are both within the tolerance {minimum}"
+            ),
+            Self::ConeSideTooShort { length, minimum } => write!(
+                f,
+                "a cone side of length {length} is not longer than the tolerance {minimum}"
+            ),
+            Self::ConeSurfaceNotMade => f.write_str("the cone surface could not be built"),
+            Self::CurvesMakeNoLoop => f.write_str("the curves make no loop"),
+            Self::CylinderDomainNotSet => {
+                f.write_str("the cylinder could not be bounded to the height")
+            }
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::EdgeWithoutFace => f.write_str("the edge bounds no face"),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::Failed(what) => f.write_str(what),
+            Self::HeightTooSmall { height, minimum } => write!(
+                f,
+                "the height {height} is below the zero tolerance {minimum}"
+            ),
             Self::HelixDeviates {
                 deviation,
                 tolerance,
@@ -492,46 +526,38 @@ impl core::fmt::Display for PrimitiveFailure {
                 f,
                 "the fitted helix strays {deviation} from the helix, more than the tolerance {tolerance}"
             ),
-            Self::AxisInsideFace => {
-                f.write_str("the revolution axis runs inside the face it would turn")
+            Self::HelixNotEvaluated => f.write_str("the fitted helix could not be evaluated"),
+            Self::MergeGaveNoBrep => f.write_str("the merge gave no result B-rep"),
+            Self::MergeOperandMissing { other: false } => {
+                f.write_str("the merge stage has no primary operand")
             }
+            Self::MergeOperandMissing { other: true } => {
+                f.write_str("the merge stage has no other operand")
+            }
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::NoCurveGiven => f.write_str("no curve was given"),
+            Self::NoProfiles => f.write_str("no profiles to sweep"),
+            Self::NoRegion => f.write_str("there is no region to build the faces in"),
+            Self::OffsetFacesMissing => f.write_str("the offset curve's faces are missing"),
+            Self::OffsetMakesNoCurves => f.write_str("the untrimmed offset makes no curves"),
+            Self::OffsetMakesNoSurface => {
+                f.write_str("the offset collapses the surface, so it makes no surface")
+            }
+            Self::OffsetMapIndexOutOfRange { index, len } => write!(
+                f,
+                "the offset map's index {index} is outside its {len} curves"
+            ),
+            Self::OffsetMapMissing => f.write_str("the offset curve has no offset map"),
+            Self::PathTurnsBack => f.write_str("the path turns back on itself at a corner"),
+            Self::PlanarDifferenceEmpty => f.write_str(
+                "the planar difference had an operand with no faces, so it made no B-rep",
+            ),
             Self::PlaneCannotCover => {
                 f.write_str("a face's plane cannot be grown to cover the other faces")
             }
-            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
-            Self::NoCurveGiven => f.write_str("no curve was given"),
-            Self::HeightTooSmall { height, minimum } => write!(
-                f,
-                "the height {height} is below the zero tolerance {minimum}"
-            ),
-            Self::NoRegion => f.write_str("there is no region to build the faces in"),
-            Self::TreeLeavesMoreBreps { left, given } => write!(
-                f,
-                "the Boolean tree leaves {left} B-reps, more than the {given} it was given"
-            ),
-            Self::TreeLeftNoBrep => f.write_str("a slot the Boolean tree leaves holds no B-rep"),
-            Self::PathTurnsBack => f.write_str("the path turns back on itself at a corner"),
-            Self::SweepDoesNotClose => f.write_str("the sweep does not close"),
-            Self::SweepEnclosesNoMaterial => f.write_str("the sweep encloses no material"),
-            Self::SweepAngleTooSmall { angle, minimum } => write!(
-                f,
-                "the sweep angle {angle} is below the zero tolerance {minimum}"
-            ),
-            Self::ConeSideTooShort { length, minimum } => write!(
-                f,
-                "a cone side of length {length} is not longer than the tolerance {minimum}"
-            ),
-            Self::ConeHasNoRadius { base, top, minimum } => write!(
-                f,
-                "the cone's radii {base} and {top} are both within the tolerance {minimum}"
-            ),
+            Self::PolygonSideNotMade => f.write_str("a polygon side could not be made"),
             Self::ProfileFrameDegenerate => f.write_str("the profile's frame is degenerate"),
-            Self::TooFewProfiles { profiles } => {
-                write!(f, "a skin needs at least two profiles, not {profiles}")
-            }
-            Self::ProfilesDoNotMatch { profile } => {
-                write!(f, "profile {profile} does not match the first")
-            }
+            Self::ProfileMakesNoWire => f.write_str("a profile curve makes no wire"),
             Self::ProfileMakesSeveralFaces { faces } => {
                 write!(f, "a profile makes {faces} faces, not one")
             }
@@ -539,62 +565,10 @@ impl core::fmt::Display for PrimitiveFailure {
                 f,
                 "the profile's curves make {composites} composite curves, not one"
             ),
-            Self::OffsetMakesNoCurves => f.write_str("the untrimmed offset makes no curves"),
-            Self::SeamWeightNotPositive { weight } => {
-                write!(f, "a seam pcurve weight {weight} is not positive")
+            Self::ProfileSlotEmpty => f.write_str("a profile curve slot is empty"),
+            Self::ProfilesDoNotMatch { profile } => {
+                write!(f, "profile {profile} does not match the first")
             }
-            Self::SeamLeavesSpan { tau } => {
-                write!(f, "a seam piece leaves its span, at {tau} across it")
-            }
-            Self::CurvesMakeNoLoop => f.write_str("the curves make no loop"),
-            Self::OffsetMakesNoSurface => {
-                f.write_str("the offset collapses the surface, so it makes no surface")
-            }
-            Self::HelixNotEvaluated => f.write_str("the fitted helix could not be evaluated"),
-            Self::PolygonSideNotMade => f.write_str("a polygon side could not be made"),
-            Self::MergeOperandMissing { other: false } => {
-                f.write_str("the merge stage has no primary operand")
-            }
-            Self::MergeOperandMissing { other: true } => {
-                f.write_str("the merge stage has no other operand")
-            }
-            Self::MergeGaveNoBrep => f.write_str("the merge gave no result B-rep"),
-            Self::PlanarDifferenceEmpty => f.write_str(
-                "the planar difference had an operand with no faces, so it made no B-rep",
-            ),
-            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
-            Self::EdgeWithoutFace => f.write_str("the edge bounds no face"),
-            Self::SheetHasNoFace => f.write_str("the sheet's face could not be made"),
-            Self::CircleNotMade => f.write_str("the circle could not be built"),
-            Self::CylinderDomainNotSet => {
-                f.write_str("the cylinder could not be bounded to the height")
-            }
-            Self::ConeSurfaceNotMade => f.write_str("the cone surface could not be built"),
-            Self::AnalyticSweepRefused(refusal) => refusal.fmt(f),
-            Self::SweptSurfaceNotMade => f.write_str("no analytic surface could be built"),
-            Self::SweptFaceNotMade => f.write_str("the analytic face could not be built"),
-            Self::SphereEdgeNotDropped { tolerance } => write!(
-                f,
-                "the drop of a sphere patch's edge onto the cap patch found no UV curve at the tolerance {tolerance}"
-            ),
-            Self::NoProfiles => f.write_str("no profiles to sweep"),
-            Self::SectionNotFinite => f.write_str("a section gives a non-finite value"),
-            Self::SectionLoopNoInterval => {
-                f.write_str("a section loop has no finite parameter interval")
-            }
-            Self::SectionLayersDiffer { first, this } => write!(
-                f,
-                "the sections have different numbers of loops: {first} in the first, {this} in this one"
-            ),
-            Self::ClosestPointNotFound => {
-                f.write_str("the closest point on the scale reference was not found")
-            }
-            Self::OffsetMapMissing => f.write_str("the offset curve has no offset map"),
-            Self::OffsetMapIndexOutOfRange { index, len } => write!(
-                f,
-                "the offset map's index {index} is outside its {len} curves"
-            ),
-            Self::OffsetFacesMissing => f.write_str("the offset curve's faces are missing"),
             Self::RuledSidesTooShort {
                 lengths: [offset, generator],
                 minimum,
@@ -602,15 +576,41 @@ impl core::fmt::Display for PrimitiveFailure {
                 f,
                 "both ruled sides, of lengths {offset} and {generator}, are shorter than {minimum}"
             ),
-            Self::ProfileSlotEmpty => f.write_str("a profile curve slot is empty"),
-            Self::ProfileMakesNoWire => f.write_str("a profile curve makes no wire"),
-            Self::CappedSweepNoRepetition => {
-                f.write_str("a capped repeated sweep needs at least one repetition")
+            Self::SeamLeavesSpan { tau } => {
+                write!(f, "a seam piece leaves its span, at {tau} across it")
             }
-            Self::CappedRevolutionRepeats { repetitions } => write!(
+            Self::SeamWeightNotPositive { weight } => {
+                write!(f, "a seam pcurve weight {weight} is not positive")
+            }
+            Self::SectionLayersDiffer { first, this } => write!(
                 f,
-                "a capped revolution repeats once, not {repetitions} times"
+                "the sections have different numbers of loops: {first} in the first, {this} in this one"
             ),
+            Self::SectionLoopNoInterval => {
+                f.write_str("a section loop has no finite parameter interval")
+            }
+            Self::SectionNotFinite => f.write_str("a section gives a non-finite value"),
+            Self::SheetHasNoFace => f.write_str("the sheet's face could not be made"),
+            Self::SphereEdgeNotDropped { tolerance } => write!(
+                f,
+                "the drop of a sphere patch's edge onto the cap patch found no UV curve at the tolerance {tolerance}"
+            ),
+            Self::SweepAngleTooSmall { angle, minimum } => write!(
+                f,
+                "the sweep angle {angle} is below the zero tolerance {minimum}"
+            ),
+            Self::SweepDoesNotClose => f.write_str("the sweep does not close"),
+            Self::SweepEnclosesNoMaterial => f.write_str("the sweep encloses no material"),
+            Self::SweptFaceNotMade => f.write_str("the analytic face could not be built"),
+            Self::SweptSurfaceNotMade => f.write_str("no analytic surface could be built"),
+            Self::TooFewProfiles { profiles } => {
+                write!(f, "a skin needs at least two profiles, not {profiles}")
+            }
+            Self::TreeLeavesMoreBreps { left, given } => write!(
+                f,
+                "the Boolean tree leaves {left} B-reps, more than the {given} it was given"
+            ),
+            Self::TreeLeftNoBrep => f.write_str("a slot the Boolean tree leaves holds no B-rep"),
         }
     }
 }

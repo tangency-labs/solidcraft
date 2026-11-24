@@ -705,6 +705,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
+        let vertices_before = std::mem::take(&mut self.0.vertices_before);
         // The cleanup's face and edge merges notify through the session's store, so the
         // survivors keep the attributes of the objects merged into them.
         let result = self.with_target_env(k, |k, target, env| {
@@ -713,8 +714,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 target,
                 &relations,
                 check_all_edges,
-                Some(env),
-            )
+                Some(&mut *env),
+            )?;
+            // As the boolean's merge places its own after its cleanup (#3090): a vertex the
+            // fillet made on a target edge stands on that edge's curve, which may lie up to the
+            // edge's tolerance off one of its faces, past the B-rep's intersection tolerance that
+            // every vertex/face gap must stay under. The fillet's vertices (those the target did
+            // not have) go to the corner their faces define, under the boolean's guards.
+            let vertices: Vec<_> = p1::vertices(target, None)?
+                .into_iter()
+                .filter(|v| !vertices_before.contains(v))
+                .collect();
+            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
         });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
@@ -883,11 +894,19 @@ impl FilletSession<'_> {
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
     /// is a blend by its definition evaluates as its certified net wherever the net's
     /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
-    /// (a station of a definition) takes S.
+    /// (a station of a definition) takes S. [`Self::do_filleting`], called on its own after
+    /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
-        let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+        let tolerance = self.net_tolerance(k);
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+    }
+
+    /// The tolerance the fillet is built to, the target's approximation tolerance
+    /// (`SmTol::GetApproxTol3d`): the [`NetScope`] [`Self::do_fillet`] and
+    /// [`Self::do_filleting`] run in.
+    fn net_tolerance(&self, k: &Kernel) -> f64 {
+        approx_tol3d(k, 0.5 * self.objects.target.tolerance())
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
@@ -959,14 +978,19 @@ impl FilletSession<'_> {
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
     /// step by step, its corners set between [`Self::create_corners`] and this, builds the
-    /// law's corners as [`Self::do_fillet`] does.
+    /// law's corners as [`Self::do_fillet`] does. It runs in [`Self::do_fillet`]'s
+    /// [`NetScope`] too, so a session filleted step by step reads a round kept as its
+    /// definition through its certified net as [`Self::do_fillet`] does.
     pub fn do_filleting(
         &mut self,
         k: &mut Kernel,
         error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
-        let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
-        status.and(split_and_logged)
+        let tolerance = self.net_tolerance(k);
+        NetScope::within_mut(k, tolerance, |k| {
+            let (status, split_and_logged) = self.filleting_split_and_logged(k, error_out);
+            status.and(split_and_logged)
+        })
     }
 
     /// The filleting's status, then the split at the radius law's corners and the blend
@@ -1122,6 +1146,9 @@ impl FilletSession<'_> {
                 &refusal,
             ));
         }
+        self.objects.vertices_before = p1::vertices(self.objects.target, None)?
+            .into_iter()
+            .collect();
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             let mut edges = std::collections::BTreeMap::new();
