@@ -749,6 +749,8 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
+        // A preview frame with no session: no whole-body selection.
+        selection_all: false,
         product_lights,
         product,
         upload_error: None,

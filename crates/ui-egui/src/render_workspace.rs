@@ -3757,6 +3757,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         }
         let slot = app.render_workspace.slot.clone();
         let frame = Frame {
+            selection_all: app.session.selection_all_bodies,
             product_lights: if feedback { None } else { Some(light::preview(app)?) },
             product: true,
             upload_error: Some(app.render_workspace.upload_error.clone()),

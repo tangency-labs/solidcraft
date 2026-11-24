@@ -7667,6 +7667,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
+            selection_all: app.session.selection_all_bodies,
             product_lights: None,
             ssaa,
             ao_samples,
@@ -13407,6 +13408,7 @@ mod tests {
                     sketch_key: 0,
                     sketch_slot: none(),
                     hl_key: 0,
+                    selection_all: false,
                     hl_slot: none(),
                     pv_key: 0,
                     pv_slot: none(),
