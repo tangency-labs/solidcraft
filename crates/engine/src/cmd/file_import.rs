@@ -741,8 +741,9 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
         };
         // A sketch or plane named like one the design has is numbered, as a paste numbers it.
         // The features after it reach it by id or through `names`, so they follow the new name.
-        let feature_name = if s.doc.name_clash(&kind, &f.name, top) {
-            solidcraft_doc::copy_name(&f.name, |n| s.doc.name_clash(&kind, n, top))
+        // The copies of a file are numbered in the whole design, each in its own component.
+        let feature_name = if s.doc.name_clash_anywhere(&kind, &f.name) {
+            solidcraft_doc::copy_name(&f.name, |n| s.doc.name_clash_anywhere(&kind, n))
         } else {
             f.name.clone()
         };

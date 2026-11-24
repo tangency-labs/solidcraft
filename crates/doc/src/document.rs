@@ -5101,9 +5101,20 @@ impl Document {
     /// `component` are compared, so two components may hold features with the same name and each
     /// of them finds its own.
     pub fn name_clash(&self, kind: &FeatureKind, name: &str, component: u64) -> bool {
+        self.name_clash_where(kind, name, Some(component))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous anywhere in the
+    /// design. The copies of an imported file are numbered, so each copy keeps its own name
+    /// even when the copies live in different components (#11258).
+    pub fn name_clash_anywhere(&self, kind: &FeatureKind, name: &str) -> bool {
+        self.name_clash_where(kind, name, None)
+    }
+
+    fn name_clash_where(&self, kind: &FeatureKind, name: &str, component: Option<u64>) -> bool {
         let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
         let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
-        self.features.iter().filter(|f| f.component == component).any(|f| {
+        self.features.iter().filter(|f| component.is_none_or(|c| f.component == c)).any(|f| {
             let other_sketch = matches!(f.kind, FeatureKind::Sketch { .. });
             let other_plane = matches!(f.kind, FeatureKind::ConstructionPlane { .. });
             (is_sketch && other_sketch && same_feature_name(&f.name, name)) || ((is_plane || other_plane) && f.name == name)
