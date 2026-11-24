@@ -1077,7 +1077,7 @@ fn step_marker(s: &mut Session, cmd: &str, direction: i32) -> Result<Value> {
         k if k < n => Some(k),
         _ => None,
     };
-    s.selection.clear();
+    s.clear_selection();
     reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
