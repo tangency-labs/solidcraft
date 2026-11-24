@@ -661,13 +661,23 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
+        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_tabs"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             ui_kit::row(ui, tr("ui.assistant"), |ui| {
                 ui_kit::checkbox(ui, tr("ui.agent_chat_own_window"), &mut app.preferences.agent_chat_popped);
+            });
+            ui_kit::row(ui, tr("ui.agent_chat_tabs"), |ui| {
+                let was = app.preferences.agent_shared_session;
+                let response = ui_kit::checkbox(ui, tr("ui.agent_shared_session"), &mut app.preferences.agent_shared_session)
+                    .backing_on_hover_text(tr("ui.agent_shared_session_note"));
+                solidcraft_ui_registry::publish_target("prefs:agent_shared_session", response.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_shared_session", response.rect.center());
+                if !was && app.preferences.agent_shared_session {
+                    crate::documents::disconnect_background_chats(app, false);
+                }
             });
             ui_kit::row(ui, tr("ui.agent_chat_thinking"), |ui| {
                 let response = ui_kit::checkbox(ui, tr("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)

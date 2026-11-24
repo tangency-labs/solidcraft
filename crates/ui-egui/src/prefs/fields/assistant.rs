@@ -32,6 +32,9 @@ macro_rules! assistant_preferences {
             /// they run on the window thread, and the window waits for each.
             agent_off_thread: bool = true, PAGE_ASSISTANT;
             agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode> = Default::default(), PAGE_ASSISTANT;
+            /// Keep one Assistant conversation across open design tabs and Edit in Place instead of a
+            /// separate chat per tab (#16282). Off by default so each tab keeps its own chat.
+            agent_shared_session: bool = false, PAGE_ASSISTANT;
             /// Each reply's thinking (the dimmed text a model streams while it works) starts folded, with
             /// a control to open it (#17072). Off: it is shown open, as before.
             agent_thinking_folded: bool = true, PAGE_ASSISTANT;

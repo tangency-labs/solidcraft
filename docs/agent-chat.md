@@ -29,6 +29,9 @@ Everything about it is on one page: **Preferences → AI**.
   as nothing was asked in that empty design's chat.
 - **Open the Assistant panel when SolidCraft starts** (off by default): the panel (or its own
   window) is shown at each launch.
+- **Keep one chat across design tabs** (off by default, under **Preferences → AI → Panel**): keep the same
+  Assistant conversation and connection when switching tabs, opening linked sub-assemblies, or editing in
+  place; tools always act on the active tab in front.
 
 Neither applies when SolidCraft is started with `--control` for automation.
 

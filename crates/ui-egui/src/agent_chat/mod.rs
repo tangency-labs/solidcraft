@@ -588,6 +588,9 @@ pub struct AgentChat {
     /// The design as the agent last saw it: at the end of its last turn that it answered or worked
     /// in. The next message tells it when the design is no longer that one (#10854).
     seen: Option<Revision>,
+    /// Which design (`session.uid`, name, optional path) the agent last saw, so switching tabs
+    /// with a shared conversation informs the agent on its next turn (#16282).
+    seen_design: Option<(u64, String, Option<String>)>,
     tools_available: Option<bool>,
     /// The agent was started with SolidCraft's tools (solidcraft-cli and the control port were
     /// both there): if they are still unavailable, they failed to start, not to be found.
@@ -871,6 +874,7 @@ impl AgentChat {
         self.discard_end = false;
         // The next agent starts without this one's memory of the design.
         self.seen = None;
+        self.seen_design = None;
         if let Some(mut b) = self.backend.take() {
             b.cancel();
             b.shutdown(wait);
@@ -1449,15 +1453,15 @@ pub(crate) fn continue_in_document(app: &mut SolveApp) {
     }
     chat.pills.clear();
     chat.selected_count = None;
+    chat.hover.clear();
+    chat.lit_cache = None;
+    chat.gone = Gone::default();
+    chat.chips_version += 1;
 }
 
-/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
-/// grouping the previous design's completed edits before its session is parked.
-pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
-    if !app.agent_chat.following_document {
-        switch(app);
-        return;
-    }
+/// Group any undo steps made during the active turn into one step on the outgoing session before
+/// switching tabs (#16282).
+pub(crate) fn merge_active_turn_for_switch(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_ref() {
         let steps = merge_turn(&mut app.session.undo, turn);
         if steps > 0 {
@@ -1469,6 +1473,20 @@ pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveA
             });
         }
     }
+}
+
+/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
+/// grouping the previous design's completed edits before its session is parked.
+pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
+    if app.preferences.agent_shared_session {
+        switch(app);
+        return;
+    }
+    if !app.agent_chat.following_document {
+        switch(app);
+        return;
+    }
+    merge_active_turn_for_switch(app);
     let mut chat = AgentChat::default();
     app.agent_chat.swap_document(&mut chat);
     switch(app);
@@ -1569,6 +1587,15 @@ fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine
     Some(format!(
         "[The user changed the design by hand since your last reply{what}. Read it again before you reuse positions, edge or face picks or sizes from earlier in this chat.]"
     ))
+}
+
+/// Said to the agent when a shared conversation switched to a different design tab since its last
+/// completed turn (#16282), so it inspects the active tab instead of reusing picks from another design.
+fn switched_design_note(prev_name: &str, now_name: &str, now_path: Option<&str>) -> String {
+    let at = now_path.map(|p| format!(" ({p})")).unwrap_or_default();
+    format!(
+        "[The active design tab changed from \"{prev_name}\" to \"{now_name}\"{at}. Read it again before you reuse positions, body names, edge or face picks, or sizes from earlier in this chat.]"
+    )
 }
 
 /// Work out again which chips point at things that have left the design, when the design or the
@@ -1897,6 +1924,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.stopped = false;
     chat.ended = None;
     chat.seen = None;
+    chat.seen_design = None;
     chat.discard_end |= running;
     chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
@@ -1950,8 +1978,21 @@ fn start_turn(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, 
 /// that takes them. `at` is the message's place in the conversation, where its picture is kept.
 fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>, note: Option<&str>) {
     let (pictures, documents) = (app.agent_chat.images, app.agent_chat.documents);
-    let seen = app.agent_chat.seen.as_ref().and_then(Revision::get::<solidcraft_engine::doc::Document>);
-    let changed = seen.and_then(|seen| changed_note(&seen, &app.session.doc));
+    let switched = app
+        .agent_chat
+        .seen_design
+        .as_ref()
+        .filter(|(uid, _, _)| *uid != app.session.uid)
+        .map(|(_, prev_name, _)| switched_design_note(prev_name, &app.session.doc.name, app.session.path.as_deref()));
+    let changed = if switched.is_some() {
+        switched
+    } else {
+        app.agent_chat
+            .seen
+            .as_ref()
+            .and_then(Revision::get::<solidcraft_engine::doc::Document>)
+            .and_then(|seen| changed_note(&seen, &app.session.doc))
+    };
     let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
     let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
     // The whole message stays within the cap: the files' text gets what the words leave.
@@ -2237,6 +2278,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
     if turn.replied || turn.tool_called || turn.requests > 0 {
         chat.seen = Some(Revision::of(&session.doc));
+        chat.seen_design = Some((session.uid, session.doc.name.clone(), session.path.clone()));
     }
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
@@ -3124,6 +3166,7 @@ pub fn status(app: &SolveApp) -> Value {
         state.insert("modelsNote".into(), json!(c.models_note));
         state.insert("customModels".into(), json!(custom_models_accepted(app)));
         state.insert("instructions".into(), json!(app.preferences.agent_instructions));
+        state.insert("sharedSession".into(), json!(app.preferences.agent_shared_session));
         // What the box holds, and what the pill marks in it stand for.
         state.insert("input".into(), json!(c.input));
         state.insert("pills".into(), Value::Array(c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>()));

@@ -507,6 +507,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     if !presenting {
         crate::select_other::close(app);
     }
+    let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
         crate::select_other::close(app);
@@ -523,7 +524,15 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.viewport.hover = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
-        crate::agent_chat::leave_document(app);
+        if shared_chat {
+            if app.agent_chat.following_document {
+                crate::agent_chat::merge_active_turn_for_switch(app);
+            } else if app.agent_chat.state() == crate::agent_chat::State::Busy {
+                crate::agent_chat::leave_document(app);
+            }
+        } else {
+            crate::agent_chat::leave_document(app);
+        }
         app.edit_anchor_hint = None;
     }
     if !presenting {
@@ -547,7 +556,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.agent_chat.swap_document(&mut slot.agent_chat);
+    if !shared_chat {
+        app.agent_chat.swap_document(&mut slot.agent_chat);
+    }
     let out_rev = app.session.revision;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
@@ -595,6 +606,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
             pending.view_changed(before, app.session.revision);
         }
         app.jobs_view_changed(before, app.session.revision);
+    }
+    if !presenting && shared_chat {
+        crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
@@ -1865,7 +1879,7 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
         app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
     };
     let Some(index) = index else { return Ok(false) };
-    if app.agent_chat.following_document && index != app.docs.active {
+    if app.agent_chat.following_document && index != app.docs.active && !app.preferences.agent_shared_session {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
     }
     if app.file_picker_busy() {
@@ -2325,6 +2339,13 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
 /// A replacement starts a fresh conversation, unless the current chat itself requested it.
 pub(crate) fn reset_chat(app: &mut SolveApp) {
     if app.agent_chat.following_document {
+        crate::agent_chat::continue_in_document(app);
+        return;
+    }
+    if app.preferences.agent_shared_session {
+        if app.agent_chat.state() == crate::agent_chat::State::Busy {
+            crate::agent_chat::leave_document(app);
+        }
         crate::agent_chat::continue_in_document(app);
         return;
     }
