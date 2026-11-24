@@ -10,6 +10,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::boolean::api_brep::boolean_union;
+use solidcore::mass::integrator::properties::brep_volume_default;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::get_faces;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -53,4 +54,62 @@ fn near_coplanar_fronts_stay_apart_above_the_plane_cover_tolerance() {
         assert!(lines.is_empty(), "dy {dy}: {lines:?}");
         assert!(get_faces(&u).unwrap().len() > 6, "dy {dy}");
     }
+}
+
+/// One operand of [`interleaved_grids_union`]: the strips of an `n` x `n` grid whose index
+/// has parity `parity`, `w` wide and `2 w` apart, on z = 0: those along x 1 high, those along
+/// y 2 high, united one after another into one grid whose bottom is one face.
+fn grid(k: &mut Kernel, n: u32, w: f64, parity: u32) -> solidcore::Brep {
+    let length = 2.0 * w * f64::from(n);
+    let mut all: Option<solidcore::Brep> = None;
+    for i in (0..n).filter(|i| i % 2 == parity) {
+        let at = 2.0 * w * f64::from(i);
+        for strip in [
+            create_box(k, Point3::new(0.0, at, 0.0), length, w, 1.0).unwrap(),
+            create_box(k, Point3::new(at, 0.0, 0.0), w, length, 2.0).unwrap(),
+        ] {
+            all = Some(match all {
+                Some(a) => boolean_union(k, a, strip).unwrap(),
+                None => strip,
+            });
+        }
+    }
+    all.unwrap()
+}
+
+/// The even strips of an `n` x `n` woven grid united with the odd ones, as a woven panel's
+/// halves are joined: the two bottoms lie on one plane and coincide on the squares where a
+/// strip of one grid crosses a strip of the other. Checks the union's exact volume and
+/// returns the points its imprint classified on the faces it split
+/// ([`solidcore::kernel::WorkCounters::split_face_classifications`]).
+fn interleaved_grids_union(n: u32) -> u64 {
+    let mut k = Kernel::default();
+    let w = 1.0;
+    let a = grid(&mut k, n, w, 0);
+    let b = grid(&mut k, n, w, 1);
+    k.work_counters.reset();
+    let mut u = boolean_union(&mut k, a, b).unwrap();
+    let classified = k.work_counters.split_face_classifications();
+    let length = 2.0 * w * f64::from(n);
+    let exact = f64::from(n) * length * w * (1.0 + 2.0) - f64::from(n * n) * w * w;
+    let volume = brep_volume_default(&k, &mut u, 1e-9).unwrap();
+    println!("{n} x {n} interleaved grids: {classified} points classified on split faces, volume {volume}");
+    assert!(
+        (volume - exact).abs() <= 1e-9 * exact,
+        "volume {volume}, exact {exact}"
+    );
+    classified
+}
+
+/// Joining two woven grids whose bottoms are each one face imprints every crossing of a
+/// strip of one with a strip of the other in both bottoms; each imprint splits a bottom
+/// face and classifies what is still to be imprinted there on its two parts: 61 and 288
+/// points for 4 x 4 and 8 x 8 strips, about four times for four times the crossings.
+/// Upstream's `UpdateFaces` also classified every coincident proto edge of every proto face
+/// on the split face, all of them on the one bottom: 226 and 8265 points, 37 times for four
+/// times the crossings. A woven panel of 144 strips spent most of its joins' time there.
+#[test]
+fn interleaved_grids_on_one_plane_classify_no_coincident_edges_at_face_splits() {
+    let counts = [4, 8].map(interleaved_grids_union);
+    assert_eq!(counts, [61, 288]);
 }
