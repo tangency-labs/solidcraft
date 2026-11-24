@@ -108,8 +108,8 @@ Sačuvaj/Spremi/Sačuvaj (Save). A timeline feature is Operacija in Bosnian and 
 Croatian; the Browser panel is Stablo modela, so it is never confused with a web browser
 (preglednik/pregledač); the undo history is Historija/Povijest/Istorija and the timeline Vremenska
 traka. In Serbian, brand and file names, acronyms, units, key names and placeholders stay in Latin
-script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
-are not translated.
+script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided
+names are not translated.
 
 The Georgian catalog (`ka`, shown as ქართული) uses ესკიზი (Sketch), სხეული (Body), ოპერაცია (timeline Feature), შეზღუდვა (Constraint), ზომა (Dimension), ამოწევა (Extrude), ბრუნვით აგება (Revolve), მომრგვალება (Fillet), ფასკა (Chamfer), მასივი (Pattern), შეერთება (Joint), წახნაგი (Face), წიბო (Edge) and წვერო (Vertex); a design is a პროექტი. The Browser panel is მოდელის ხე (model tree) and the timeline ქრონოლოგია, apart from the undo history (ისტორია). Georgian has no letter case, so capitalised English labels are written in ordinary Mkhedruli, never in Mtavruli; a count stays singular after its number, so counted labels are written as `კომპონენტი: {count}`. The catalog is written in Mkhedruli; where no Georgian system font is found, egui's built-in Hack draws it in its monospace design. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged. Written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker (@devius).
 

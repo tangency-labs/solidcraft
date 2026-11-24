@@ -200,8 +200,8 @@ impl SurfaceConfig {
 /// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
 /// fails: from then on every call on the device fails quietly, and the device's lost callback
 /// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter first probes the device ([`DeviceLost::probe`]):
-/// the probe meets the loss instead, and the frame's uploads are skipped.
+/// (`PendingWrites::activate`), so the painter survives that panic ([`DeviceLost::survive`]),
+/// which probes the device to tell a loss from any other panic.
 #[derive(Clone, Debug, Default)]
 pub struct DeviceLost {
     lost: Arc<std::sync::atomic::AtomicBool>,
@@ -264,10 +264,10 @@ impl DeviceLost {
     }
 
     /// Run `draw`, GPU work on this device, and survive a panic it meets once the device is lost:
-    /// `None` then. The driver resets a device at any moment, so a reset can land after the
-    /// probe and a queue write (or the present) still be the first call to meet it, which panics
-    /// inside wgpu (`PendingWrites::activate` unwraps `Lost`, #10240). After such a panic the
-    /// probe meets the loss and marks it. Any other panic carries on unwinding.
+    /// `None` then. The driver resets a device at any moment, and a queue write (or the present)
+    /// can be the first call to meet it, which panics inside wgpu (`PendingWrites::activate`
+    /// unwraps `Lost`, #10240). After such a panic the probe meets the loss and marks it. Any
+    /// other panic carries on unwinding.
     pub fn survive<R>(
         &self,
         device: &wgpu::Device,
