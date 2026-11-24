@@ -39,8 +39,10 @@
 //! cover an edge end that `n` does.
 
 mod gap_samples;
+mod p6_split;
 
 use gap_samples::{GAP_CHANGES, GAP_MAIN};
+use p6_split::{P6_CURVE_CLASS_CHANGES, P6_CURVE_CLASS_MAIN, P6_HEAL_CHANGES, P6_HEAL_MAIN};
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
@@ -195,7 +197,11 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 ///   tolerance moves its estimate): the new value is within [`MASS_ACCURACY`] of its scale of
 ///   every point of a certified enclosure of the exact property of the body
 ///   (`mass::enclosure::enclose_mass_properties`), so of the exact value, the accuracy the
-///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN;
+///   runner asks ([`MassBands`]); EQUAL at the case's own accuracy, PROVEN
+///   (`stubs4-delete-edge-bottle-e8-r0.1`'s centroid x, `Izz` and products zx and xy also
+///   carry, by at most 1e-15, the move of the integration's origin, the middle of the body's
+///   exact box, 1.53e-5 in x once the round's exact box divides at its net's knots and no
+///   longer counts a point outside the face: checked the same way);
 /// - `padding`: a box coordinate padded by an edge's tolerance (`query.brep`'s tight box
 ///   expanded by its entities' tolerances): it moved inward by exactly a moved edge's
 ///   `o - n` (to four units in the last place), that edge certified as every other;
@@ -1606,6 +1612,16 @@ fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
             GAP_CHANGES,
             GAP_MAIN,
         ),
+        (
+            include_str!("../../expected/heal.face_props.jsonl"),
+            P6_HEAL_CHANGES,
+            P6_HEAL_MAIN,
+        ),
+        (
+            include_str!("../../expected/intersect.curve_class_p5.jsonl"),
+            P6_CURVE_CLASS_CHANGES,
+            P6_CURVE_CLASS_MAIN,
+        ),
     ] {
         let put_back =
             |text: &str, rows: &[Row]| put_back_independent_changes(text, rows, changes, originals);
@@ -1725,7 +1741,7 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
 /// expected one. The ledger restores the original lines of [`FILLET_UV_CHANGES`] and
-/// [`GAP_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
+/// [`GAP_CHANGES`], [`P6_HEAL_CHANGES`] and [`P6_CURVE_CLASS_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
 /// loop normal, [`crate::wr587_replay::put_back_main_lines`]), before it reverses the
 /// tolerance changes.
 #[test]
@@ -1759,6 +1775,7 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         "ROWS units with no expected file: {missing:?}"
     );
     let mut left_out: Vec<(String, String)> = Vec::new();
+    let mut moved = Vec::new();
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
@@ -1775,6 +1792,15 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
                 put_back_independent_changes(&text, &rows, FILLET_UV_CHANGES, FILLET_UV_MAIN)
             }
             "heal.gap" => put_back_independent_changes(&text, &rows, GAP_CHANGES, GAP_MAIN),
+            "heal.face_props" => {
+                put_back_independent_changes(&text, &rows, P6_HEAL_CHANGES, P6_HEAL_MAIN)
+            }
+            "intersect.curve_class_p5" => put_back_independent_changes(
+                &text,
+                &rows,
+                P6_CURVE_CLASS_CHANGES,
+                P6_CURVE_CLASS_MAIN,
+            ),
             _ => Ok(text),
         }
         .unwrap_or_else(|e| panic!("{unit}: {e}"));
@@ -1785,8 +1811,11 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
-        assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
+        if got != *want {
+            moved.push(format!("{unit}: {got:016x}, main {want:016x}"));
+        }
     }
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
     let pinned: Vec<(String, String)> = LEDGER_KNOWN_FAILING
         .iter()
         .map(|&(u, c)| (u.to_string(), c.to_string()))
