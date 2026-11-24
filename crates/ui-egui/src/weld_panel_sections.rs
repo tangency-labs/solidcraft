@@ -7,7 +7,7 @@ use egui::{Align, Align2, FontId, Layout, RichText, Sense, UiBuilder, pos2, vec2
 #[path = "weld_panel/chrome.rs"]
 mod chrome;
 #[path = "weld_panel/look.rs"]
-mod look;
+pub(super) mod look;
 #[path = "weld_panel/size.rs"]
 mod size;
 

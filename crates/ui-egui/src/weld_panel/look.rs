@@ -1,15 +1,19 @@
 //! Process textures and the six spot appearance specimens.
 use super::*;
 
-const PROCESSES: &[&str] = &[
-    "ui.weld.process.mig",
-    "ui.weld.process.tig",
-    "ui.weld.process.stick",
-    "ui.weld.process.saw",
-    "ui.weld.process.laser",
-    "ui.weld.process.fsw",
-    "ui.weld.process.unset",
+const PROCESSES: &[(&str, Option<&str>)] = &[
+    ("ui.weld.process.mig", Some("135")),
+    ("ui.weld.process.tig", Some("141")),
+    ("ui.weld.process.stick", Some("111")),
+    ("ui.weld.process.saw", Some("121")),
+    ("ui.weld.process.laser", Some("52")),
+    ("ui.weld.process.fsw", Some("43")),
+    ("ui.weld.process.unset", None),
 ];
+
+pub(in crate::weld_panel) fn process_number(process: usize) -> Option<&'static str> {
+    PROCESSES.get(process).and_then(|(_, number)| *number)
+}
 
 fn texture(ui: &mut Ui, state: &WeldPanelState, t: &Tokens) {
     let (rect, _) = ui.allocate_exact_size(vec2(t.form_label_width + t.space_24 * 2.0 + t.space_2, t.control_height - t.space_2), Sense::hover());
@@ -93,7 +97,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut 
             }
             label(ui, "ui.weld.spot.two_sheets", t, true);
         } else {
-            let options: Vec<_> = PROCESSES.iter().map(|id| tr(id)).collect();
+            let options: Vec<_> = PROCESSES.iter().map(|(id, _)| tr(id)).collect();
             let before = state.process;
             kit::dropdown(ui, "process", &mut state.process, &options);
             if state.process != before {

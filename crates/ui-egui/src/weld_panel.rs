@@ -6,6 +6,8 @@ use solidcraft_theme::Tokens;
 
 #[path = "weld_panel_sections.rs"]
 mod sections;
+#[path = "weld_panel/symbol.rs"]
+mod symbol;
 #[cfg(test)]
 #[path = "weld_panel_tests.rs"]
 mod tests;
@@ -353,8 +355,6 @@ pub(super) struct Measurements {
     #[cfg(test)]
     pub type_choices: Vec<ChoiceMeasurements>,
     pub more_button: Option<Rect>,
-    #[cfg(test)]
-    pub symbol_icon: Option<Rect>,
     #[cfg(test)]
     pub done_check: Option<Rect>,
     #[cfg(test)]

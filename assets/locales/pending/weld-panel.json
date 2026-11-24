@@ -4,6 +4,7 @@
     "ui.weld.number_tip": "Weld number (rename)",
     "ui.weld.symbol": "Symbol: click to define",
     "ui.weld.symbol_tip": "Define weld (optional)",
+    "ui.weld.symbol_undefined": "Symbol not defined yet",
     "ui.weld.cancel": "Cancel",
     "ui.weld.done": "Done",
     "ui.weld.section.type": "Type",

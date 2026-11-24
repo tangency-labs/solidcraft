@@ -455,9 +455,6 @@ fn weld_panel_symbol_strip_fits_preview_hint_and_right_aligned_actions() {
         assert_eq!(painted_hint.galley.rows.len(), 2);
         assert!(painted_hint.galley.job.sections.iter().all(|section| section.format.font_id.size == 11.5 && section.format.color == t.form_dim));
         assert_eq!(painted_hint.galley.rect.translate(painted_hint.pos.to_vec2()), hint_text);
-        let icon = m.symbol_icon.expect("symbol icon");
-        close(icon.center().x, preview.center().x, 0.5);
-        close(icon.center().y, preview.center().y, 0.5);
         let check = m.done_check.expect("Done check");
         close(check.width(), 14.0, 0.5);
         close(check.height(), 14.0, 0.5);
@@ -472,4 +469,150 @@ fn weld_panel_symbol_strip_fits_preview_hint_and_right_aligned_actions() {
             m.strip_hint_lines
         );
     }
+}
+
+fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Shape>, Vec<String>) {
+    let ctx = context();
+    solidcraft_theme::set_dark(dark);
+    solidcraft_theme::apply(&ctx);
+    let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(110.0, 44.0));
+    let mut defined = false;
+    let mut expected_labels = Vec::new();
+    let mut output = ctx.run_ui(RawInput::default(), |ui| {
+        let t = Tokens::get();
+        if let Ok(record) = symbol::record(state) {
+            expected_labels = symbol::drawing(ui, &record, &t).expect("valid symbol").text.into_iter().map(|text| text.text).collect();
+        }
+        defined = symbol::paint(ui, rect, state, &t);
+    });
+    output.textures_delta.clear();
+    let shapes = output.shapes.into_iter().map(|shape| shape.shape).filter(|shape| shape.visual_bounding_rect().is_positive()).collect();
+    (defined, rect, shapes, expected_labels)
+}
+
+#[test]
+fn weld_symbol_fillet_a3_paints_geometry_and_draw_labels_inside_preview_in_both_themes() {
+    for dark in [false, true] {
+        let state = WeldPanelState::default();
+        let (defined, rect, shapes, expected_labels) = symbol_frame(&state, dark);
+        assert!(defined);
+        assert_eq!(expected_labels, ["a3", "135"]);
+        assert!(shapes.iter().any(|shape| matches!(shape, egui::Shape::Path(_))));
+        let labels: Vec<_> = shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, expected_labels, "paint the exact text returned by Weld::draw");
+        let bounds = shapes.iter().fold(Rect::NOTHING, |bounds, shape| {
+            let painted = shape.visual_bounding_rect();
+            assert!(rect.contains_rect(painted), "{painted:?} outside {rect:?}");
+            bounds.union(painted)
+        });
+        close(bounds.center().x, rect.center().x, 0.5);
+        close(bounds.center().y, rect.center().y, 0.5);
+    }
+}
+
+#[test]
+fn weld_symbol_unsupported_type_paints_the_dimmed_icon_and_undefined_hint() {
+    for dark in [false, true] {
+        let mut state = WeldPanelState { weld_type: WeldType::Spot, ..Default::default() };
+        let (defined, rect, shapes, labels) = symbol_frame(&state, dark);
+        assert!(!defined);
+        assert!(labels.is_empty());
+        let mesh = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Mesh(mesh) => Some(mesh),
+                _ => None,
+            })
+            .expect("icon texture mesh");
+        assert!(rect.contains_rect(mesh.calc_bounds()));
+        assert!(!mesh.vertices.is_empty());
+        assert!(mesh.vertices.iter().all(|vertex| (1..255).contains(&vertex.color.a())), "placeholder is visible and dimmed");
+        let ctx = context();
+        let mut output = ctx.run_ui(RawInput::default(), |ui| {
+            show(ui, &mut state, &Tokens::get());
+        });
+        output.textures_delta.clear();
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == tr("ui.weld.symbol_undefined")))
+        );
+        assert_eq!(tr("ui.weld.symbol_undefined"), "Symbol not defined yet");
+    }
+}
+
+#[test]
+fn weld_symbol_invalid_sizes_paint_basic_geometry_without_panicking() {
+    for typ in [WeldType::Fillet, WeldType::Groove] {
+        for value in ["", "0", "-3", "NaN", "inf", "100001", "0.0000001", "plate / 2"] {
+            let mut state = WeldPanelState { weld_type: typ, ..Default::default() };
+            state.size.a = value.into();
+            state.size.s = value.into();
+            let (defined, rect, shapes, labels) = symbol_frame(&state, false);
+            assert!(!defined, "{typ:?} size {value}");
+            assert!(labels.is_empty());
+            assert!(shapes.iter().any(
+                |shape| matches!(shape, egui::Shape::Path(path) if path.stroke.color == egui::epaint::ColorMode::Solid(Tokens::get().form_dim))
+            ));
+            assert!(shapes.iter().all(|shape| rect.contains_rect(shape.visual_bounding_rect())));
+        }
+    }
+}
+
+#[test]
+fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
+    use solidcraft_engine::geom::weld::{Contour, Kind, Size};
+    crate::i18n::install();
+    let mut state = WeldPanelState {
+        size_by_leg: true,
+        both_sides: true,
+        all_around: true,
+        field_weld: true,
+        face: Face::Flat,
+        process: 1,
+        ..Default::default()
+    };
+    let record = symbol::record(&state).expect("valid fillet");
+    let side = record.arrow_side.as_ref().expect("arrow side");
+    assert_eq!(side.kind, Kind::Fillet);
+    assert_eq!(side.size, Some(Size::Leg(4.2)));
+    assert_eq!(side.contour, Some(Contour::Flush));
+    assert_eq!(record.arrow_side, record.other_side);
+    assert!(record.all_round && record.field);
+    assert_eq!(record.tail.as_deref(), Some("141"));
+    state.weld_type = WeldType::Groove;
+    state.size.s = "2.50".into();
+    state.face = Face::Concave;
+    state.process = 6;
+    let record = symbol::record(&state).expect("valid butt");
+    let side = record.arrow_side.expect("arrow side");
+    assert_eq!(side.kind, Kind::SingleVButt);
+    assert_eq!(side.size, Some(Size::ButtPenetration(2.5)));
+    assert_eq!(side.contour, Some(Contour::Concave));
+    assert_eq!(record.tail, None);
+    let (defined, _, _, labels) = symbol_frame(&state, false);
+    assert!(defined);
+    assert_eq!(labels, ["2.5", "2.5"]);
+}
+
+#[test]
+fn weld_symbol_iso_a_identification_dashes_have_equal_end_marks() {
+    let (defined, _, shapes, _) = symbol_frame(&WeldPanelState::default(), false);
+    assert!(defined);
+    let lengths: Vec<_> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::LineSegment { points, .. } => Some(points[0].distance(points[1])),
+            _ => None,
+        })
+        .collect();
+    assert!(lengths.len() > 2);
+    close(*lengths.first().expect("first dash"), *lengths.last().expect("last dash"), 0.01);
 }

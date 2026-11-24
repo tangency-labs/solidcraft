@@ -86,15 +86,9 @@ pub(super) fn header(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mu
     let done_width = done_content + action_padding;
     let preview_width = (inner_width - cancel_width - done_width - hint_width - 3.0 * gap).clamp(minimum_preview, preferred_preview);
     let symbol = Rect::from_min_size(rect.min + vec2(t.space_12, t.space_8), vec2(preview_width, t.form_header_height + t.space_4));
-    // The real symbol drawing from geom::weld belongs to a later PR; this is its model-icon placeholder.
     let preview = at_button(ui, m, symbol, "symbol", "", Button::Normal).backing_on_hover_text(tr("ui.weld.symbol_tip"));
     preview.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.symbol_tip")));
-    let symbol_icon = Rect::from_center_size(symbol.center(), vec2(t.control_height + t.space_4, t.control_height + t.space_4));
-    kit::icons::paint_icon(ui.painter(), symbol_icon, "weld_symbol", 1.0);
-    #[cfg(test)]
-    {
-        m.symbol_icon = Some(symbol_icon);
-    }
+    let symbol_defined = symbol::paint(ui, symbol, state, t);
     if preview.clicked() {
         *event = WeldPanelEvent::DefineSymbol;
     }
@@ -102,7 +96,7 @@ pub(super) fn header(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mu
     let cancel = Rect::from_center_size(pos2(done.left() - gap - cancel_width / 2.0, rect.center().y), vec2(cancel_width, t.control_height));
     let hint = Rect::from_min_size(pos2(cancel.left() - gap - hint_width, symbol.top()), vec2(hint_width, symbol.height()));
     let mut job = egui::text::LayoutJob::single_section(
-        tr("ui.weld.symbol").into(),
+        tr(if symbol_defined { "ui.weld.symbol" } else { "ui.weld.symbol_undefined" }).into(),
         egui::TextFormat {
             font_id: FontId::proportional(t.font_caption),
             color: t.form_dim,
