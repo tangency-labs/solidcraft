@@ -1976,6 +1976,10 @@ enum Rec {
 
 /// `Ok(value)` or `Err(status)` of a kernel result; an unported callee returns the
 /// deferral from the enclosing function.
+/// The status upstream's `sm_SurfaceDropPoint` returns when no tolerance drops the point
+/// (`SM_ERR`), which the Rust side answers with `None`.
+const SM_ERR_DROP_MISS: f64 = 1001.0;
+
 macro_rules! try_status {
     ($e:expr) => {
         match $e {
@@ -2088,7 +2092,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 v3(*pnt),
                 *tol
             )) {
-                Ok(sols) => {
+                Ok(Some(sols)) => {
                     o.extend([0.0, sols.len() as f64]);
                     for n in 0..sols.len() {
                         if let Some(sol) = sols.get(n) {
@@ -2100,6 +2104,8 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                         }
                     }
                 }
+                // the miss is upstream's `SM_ERR` ("Unable to drop point")
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0]),
                 Err(st) => o.extend([st, 0.0]),
             }
         }
@@ -2126,13 +2132,15 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 *tol,
             );
             match try_status!(r) {
-                Ok(x) => {
+                Ok(Some(x)) => {
                     o.push(0.0);
                     // (the C++ dumps the SmBSplineCurve outputs' NURBs)
                     dump_bcurve(&mut o, x.curve_3d.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface1_uv_curve.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface2_uv_curve.as_ref().and_then(b_spline_part));
                 }
+                // a point that drops nowhere: upstream returns the drop's `SM_ERR`
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0, 0.0, 0.0]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }
             o.extend([d.x, d.y, d.z]);

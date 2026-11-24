@@ -76,9 +76,10 @@
 //!   fillet B-rep ([`BlendFailure::FilletEdgeMatchesNoBrepEdge`]), two rails whose crossing
 //!   the local solve did not find ([`BlendFailure::RailCrossingNotConverged`]). A mate's
 //!   face whose surface is not of a B-spline class is an unsupported kind
-//!   ([`BlendFailure::MateFaceSurfaceNotBSpline`]). The surface drop's miss stays
-//!   [`BlendFailure::StageFailed`] (`SM_ERR`), not reviewed yet: its only caller swallows
-//!   it, so it is control flow, to become a value.
+//!   ([`BlendFailure::MateFaceSurfaceNotBSpline`]). The surface drop's miss (upstream's
+//!   `SM_ERR` "Unable to drop point") is control flow, not a failure: every caller takes
+//!   it as "no curve through these points", so [`surface_drop_point`] and
+//!   [`two_pnts_intersection`] answer it with `None`.
 //! - **A rail the fillet B-rep splits** (WR-19502, not upstream).
 //!   [`FilletBrep::fillet_brep_pieces_along`] finds the edges of the stitched fillet B-rep
 //!   that cover a rail end to end where none matches it whole, so that the edge map can
@@ -2909,10 +2910,14 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
 /// starting at `approx_tol / 100` and multiplied by 10 up to four times until a solution
 /// is found.
 ///
+/// `None` when no tolerance finds a solution (upstream's `SM_ERR` "Unable to drop
+/// point"): the point is not on the surface after all. Its callers take that as "no
+/// curve here" and go on, so it is an answer, not a failure.
+///
 /// # Errors
 ///
-/// A blend failure (`SM_ERR`) when no tolerance finds a solution; those of the
-/// point solve.
+/// A blend failure (`SM_ERR_NULL_POINTER`) when the surface cache cannot be built; those
+/// of the point solve.
 ///
 /// `handle` names `surface` in the solutions (upstream's solutions point at it).
 pub fn surface_drop_point<O: SolutionObject>(
@@ -2921,7 +2926,7 @@ pub fn surface_drop_point<O: SolutionObject>(
     handle: Option<O>,
     pnt: Point3,
     approx_tol: f64,
-) -> Result<SolutionArray<O>> {
+) -> Result<Option<SolutionArray<O>>> {
     // the surface cache the solves below use; a surface whose cache cannot be built
     // (its Bezier decomposition fails, UB-166's u direction) is a null pointer here
     if let Err(e) = get_surface_cache(k, surface, handle) {
@@ -2959,13 +2964,13 @@ pub fn surface_drop_point<O: SolutionObject>(
             SolutionRequested::All,
         )?;
         if !solutions.is_empty() {
-            return Ok(solutions);
+            return Ok(Some(solutions));
         }
         dropping_tol *= 10.0;
     }
 
     // Unable to drop point
-    Err(stage_failed(OP_SURFACE_DROP_POINT))
+    Ok(None)
 }
 
 /// Whether the surface is closed in `param` over `domain` (`IsClosed`).
@@ -2990,6 +2995,10 @@ fn is_closed(
 /// `solutions.len() == 2` seam test (cpp:286) counts what upstream counts (review of
 /// #264; with the object-less handle the tolerance was only `100 * EFF_ZERO * (1 + |s|)`).
 ///
+/// `None` when a point does not drop onto a surface ([`surface_drop_point`]'s `None`,
+/// upstream's `SM_ERR` from that drop), before `direction` is touched: there is no curve
+/// through the points.
+///
 /// # Errors
 ///
 /// Those of the point drops ([`surface_drop_point`]) and of
@@ -3005,7 +3014,7 @@ pub fn two_pnts_intersection(
     surf1: &Surface,
     surf2: &Surface,
     tol_3d: f64,
-) -> Result<PointIntersection> {
+) -> Result<Option<PointIntersection>> {
     // surface size locals
     let domain1 = surf1.natural_uv_domain_with_nurb(k)?;
     let domain2 = surf2.natural_uv_domain_with_nurb(k)?;
@@ -3018,13 +3027,16 @@ pub fn two_pnts_intersection(
     let mut surface1_points: Vec<Point2> = Vec::new();
     let mut surface2_points: Vec<Point2> = Vec::new();
     // (the solutions name the surface they were dropped onto, as upstream's do)
-    let solutions = surface_drop_point(
+    let Some(solutions) = surface_drop_point(
         k,
         surf1,
         Some(SurfaceHandle(surf1)),
         start_pnt,
         dropping_tol,
-    )?;
+    )?
+    else {
+        return Ok(None);
+    };
     let mut index11 = 0;
     // Please note that it is possible that this point lies on the seam of a closed surface.
     if solutions.len() == 2 {
@@ -3040,13 +3052,16 @@ pub fn two_pnts_intersection(
     let uv11 = solution_uv(&solutions, index11);
 
     // Drop start point onto surf2 - watch for closed surfaces
-    let solutions = surface_drop_point(
+    let Some(solutions) = surface_drop_point(
         k,
         surf2,
         Some(SurfaceHandle(surf2)),
         start_pnt,
         dropping_tol,
-    )?;
+    )?
+    else {
+        return Ok(None);
+    };
     let mut index21 = 0;
     if solutions.len() == 2 {
         // Closed surface
@@ -3067,8 +3082,11 @@ pub fn two_pnts_intersection(
     // when given a stop point - drop it onto the surfaces
     if let Some(end_pnt) = opt_end_pnt {
         // Drop end point onto surf1 - watch for closed surfaces
-        let solutions =
-            surface_drop_point(k, surf1, Some(SurfaceHandle(surf1)), end_pnt, dropping_tol)?;
+        let Some(solutions) =
+            surface_drop_point(k, surf1, Some(SurfaceHandle(surf1)), end_pnt, dropping_tol)?
+        else {
+            return Ok(None);
+        };
         let mut index12 = 0;
         if solutions.len() == 2 {
             // Closed surface
@@ -3084,8 +3102,11 @@ pub fn two_pnts_intersection(
         let uv12 = solution_uv(&solutions, index12);
 
         // Drop end point onto surf2 - watch for closed surfaces
-        let solutions =
-            surface_drop_point(k, surf2, Some(SurfaceHandle(surf2)), end_pnt, dropping_tol)?;
+        let Some(solutions) =
+            surface_drop_point(k, surf2, Some(SurfaceHandle(surf2)), end_pnt, dropping_tol)?
+        else {
+            return Ok(None);
+        };
         let mut index22 = 0;
         if solutions.len() == 2 {
             // Closed surface
@@ -3114,18 +3135,20 @@ pub fn two_pnts_intersection(
         }
     };
 
-    surf1.point_based_surface_intersect(
-        k,
-        &domain1,
-        surf2,
-        &domain2,
-        &surface1_points,
-        &surface2_points,
-        [false, false],
-        [Some(*direction), opt_end_direction],
-        Some(ssi_tol),
-        Some(angle_tol),
-    )
+    surf1
+        .point_based_surface_intersect(
+            k,
+            &domain1,
+            surf2,
+            &domain2,
+            &surface1_points,
+            &surface2_points,
+            [false, false],
+            [Some(*direction), opt_end_direction],
+            Some(ssi_tol),
+            Some(angle_tol),
+        )
+        .map(Some)
 }
 
 /// `DropVectors(uv, TRUE, TRUE, 1, &direction, &uv_dir)`.
@@ -4406,13 +4429,6 @@ pub fn set_surface_closure(k: &Kernel, surf: &Surface, domain: &Extent2d) -> Res
     Ok(ret)
 }
 
-/// A step that could not go on, not reviewed yet: a stage failure keeping `SM_ERR`. Only
-/// the surface drop's miss builds it, which its only caller swallows.
-#[track_caller]
-fn stage_failed(op: &'static str) -> SolidError {
-    SolidError::blend(op, BlendFailure::StageFailed)
-}
-
 /// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces.
 #[track_caller]
 fn defect(op: &'static str, why: &'static str) -> SolidError {
@@ -4847,6 +4863,104 @@ mod tests {
         assert!(check_seam_on(&s, &mut uv, 1e-9, SurfParamType::V));
         assert_eq!(uv, Point2::new(0.3, 0.0));
         assert!(!check_seam_on(&s, &mut uv, 1e-9, SurfParamType::Neither));
+    }
+
+    /// A flat bilinear patch over [0,3] x [0,2] at height `z`.
+    fn flat_patch(z: f64) -> Surface {
+        let net = vec![
+            vec![CPoint::new(0.0, 0.0, z, NOW), CPoint::new(0.0, 2.0, z, NOW)],
+            vec![CPoint::new(3.0, 0.0, z, NOW), CPoint::new(3.0, 2.0, z, NOW)],
+        ];
+        let nurb = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// #19827 (TE-B-F1): a point that no tolerance drops onto the surface is an answer,
+    /// `None`, not an error (upstream's `SM_ERR` "Unable to drop point"); a point on the
+    /// surface drops.
+    #[test]
+    fn a_point_off_the_surface_drops_to_none() {
+        let k = &Kernel::default();
+        let s = bilinear_patch();
+        let miss = surface_drop_point(
+            k,
+            &s,
+            Some(SurfaceHandle(&s)),
+            Point3::new(1.0, 1.0, 5.0),
+            1e-3,
+        )
+        .unwrap();
+        assert!(miss.is_none());
+        let hit = surface_drop_point(
+            k,
+            &s,
+            Some(SurfaceHandle(&s)),
+            Point3::new(0.0, 0.0, 0.0),
+            1e-3,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!hit.is_empty());
+    }
+
+    /// #19827 (TE-B-F1): a start point that drops onto one surface but not the other gives
+    /// no curve (`None`), before the direction is unitised, as upstream returns the drop's
+    /// status before `Unitize`.
+    #[test]
+    fn two_points_off_a_surface_give_no_curve_and_keep_the_direction() {
+        let k = &Kernel::default();
+        let s1 = flat_patch(0.0);
+        let s2 = flat_patch(10.0);
+        // off both surfaces: the first drop misses
+        let mut dir = Vec3::new(0.0, 2.0, 0.0);
+        let r = two_pnts_intersection(
+            k,
+            Point3::new(1.0, 1.0, 5.0),
+            None,
+            &mut dir,
+            None,
+            &s1,
+            &s2,
+            1e-6,
+        )
+        .unwrap();
+        assert!(r.is_none());
+        assert_eq!(dir, Vec3::new(0.0, 2.0, 0.0));
+        // on the first surface only: the second drop misses
+        let r = two_pnts_intersection(
+            k,
+            Point3::new(1.0, 1.0, 0.0),
+            None,
+            &mut dir,
+            None,
+            &s1,
+            &s2,
+            1e-6,
+        )
+        .unwrap();
+        assert!(r.is_none());
+        assert_eq!(dir, Vec3::new(0.0, 2.0, 0.0));
+        // a start on both and an end off the second: the end drop misses
+        let r = two_pnts_intersection(
+            k,
+            Point3::new(1.0, 1.0, 0.0),
+            Some(Point3::new(2.0, 1.0, 3.0)),
+            &mut dir,
+            None,
+            &s1,
+            &s1,
+            1e-6,
+        )
+        .unwrap();
+        assert!(r.is_none());
+        assert_eq!(dir, Vec3::new(0.0, 2.0, 0.0));
     }
 
     #[test]
