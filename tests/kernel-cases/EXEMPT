@@ -68,6 +68,7 @@ construct.axis                    builds with the first construct.axis.* method 
 construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.plane.square_to_line    a plane through a point, square to a line: plane_through_point_square_to_line_* (crates/engine/src/construct_tests.rs)
 construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.point.average           the point at the average of two or more points: tested in crates/engine/src/construct_tests.rs
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
@@ -192,6 +193,7 @@ file.slicers                      a listing of slicers
 file.trash                       file guards and isolated trash: tested in crates/engine/src/cmd/file_library.rs tests
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
+frame.gusset                      support contact, placement and editing in engine frame_tests.rs and UI dialogs_frame_tests.rs
 frame.multi_trim                  sets one corner of a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
 frame.plate                       tested in crates/engine/src/cmd/frame_tests.rs and crates/ui-egui/src/dialogs_frame_tests.rs
 frame.profile.list                a listing of the profile library
