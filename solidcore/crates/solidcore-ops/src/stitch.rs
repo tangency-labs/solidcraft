@@ -23,7 +23,9 @@
 //! partitions the gluing made and are removed. The other reading, an enclosed cavity, would
 //! leave the sheet void on both sides, a sheet face and not a solid. A space closed only
 //! through material (a sheet inside a cavity) comes out void by the same parity: no new
-//! material, so the manifold stitch's result is kept, reported not closed.
+//! material, so the manifold stitch's result is kept, reported not closed. A body that comes
+//! in already closed but with no material region (a union of sheets glues them into a closed
+//! shell and leaves every region void) gets the same nesting: the space it encloses is material.
 //!
 //! [`stitch`] and [`merge_faces`] take their body by value and give the result: an application
 //! that keeps its input copies it first ([`Body::copy`]); [`gather`] and [`sew`] copy their
@@ -32,14 +34,18 @@
 
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::region_material;
+use solidcore::query::brep::BrepQuery;
 use solidcore::topology::brep::p1 as bl;
+use solidcore::topology::brep::p1::SetRegionVoidType;
 use solidcore::topology::brep::p2::{is_manifold_solid, ArenaNotifyState};
 use solidcore::topology::brep::p3::{
     brep_copy, delete_face, merge_brep, notify_serial, orient_trimmed_surfaces, topology_ref,
     with_kernel_callbacks, DeleteFaceOptions,
 };
 use solidcore::topology::brep::p4::stitch_faces;
-use solidcore::topology::brep::p5::remove_topological_edges_and_vertices;
+use solidcore::topology::brep::p5::{
+    find_and_set_infinite_region, remove_topological_edges_and_vertices,
+};
 use solidcore::topology::edgeuse::p1::edge_is_lamina;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::topology_traverser::Marks;
@@ -85,6 +91,8 @@ pub fn stitch(body: Body, tolerance: f64) -> Result<(Body, bool)> {
                 Ok(b) => b,
                 Err(e) => return Ok(Err(e)),
             };
+        } else if let Err(e) = fill_closed_shell(k, &mut b) {
+            return Ok(Err(status(e)));
         }
         let oriented = with_kernel_callbacks(k, &mut b, |k, b, env| {
             let mut marks = Marks::default();
@@ -183,6 +191,28 @@ pub fn open_edges(body: &Body) -> Result<Vec<usize>> {
         }
         Ok(open)
     })
+}
+
+/// A body with no lamina edge that is a manifold solid but has no material region (a closed
+/// shell that came in already glued, such as a union of sheets) gets its void flags set by
+/// nesting from the infinite region, as a stitch that closes the shell itself would: the space
+/// the shell encloses becomes material. A body with a material region is left as it is.
+fn fill_closed_shell(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
+    b.refresh_cached_topology();
+    if !is_manifold_solid(b)? {
+        return Ok(());
+    }
+    for r in bl::regions(b, None)? {
+        if region_material(b, r)? {
+            return Ok(());
+        }
+    }
+    let old = b.editing_enabled();
+    b.set_editing_enabled(false);
+    let query = BrepQuery::of_brep(b);
+    let r = find_and_set_infinite_region(k, b, &query, None, SetRegionVoidType::NestedSolid, None);
+    b.set_editing_enabled(old);
+    r
 }
 
 /// Whether `tolerance` is one a stitch takes: finite and positive.
