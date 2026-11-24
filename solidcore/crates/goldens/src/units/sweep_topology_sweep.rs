@@ -1733,7 +1733,11 @@ mod moved_rows {
             for &v in &vertices {
                 allowed.push([at(v), image(v)]);
             }
-            assert!(ends.len() % 2 == 0, "{name}");
+            // every output edge has both ends (`whole` is the status, the six counts, edges
+            // at index 5, then the edges without two vertices), so `ends` holds a pair
+            // per output edge and the checks below see them all
+            assert_eq!(whole[7], 0, "{name}: an edge without two vertices");
+            assert_eq!(ends.len(), 2 * whole[5] as usize, "{name}: an end pair per output edge");
             assert!(!ends.is_empty(), "{name}: no closed edge recorded");
             for pair in ends.chunks(2) {
                 let (p, q) = (pair[0], pair[1]);

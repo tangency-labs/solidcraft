@@ -1647,6 +1647,14 @@ mod revolve_analytic_rows {
             let b = bodies.pop().unwrap();
             assert_eq!(out.values["status"], [0.0], "{name}");
             assert_eq!(out.values["counts"], [1.0, 1.0, 2.0], "{name}");
+            // the one face is the analytic sphere, not a surface of revolution
+            let faces = b.face_list();
+            assert_eq!(faces.len(), 1, "{name}: one face");
+            let surface = b.face(faces[0]).unwrap().surface.as_ref().unwrap();
+            assert!(
+                matches!(surface.kind(), solidcore::surface::surface::SurfaceKind::Sphere(_)),
+                "{name}: the face is a sphere"
+            );
 
             let vertices = p1::vertices(&b, None).unwrap();
             let recorded = out.values["linear_vertices"].as_chunks::<3>().0.to_vec();

@@ -709,9 +709,13 @@ mod moved_rows {
                 .unwrap();
             let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
             assert_eq!(i.op, 1, "{name}: a partial cone");
-            let (result, _, tolerance) = run(&i);
+            let (result, faces, tolerance) = run(&i);
             assert!(i.data[1] > 0.0 && i.data[1] <= tolerance, "{name}: height {}", i.data[1]);
             let err = result.expect_err(name);
+            // the refusal is the sweep's: `create_partial_rotational_sweep` has built the
+            // planar profile face it turns, and no swept face follows (the API layer then
+            // drops this B-rep)
+            assert_eq!(faces, 1, "{name}: the profile face only");
             assert!(
                 matches!(err.sweep_failure(), Some(SweepFailure::SweptEdgeCurveDropped)),
                 "{name}: {err:?}"

@@ -825,6 +825,7 @@ mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
     use super::*;
     use crate::interval::{sin_cos_deg, Iv};
+    use solidcore::surface::surface::SurfaceKind;
 
     /// The rows #14425 moved whose samples moved (all profiles in a plane through the axis).
     const SAMPLE_ROWS: [&str; 11] = [
@@ -1078,6 +1079,29 @@ mod moved_rows {
                     );
                 }
             }
+            // the open sheet reaches both ends of its turn: each profile end and its exact
+            // image turned through `theta` (`w = q - c` keeps its axial part `h`, and its
+            // parts along `u` and `n0` turn to `dirs` and `a x dirs`) is a vertex of the
+            // body within that vertex's own tolerance
+            if !name.starts_with("capped_") {
+                let vertices = solidcore::topology::brep::p1::vertices(&b, None).unwrap();
+                for piece in &pieces {
+                    for q in piece.on() {
+                        let w = sub(v(q), v(c));
+                        let (h, s, t) = (dot(a, w), dot(u, w), dot(n0, w));
+                        for (end, &dir) in dirs.iter().enumerate() {
+                            let image =
+                                add(add(add(v(c), scale(a, h)), scale(dir, s)), scale(cross(a, dir), t));
+                            let reached = vertices.iter().any(|&vx| {
+                                let vr = b.vertex(vx).unwrap();
+                                let gap = sub(v(vr.point), image);
+                                dot(gap, gap).sqrt().hi <= vr.tolerance
+                            });
+                            assert!(reached, "{name}: profile point {q:?} turned to end {end} is no vertex");
+                        }
+                    }
+                }
+            }
             let k = Kernel::default();
             let mut again = Vec::new();
             construction_geometry(&k, &b, true, &mut again).unwrap();
@@ -1150,6 +1174,18 @@ mod moved_rows {
                     })
                     .collect();
                 assert!(!found.is_empty(), "{name}: face {f:?} on no carrier");
+                // the face's surface is its carrier's analytic kind: an end plane a plane, a
+                // turned segment a plane or cone (a cylinder is a `Cone` of half-angle
+                // zero), a turned arc a sphere or torus
+                let kind = surface.kind();
+                let analytic = match found[0] {
+                    Carrier::Cap(_) => matches!(kind, SurfaceKind::Plane(_)),
+                    Carrier::Side(n) => match pieces[n] {
+                        Piece::Segment(..) => matches!(kind, SurfaceKind::Plane(_) | SurfaceKind::Cone(_)),
+                        Piece::Arc { .. } => matches!(kind, SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)),
+                    },
+                };
+                assert!(analytic, "{name}: face {f:?} on {:?} is not its analytic kind", found[0]);
                 // Several carriers only when they are one surface: profile segments mirrored
                 // across the axis turn to the same cone, so each one's ends are on every
                 // other's turned carrier (within the face's tolerance).

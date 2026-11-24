@@ -1614,11 +1614,24 @@ mod revolve_analytic_rows {
 
             // the five tolerances are the edge's and its vertices' (the fixture's), which
             // the analytic surface does not touch: the face, start curve and edge take the
-            // edge's; each side takes its vertex's, or stays unset (-1) on a closed edge
+            // edge's. Each side takes its own vertex's (the start vertex's, then the
+            // other's) whether or not its arc is kept (a vertex on the axis sweeps a
+            // degenerate arc, dropped, yet its side's tolerance is set); on a closed edge
+            // the one vertex sweeps one side, so exactly one side is set and the other
+            // stays unset (-1). A side whose arc is kept (its curve index set) is set.
             let (vtol, etol) = ([rec[10], rec[11]], rec[12]);
             assert_eq!(rec[AFTER_SAMPLES..AFTER_SAMPLES + 3], [etol; 3], "{name}: edge tols");
-            for t in &rec[AFTER_SAMPLES + 3..NORMAL] {
-                assert!(vtol.contains(t) || *t == -1.0, "{name}: vertex tol {t}");
+            let index = |o: usize| (rec[IDX + o] >= 0.0).then(|| rec[IDX + o] as usize);
+            let sides = [rec[AFTER_SAMPLES + 3], rec[AFTER_SAMPLES + 4]];
+            let set = [0, 1].map(|j| sides[j] == vtol[j]);
+            for j in 0..2 {
+                assert!(set[j] || sides[j] == -1.0, "{name}: side {j} tol {} is not its vertex's", sides[j]);
+                assert!(index(2 + j).is_none() || set[j], "{name}: side {j} has an arc but no tolerance");
+            }
+            if rec[3] == 0.0 {
+                assert!(set[0] && set[1], "{name}: an open edge sets both sides: {sides:?}");
+            } else {
+                assert!(set[0] != set[1], "{name}: a closed edge sets one side: {sides:?}");
             }
 
             // (a) the surface: every sample on the carrier turned into the sector
@@ -1685,6 +1698,12 @@ mod revolve_analytic_rows {
                     .collect();
                 at += 3 + 3 * N_CURVE_SAMPLES;
                 let on = |f: &dyn Fn(&[f64; 2]) -> bool| ps.iter().all(f);
+                // every sample in the domain, so a line on one of its sides is that side
+                let (ulo, uhi, vlo, vhi) = (u0.min(u1), u0.max(u1), v0.min(v1), v0.max(v1));
+                assert!(
+                    on(&|q| (ulo..=uhi).contains(&q[0]) && (vlo..=vhi).contains(&q[1])),
+                    "{name}: uv trim {t} outside the domain: {ps:?}"
+                );
                 assert!(
                     on(&|q| q[0] == u0) || on(&|q| q[0] == u1) || on(&|q| q[1] == v0) || on(&|q| q[1] == v1),
                     "{name}: uv trim {t} off the domain boundary: {ps:?}"
@@ -1747,7 +1766,6 @@ mod revolve_analytic_rows {
             }
 
             // the curve indices name the right boundaries
-            let index = |o: usize| (rec[IDX + o] >= 0.0).then(|| rec[IDX + o] as usize);
             if let Some(sc) = index(0) {
                 assert!(trims[sc].1, "{name}: start curve in the start half-plane");
             }
