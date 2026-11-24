@@ -1153,8 +1153,9 @@ fn loose_bound(setup: &Setup<'_>, net: &Nurbs) -> Option<f64> {
     let mut reach = 0.0_f64;
     for c in net.pw.chunks_exact(4) {
         let [px, py, pz, w] = [*c.first()?, *c.get(1)?, *c.get(2)?, *c.get(3)?];
-        let positive = w > 0.0;
-        if !positive {
+        // (a NaN or infinite coordinate or weight gives no bound: `f64::max` drops a NaN)
+        let finite = [px, py, pz, w].iter().all(|v| v.is_finite());
+        if !(finite && w > 0.0) {
             return None;
         }
         let w = Ivl::from(w);
@@ -1162,8 +1163,13 @@ fn loose_bound(setup: &Setup<'_>, net: &Nurbs) -> Option<f64> {
         let d = p
             .iter()
             .zip(&setup.o)
-            .fold(zero(), |acc, (&a, &b)| acc + (a - b) * (a - b));
-        reach = reach.max(d.sqrt().hi);
+            .fold(zero(), |acc, (&a, &b)| acc + (a - b) * (a - b))
+            .sqrt()
+            .hi;
+        if !d.is_finite() {
+            return None;
+        }
+        reach = reach.max(d);
     }
     let (lk, q, nl) = setup.lam;
     let h = setup
@@ -1383,6 +1389,90 @@ mod tests {
         let gap = (p - n).length();
         assert!(gap > 1.0e-8, "the snap tears {gap:e}");
         assert!(gap <= b, "{gap:e} over the bound {b:e}");
+    }
+
+    /// A net with a NaN control point gives no bound (`f64::max` would drop it from the
+    /// loose bound's reach).
+    #[test]
+    fn a_nan_net_gives_no_bound() {
+        let k = Kernel::default();
+        for (name, s, _, _) in cones(&k) {
+            let (mut net, _) = nets(&k, &s, 0.0);
+            if let Some(c) = net.pw.get_mut(0) {
+                *c = f64::NAN;
+            }
+            let b = net_to_surface_bound(&k, &s, &net).unwrap();
+            assert!(b.is_none(), "{name}: {b:?}");
+        }
+    }
+
+    /// The kept-trim cover's bound (`trim_distance_bound`) on a full-turn cylinder counts the
+    /// cone's distance off its net (#20643 review): the trim `W` is an iso line `e` before the
+    /// `u` end, the curve `C` the net's image of it (a straight line along the axis), and
+    /// the surface's image of `W` is the formula point, off the net by up to the residual.
+    /// The bound holds the formula point's distance from `C` and the residual. (Within the
+    /// seam snap, about 1e-7 before the end, no bound is given.)
+    #[test]
+    fn a_cylinders_kept_trim_bound_counts_its_net_residual() {
+        use super::super::polynomial_pieces::trim_distance_bound;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let mut c = Cone::new_bounded(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            12.5,
+            12.5,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let s = Surface::from(c.clone());
+        let residual =
+            net_to_surface_bound(&k, &s, &NetSurface::of(&k, &s, &[]).unwrap().unwrap().net)
+                .unwrap()
+                .unwrap();
+        let d = c.rev.base.natural_uv_domain();
+        let (v0, v1) = (d.v_interval().min(), d.v_interval().max());
+        let line = |a: Point3, b: Point3| {
+            let n = NurbCurve::new(
+                vec![
+                    CPoint::new(a.x, a.y, a.z, NOW),
+                    CPoint::new(b.x, b.y, b.z, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(n, 3, false)
+        };
+        for e in [1e-2, 1e-3, 3e-4, 1e-4, 1e-5, 1e-6, 3e-7, 1.5e-7] {
+            let u = d.u_interval().max() - e;
+            let n0 = c.rev.base.evaluate_point(Point2::new(u, v0)).unwrap();
+            let n1 = c.rev.base.evaluate_point(Point2::new(u, v1)).unwrap();
+            let curve = line(n0, n1);
+            let uv = line(Point3::new(u, v0, 0.0), Point3::new(u, v1, 0.0));
+            let p = s
+                .evaluate_point(&k, Point2::new(u, 0.5 * (v0 + v1)))
+                .unwrap();
+            let axis = (n1 - n0) * (1.0 / (n1 - n0).length());
+            let off = p - n0;
+            let across = (off - axis * off.dot(axis)).length();
+            let g = trim_distance_bound(&k, &curve, [0.0, 1.0], &uv, [0.0, 1.0], &s, 1.0e-14, 0.0)
+                .unwrap()
+                .unwrap();
+            assert!(g >= across, "{e:e}: {g:e} under {across:e}");
+            assert!(
+                g >= residual,
+                "{e:e}: {g:e} under the residual {residual:e}"
+            );
+        }
     }
 
     /// An offset of a cone evaluates the cone's formula point plus the distance along its

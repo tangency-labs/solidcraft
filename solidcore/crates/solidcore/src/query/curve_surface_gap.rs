@@ -103,8 +103,10 @@ impl NetSurface {
     /// (`query::seam_bound` refuses it). A cone (or cylinder) evaluates by its formula, not
     /// its net: the plane, structured-trim and bisection bounds count the distance between
     /// the two over the net's box ([`net_to_surface_bound`]), so its net is not continued past
-    /// its ends; [`curve_uv_gap_bound`], [`curve_uv_gap_lower_bound`] and
-    /// [`curve_piece_gap_bound`] do not yet (tangency-labs/solidcraft#21600).
+    /// its ends, and so do [`curve_face_gap_bound`] and the kept-trim cover's
+    /// `trim_distance_bound` ([`cone_net_offset`]); [`curve_uv_gap_bound`],
+    /// [`curve_uv_gap_lower_bound`] and [`curve_piece_gap_bound`] do not yet
+    /// (tangency-labs/solidcraft#21600).
     pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
@@ -1317,7 +1319,46 @@ pub fn curve_face_gap_bound(
     else {
         return Ok(None);
     };
-    certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)
+    // (#20643 review: the bound is on the net's image; a cone's distance off its net added)
+    let Some(off) = cone_net_offset(k, &surface, &net)? else {
+        return Ok(None);
+    };
+    let gap = certified_gap(k, curve, &correspondence, &net, range, FIRST_PIECES, floor)?;
+    Ok(gap.and_then(|g| plus_net_offset(g, off)))
+}
+
+/// Not upstream (#20643): the distance from the net `net` of a cone (or cylinder) `surface`
+/// to the point the cone evaluates ([`net_to_surface_bound`]), for a bound taken on a net
+/// [`NetSurface::of`] gives to hold for the surface; `0` for any other surface (whose net is
+/// its evaluation, or whose caller adds the net's own bound), and for an offset's net
+/// ([`bisection_residual`] bounds those). `None` where a cone's is not enclosed.
+///
+/// # Errors
+///
+/// The kernel's cancelled status.
+pub(super) fn cone_net_offset(
+    k: &Kernel,
+    surface: &Surface,
+    net: &NetSurface,
+) -> Result<Option<f64>> {
+    use crate::surface::surface::SurfaceKind;
+    if net.offset.is_none() && matches!(surface.kind(), SurfaceKind::Cone(_)) {
+        net_to_surface_bound(k, surface, &net.net)
+    } else {
+        Ok(Some(0.0))
+    }
+}
+
+/// Not upstream (#20643): `bound` plus `off` ([`cone_net_offset`]) rounded up, `bound` as it
+/// is for an `off` of `0` (an interval sum rounds outward, so adding `0` would move it an
+/// ulp); `None` where it is not finite.
+pub(super) fn plus_net_offset(bound: f64, off: f64) -> Option<f64> {
+    let b = if off > 0.0 {
+        (Ivl::from(bound) + Ivl::from(off)).hi
+    } else {
+        bound
+    };
+    b.is_finite().then_some(b)
 }
 
 /// Not upstream (#18166): a proved upper bound on the distance from every point of `curve`
@@ -3889,6 +3930,68 @@ mod tests {
                 .unwrap()
                 .is_none()
         }));
+    }
+
+    /// A cylinder face's bound counts the cone's distance off its net (#20643 review): each
+    /// curve is the face net's image of an axial line at `e` before the `u` end, so its gap
+    /// to the net is rounding, and the face's point there is the formula's, off it by up to
+    /// the residual ([`net_to_surface_bound`]). The bound holds the formula point's distance
+    /// from the line and the residual. (Within the seam snap, about 1e-7 before the end, the
+    /// curve's nearest points jump across the seam and no bound is given.)
+    #[test]
+    fn a_cylinder_faces_gap_bound_counts_its_net_residual() {
+        use crate::surface::surface::SurfaceKind;
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 12.5, 3.0)
+            .unwrap();
+        let mut checked = 0;
+        for f in crate::query::api_queries::get_faces(&b).unwrap() {
+            let rec = b.face(f).unwrap();
+            let Some(s) = rec.surface.as_ref() else {
+                continue;
+            };
+            let s = s.clone_for_evaluation().unwrap();
+            let SurfaceKind::Cone(c) = s.kind() else {
+                continue;
+            };
+            let d = &rec.uv_domain;
+            let (v0, v1) = (d.v_interval().min(), d.v_interval().max());
+            for e in [1e-2, 1e-3, 3e-4, 1e-4, 1e-5, 1e-6, 3e-7, 1.5e-7] {
+                let u = d.u_interval().max() - e;
+                let n0 = c.rev.base.evaluate_point(Point2::new(u, v0)).unwrap();
+                let n1 = c.rev.base.evaluate_point(Point2::new(u, v1)).unwrap();
+                let line = NurbCurve::new(
+                    vec![
+                        CPoint::new(n0.x, n0.y, n0.z, NOW),
+                        CPoint::new(n1.x, n1.y, n1.z, NOW),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap();
+                let line = BSplineCurve::from_nurb(line, 3, false);
+                let axis = (n1 - n0) * (1.0 / (n1 - n0).length());
+                let p = s
+                    .evaluate_point(&k, Point2::new(u, 0.5 * (v0 + v1)))
+                    .unwrap();
+                let off = p - n0;
+                let across = (off - axis * off.dot(axis)).length();
+                let g = curve_face_gap_bound(&k, &b, f, &line, [0.0, 1.0], 1e-14)
+                    .unwrap()
+                    .unwrap();
+                assert!(g >= across, "{e:e}: {g:e} under {across:e}");
+                let (net, _) = correspondence(&k, &s, d, &line, [0.0, 1.0])
+                    .unwrap()
+                    .unwrap();
+                let residual = net_to_surface_bound(&k, &s, &net.net).unwrap().unwrap();
+                assert!(
+                    g >= residual,
+                    "{e:e}: {g:e} under the residual {residual:e}"
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 1);
     }
 
     /// A curve bowing within a plane parallel to a box's face is bounded against the face

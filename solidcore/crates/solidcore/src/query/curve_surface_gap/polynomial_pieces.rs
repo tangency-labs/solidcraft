@@ -798,6 +798,16 @@ pub(crate) fn trim_distance_bound(
     let Some(net) = NetSurface::of(k, &surface, &probe)? else {
         return Ok(None);
     };
+    // (#20643 review: the pieces bound the net's image; a cone's distance off its net is
+    // taken off `accept` and added to the result, rounded up)
+    let Some(off) = super::cone_net_offset(k, &surface, &net)? else {
+        return Ok(None);
+    };
+    let accept = if off > 0.0 {
+        (Ivl::from(accept) - Ivl::from(off)).lo.max(0.0)
+    } else {
+        accept
+    };
     let (Some(cn), Some(wn)) = (stored_nurbs(curve), stored_nurbs(uv)) else {
         return Ok(None);
     };
@@ -952,7 +962,10 @@ pub(crate) fn trim_distance_bound(
         stack.push((mid, b, tm, tb, depth + 1));
         stack.push((a, mid, ta, tm, depth + 1));
     }
-    Ok(worst.is_finite().then_some(worst))
+    if !worst.is_finite() {
+        return Ok(None);
+    }
+    Ok(super::plus_net_offset(worst, off))
 }
 
 /// The ulps (of its middle) [`trim_distance_bound`] pulls each end of a piece's line in by,
