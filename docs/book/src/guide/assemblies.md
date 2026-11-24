@@ -179,10 +179,10 @@ solve and `joint.solve` gives the reason, instead of placing the part from old n
 plain number, or driving the value, drops that expression.
 
 **Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
-the saved first attachment's axes. Their expressions are evaluated once, as during creation;
-scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
-with X and Y initially zero for additional shifts from those positions. Assembly constraints
-keep their existing controls and reference geometry until changed to a plain joint.
+the saved first attachment's axes, and expressions typed for them follow their parameters just as
+Offset Z does; scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment
+positions, with X and Y initially zero for additional shifts from those positions. Assembly
+constraints keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -750,3 +750,111 @@ you tick, each with how many it matches, or with nothing typed lists everything 
 body it didn't find; the line under the field then says how many it hid, with **Undo**. Esc, **×**
 or the magnifier in the box ends the search and closes the box. Scripts and agents
 search the same way with `browser.find`.
+
+## Secondary joint alignment
+
+Joint creation and editing offer optional **Alignment 1** and **Alignment 2** inputs.
+Pick a planar face, a straight or circular edge, a cylindrical face's axis, a sketch line,
+or an axis/plane of construction geometry on the same occurrence as that side's primary
+face, circle, plane or axis origin. Planes supply their normal, straight lines their direction,
+and cylindrical faces their axis. Circular rims selected in the UI align by centre; the API also accepts their axis. The direction is projected square to the
+primary joint axis. The root origin widget can reference a root-side joint origin; it cannot silently stand for
+a different part's frame. Scripts may explicitly name an origin axis/plane in that side's
+component frame.
+
+Each alignment picker only offers references on its primary origin's exact occurrence.
+Hovering or clicking the other component leaves the confirmed reference and pose unchanged.
+A circular hole rim shows the **Circle center alignment** marker; cylindrical face and
+construction-axis references show their direction. An exact circular edge with a unique adjacent cylinder and end face supplies the persistent
+identity. Multiple possible cylinders are refused
+rather than choosing one arbitrarily.
+
+The UI orders the references by the solved motion: **Alignment 1** is on the moving
+component and **Alignment 2** on the fixed component, independently of primary pick order.
+With both references empty, hovering only highlights geometry and shows snap markers.
+Click the first reference before hovering the second to preview its temporary solution;
+leaving restores the confirmed solution. Wrong-component and degenerate picks are ignored.
+
+Circular rim references automatically use their center. The reference stores the cylindrical
+face and the adjacent face naming the picked rim. Its clocking direction is the vector from
+the primary origin to that circle centre, projected into the joint plane. Thus another hole
+can orient two plates even when the hole axes are parallel. The centre is recomputed when
+geometry changes; a lost/ambiguous rim or a centre on the primary axis is refused. Construction
+axes and cylindrical face directions retain direction semantics and refuse parallel axes.
+Previously saved directional references remain compatible without being reinterpreted.
+Assembly motion displays the solved body as solid and its original placement as the ghost;
+it never treats display-mesh volume drift as material removal.
+
+One **Invert alignment** checkbox reverses the relative secondary orientation. The authored **Angle**
+expression, component **Flip**, motion values, limits and degrees of freedom keep their meaning.
+After choosing the primary origins, picking and highlighting continue on the solved placement.
+An incomplete or invalid secondary input keeps the last valid pose while explaining the error.
+Once its counterpart is confirmed, hovering a valid reference previews that candidate
+temporarily; leaving it restores the authored pose, and only a click fills the selection.
+Cancel discards the operation; accepted edits can be undone.
+
+Preferences > Design offers **Invert joint selection order**, off by default. Its visible help
+explains moving-then-fixed selection when enabled. The primary fields retain their original
+**Component 1** and **Component 2** labels in either mode. Off preserves
+the fixed-then-moving primary pick order; on reverses the two primary input rows while the
+backend keeps the same fixed/moving origins. The preference is captured when a new Joint
+command opens: changing it never reorders a dialog in progress or an existing joint.
+Secondary alignment always starts with the actual moving component, independently of this
+preference. A hovered circular rim stays selectable across preview updates and small pointer
+movements within that hole's projected footprint; leaving that region restores the confirmed pose.
+
+References keep persistent geometry names or feature/curve identities through save/reopen,
+geometry changes and independent component copies. Missing, ambiguous, wrong-component,
+unsupported curve or parallel-axis references are errors. They never silently attach to nearby
+geometry. Clear removes the reference and keeps the current turn as a direction without following
+the cleared geometry. An invalid reference can also be cleared.
+
+Picking a circular hole rim as a primary origin keeps the unique cylindrical face and rim-end
+names, just like picking its cylindrical wall. The displayed hole center therefore remains a
+round origin when the first secondary alignment is added. A generic primary point/edge or an
+ambiguous/unnamed rim can still define a basic joint, but the dialog explains the limitation and
+disables secondary picking until compatible primary origins are selected. Nonzero Offset X/Y
+and nested occurrence paths still need a supported origin; no secondary reference is converted
+to a static frame. Offset Z remains available.
+Existing joints without secondary alignment keep their previous behavior.
+
+Scripts use `a_alignment` and `b_alignment` on `joint.create` or `joint.edit`:
+`{"face": "<persistent planar face name>", "occurrence": "<occurrence name>", "reverse": true}`,
+or a typed reference, for example
+`{"reference": {"type": "edge", "name": "<persistent edge name>"}, "occurrence": "<occurrence name>"}`.
+The other reference types are `circle_center` (`name` of the cylindrical face and `end` naming
+the adjacent rim face), `cylinder` (`name`), `construction` (`feature` id), `sketch_line`
+(`sketch` id and `curve` id), `construction_plane` (`feature` id), `origin_axis` (`axis`: X/Y/Z), and `origin_plane` (`plane`: XY/XZ/YZ).
+Omit a field to leave that side unchanged; pass `null` to clear it. Supplying `occurrence`
+also checks the exact picked instance of a shared definition.
+
+### Alignment preview in the Joint dialog
+
+In the right-hand **Joint** or **Edit Joint** panel, **Options > Preview alignment on hover**
+controls temporary secondary-alignment previews, including hole rims.
+It starts enabled each time a dialog opens. The checkbox belongs to that dialog
+and is not saved in Preferences or in the design.
+Turn it off to keep the confirmed pose while hovering. Click a reference to apply
+its alignment in either mode. Toggling it does not change primary origins,
+saved joints, reference validation or the command API.
+
+### Associative construction-axis references
+
+A construction axis can supply the secondary X direction of a face, circle, plane or axis
+origin. Use its feature ID, returned by the construction command:
+
+```json
+{"occurrence": 0, "plane": "XY", "x": {"reference": {"type": "construction", "feature": 17}}}
+```
+
+The same X object is accepted by `joint.origin` and inline origins in `joint.create` and
+`joint.edit`. The Joint dialog can pick the construction axis through its alignment fields.
+A string in `x` retains its legacy meaning: a persistent face name. Construction axes use
+the typed object above. Renaming the feature keeps its identity.
+
+For positional clocking, create two construction points attached to the selected hole
+centres, then a two-point construction axis from the primary centre to the other centre.
+The joint resolves that axis again and projects its direction square to primary Z; the
+primary origin and Z retain their references. Construction-only edits invalidate the
+resolved frame even when no body changes. An axis parallel to Z is refused. Point origins
+continue to accept only numeric X directions.

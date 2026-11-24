@@ -352,6 +352,17 @@ pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
     k::eval(&solidcore_convert::curve2(c), t)
 }
 
+/// The points of `surface` at each of `uvs`, in the surface's own (u, v) (`None` for a surface
+/// that does not convert, or a parameter off it) ([`solidcore::eval::SurfaceEval::point`]).
+#[must_use]
+pub fn surface_points(surface: &Surface, uvs: &[[f64; 2]]) -> Option<Vec<[f64; 3]>> {
+    let kernel = solidcore_convert::surface(surface).ok()?;
+    let eval = solidcore::eval::SurfaceEval::new(&kernel).ok()?;
+    uvs.iter()
+        .map(|uv| eval.point(*uv).map(|p| [p.x, p.y, p.z]))
+        .collect()
+}
+
 /// The point of pcurve `c` at `t` and its first derivative there (`None` outside its interval or
 /// for a malformed record) ([`solidcore::eval::pcurve::eval_d1`]).
 #[must_use]
