@@ -22,7 +22,10 @@
 //! on A then reads that stretch as on E and starts C's interval inside A at the point P
 //! on E where C leaves it (an end classified on E, not at X). The strip is then the one
 //! beside E's piece from P to V, and the same certificate decides it with that piece of
-//! E's trim in place of the whole trim; P is dropped as an event with C.
+//! E's trim in place of the whole trim. Only C's interval inside A, from P, is dropped;
+//! C's stretch along E stays, so P stays an end on E, a kept edge it lies on within the
+//! tolerance (no event left far from anything it must be related to, unlike C's end on
+//! N, which the event check on N guards).
 //!
 //! The decision is a certificate over A's strip, not a sample. A's surface `S` is its net
 //! (a B-spline face's own surface, or a blend's or sweep's certified net) plus the net's
