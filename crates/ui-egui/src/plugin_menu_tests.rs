@@ -1734,9 +1734,9 @@ fn plugin_ribbon_slot_labels_and_model_tab_opt_out() {
     let mold = listed(
         "mold",
         vec![
-            entry("feature", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"형상인식"}])),
-            entry("height", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"높이측정"}])),
-            entry("overview", "read", json!([{"kind":"ribbon","name":"Inspect","label":"개요","model_group":true}])),
+            entry("feature", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"형상인식","model_group":false}])),
+            entry("height", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"높이측정","model_group":false}])),
+            entry("overview", "read", json!([{"kind":"ribbon","name":"Inspect","label":"개요"}])),
         ],
     );
     app.plugin_menu.listed = vec![mold];
@@ -1761,8 +1761,8 @@ fn plugin_slots_display_custom_label_on_ribbon_tab() {
                 "module": "entry.wasm",
                 "commands": [],
                 "entries": [
-                    {"name": "feature", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식"}]},
-                    {"name": "height", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정"}]}
+                    {"name": "feature", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식", "model_group": false}]},
+                    {"name": "height", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": false}]}
                 ]
             }
         })

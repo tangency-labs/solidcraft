@@ -814,6 +814,10 @@ fn slot_label_or_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> O
 }
 
 /// Whether this entry appears in the Model tab's Plugins group.
+///
+/// Existing declarations without an explicit `model_group` setting retain prior
+/// inclusion behavior (they continue to appear in the Model tab Plugins group).
+/// An explicit `model_group: false` (on the entry or its ribbon slot) opts out.
 pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entry) -> bool {
     if let Some(explicit) = entry.model_group {
         return explicit;
@@ -823,10 +827,7 @@ pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entr
             return *explicit;
         }
     }
-    !entry.slots.iter().any(|slot| match slot {
-        solidcraft_engine::plugin::UiSlot::Ribbon { name, .. } => crate::plugin_slots::ribbon_name(name).is_some(),
-        _ => false,
-    })
+    true
 }
 
 /// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
