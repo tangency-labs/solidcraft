@@ -165,15 +165,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 ui_kit::help_icon(ui, &tip);
             });
-            ui.horizontal(|ui| {
-                let (meshes, tip) = (app.tr("prefs.save_display_meshes").to_string(), app.tr("prefs.save_display_meshes_tip").to_string());
-                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
-                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    let response = ui_kit::checkbox(ui, &meshes, &mut app.preferences.save_display_meshes).backing_on_hover_text(&tip);
-                    crate::scenario::publish_target("prefs:save_display_meshes", response.rect);
-                });
-                ui_kit::help_icon(ui, &tip);
-            });
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.print_face_highlight"), app.tr("prefs.print_face_highlight_tip"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {

@@ -36,10 +36,9 @@ pub fn start(app: &mut SolveApp, command: &'static str, mut params: Value) -> bo
     }
     // A save keeps print faces only when the user keeps them (#11512).
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
-    // Display meshes for file browsers, when the user keeps them (an explicit `preview` wins).
-    if app.preferences.save_display_meshes
-        && let Some(given) = params.as_object_mut()
-    {
+    // The window's saves keep the bodies' display meshes, so a file browser can show the model
+    // in 3D (Quick Look on macOS, #19328). An explicit `preview` wins.
+    if let Some(given) = params.as_object_mut() {
         given.entry("preview").or_insert(Value::Bool(true));
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -125,7 +124,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
@@ -166,25 +165,27 @@ mod tests {
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
     }
 
-    /// Preferences › General › Save display meshes: the window's saves keep the bodies'
-    /// display meshes for file browsers (Quick Look's 3D view); off, they don't, as before.
+    /// #19328: the window's saves keep the bodies' display meshes for file browsers (Quick
+    /// Look's 3D view), deflated; a save that asks for no preview still leaves them out.
     #[test]
-    fn saves_keep_display_meshes_only_when_the_user_does() {
+    fn saves_keep_display_meshes_for_file_browsers() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.frames(2);
-        let saved = |h: &mut crate::scenario::Harness, name: &str| {
+        let saved = |h: &mut crate::scenario::Harness, name: &str, extra: Value| {
             let path = h.dir.join(name);
-            super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()}));
+            let mut params = json!({"path": path.to_string_lossy()});
+            if let (Some(params), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
+                params.extend(extra.clone());
+            }
+            super::start(&mut h.app, "file.save_as", params);
             super::tick(&mut h.app, true);
             let bytes = std::fs::read(&path).unwrap();
             bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin")
         };
-        assert!(!h.app.preferences.save_display_meshes, "off by default");
-        assert!(!saved(&mut h, "Plain.sc"));
-        crate::prefs::set(&mut h.app, &json!({"save_display_meshes": true})).unwrap();
-        assert!(saved(&mut h, "With meshes.sc"));
+        assert!(saved(&mut h, "With meshes.sc", json!({})));
+        assert!(!saved(&mut h, "Plain.sc", json!({"preview": false})));
     }
 
     /// #6003: an agent's `engine.script` that arrives while the window's Save is being written
