@@ -1155,14 +1155,6 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             fit(&mut || b = read_corpus(&mut k, name, false));
             let asked = 1e-9 * main.abs();
             let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
-            // #18671: an enclosure that ends at its floor cannot reach the width asked (its
-            // least width, a certified lower bound of every refinement's, is past it), and
-            // it is within a factor of 2 of that least width
-            assert!(
-                e.stop != EnclosureStop::Floor
-                    || (e.least > asked && e.least <= e.width() && e.width() <= 2.0 * e.least),
-                "{name}: {e:?} asked {asked}"
-            );
             let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
                 "both enclosed"
             } else if volume.max(main) < e.lo {
@@ -1204,16 +1196,15 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         "{volume_classes:?}"
     );
     // (the doc's claim on the width, against the asked width rather than as printed
-    // digits, which move with any change to the enclosure's cells: `corner_box`'s ends at
-    // its floor wider than asked, its least width past the width asked (#18671; before, it
-    // spent its cell budget), so "both enclosed" is all it can say)
+    // digits, which move with any change to the enclosure's cells: `corner_box`'s spent
+    // its cell budget wider than asked, so "both enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
         .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
-        [("Fillet/corner_box.smb", EnclosureStop::Floor, false)],
+        [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");

@@ -162,9 +162,9 @@ pub enum EnclosureStop {
     /// The sign is not decided, and the settled cells and fixed terms already hold 0
     /// whatever the rest becomes ([`volume_sign`] only).
     Settled,
-    /// The width asked is below what any further cut can give, and refining has come within
-    /// a factor of 2 of that least width: the enclosure is at most twice as wide as any
-    /// refinement of it ([`VolumeEnclosure::least`]).
+    /// The width asked is below what any refinement can give ([`VolumeEnclosure::least`]),
+    /// and the enclosure is within the width asked of that least width: no refinement could
+    /// narrow it by more than the width asked.
     Floor,
     /// [`CELL_BUDGET`] refinement cells are spent.
     Budget,
@@ -190,8 +190,8 @@ pub struct VolumeEnclosure {
     /// A lower bound, rounded down, of the width of every enclosure refining can still give
     /// (the fixed terms and each strip cell's least width however it is cut;
     /// [`Work::strip_cell`]): no width below it is reached, and the result is at least this
-    /// wide. Refining ends at [`EnclosureStop::Floor`] once a width asked below it is within a
-    /// factor of 2 of it.
+    /// wide. Asked a width below it, refining ends at [`EnclosureStop::Floor`] once the
+    /// enclosure is at most this plus the width asked.
     pub least: f64,
     /// Why refinement ended.
     pub stop: EnclosureStop,
@@ -225,9 +225,12 @@ pub enum VolumeSign {
 /// [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
 /// ([`EnclosureStop::Exhausted`]). A width below the enclosure's [`VolumeEnclosure::least`]
 /// is not reached: refining ends at [`EnclosureStop::Floor`] once the enclosure is at most
-/// twice that least width, so no refinement could halve it. A width below the
-/// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection of every enclosure summed along the way (each
-/// holds the volume), so a tighter `width` is never answered wider by further refinement.
+/// that least width plus `width`, so no refinement could narrow it by more than `width`
+/// (the answer is as close to the narrowest any refinement gives as `width` asks of the
+/// volume). A width below the
+/// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection
+/// of every enclosure summed along the way (each holds the volume), so a tighter `width` is
+/// never answered wider by further refinement.
 /// Missing UV trim curves are made on `b`, as
 /// [`super::integrator::properties::brep_volume_default`] makes them.
 ///
@@ -245,7 +248,7 @@ pub fn enclose_volume(k: &Kernel, b: &mut Brep, width: f64) -> Result<VolumeEncl
         return Err(SolidError::invalid_input(OP, "width not positive"));
     }
     let mut w = Work::new(k, b)?;
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false, wider(width))
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
 /// What [`enclose_quantity`] encloses.
@@ -300,7 +303,7 @@ pub fn enclose_quantity(
         }
     }
     let mut w = Work::with(k, b, quantity)?;
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false, wider(width))
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
@@ -325,7 +328,7 @@ pub fn enclose_face_area(
         return Err(SolidError::invalid_input(OP, "no faces"));
     }
     let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
-    w.refine(|e| e.hi - e.lo <= width, |_, _| false, wider(width))
+    w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
@@ -354,7 +357,7 @@ pub fn enclose_face_area_relative(
         return Err(SolidError::invalid_input(OP, "no faces"));
     }
     let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
-    w.refine(within(rel), |_, _| false, beyond_rel(rel))
+    w.refine(within(rel), |_, _| false, relative(rel))
 }
 
 /// Whether an enclosure is finite and at most `rel` of its own magnitude wide (false for
@@ -368,18 +371,22 @@ fn within(rel: f64) -> impl Fn(Ivl) -> bool {
     }
 }
 
-/// Whether no enclosure at least `least` wide is at most `width` wide: the `beyond` of
-/// [`Work::refine`] for an absolute width (each enclosure's `hi - lo`, rounded to nearest, is
-/// at least `least`, a float at most its width).
-fn wider(width: f64) -> impl Fn(Ivl, f64) -> bool {
-    move |_: Ivl, least: f64| least > width
+/// The widths an absolute `width` asks of any enclosure: the `asked` of [`Work::refine`]
+/// (`done` compares each enclosure's `hi - lo`, rounded to nearest, with it).
+fn absolute(width: f64) -> impl Fn(Ivl) -> Option<Ivl> {
+    move |_: Ivl| Some(Ivl::from(width))
 }
 
-/// Whether no enclosure inside `best` at least `least` wide is [`within`] `rel`: its width
-/// is at least `least` and its magnitude at most `best`'s, so `rel` times it is at most
-/// `rel` times `best`'s (rounding is monotone).
-fn beyond_rel(rel: f64) -> impl Fn(Ivl, f64) -> bool {
-    move |best: Ivl, least: f64| least > rel * best.mag()
+/// The widths [`within`] `rel` asks of the enclosures inside `best`: at least `rel` times
+/// `best`'s least magnitude, rounded down, and at most `rel * best.mag()` as [`within`]
+/// rounds it (each enclosure's magnitude is at most `best`'s, and rounding is monotone).
+fn relative(rel: f64) -> impl Fn(Ivl) -> Option<Ivl> {
+    move |best: Ivl| {
+        Some(Ivl::new(
+            (Ivl::from(rel) * Ivl::from(best.mig())).lo,
+            rel * best.mag(),
+        ))
+    }
 }
 
 /// A certified enclosure `[lo, hi]` of one mass property.
@@ -459,7 +466,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut run = |b: &mut Brep, q: Quantity, width: Option<f64>| -> Result<(Ivl, EnclosureStop)> {
         let e = match width {
             Some(width) => enclose_quantity(k, b, q, width)?,
-            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false, beyond_rel(rel))?,
+            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false, relative(rel))?,
         };
         cells += e.counts.cells;
         Ok((Ivl::new(e.lo, e.hi), e.stop))
@@ -577,7 +584,7 @@ fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeS
     let e = w.refine(
         |e| e.lo > 0.0 || e.hi < 0.0,
         |rest, still| still >= rest.mag(),
-        |_, _| false,
+        |_| None,
     )?;
     Ok(if e.lo > 0.0 {
         VolumeSign::Positive(e)
@@ -2057,8 +2064,10 @@ impl<'a> Work<'a> {
         };
         let kept = (Ivl::from(least) * (xh - xl)).lo;
         let settled = kept + kept >= gap.hi;
-        // the least `|Phi|` and speed over the cell: each cut's bounds are at least their
-        // values at a point of it, so at least these, and its gaps sum to at least `kept`
+        // lower bounds of every cut's `|Phi|` and speed bounds (`zmax`, `speed`): each is at
+        // least its value at a point of this cell, so at least these (for the volume, the
+        // larger side's least `|z - z0|`, which `zmax` takes the larger of), and the cuts'
+        // `int |D|` bounds sum to at least `kept`
         let phi_least = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
             (o1[2].at(0, 0) - z0).mig().max((o2[2].at(0, 0) - z0).mig())
         } else {
@@ -2159,19 +2168,19 @@ impl<'a> Work<'a> {
 
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
     /// enclosure ([`EnclosureStop::Reached`]), `hopeless` of its parts ([`Work::parts`]: no
-    /// refining can make `done` hold; [`EnclosureStop::Settled`]), `beyond` of the enclosure
-    /// and its least width ([`Work::least`]: `done` holds of no enclosure inside it at least
-    /// that wide) while the enclosure is at most twice that width ([`EnclosureStop::Floor`]),
-    /// the refinement budget is spent, or no cell is left to cut. The result is the intersection of every enclosure summed
-    /// (each holds the volume): rounding that grows faster than the cells shrink does not
-    /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
-    /// cell's construction allows: a defect ([`MassFailure::Defect`]) then, not an enclosure
-    /// (no input is known to reach it).
+    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the least width
+    /// ([`Work::least`]) is past every width `asked` of an enclosure inside the enclosure
+    /// (`None`: `done` is not a width) while the enclosure is at most that least width plus
+    /// the least width asked ([`EnclosureStop::Floor`]), the refinement budget is spent, or no cell is left to cut. The result is the
+    /// intersection of every enclosure summed (each holds the volume): rounding that grows
+    /// faster than the cells shrink does not widen it. Two enclosures that do not overlap mean
+    /// one of them is not sound, which no cell's construction allows: a defect
+    /// ([`MassFailure::Defect`]) then, not an enclosure (no input is known to reach it).
     fn refine(
         &mut self,
         done: impl Fn(Ivl) -> bool,
         hopeless: impl Fn(Ivl, f64) -> bool,
-        beyond: impl Fn(Ivl, f64) -> bool,
+        asked: impl Fn(Ivl) -> Option<Ivl>,
     ) -> Result<VolumeEnclosure> {
         let out = |w: &Self, best: Ivl, stop: EnclosureStop| -> Result<VolumeEnclosure> {
             let e = intersect(w.total(), best)?;
@@ -2209,12 +2218,13 @@ impl<'a> Work<'a> {
                     return out(self, best, EnclosureStop::Settled);
                 }
                 // every enclosure from now on is inside `best` and at least `least` wide: past
-                // `beyond`, `done` holds of none of them, and once `best` is within a factor
-                // of 2 of that width no refinement can halve it (as a strip cell settles once
-                // its gap's least size is half its bound)
+                // every width asked, `done` holds of none of them, and once `best` is within
+                // the width asked of `least` no refinement can narrow it by more than that
                 let least = self.least();
-                if beyond(best, least) && width(best) <= (Ivl::from(least) + Ivl::from(least)).lo {
-                    return out(self, best, EnclosureStop::Floor);
+                if let Some(a) = asked(best) {
+                    if least > a.hi && (Ivl::from(width(best)) - Ivl::from(least)).hi <= a.lo {
+                        return out(self, best, EnclosureStop::Floor);
+                    }
                 }
                 (lo, hi) = (total.lo, total.hi);
                 checked = self.counts.cells;
@@ -2752,6 +2762,13 @@ mod tests {
                         cuts.len()
                     );
                 }
+                // and the other way, as `Work::least` needs of the enclosures summed earlier:
+                // a coarser cell's width bounds its cuts' least widths summed
+                let parts: f64 = [(t.0, 0.5 * (t.0 + t.1)), (0.5 * (t.0 + t.1), t.1)]
+                    .iter()
+                    .map(|&c| w.strip_cell(strip, spans, c, ORDER).unwrap().2)
+                    .sum();
+                assert!(parts <= e.hi - e.lo, "{strip} {t:?}: {e:?} < {parts}");
                 assert!(least <= e.hi - e.lo, "{strip} {t:?}: {e:?} {least}");
                 positive += usize::from(least > 0.0);
                 checked += 1;

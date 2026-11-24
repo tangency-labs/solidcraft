@@ -3266,8 +3266,8 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
 /// #18671: the ledge's operand asked 2.5e-4 wide, below the 7.4e-4 its strips settle at
 /// ([`the_ledge_corner_rolls_over_across_the_bores_tangent_seam`]), ends at its floor: the
 /// enclosure's least width (the strips' least widths however they are cut) is past 2.5e-4,
-/// so no refinement reaches it, and the enclosure is within a factor of 2 of that least
-/// width, so no refinement halves it. It still holds the operand's closed-form volume, and it
+/// so no refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so
+/// no refinement narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
 /// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`]
 /// (131,375 cells, 129,094 of them strip cells) for 7.43e-4.
 #[test]
@@ -3280,7 +3280,12 @@ fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
     let e = enclose_volume(&k, &mut brep, 2.5e-4).unwrap();
     assert_eq!(e.stop, EnclosureStop::Floor, "{e:?}");
     assert!(e.least > 2.5e-4, "{e:?}");
-    assert!(e.least <= e.width() && e.width() <= 2.0 * e.least, "{e:?}");
+    assert!(
+        e.least <= e.width() && e.width() - e.least <= 2.5e-4,
+        "{e:?}"
+    );
+    // and no wider than the 1e-3 the ledge's own test asks and reaches
+    assert!(e.width() <= 1e-3, "{e:?}");
     assert!(e.lo <= v0 && v0 <= e.hi, "{e:?} {v0}");
     assert!(e.counts.cells < CELL_BUDGET / 4, "{e:?}");
 }
