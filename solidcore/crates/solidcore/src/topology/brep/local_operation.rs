@@ -42,7 +42,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Failure, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
@@ -448,9 +448,12 @@ fn radial_sweep(
     Ok((tool, inner))
 }
 
-/// `what` is missing (upstream `SM_ERR_NULL_POINTER`).
-fn null(what: &'static str) -> SolidError {
-    SolidError::topology_missing(OP, what)
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR_NULL_POINTER` of the
+/// `NER` it replaces.
+fn broken(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
 /// `SmBrep::LocalOperation(rFaces, rNewSurfaces)`: `surfaces[i]` becomes the surface of
@@ -493,7 +496,13 @@ pub fn local_operation(
 ) -> Result<()> {
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     if surfaces.len() < faces.len() {
-        return Err(null("a surface for every face"));
+        return Err(SolidError::topology(
+            OP,
+            TopologyFailure::TooFewSurfaces {
+                faces: faces.len(),
+                surfaces: surfaces.len(),
+            },
+        ));
     }
     // (not upstream) a refusal or a failure leaves `b` as it came in, the caches its
     // surfaces had included (the operation runs on its copy), and the caller's
@@ -546,7 +555,8 @@ fn local_operation_on(
     let mut moving = Vec::new();
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
+        let own = face_ops::surface(b, face)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
         if let Some(new) = index.and_then(|i| given.get(i)).and_then(Option::as_ref) {
             if !is_own_surface(own, new) {
                 moving.push(face);
@@ -556,14 +566,17 @@ fn local_operation_on(
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
+        let own = face_ops::surface(b, face)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
         let replacement = match index {
-            Some(index) if moving.contains(&face) => Some(
-                given
-                    .get_mut(index)
-                    .and_then(Option::take)
-                    .ok_or_else(|| null("the face's given surface"))?,
-            ),
+            Some(index) if moving.contains(&face) => {
+                Some(given.get_mut(index).and_then(Option::take).ok_or_else(|| {
+                    broken(
+                        "a moving face's given surface is gone, though only faces given a \
+                             surface move and each takes its own once",
+                    )
+                })?)
+            }
             _ => continued.remove(&face),
         };
         let surface = if let Some(mut new) = replacement {
@@ -1430,11 +1443,9 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
             let line = if let Some(c) = eu1::uv_trim_curve(b, u)?.0 {
                 uv_line(k, c)?
             } else {
-                if scratch.is_none() {
-                    scratch = Some(b.clone_standing_for_self()?);
-                }
-                let Some(s) = scratch.as_mut() else {
-                    return Err(null("the scratch copy of the B-rep"));
+                let s = match &mut scratch {
+                    Some(s) => s,
+                    slot => slot.insert(b.clone_standing_for_self()?),
                 };
                 let _ = get_or_create_uv_trim_curve(k, s, u, false, false, true)?;
                 match eu1::uv_trim_curve(s, u)?.0 {
@@ -2447,11 +2458,14 @@ mod tests {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP);
         assert_eq!(
             e.topology_failure(),
-            Some(&TopologyFailure::Missing("a surface for every face"))
+            Some(&TopologyFailure::TooFewSurfaces {
+                faces: 1,
+                surfaces: 0,
+            })
         );
     }
 
