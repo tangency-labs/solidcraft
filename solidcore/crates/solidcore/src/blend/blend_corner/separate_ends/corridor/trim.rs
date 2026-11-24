@@ -1,0 +1,316 @@
+//! Enclose the exact endpoints of straight edges on non-cardinal support planes.
+
+use super::{coords, expansion_span, measured_span, resolved_vertex};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::curve::curve::CurveKind;
+use crate::curve::line::Line;
+use crate::error::Result;
+use crate::geom::certified::next_up;
+use crate::geom::expansion;
+use crate::math::Point3;
+use crate::nurbs::math::{CPoint, NOW};
+use crate::surface::plane::Plane;
+use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::face::p2 as face2;
+use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
+
+pub(super) type PointBounds = [Ivl; 3];
+
+pub(super) fn point_bounds(point: Point3) -> PointBounds {
+    coords(point).map(Ivl::from)
+}
+
+pub(super) fn subtract(a: PointBounds, b: PointBounds) -> PointBounds {
+    let [x, y, z] = a;
+    let [u, v, w] = b;
+    [x.sub_ulp(u), y.sub_ulp(v), z.sub_ulp(w)]
+}
+
+pub(super) fn cross(a: PointBounds, b: PointBounds) -> PointBounds {
+    let [x, y, z] = a;
+    let [u, v, w] = b;
+    [
+        y.mul_ulp(w).sub_ulp(z.mul_ulp(v)),
+        z.mul_ulp(u).sub_ulp(x.mul_ulp(w)),
+        x.mul_ulp(v).sub_ulp(y.mul_ulp(u)),
+    ]
+}
+
+pub(super) fn dot(a: PointBounds, b: PointBounds) -> Ivl {
+    a.into_iter()
+        .zip(b)
+        .fold(Ivl::from(0.0), |sum, (x, y)| sum.add_ulp(x.mul_ulp(y)))
+}
+
+pub(super) fn excludes_zero(value: Ivl) -> bool {
+    value.lo > 0.0 || value.hi < 0.0
+}
+
+fn encloses_distance(a: PointBounds, b: PointBounds, limit: f64) -> bool {
+    if !limit.is_finite() || limit < 0.0 {
+        return false;
+    }
+    // The 1-norm bounds the Euclidean distance from above.
+    let distance = subtract(a, b).into_iter().fold(0.0, |sum, range| {
+        let component = range.mag();
+        if component == 0.0 {
+            sum
+        } else {
+            next_up(sum + component)
+        }
+    });
+    distance <= limit
+}
+
+pub(super) fn stored_vertex_in_zone(
+    b: &Brep,
+    v: VertexId,
+    point: PointBounds,
+    allowance: f64,
+) -> Result<bool> {
+    let stored = point_bounds(vertex::point(b, v)?);
+    Ok(encloses_distance(
+        point,
+        stored,
+        vertex::tolerance(b, v)?.min(allowance),
+    ))
+}
+
+struct SupportPlane {
+    normal: PointBounds,
+    origin: PointBounds,
+    exact_normal: [Vec<f64>; 3],
+}
+
+fn support_plane(b: &Brep, face: FaceId) -> Result<Option<SupportPlane>> {
+    let Some(SurfaceKind::Plane(plane)) = face2::surface(b, face)?.map(Surface::kind) else {
+        return Ok(None);
+    };
+    let frame = plane.position();
+    // Cross the actual chart axes. Its field normal may itself be rounded.
+    let Some(exact_normal) = expansion::cross(frame.x_axis(), frame.y_axis()) else {
+        return Ok(None);
+    };
+    let [x, y, z] = exact_normal
+        .each_ref()
+        .map(|terms| expansion_span(terms).map(|span| Ivl::new(span.lo, span.hi)));
+    let (Some(x), Some(y), Some(z)) = (x, y, z) else {
+        return Ok(None);
+    };
+    Ok(Some(SupportPlane {
+        normal: [x, y, z],
+        origin: point_bounds(frame.origin()),
+        exact_normal,
+    }))
+}
+
+/// A rounded solve can straddle an exactly representable vertex. Certify the
+/// stored point directly with expansion arithmetic before enclosing a quotient.
+fn contains_exactly(plane: &SupportPlane, stored: PointBounds) -> bool {
+    plane
+        .exact_normal
+        .iter()
+        .zip(plane.origin)
+        .zip(stored)
+        .try_fold(Vec::new(), |sum, ((normal, origin), stored)| {
+            let at = expansion::scale(normal, stored.lo)?;
+            let from = expansion::scale(normal, origin.lo)?;
+            Some(expansion::add(&sum, &expansion::sub(&at, &from)))
+        })
+        .is_some_and(|deviation| expansion::is_zero(&deviation))
+}
+
+/// Enclose the intersection of three independent plane charts. Translate the
+/// equations about the stored vertex to keep the interval cancellation local.
+/// A cardinal incident plane fixes its coordinate exactly, including where the
+/// trim ends on one of the corridor's permitted contact planes.
+pub(super) fn vertex_bounds(b: &Brep, v: VertexId) -> Result<Option<PointBounds>> {
+    if let Some(point) = resolved_vertex(b, v)? {
+        return Ok(Some(point_bounds(point)));
+    }
+    let faces = vertex::faces(b, v)?;
+    let [a, b_face, c] = faces.as_slice() else {
+        return Ok(None);
+    };
+    let (Some(a), Some(z), Some(c)) = (
+        support_plane(b, *a)?,
+        support_plane(b, *b_face)?,
+        support_plane(b, *c)?,
+    ) else {
+        return Ok(None);
+    };
+    let planes = [a, z, c];
+    let [a, z, c] = planes.each_ref().map(|plane| plane.normal);
+    let cofactors = [cross(z, c), cross(c, a), cross(a, z)];
+    let det = dot(a, cofactors[0]);
+    if !excludes_zero(det) {
+        return Ok(None);
+    }
+    let stored = point_bounds(vertex::point(b, v)?);
+    if planes.iter().all(|plane| contains_exactly(plane, stored)) {
+        return Ok(Some(stored));
+    }
+    let rhs = planes
+        .each_ref()
+        .map(|p| dot(p.normal, subtract(p.origin, stored)));
+    let mut point = stored;
+    let [a, z, c] = cofactors;
+    for (value, ((a, z), c)) in point.iter_mut().zip(a.into_iter().zip(z).zip(c)) {
+        *value = value.add_ulp(dot([a, z, c], rhs).div_ulp(det));
+    }
+    for plane in planes {
+        let mut axes = plane
+            .normal
+            .into_iter()
+            .enumerate()
+            .filter(|(_, n)| *n != Ivl::from(0.0));
+        if let Some((axis, normal)) = axes.next() {
+            if axes.next().is_none() && excludes_zero(normal) {
+                if let Some((value, fixed)) = point.get_mut(axis).zip(plane.origin.get(axis)) {
+                    *value = *fixed;
+                }
+            }
+        }
+    }
+    Ok(encloses_distance(point, stored, vertex::tolerance(b, v)?).then_some(point))
+}
+
+/// The plane's affine UV lift with outward interval arithmetic. Unlike an
+/// expansion, this also encloses products for subnormal UV error bounds.
+fn lift_box(plane: &Plane, [u, v]: [Ivl; 2], point: bool) -> PointBounds {
+    let frame = plane.position();
+    let u = u.mul_ulp(Ivl::from(plane.uv_scale().x));
+    let v = v.mul_ulp(Ivl::from(plane.uv_scale().y));
+    let mut result = if point {
+        point_bounds(frame.origin())
+    } else {
+        [Ivl::from(0.0); 3]
+    };
+    for ((axis, x), y) in result
+        .iter_mut()
+        .zip(coords(frame.x_axis()))
+        .zip(coords(frame.y_axis()))
+    {
+        *axis = axis
+            .add_ulp(u.mul_ulp(Ivl::from(x)))
+            .add_ulp(v.mul_ulp(Ivl::from(y)));
+    }
+    result
+}
+
+fn uv_bounds(plane: &Plane, [first, last]: [[Ivl; 2]; 2]) -> [PointBounds; 2] {
+    let endpoints = [lift_box(plane, first, true), lift_box(plane, last, true)];
+    if plane.is_out_of_bounds_enabled() {
+        return endpoints;
+    }
+    // The clamp displacement is monotone in each coordinate. Use the total
+    // affine UV range to enclose displacement throughout the whole trim.
+    let [u0, v0] = first;
+    let [u1, v1] = last;
+    let [u, v] = [u0.hull(u1), v0.hull(v1)];
+    let domain = plane.step_uv_domain();
+    let lo = domain.min();
+    let hi = domain.max();
+    let displacement = |range: Ivl, min: f64, max: f64| {
+        let delta = |t: f64| Ivl::from(t.min(max).max(min)).sub_ulp(Ivl::from(t));
+        delta(range.lo).hull(delta(range.hi))
+    };
+    let [du, dv] = [displacement(u, lo.x, hi.x), displacement(v, lo.y, hi.y)];
+    let [u, v, w] = lift_box(plane, [du, dv], false);
+    endpoints.map(|[x, y, z]| [x.add_ulp(u), y.add_ulp(v), z.add_ulp(w)])
+}
+
+fn spline_uv_endpoints(points: &[CPoint]) -> Option<[[Ivl; 2]; 2]> {
+    let [a, z] = points else {
+        return None;
+    };
+    [a, z]
+        .into_iter()
+        .all(|p| (p.w == NOW || p.w == 1.0) && p.x.is_finite() && p.y.is_finite())
+        .then(|| [a, z].map(|p| [Ivl::from(p.x), Ivl::from(p.y)]))
+}
+
+fn match_endpoints(
+    actual: [PointBounds; 2],
+    ideal: [PointBounds; 2],
+    tolerances: [f64; 2],
+) -> bool {
+    let [a, z] = actual;
+    let [u, v] = ideal;
+    let monotone = a
+        .into_iter()
+        .zip(z)
+        .zip(u.into_iter().zip(v))
+        .any(|((a, z), (u, v))| (a.hi < z.lo && u.hi < v.lo) || (z.hi < a.lo && v.hi < u.lo));
+    let [first, last] = tolerances;
+    monotone && encloses_distance(a, u, first) && encloses_distance(z, v, last)
+}
+
+/// Both incident plane charts select a unique straight carrier. Affine trims
+/// stay within the existing edge zone of its bounded segment by convexity,
+/// once their ordered endpoints agree within the edge and vertex zones.
+pub(super) fn binds_affine_trim(
+    b: &Brep,
+    eu: EdgeuseId,
+    e: EdgeId,
+    plane: &Plane,
+    line: &Line,
+    vertices: [VertexId; 2],
+    endpoints: [PointBounds; 2],
+    allowance: f64,
+) -> Result<bool> {
+    let faces = edge::faces(b, e, None)?;
+    let [a, z] = faces.as_slice() else {
+        return Ok(false);
+    };
+    let (Some(a), Some(z)) = (support_plane(b, *a)?, support_plane(b, *z)?) else {
+        return Ok(false);
+    };
+    if !cross(a.normal, z.normal).into_iter().any(excludes_zero) {
+        return Ok(false);
+    }
+    let [u, v] = vertices;
+    let zone = edge::tolerance(b, e)?.min(allowance);
+    let tolerances = [
+        zone.min(vertex::tolerance(b, u)?),
+        zone.min(vertex::tolerance(b, v)?),
+    ];
+    let interval = edge::interval(b, e)?;
+    let Some(points) = line.segment_over(&interval) else {
+        return Ok(false);
+    };
+    let xyz = points.map(|(p, error)| {
+        coords(p).map(|component| {
+            let range = measured_span(component, error);
+            Ivl::new(range.lo, range.hi)
+        })
+    });
+    if !match_endpoints(xyz, endpoints, tolerances) {
+        return Ok(false);
+    }
+    let Some(trim) = eu1::uv_trim_curve(b, eu)?.0 else {
+        // A later drop onto the face can move and clip the edge's 3D line.
+        // Its 3D endpoint bounds do not enclose that unobserved trim.
+        return Ok(false);
+    };
+    let uv = match trim.kind() {
+        CurveKind::BSpline(spline)
+            if spline.dim() == 2
+                && spline.degree()? == 1
+                && trim.natural_interval() == interval =>
+        {
+            spline_uv_endpoints(spline.control_points()?)
+        }
+        CurveKind::Line(line) if line.dim() == 2 => line.segment_over(&interval).map(|points| {
+            points.map(|(p, err)| {
+                [p.x, p.y].map(|value| {
+                    let span = measured_span(value, err);
+                    Ivl::new(span.lo, span.hi)
+                })
+            })
+        }),
+        _ => None,
+    };
+    Ok(uv.is_some_and(|uv| match_endpoints(uv_bounds(plane, uv), endpoints, tolerances)))
+}

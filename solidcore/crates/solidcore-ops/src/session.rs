@@ -707,7 +707,20 @@ pub(crate) fn with_body<T: Answer>(
         let mut b = body.lock();
         // the kernel puts the body back on a refusal or a panic; the panic is caught again
         // here only to release the body before it goes on
-        let r = catch_unwind(AssertUnwindSafe(|| b.with_rollback(|br| f(k, br), kept)));
+        let log_before = k.blend_face_log.clone();
+        let mut committed = false;
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            b.with_rollback(
+                |br| f(k, br),
+                |result| {
+                    committed = kept(result);
+                    committed
+                },
+            )
+        }));
+        if !committed || r.is_err() {
+            k.blend_face_log = log_before;
+        }
         drop(b);
         r.unwrap_or_else(|p| resume_unwind(p))
     })

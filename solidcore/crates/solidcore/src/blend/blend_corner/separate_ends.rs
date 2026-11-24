@@ -61,8 +61,6 @@ enum SeparateEndFit {
     NotApplicable,
     /// Every pair fits and the blend envelopes are disjoint.
     Fits,
-    /// The supports fit, but their trims lie outside the cardinal certificate.
-    WithinSupports,
     /// A trim or face blocks the sweep at its requested or limiting size.
     Obstructed { vertex: VertexId },
     /// A common size exceeds the certified room for the whole selection.
@@ -77,7 +75,6 @@ enum SeparateEndFit {
 struct Supports {
     corridor: Corridor,
     rails: [EdgeId; 3],
-    span: Extent3d,
 }
 
 /// Qualifies separate Ends and finds a support limit for a common size.
@@ -144,7 +141,6 @@ fn independent_separate_ends(
     envelopes
         .try_reserve_exact(supports.len())
         .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
-    let mut certified = true;
     for (geometry, requested) in supports {
         let widths = limit.map_or(requested, |(fit, _)| [fit; 2]);
         let span = match check_corridor(k, b, &geometry.corridor, widths)? {
@@ -154,10 +150,7 @@ fn independent_separate_ends(
                     vertex: geometry.corridor.at.0,
                 });
             }
-            Clearance::Unproven => {
-                certified = false;
-                geometry.span
-            }
+            Clearance::Unproven => return Ok(SeparateEndFit::NotApplicable),
         };
         let Some(envelope) = swept_envelope(span, widths[0].max(widths[1])) else {
             return Ok(SeparateEndFit::NotApplicable);
@@ -170,14 +163,12 @@ fn independent_separate_ends(
         }
         envelopes.push(envelope);
     }
-    Ok(match (limit, certified) {
-        (Some((size, edge)), true) => {
+    Ok(match limit {
+        Some((size, edge)) => {
             check_resolution(k, b, pairs, size, kind)?;
             SeparateEndFit::Limited { size, edge }
         }
-        (Some(_), false) => SeparateEndFit::NotApplicable,
-        (None, true) => SeparateEndFit::Fits,
-        (None, false) => SeparateEndFit::WithinSupports,
+        None => SeparateEndFit::Fits,
     })
 }
 
@@ -276,10 +267,16 @@ fn classify_separate_ends(
     }
 
     // With line edges and plane supports the oriented dihedral is constant.
-    if !(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?) {
+    // Classifying it may populate UV trims or raise a local zone. The plan
+    // must leave those edits to the ordinary construction and its transaction.
+    let concave = b.with_rollback_untouched(
+        |b| Ok(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?),
+        |_| false,
+    )?;
+    if !concave {
         return Ok(None);
     }
-    let (Some((vertex_a, end_a, far_a)), Some((vertex_b, end_b, far_b))) = (
+    let (Some((vertex_a, _, far_a)), Some((vertex_b, _, far_b))) = (
         square_cap(b, first, v, u, roundoff)?,
         square_cap(b, second, v, w, roundoff)?,
     ) else {
@@ -293,7 +290,6 @@ fn classify_separate_ends(
     ) else {
         return Ok(None);
     };
-    let span = Extent3d::from_points(at, end_a).union(&Extent3d::from_point(end_b));
     Ok(Some(Supports {
         corridor: Corridor {
             at: (v, at),
@@ -303,7 +299,6 @@ fn classify_separate_ends(
             far_caps: [far_a, far_b],
         },
         rails,
-        span,
     }))
 }
 

@@ -1281,7 +1281,7 @@ fn separated_end_passes(
         pass_or_refuse(k, b, together(edges, section, Turn::Mitre, &[], contract))
             .map(|result| result.map(|_| ()))
     };
-    groups.build(k, b, picked, sizes, pass_group).map(Some)
+    groups.build(k, b, pass_group).map(Some)
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
@@ -1809,10 +1809,10 @@ fn blend_impl(
             .flat_map(|log| log.sessions.iter().flatten())
             .map(|m| m.face)
             .collect();
-        if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
-            log.sessions.extend(ours.sessions);
-        }
         Ok(ran?.map(|mut blended| {
+            if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
+                log.sessions.extend(ours.sessions);
+            }
             blended.made = b
                 .face_list()
                 .iter()
