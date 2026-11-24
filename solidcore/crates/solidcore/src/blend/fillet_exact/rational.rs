@@ -1012,6 +1012,31 @@ pub fn calc_rational_spine_fillet_geom(
         .fillet_surface_generator_type()
         == FilletSurfaceGeneratorType::Circular;
 
+    // the ball's centre at the trace's interior point farthest from both its ends, if any
+    // stands clear of them (the round passes through it)
+    let mut interior: Option<(f64, Point3)> = None;
+    if let [_, inner @ .., _] = tsects {
+        let mut centres = Vec::new();
+        for t in inner {
+            ops.setup_offset_values(t, None)?;
+            centres.push(eval_offset(
+                k,
+                ops.solver_mut(),
+                0,
+                t.uv_pos(SrfIndex::First),
+            )?);
+        }
+        ops.setup_offset_values(first, None)?;
+        let a = eval_offset(k, ops.solver_mut(), 0, first.uv_pos(SrfIndex::First))?;
+        ops.setup_offset_values(last, None)?;
+        let z = eval_offset(k, ops.solver_mut(), 0, last.uv_pos(SrfIndex::First))?;
+        for c in centres {
+            let clear = min2(c.distance(a), c.distance(z));
+            if clear > b.tolerance() && interior.is_none_or(|(best, _)| clear > best) {
+                interior = Some((clear, c));
+            }
+        }
+    }
     // the ball's centre at the trace's ends, and the edge's direction there
     ops.setup_offset_values(first, None)?;
     let start = eval_offset(k, ops.solver_mut(), 0, first.uv_pos(SrfIndex::First))?;
@@ -1085,10 +1110,23 @@ pub fn calc_rational_spine_fillet_geom(
                 dir = if tan.dot(edge_dir) >= 0.0 { 1.0 } else { -1.0 };
                 span = dir * 2.0 * PI;
             } else {
-                // the arc t0 -> t1 one way or the other, by where the edge's middle lies
-                // round the quadric's axis
-                let mid =
-                    ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, &q_face, edge_mid)?;
+                // the arc t0 -> t1 one way or the other: the way through the ball's centre at
+                // a point of the trace between its ends (on the conic, its parameter exact);
+                // with no such point, by where the edge's middle lies round the quadric's
+                // axis. Not the fork's (#18913): the edge's middle reads round the axis at its
+                // own angle, which the ball's centres miss by the angle the ball's contact
+                // turns up the wall; on an arc shorter than twice that the way round is lost.
+                let mid = match interior {
+                    Some((_, c)) => conic_param(&kc, c),
+                    None => ellipse_param_about_axis(
+                        &kc,
+                        blend.point,
+                        blend.dir,
+                        &q,
+                        &q_face,
+                        edge_mid,
+                    )?,
+                };
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();

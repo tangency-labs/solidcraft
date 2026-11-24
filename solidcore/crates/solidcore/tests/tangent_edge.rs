@@ -465,6 +465,19 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
     (b, edges)
 }
 
+/// The procedural round builds by its exact class (tangency-labs/solidcraft#21463): its
+/// ellipse arc runs the short way between the trace's ends, through the ball's centre at the
+/// trace's interior point. Read off the edge's middle about the pipe's axis instead, the way
+/// round came out the long way (the middle's angle is off the centres' by the ball's contact
+/// angle up the wall, more than half this short arc), the rails ran round the ellipse onto
+/// the plate's top again past its side, and the round was refused as overflowing a cliff.
+#[test]
+fn a_procedural_round_builds_the_short_way_round() {
+    let mut k = Kernel::default();
+    let (_, edges) = procedural_round(&mut k);
+    assert_eq!(edges.len(), 2, "{edges:?}");
+}
+
 /// The procedural round's edges along the root, decided on its net with its definition's
 /// margin: Tangent on each. Where the pipe's foot crosses its net's C1 quarter knot (u =
 /// 15.708, multiplicity 2) the definition's feet box is taken cell by cell
