@@ -2617,6 +2617,18 @@ fn delete_takes_every_body_of_a_whole_body_selection() {
 }
 
 #[test]
+fn the_whole_body_selection_reports_its_count_without_listing_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "select.all", json!({}));
+    let got = run(&mut s, "selection.get", json!({}));
+    assert_eq!(got["count"], json!(2), "{got}");
+    assert_eq!(got["all_bodies"], json!(true), "{got}");
+    assert_eq!(got["items"], json!([]), "a scope names no items");
+}
+
+#[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
     run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 7]}, "name": "Pin"}));

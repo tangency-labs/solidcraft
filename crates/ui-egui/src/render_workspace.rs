@@ -396,7 +396,7 @@ pub(crate) fn selection_editor(app: &mut SolveApp, selection: &RenderSelection) 
 }
 
 pub(crate) fn object_selection(app: &SolveApp) -> RenderSelection {
-    if app.session.has_selection()==false { RenderSelection::Nothing } else { RenderSelection::Object(app.session.selection.clone()) }
+    if app.session.has_selection() == false { RenderSelection::Nothing } else { RenderSelection::Object(app.session.selection.clone()) }
 }
 pub(crate) fn current_shot_selection(app: &SolveApp) -> RenderSelection {
     let name = &app.render_workspace.view.name;

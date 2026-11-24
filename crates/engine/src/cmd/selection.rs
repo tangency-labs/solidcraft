@@ -40,6 +40,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let s: &Session = s;
     let mut ctx = Context::new(s)?;
+    let scoped = s.selection_all_bodies;
     let items: Vec<SelectionItem> = s
         .selection
         .iter()
@@ -53,7 +54,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let detail_limit = (detail && s.selection.len() > MAX_DETAIL).then_some(MAX_DETAIL);
-    let reply = SelectionGetResult { count: items.len(), items, detail_limit, param_warnings: Vec::new() };
+    let reply = SelectionGetResult { count: s.selected_count()?, all_bodies: scoped, items, detail_limit, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 

@@ -1946,13 +1946,7 @@ impl Session {
             return Ok(self.selection.clone());
         }
         let hidden = &self.visibility.hidden_bodies;
-        Ok(self
-            .world_state()?
-            .bodies
-            .iter()
-            .filter(|b| !hidden.contains(&b.name))
-            .map(|b| Sel::Body { name: b.name.clone() })
-            .collect())
+        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect())
     }
 
     /// How many things are selected, resolving the whole-body scope against the world.

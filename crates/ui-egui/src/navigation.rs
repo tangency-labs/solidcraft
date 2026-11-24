@@ -2631,7 +2631,7 @@ mod tests {
                     assert!(app.viewport.orbit_free.is_none());
                     assert!(!ctx.input(|i| i.pointer.any_down()));
                     assert_eq!(app.session.doc.to_json(), design);
-                    assert!(app.session.undo.is_empty() && app.session.has_selection()==false);
+                    assert!(app.session.undo.is_empty() && app.session.has_selection() == false);
                 }
             }
         }
@@ -2698,7 +2698,7 @@ mod tests {
         assert_eq!(app.cam, stopped);
         assert_eq!(app.session.doc.to_json(), design);
         assert_eq!(app.session.log.len(), log);
-        assert!(app.session.undo.is_empty() && app.session.has_selection()==false);
+        assert!(app.session.undo.is_empty() && app.session.has_selection() == false);
     }
 
     #[test]
@@ -3817,7 +3817,7 @@ mod tests {
         assert_eq!(h.app.cam.target, before.target);
         assert_eq!(h.app.cam.back(), before.back());
         assert!(h.app.tool.is_none() && h.app.dialog.is_none());
-        assert!(h.app.session.undo.is_empty() && h.app.session.has_selection()==false);
+        assert!(h.app.session.undo.is_empty() && h.app.session.has_selection() == false);
     }
 
     #[test]
@@ -4642,7 +4642,7 @@ mod tests {
         let mut events = pointer(at.x, at.y, Some(false));
         events.extend([finger(1, End, at.x, at.y), egui::Event::PointerGone]);
         h.frame_with(events);
-        assert!(!h.app.session.has_selection()==false, "a stationary touch selects even when its pointer disappears");
+        assert!(!h.app.session.has_selection() == false, "a stationary touch selects even when its pointer disappears");
         assert_eq!(h.app.cam, before);
         h.app.session.selection.clear();
         h.frames(2);
@@ -4659,7 +4659,7 @@ mod tests {
         let mut events = pointer(to.x, to.y, Some(false));
         events.extend([finger(1, End, to.x, to.y), egui::Event::PointerGone]);
         h.frame_with(events);
-        assert!(h.app.session.has_selection()==false, "orbiting must not select on release");
+        assert!(h.app.session.has_selection() == false, "orbiting must not select on release");
         h.step(&json!({"shot":"touch-orbit"})).unwrap();
         let orbited = h.app.cam;
         h.frame_with(pointer(at.x, at.y, None));

@@ -4830,7 +4830,7 @@ fn a_split_wall_clicked_once_is_one_item() {
         false,
         false,
     );
-    assert!(!app.session.has_selection()==false);
+    assert!(!app.session.has_selection() == false);
     assert_eq!(selected_count(&mut app), 1, "one click, however many patches it selected: {:?}", app.session.selection);
     app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "this wall".into());

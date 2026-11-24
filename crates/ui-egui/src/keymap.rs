@@ -1245,7 +1245,7 @@ mod tests {
         h.frames(3);
         h.app.session.selection.clear();
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
-        assert!(h.app.session.has_selection()==false, "the palette's field selects its own text");
+        assert!(h.app.session.has_selection() == false, "the palette's field selects its own text");
         h.call("ui.palette", json!({"open": false}));
         h.frames(2);
         h.step(&json!({"key": "A", "cmd": true})).unwrap();

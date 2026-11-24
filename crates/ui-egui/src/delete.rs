@@ -61,7 +61,10 @@ pub fn selection_params(app: &SolveApp) -> Value {
 
 fn is_empty(p: &Value) -> bool {
     let scoped = p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false);
-    !scoped && ["items", "occurrences", "components", "canvases", "joints"].iter().all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
+    !scoped
+        && ["items", "occurrences", "components", "canvases", "joints"]
+            .iter()
+            .all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
 }
 
 fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {

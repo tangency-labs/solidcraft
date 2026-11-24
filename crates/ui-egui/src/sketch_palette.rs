@@ -1211,7 +1211,7 @@ mod tests {
         }
         h.settle();
         assert!(h.app.tool.is_none(), "Esc still puts the tool down");
-        assert!(h.app.session.has_selection()==false, "and clears the selection");
+        assert!(h.app.session.has_selection() == false, "and clears the selection");
         assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
 
         h.app.finish_sketch();
@@ -1277,7 +1277,7 @@ mod tests {
 
         h.app.start("sketch.line");
         h.settle();
-        assert!(h.app.session.has_selection()==false, "starting a drawing tool clears the prior curve selection");
+        assert!(h.app.session.has_selection() == false, "starting a drawing tool clears the prior curve selection");
 
         let construction = crate::scenario::handle_at("dialog:Line Type:construction").unwrap();
         h.call("ui.click", json!({"x": construction.x, "y": construction.y}));

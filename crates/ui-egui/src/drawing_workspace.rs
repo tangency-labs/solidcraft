@@ -1457,7 +1457,7 @@ mod tests {
 
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(h.app.session.has_selection()==false, "Escape clears the selection");
+        assert!(h.app.session.has_selection() == false, "Escape clears the selection");
 
         h.step(&json!({"key":"A", "cmd": true})).unwrap();
         h.frames(2);
@@ -1478,7 +1478,7 @@ mod tests {
         let left = h.app.session.drawing("drawing.inspect").unwrap();
         assert!(left.view(a).is_none() && left.view(b).is_some(), "Delete removes only the selected view");
         assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
-        assert!(h.app.session.has_selection()==false);
+        assert!(h.app.session.has_selection() == false);
 
         h.step(&json!({"key":"Z", "cmd": true})).unwrap();
         h.frames(2);

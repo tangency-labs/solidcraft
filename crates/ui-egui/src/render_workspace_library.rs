@@ -1308,7 +1308,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                                 },
                             );
                         }
-                        if !app.session.has_selection()==false {
+                        if !app.session.has_selection() == false {
                             return Err(app.tr("render.material_choose_body").to_string());
                         }
                     }

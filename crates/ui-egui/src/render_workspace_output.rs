@@ -381,7 +381,7 @@ pub(super) fn select_editor(app: &mut SolveApp, editor: Editor) {
     use super::RenderSelection;
     let selection = match editor {
         Editor::Appearance => {
-            if app.session.has_selection()==false
+            if app.session.has_selection() == false
                 && let Some(group) = super::scene::groups(app).first()
             {
                 app.run(

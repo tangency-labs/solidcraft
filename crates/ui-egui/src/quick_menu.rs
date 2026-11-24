@@ -45,7 +45,7 @@ pub struct Watch {
 /// The commands that take the session's selection, in toolbar order: constraints with the
 /// parameters it gives them, other commands to start as from the toolbar.
 pub(crate) fn fitting(app: &SolveApp) -> Vec<Item> {
-    if app.session.has_selection()==false {
+    if app.session.has_selection() == false {
         return Vec::new();
     }
     solidcraft_engine::command_specs()
