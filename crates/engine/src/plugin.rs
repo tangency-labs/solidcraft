@@ -106,6 +106,9 @@ pub struct AppState {
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
+    /// The design a plugin run started on, as it was before the run: what `doc.info` reports in it.
+    /// Set by the host for that run alone, like `storage_caller`.
+    pub caller_design: Option<crate::schema::inspect::DocInfoResult>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -241,7 +244,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// The sensitive command groups. Each reaches past the open design and is refused unless the
 /// manifest asks for it and the user grants it, as file folders are:
 /// - `file`: reads or writes files (save, export, import, insert from a file, libraries);
-/// - `doc`: opens, creates, recovers or switches designs;
+/// - `doc`: opens, creates, recovers or switches designs, or reads the open one's file (`doc.info`);
 /// - `app`: app settings, the window and diagnostics, outside any design;
 /// - `plugin`: reviews, installs, removes, inspects or runs plugins.
 pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
@@ -527,6 +530,8 @@ fn run_package(
         panels::register_package(&mut scratch, &package)?;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
+        // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
+        scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
         scratch.plugin_state.storage_caller =
             rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
                 storage::StorageCaller {

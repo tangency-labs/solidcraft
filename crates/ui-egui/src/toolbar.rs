@@ -223,10 +223,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let preview_layout = crate::app_bar_custom::preview(app, ui.ctx());
     let customizing = app.toolbar_custom.app_bar_customizing;
     let bar_height = crate::app_bar::height(customizing);
+    crate::plugin_slots::set_context(app, ui.ctx());
     crate::plugin_slots::refresh(app);
-    if app.plugin_slots.discovery_pending() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
-    }
     let t = Tokens::get();
     let app_bar = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_appbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
