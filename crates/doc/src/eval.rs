@@ -9500,8 +9500,10 @@ fn feature_tools_with_constructor(
             // may join the curves of several sketches (#16168). The profile and the path are read
             // through the frame captured when the sweep was made, so the body it builds moves with
             // the sweep's own component; a sweep that reads components of its own keeps the live
-            // placement of each.
-            let frames = ReadFrames::of(doc, f, &sweep_readers(doc, sketch.0, path, *path_sketch, rails));
+            // placement of each. A guide rail is read through its own live placement, so a sweep
+            // that has one keeps that too.
+            let readers = sweep_readers(doc, sketch.0, path, *path_sketch, rails);
+            let frames = ReadFrames::of(doc, f, &readers, rails.is_empty());
             let curves = path_curves(doc, st, path, *path_sketch, f.component, &frames)?;
             // The profile joins the path in the feature's frame, whatever sketch each is drawn
             // in (identity when a sketch shares the feature's component).
@@ -9719,10 +9721,11 @@ impl ReadFrames {
     /// The frames a feature reads the components it names through. The captured frame applies
     /// when every one of them shares the common ancestor it was captured against; else each is
     /// read through its live placement, as before.
-    fn of(doc: &Document, feature: &Feature, owners: &[u64]) -> Self {
+    fn of(doc: &Document, feature: &Feature, owners: &[u64], use_captured: bool) -> Self {
         let profile_owner = owners.first().copied().unwrap_or(0);
         let ancestor = doc.common_ancestor(feature.component, profile_owner);
-        let captured = feature.profile_frame.filter(|_| owners.iter().all(|o| doc.common_ancestor(feature.component, *o) == ancestor));
+        let frame = if use_captured { feature.profile_frame } else { None };
+        let captured = frame.filter(|_| owners.iter().all(|o| doc.common_ancestor(feature.component, *o) == ancestor));
         Self { captured: captured.map(|frame| (frame, ancestor)), consumer: feature.component }
     }
 
