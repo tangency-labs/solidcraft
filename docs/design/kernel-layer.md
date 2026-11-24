@@ -520,6 +520,27 @@ design with no `kernel` field:
    never taken silently.
 5. **The design is not rewritten.** Saving afterwards records the route it was saved under.
 
+### Bug and crash reports record the kernel too
+
+So triage knows which kernel made a body, every report carries the route and the backend
+versions. This covers the in-app bug report, a crash report, the system block a ticket gets, and
+`diagnostics.*` over MCP.
+
+- **Always recorded, the default included.** The field reads, for example,
+  `kernel: { route: "all solidcore", versions: { solidcore: "<version and source digest>" } }`.
+  Reports aren't designs, so adding the field to them changes no design file's bytes.
+- **The failing call says which backend.** A failed operation's `ErrorCode` already names it: a
+  non-solidcore backend's `operation` starts with its adapter's crate path (§6). A report also
+  names the backend that made each body the failing feature read, which the router knows.
+- **Triage replays on solidcore first.** A report on a non-default route is replayed with
+  `solidcraft-cli run replay.json --in <design>.sc --kernel solidcore`, then on the reported
+  route. That separates the cases:
+  - fails on both routes: an app or solidcore bug, triaged as today;
+  - fails only on the reported route: a bug in that backend or its adapter, labelled with the
+    backend and filed against its adapter. A kernel defect is reported upstream from there.
+- **Design files already record the route** for non-default routes (above), so a design attached
+  to a report carries it as well.
+
 ---
 
 ## 6. Errors
@@ -675,7 +696,13 @@ results:
    - `backend`, status, counts, volume and area;
    - time in the operation, and time in the exchange;
    - `ExchangeLoss`;
-   - the shared check's verdict and the native check's verdict.
+   - the shared check's verdict and the native check's verdict;
+   - **accuracy**, all in millimetres at the case's own scale:
+     - the largest edge and vertex tolerance the result record carries (the gap the kernel had to
+       declare);
+     - the largest gap the shared check measures between each edge's curve, its pcurves and its
+       faces (`record_check::agreement`);
+     - the relative error in volume and area against the case's analytic answer.
 
    The rig's answers come from analysis, never from a kernel (tests/kernel-cases/README.md), so
    they are already neutral.
@@ -694,22 +721,33 @@ results:
 `target/kernel-compare/table.md` and `.json`. It has one row per `OpKind` and one column group
 per backend:
 
-| `OpKind` | cases | solidcore pass / refused / wrong / median ms | `<name>` pass / refused / wrong / median ms / exchange ms / losses | names identical (designs) |
-|---|---|---|---|---|
+| `OpKind` | cases | solidcore pass / refused / wrong / median ms / worst tolerance | `<name>` pass / refused / wrong / median ms / exchange ms / losses / worst tolerance | cases looser than solidcore | names identical (designs) |
+|---|---|---|---|---|---|
 
 Each row expands to its cases. A scheduled CI job (nightly, not per pull request) builds the
 non-default features and publishes the table. Nothing in it gates the default build.
 
 ### When an operation may be routed
 
-An `OpKind` may go to another backend only when all five hold on its rows:
+An `OpKind` may go to another backend only when all six hold on its rows:
 
 1. **No new refusals.** No case solidcore passes is refused or wrong on that backend (§6).
 2. **Same names.** Verified names are identical on every corpus design that uses the operation.
 3. **Shared check.** No result fails the shared check.
 4. **No loss.** There is no `ExchangeLoss` on a case solidcore builds losslessly, unless the loss
    is a label only and every later case on that body still passes.
-5. **Clearly better.** End to end, conversions included, the backend is at least 1.2× faster at
+5. **As accurate (a hard gate).** On every case, the backend's result holds the same linear
+   tolerance as solidcore's or a tighter one. Each of the three accuracy measures (the worst
+   tolerance it carries, the worst gap the shared check measures, and the volume and area error
+   against the analytic answer) is no larger than solidcore's on the same case. The comparison is
+   made after the exchange, on the whole body, so a conversion that loosens faces the operation
+   didn't touch counts against it.
+   - Why it is hard: solidcore results typically hold about 1e-12 mm at part scale, while some
+     kernels work to a single global tolerance near 1e-7. That is invisible on one part, but on a
+     large assembly placed and combined many times over it compounds to millimetre-level error.
+   - Speed never buys back accuracy. A faster backend that is looser on any case isn't routed.
+     The "cases looser than solidcore" column must read 0.
+6. **Clearly better.** End to end, conversions included, the backend is at least 1.2× faster at
    the median and never more than 1.5× slower on any case, or it passes cases solidcore refuses.
 
 The decision is recorded on the operation's tracking issue, with the table. The shipped route
@@ -1102,6 +1140,34 @@ kernel-neutral, which the solidcore work has assumed so far.
   may not. Long operations stay on solidcore until a backend can be stopped.
 - **The size of §10.** Steps 4 to 9 touch many crates. Each pull request is mechanical and
   checked byte-identical, but together they are the bulk of the series.
+- **Accuracy.** A backend that works to a looser global tolerance can look correct on single parts
+  and still drift by millimetres across a large assembly. Rule 5 of §8 is a hard gate on every
+  case, with no trade for speed, and the tolerance column keeps the gap visible.
+
+### Tradeoff: support cost grows with every kernel
+
+Every backend that can be built multiplies what support has to cover. This is an explicit cost to
+weigh against any speed win.
+
+- **Triage.** A report now has a route as well as a version. The triage matrix grows with the
+  number of backends, and with every combination of per-operation routes in use. Replaying on
+  solidcore separates the kernels (§5), but it is extra work on every report from a non-default
+  route.
+- **Upstream defects.** Bugs in another kernel are fixed upstream, on its maintainers' schedule.
+  Until they are, the operation falls back or is un-routed, and someone has to own reporting it
+  and tracking the fix.
+- **Upgrades.** Each pinned kernel needs upgrading, its adapter re-measured (the full comparison
+  table), and cached results rebuilt.
+- **Documentation and tests.** Each backend needs its rig, corpus and bench runs kept green, plus
+  its own known-failing lists.
+
+How this design limits the cost:
+
+- release builds ship solidcore only, so ordinary users report against one kernel until the owner
+  routes an operation elsewhere by default;
+- each backend routed by default needs a named owner for its adapter and for upstream liaison;
+- a backend that wins nothing in the table after an agreed period is removed, adapter and feature
+  together, rather than kept compiling.
 
 ### Open questions for the owner
 
