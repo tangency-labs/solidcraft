@@ -1974,6 +1974,10 @@ enum Rec {
     Deferred(SolidError),
 }
 
+/// The status upstream's `sm_SurfaceDropPoint` returns when no tolerance drops the point
+/// (`SM_ERR`), which the Rust side answers with `None`.
+const SM_ERR_DROP_MISS: f64 = 1001.0;
+
 /// `Ok(value)` or `Err(status)` of a kernel result; an unported callee returns the
 /// deferral from the enclosing function.
 macro_rules! try_status {
@@ -2088,7 +2092,7 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 v3(*pnt),
                 *tol
             )) {
-                Ok(sols) => {
+                Ok(Some(sols)) => {
                     o.extend([0.0, sols.len() as f64]);
                     for n in 0..sols.len() {
                         if let Some(sol) = sols.get(n) {
@@ -2100,6 +2104,8 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                         }
                     }
                 }
+                // the miss is upstream's `SM_ERR` ("Unable to drop point")
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0]),
                 Err(st) => o.extend([st, 0.0]),
             }
         }
@@ -2126,13 +2132,15 @@ fn rust_geometry(i: &Inputs) -> Result<Rec, HarnessError> {
                 *tol,
             );
             match try_status!(r) {
-                Ok(x) => {
+                Ok(Some(x)) => {
                     o.push(0.0);
                     // (the C++ dumps the SmBSplineCurve outputs' NURBs)
                     dump_bcurve(&mut o, x.curve_3d.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface1_uv_curve.as_ref().and_then(b_spline_part));
                     dump_bcurve(&mut o, x.surface2_uv_curve.as_ref().and_then(b_spline_part));
                 }
+                // a point that drops nowhere: upstream returns the drop's `SM_ERR`
+                Ok(None) => o.extend([SM_ERR_DROP_MISS, 0.0, 0.0, 0.0]),
                 Err(st) => o.extend([st, 0.0, 0.0, 0.0]),
             }
             o.extend([d.x, d.y, d.z]);
@@ -3771,5 +3779,45 @@ mod tests {
         ] {
             assert!(seen.contains(&op), "op {op} never generated");
         }
+    }
+}
+
+/// #21383: the 7 `EvaluateMate` rows the G1R change moved. Each point lies outside
+/// the mate's domain, so `evaluate_mate` returns `evaluate_point_on_extended_surface` on
+/// the mate's NURB: a fresh G1R extension that `crate::g1r_cert::certify_unbounded`
+/// replays step by step, certifies G1 across each grown side with its input kept bit for
+/// bit, and requires to be the evaluator's surface bit for bit.
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::certify_unbounded;
+
+    const MOVED: [&str; 7] = ["gen0003", "gen0240", "gen0242", "gen0367", "gen0787", "gen1470", "gen1816"];
+
+    #[test]
+    fn each_moved_row_evaluates_a_certified_g1_extension() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::EvaluateMate { surface, uv } = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not EvaluateMate", c.name)
+            };
+            let s = surface_of(&surface).unwrap();
+            assert!(!s.natural_uv_domain_with_nurb(&k).unwrap().contains_point(Point2::new(uv[0], uv[1]), 0.0), "{}", c.name);
+            let nurb = match s.kind_with_nurb(&k).unwrap() {
+                SurfaceKind::BSpline(b) => b.gw_nurb().unwrap().clone(),
+                SurfaceKind::SurfOfRevolution(r) => r.base().gw_nurb().unwrap().clone(),
+                SurfaceKind::SurfOfExtrusion(e) => e.base().gw_nurb().unwrap().clone(),
+                _ => panic!("{}: mate kind", c.name),
+            };
+            let mixed = certify_unbounded(&nurb, uv[0], uv[1]).unwrap_or_else(|e| panic!("{}: {e}", c.name));
+            assert!(mixed > 0, "{}: no mixed-ratio step", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }
