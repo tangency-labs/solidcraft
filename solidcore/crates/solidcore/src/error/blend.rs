@@ -4574,6 +4574,35 @@ mod tests {
         assert!(e.is_defect() && inner.is_defect());
     }
 
+    /// #19824: an edge curve's cache that is not built keeps the `SM_ERR_NULL_POINTER` of the
+    /// phrase it replaces, stays a blend failure (so solidcore-ops still types it as one),
+    /// and its cause, the cache's error, decides whether it is a defect.
+    #[test]
+    fn edge_curve_cache_not_built_passes_its_cause_on() {
+        let failure = SolverFailure::EdgeCurveCacheNotBuilt {
+            edge: crate::topology::EdgeId::from_index(4),
+        };
+        let wrap = |inner: SolidError| {
+            Failure::new("blend::op", BlendFailure::Solver(failure))
+                .caused_by(inner)
+                .into_error()
+        };
+        let inner = SolidError::blend_null_defect("blend::inner", "why");
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::Solver(failure)));
+        assert!(BlendFailure::Solver(failure).replaces_upstream_status());
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(e.is_defect());
+        let inner = SolidError::blend_solver("blend::inner", SolverFailure::EdgeUseWithoutMate);
+        assert!(!wrap(inner).is_defect());
+        assert_eq!(
+            failure.to_string(),
+            "the cache of the curve of edge 4 could not be built"
+        );
+    }
+
     /// The causes (every enum of this module and of `error/blend/`) and every match on their
     /// variants (but for one with a `_` arm) are kept in name order, one arm per pattern, so changes that each add a cause or its arms touch
     /// different lines. Names compare as bytes.
