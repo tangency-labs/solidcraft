@@ -190,15 +190,17 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
 /// intersects the result's face-owned surfaces (the extrusion walls) with their faces'
 /// trimmed caches, as the fork's `GlobalSurfaceIntersect` reaches them through
 /// `SmSurface::GetFace`; without the face context it failed with
-/// `Unported(topology.face_p2)` (SolidCraft rig case shell/566). Two marched edges
-/// between the inner planar walls become lines; the volume does not change. The two
-/// inner straight walls are certified nets (WR-718), bicubic and not recognised as
-/// extrusions when merged, so their edges with the end cap stay marched (`N_SrfOffset`'s
-/// fit was recognised, and those two became lines as well). The volume moves by 1.2e-10
-/// relative, within the pin.
+/// `Unported(topology.face_p2)` (SolidCraft rig case shell/566). The inner straight walls
+/// are certified nets (WR-718) that do not give the recognised plane's points at the same
+/// parameters, so the merge keeps them as B-splines (`CopyAndAddAnalytics`, WR-450 #18923,
+/// now the only path): no marched edge lies between two analytic faces, so no edge
+/// becomes a line and the shell keeps the 16 line edges of
+/// [`issue_1476_swept_bar_shells_with_solidcraft_fixes`]. (While the analytic replaced
+/// those walls, the two marched edges between them became lines: 18.) The volume is held
+/// to the closed form, as before.
 #[test]
 fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
-    assert_eq!(check(&UpstreamFixes::default(), None), 18);
+    assert_eq!(check(&UpstreamFixes::default(), None), 16);
 }
 
 /// The shell's volume is the closed B-rep's, origin-independent (#16735; adapted from
