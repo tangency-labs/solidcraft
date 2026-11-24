@@ -590,3 +590,104 @@ fn a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once() {
     let counts = [2, 4].map(stacked_plate_seam_tests);
     assert_eq!(counts, [47 * 4 + 40, 47 * 16 + 40]);
 }
+
+/// Not the fork's: the strips of an `n` x `n` woven grid, `w` wide and `2 w` apart on
+/// z = 0, those along x 1 high and those along y 2 high, united into one body.
+fn woven_grid(k: &mut Kernel, n: u32, w: f64) -> Brep {
+    let length = 2.0 * w * f64::from(n);
+    let mut all: Option<Brep> = None;
+    for i in 0..n {
+        let at = 2.0 * w * f64::from(i);
+        for strip in [
+            create_box(k, Point3::new(0.0, at, 0.0), length, w, 1.0).unwrap(),
+            create_box(k, Point3::new(at, 0.0, 0.0), w, length, 2.0).unwrap(),
+        ] {
+            all = Some(match all {
+                Some(a) => boolean_union(k, a, strip).unwrap(),
+                None => strip,
+            });
+        }
+    }
+    all.unwrap()
+}
+
+/// Not the fork's: a strip `w` wide across [`woven_grid`] on its diagonal, standing on
+/// z = 0: its sides are planes, its top a cubic B-spline that waves between 1.4 and 2.6
+/// high, so it runs over the grid's strips of height 1 and dips into those of height 2.
+fn diagonal_wavy_strip(k: &mut Kernel, n: u32, w: f64) -> Brep {
+    use solidcore::primitive::api_curves::create_curve;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2};
+    let length = 2.0 * w * f64::from(n) * SQRT_2;
+    let at =
+        |s: f64, z: f64| Point3::new(FRAC_1_SQRT_2 * s + 0.5 * w, FRAC_1_SQRT_2 * s - 0.5 * w, z);
+    let waves = 4 * n;
+    let top: Vec<Point3> = (0..=waves)
+        .map(|i| {
+            let s = length * (1.0 - f64::from(i) / f64::from(waves));
+            at(s, if i % 2 == 0 { 1.4 } else { 2.6 })
+        })
+        .collect();
+    let line = |a: Point3, b: Point3| Curve::from(create_line_segment(a, b).unwrap());
+    let curves = [
+        line(at(0.0, 0.0), at(length, 0.0)),
+        line(at(length, 0.0), at(length, 1.4)),
+        Curve::from(create_curve(&top).unwrap()),
+        line(at(0.0, 1.4), at(0.0, 0.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let across = Vec3::new(-FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0);
+    create_linear_sweep(k, &refs, across, w, true).unwrap()
+}
+
+/// Not the fork's: the face pairs the union of [`woven_grid`] with
+/// [`diagonal_wavy_strip`] visits and those it intersects
+/// ([`solidcore::kernel::WorkCounters::face_pairs`],
+/// [`solidcore::kernel::WorkCounters::face_intersections`]), after checking the union's
+/// volume against the grid's and the strip's less their common part's.
+fn grid_and_strip_pairs(n: u32) -> (u64, u64) {
+    let mut k = Kernel::default();
+    let w = 1.0;
+    let mut grid = woven_grid(&mut k, n, w);
+    let mut strip = diagonal_wavy_strip(&mut k, n, w);
+    let grid_volume = brep_volume_default(&k, &mut grid, 1e-9).unwrap();
+    let strip_volume = brep_volume_default(&k, &mut strip, 1e-9).unwrap();
+    let (grid_copy, strip_copy) = (woven_grid(&mut k, n, w), diagonal_wavy_strip(&mut k, n, w));
+    let mut common = boolean_3d(
+        &mut k,
+        grid_copy,
+        strip_copy,
+        BooleanOperation::Intersection,
+    )
+    .unwrap()
+    .result;
+    let common_volume = brep_volume_default(&k, &mut common, 1e-9).unwrap();
+    k.work_counters.reset();
+    let mut u = boolean_union(&mut k, grid, strip).unwrap();
+    let (pairs, intersected) = (
+        k.work_counters.face_pairs(),
+        k.work_counters.face_intersections(),
+    );
+    let volume = brep_volume_default(&k, &mut u, 1e-9).unwrap();
+    let expected = grid_volume + strip_volume - common_volume;
+    println!("{n} x {n} grid and a diagonal strip: {pairs} face pairs, {intersected} intersected, volume {volume}");
+    assert!(
+        (volume - expected).abs() <= 1e-9 * expected,
+        "volume {volume}, expected {expected}"
+    );
+    (pairs, intersected)
+}
+
+/// Not the fork's: a strip across a woven grid on its diagonal, as the strips of a woven
+/// panel cross the grid of the others. The boxes of its long faces, two planes on the
+/// diagonal and a waving B-spline top, hold most of the grid, so WR-527's box test leaves
+/// most of the grid's faces paired with them: 189 and 625 pairs for 4 x 4 and 8 x 8
+/// strips, every one of which was intersected. Exact tests now show most of them apart: a
+/// face's box wholly on one side of the other's plane, two planar faces whose edges near
+/// each other's plane lie apart, a curved face whose control net's spans all lie away from
+/// the other face. 82 and 166 are intersected, about twice for twice the strip's length.
+#[test]
+fn a_strip_across_a_woven_grid_intersects_only_the_faces_it_comes_near() {
+    let counts = [4, 8].map(grid_and_strip_pairs);
+    assert_eq!(counts, [(189, 82), (625, 166)]);
+}
