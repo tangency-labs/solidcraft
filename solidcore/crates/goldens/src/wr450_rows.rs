@@ -502,6 +502,13 @@ fn seam_cone_split_drops_trims_off_the_domain() {
     let mut checked = 0;
     for &e in edges.iter().filter(|e| [3, 4].contains(&e.index())) {
         let tol = b.edge(e).expect("edge").tolerance;
+        // Without the fix the kept trim is 0.765 off its edge: a tolerance below that is
+        // what makes this test fail then, so a later raise of it cannot hide the trim.
+        assert!(
+            tol < 0.765,
+            "edge {}: tolerance {tol:e} would cover the kept trim's gap",
+            e.index()
+        );
         for (eu, bound) in crate::certify::trim_tolerance::trim_bounds_any_surface(&k, b, e) {
             let bound = bound
                 .unwrap_or_else(|| panic!("edge {} use {}: not enclosed", e.index(), eu.index()));
@@ -514,6 +521,10 @@ fn seam_cone_split_drops_trims_off_the_domain() {
             checked += 1;
         }
     }
+    assert!(
+        checked > 0,
+        "edges 3 and 4 of the healed B-rep hold no trim"
+    );
     eprintln!("seam_cone_split_drops_trims_off_the_domain: {checked} trims certified");
 }
 

@@ -2183,12 +2183,13 @@ fn remove_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()> {
 }
 
 /// Not upstream (WR-450, #18923): drops the UV trim of every edge use of `face`'s loops
-/// whose box over its edge's interval leaves `domain`, the natural domain of the surface
+/// whose certified box over its edge's interval ([`crate::curve::curve::Curve::certified_bounding_box`],
+/// which holds every point of the trim there) leaves `domain`, the natural domain of the surface
 /// `face`'s surface was copied from as an analytic of another kind. The copy keeps that
 /// surface's parameterisation on `domain` only (the copy check's grid); outside it the
 /// two differ (a cone clamps where a B-spline extrapolates), so such a trim is no longer
 /// on its edge. A dropped trim is the lazy cache of the edge's curve on the face, made
-/// again when next asked for; a trim whose box cannot be found is dropped as well.
+/// again when next asked for; a trim with no certified box is dropped as well.
 ///
 /// # Errors
 ///
@@ -2203,11 +2204,6 @@ fn drop_trims_off_domain(
         return Ok(());
     };
     let mate = b.faceuse(fu)?.mate;
-    let request = crate::nurbs::b_spline_curve::BoundingBoxRequest {
-        normal: true,
-        pseudo: false,
-        polar: false,
-    };
     for fu in std::iter::once(fu).chain(mate) {
         for eu in crate::topology::edgeuse::p1::faceuse_edgeuses(b, fu, false, None)? {
             let record = b.edgeuse(eu)?;
@@ -2215,16 +2211,15 @@ fn drop_trims_off_domain(
                 continue;
             };
             let interval = b.edge(edge)?.interval;
-            let inside =
-                crate::error::ignored(trim.calculate_bounding_box(k, &interval, request, true))?
-                    .and_then(|boxes| boxes.normal)
-                    .is_some_and(|uv| {
-                        uv.is_defined()
-                            && uv.min_at(0) >= domain.min().x
-                            && uv.max_at(0) <= domain.max().x
-                            && uv.min_at(1) >= domain.min().y
-                            && uv.max_at(1) <= domain.max().y
-                    });
+            let inside = crate::error::ignored(trim.certified_bounding_box(k, &interval))?
+                .flatten()
+                .is_some_and(|uv| {
+                    uv.is_defined()
+                        && uv.min_at(0) >= domain.min().x
+                        && uv.max_at(0) <= domain.max().x
+                        && uv.min_at(1) >= domain.min().y
+                        && uv.max_at(1) <= domain.max().y
+                });
             if !inside {
                 crate::topology::edgeuse::p1::set_uv_trim_curve(
                     b,

@@ -129,15 +129,13 @@ pub(crate) fn with_installed<R>(seam: ReplaySeam, f: impl FnOnce() -> R) -> R {
     f()
 }
 
-/// Runs `f` with `hook` installed as this thread's seam.
+/// Runs `f` with `hook` installed as this thread's seam; the seam it replaced (an outer
+/// hook, or none) is restored when `f` returns or unwinds ([`with_installed`]).
 pub(crate) fn with_hook<R>(
     hook: impl FnMut(Call<'_>) -> Answer + Send + 'static,
     f: impl FnOnce() -> R,
 ) -> R {
-    SEAM.with(|s| *s.borrow_mut() = Some(ReplaySeam::new(Box::new(hook))));
-    let r = f();
-    SEAM.with(|s| *s.borrow_mut() = None);
-    r
+    with_installed(ReplaySeam::new(Box::new(hook)), f)
 }
 
 /// A taped answer of main's: the value's three words ([`replay::Bits`]), or the error.
