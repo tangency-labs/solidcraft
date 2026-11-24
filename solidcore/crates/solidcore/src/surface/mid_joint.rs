@@ -40,7 +40,8 @@ fn finite(v: Vec3) -> bool {
 }
 
 /// The line two planes meet in, or `None` when they are parallel within the angular tolerance
-/// (whether they face the same way or opposite ways).
+/// (whether they face the same way or opposite ways), or so near parallel that no point of the
+/// line can be placed within the zone tolerance of both at this precision.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a point or normal that is not finite, or a normal of zero
@@ -60,14 +61,24 @@ pub fn planes_meeting(
     let along = ua.cross(ub);
     let sine_squared = along.length_squared();
     let tol = kernel.tolerances.ang_tol_rad().sin();
-    if sine_squared <= tol * tol {
+    // Parallel within the angular tolerance, or to working precision (no direction to unitize).
+    if sine_squared <= tol * tol || sine_squared < crate::math::EFF_ZERO_SQ {
         return Ok(None);
     }
-    // The point of both planes nearest the origin: with c = ua . ub and d the planes' offsets,
-    // p = ((da - db c) ua + (db - da c) ub) / (1 - c^2), and 1 - c^2 is the sine squared.
-    let c = ua.dot(ub);
+    // The point of both planes nearest the origin: with n = ua × ub and d the planes' offsets,
+    // p = (da (ub × n) + db (n × ua)) / |n|^2, for p . ua = da (ua . (ub × n) = n . n), p . ub = db
+    // and p . n = 0. It is built from n alone, not from 1 - (ua . ub)^2, which loses its digits
+    // to cancellation as the planes near parallel.
     let (da, db) = (a.point.dot(ua), b.point.dot(ub));
-    let point = ((ua * (da - db * c)) + (ub * (db - da * c))) * (1.0 / sine_squared);
+    let point = ((ub.cross(along) * da) + (along.cross(ua) * db)) * (1.0 / sine_squared);
+    // Planes so near parallel (under a tiny angular tolerance) that rounding moves the point off
+    // either plane by more than the zone tolerance meet in no line this precision can place.
+    let zone = kernel.tolerances.zone_tol_3d;
+    if point.distance_along(a.point, ua).abs() > zone
+        || point.distance_along(b.point, ub).abs() > zone
+    {
+        return Ok(None);
+    }
     Ok(Some(Line3 {
         point,
         direction: along.unitize()?,
@@ -247,6 +258,36 @@ mod tests {
             planes_meeting(&k, &a, &plane(v(0.0, 0.0, 2.0), v(0.0, 0.0, -1.0))).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn nearly_parallel_planes_under_no_angular_tolerance_meet_on_both_or_not_at_all() {
+        let mut k = kernel();
+        k.tolerances.ang_tol_deg = 0.0;
+        let zone = k.tolerances.zone_tol_3d;
+        // x = 1 and the plane through (1, 0, 0) with normal (1, 2^-27, 0): they meet in the line
+        // through (1, 0, 0) along z, which is its point nearest the origin. (1 - c^2 rounds to
+        // 0 here, and the old form gave the origin, 1 off the first plane.)
+        let a = plane(v(1.0, 0.0, 0.0), v(1.0, 0.0, 0.0));
+        let b = plane(v(1.0, 0.0, 0.0), v(1.0, 2.0_f64.powi(-27), 0.0));
+        let line = planes_meeting(&k, &a, &b).unwrap().unwrap();
+        assert!((line.point - v(1.0, 0.0, 0.0)).length() < 1e-12, "{line:?}");
+        assert!(line.direction.z.abs() > 1.0 - 1e-12, "{line:?}");
+        // Whatever the tilt down to the last bits, a line given lies on both planes.
+        for e in 20..=60 {
+            let t = 2.0_f64.powi(-e);
+            let c = plane(v(3.0, -7.0, 2.0), v(1.0, 1.0, 0.0));
+            let d = plane(v(-5.0, 4.0, 9.0), v(1.0 + t, 1.0, 0.0));
+            if let Some(l) = planes_meeting(&k, &c, &d).unwrap() {
+                for p in [&c, &d] {
+                    let n = p.outward.unitize().unwrap();
+                    assert!(
+                        l.point.distance_along(p.point, n).abs() <= zone,
+                        "2^-{e}: {l:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
