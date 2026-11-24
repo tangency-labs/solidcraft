@@ -1207,23 +1207,23 @@ fn tab_aliases(tab: &str) -> &'static [&'static str] {
 const TAB_HANDLES: ribbon::TabHandles<'static> =
     ribbon::TabHandles { tab: "tab:", tab_rect: "toolbar_tab:", add: "ribbon:add_tab", action: "ribbon:", highlight: "ribbon:highlight" };
 
-/// Whether ribbon tab changes move: the preference (`ribbon_motion`), and the app's animations are
-/// not switched off (an animation time of 0, as tests and a dragged window ask for).
-fn ribbon_animates(app: &SolveApp, ctx: &egui::Context) -> bool {
-    app.preferences.ribbon_motion && ctx.global_style().animation_time > 0.0
+/// Whether ribbon tab changes move: only while the app's animations are on (an animation time
+/// above 0); with them off, tabs swap at once, as before.
+fn ribbon_animates(ctx: &egui::Context) -> bool {
+    ctx.global_style().animation_time > 0.0
 }
 
 /// How a ribbon tab change moves the panels: they cross-fade, drifting in from the side of the new
-/// tab, or with the motion off they swap at once.
-pub(crate) fn ribbon_motion(app: &SolveApp, ctx: &egui::Context) -> crate::ui_kit::CrossFade {
-    let duration = if ribbon_animates(app, ctx) { crate::ui_kit::CROSS_FADE_SECONDS } else { 0.0 };
+/// tab, or with the app's animations off they swap at once.
+fn ribbon_motion(ctx: &egui::Context) -> crate::ui_kit::CrossFade {
+    let duration = if ribbon_animates(ctx) { crate::ui_kit::CROSS_FADE_SECONDS } else { 0.0 };
     crate::ui_kit::CrossFade::new(duration).drift(Tokens::get().space_12)
 }
 
-/// How the selected tab's highlight moves: it slides to the new tab, or with the motion off it
-/// jumps there.
-fn ribbon_slide(app: &SolveApp, ctx: &egui::Context) -> crate::ui_kit::SlidingHighlight {
-    crate::ui_kit::SlidingHighlight::new(if ribbon_animates(app, ctx) { crate::ui_kit::SLIDE_SECONDS } else { 0.0 })
+/// How the selected tab's highlight moves: it slides to the new tab, or with the app's animations
+/// off it jumps there.
+fn ribbon_slide(ctx: &egui::Context) -> crate::ui_kit::SlidingHighlight {
+    crate::ui_kit::SlidingHighlight::new(if ribbon_animates(ctx) { crate::ui_kit::SLIDE_SECONDS } else { 0.0 })
 }
 
 /// The selected tab's place in the row, which gives a tab change its direction.
@@ -1280,7 +1280,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
                 .collect(),
             floating: Container::for_layout(app.ui.layout, Surface::Panel).floating(),
             underline: matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL").then(|| panel_accent(&t, &app.ui.tab, "")),
-            slide: ribbon_slide(app, ui.ctx()),
+            slide: ribbon_slide(ui.ctx()),
             handles: TAB_HANDLES,
         };
         ribbon::tabs(ui, &row_data, row)
@@ -1935,7 +1935,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         // Panels.
         let tab = app.ui.tab.clone();
         // A tab change cross-fades the panels (this layer only: their drop-downs do not fade).
-        let fade = ribbon_motion(app, ui.ctx()).begin(ui);
+        let fade = ribbon_motion(ui.ctx()).begin(ui);
         // The command whose tool or dialog is open right now, shown pressed in the toolbar.
         let running = running_command(app);
         // The command the search points out (#7287): a preview while a result is hovered, or the
@@ -6418,10 +6418,10 @@ mod ribbon_label_tests {
     }
 
     #[test]
-    fn with_ribbon_motion_off_tabs_swap_at_once() {
+    fn with_the_apps_animations_off_tabs_swap_at_once() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.call("ui.prefs", json!({"ribbon_motion": false}));
+        h.ctx.global_style_mut(|style| style.animation_time = 0.0);
         h.frames(3);
         let model = panel_texts(&h);
         h.app.ui.tab = "INSPECT".into();

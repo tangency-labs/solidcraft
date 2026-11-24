@@ -38,10 +38,9 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
-    // Test change: ribbon_motion (whether ribbon tab changes animate) is a portable key.
     assert_eq!(
         keys.len(),
-        110,
+        109,
         "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
@@ -869,7 +868,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "ribbon_labels",
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
-        "ribbon_motion",
         "ribbon_reveal",
         "ribbon_tabs_only",
         "right_drag_orbits",
@@ -925,8 +923,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    // Test change: one more portable key, ribbon_motion (whether ribbon tab changes animate).
-    assert_eq!(expected.len(), 110);
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 
