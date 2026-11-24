@@ -23,6 +23,8 @@ pub mod constructor;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;
+#[cfg(test)]
+pub(crate) mod g1r_cert;
 pub mod golden;
 #[cfg(test)]
 pub(crate) mod interval;
