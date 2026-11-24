@@ -1498,9 +1498,8 @@ pub enum FeatureKind {
         #[walk(angle = "Angle")]
         angle: Expr,
     },
-    /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), then one per pair of points (#15705), its cross-section the profile,
-    /// square to the line from end to end.
+    /// Structural members (#4003): one body per selected line, arc or pair of points,
+    /// or one continuous tangent sketch path. Ordinary straight members retain corner processing.
     FrameMember {
         /// The frame sketch; none: a Frame Member of pairs only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1509,6 +1508,10 @@ pub enum FeatureKind {
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<String>,
+        /// The explicitly selected curves form one open, tangent line/arc chain, in selection
+        /// order. Otherwise each selected curve makes a separate member.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continuous: bool,
         profile: crate::frame::MemberProfile,
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
@@ -1568,6 +1571,20 @@ pub enum FeatureKind {
         /// unset. None: those fields are the feature's one group (`frame::member_groups`).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         groups: Vec<crate::frame::MemberGroup>,
+    },
+    /// Trim or extend frame members (#4003) to other members (butt joints), planes or planar
+    /// faces: each member's end that meets a target is rebuilt flat against it, `gap` short of
+    /// it. The member keeps its body and name.
+    FrameTrim {
+        members: Vec<crate::frame::TrimMemberRef>,
+        to: Vec<crate::frame::TrimTarget>,
+        /// Which end of each member moves (default: the end nearer the target).
+        #[serde(default, skip_serializing_if = "crate::frame::TrimEnd::is_auto")]
+        end: crate::frame::TrimEnd,
+        /// The weld gap between a member's end and its target (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
     },
     /// A separate mounting or end plate, centred on a persistently identified planar face.
     FramePlate {
@@ -3495,6 +3512,7 @@ impl FeatureKind {
             FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
             FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
             FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -3586,6 +3604,7 @@ impl FeatureKind {
             FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
             FeatureKind::FrameGusset { .. } => "frame_gusset",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FrameTrim { .. } => "frame_trim",
             FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -3678,6 +3697,7 @@ impl FeatureKind {
             "EndCapFeature" => "frame_end_cap",
             "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
+            "FrameTrimFeature" => "frame_trim",
             "GussetFeature" => "frame_gusset",
             "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
@@ -3771,6 +3791,7 @@ impl FeatureKind {
             FeatureKind::FrameMemberTurn { .. } => "Rotate",
             FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FrameTrim { .. } => "MemberTrim",
             FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
@@ -4178,6 +4199,13 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
+    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// file carries it: the session keeps the choice, and a design in memory always holds the
+    /// bodies it could read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked_bodies_left_out: bool,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -4532,6 +4560,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            linked_bodies_left_out: false,
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),

@@ -744,6 +744,17 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How unsuppressing an upstream feature in the 2D Timeline affects downstream dependents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timeline2dUnsuppressMode {
+    /// Restore each downstream feature's original suppression state (features separately suppressed remain suppressed).
+    #[default]
+    RestoreState,
+    /// Unsuppress all downstream features that depend on the upstream feature.
+    UnsuppressAll,
+}
+
 /// How a section hatches the faces it cuts (Preferences: "Section hatch").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -6652,6 +6663,7 @@ mod tests {
             ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
+            ("timeline_2d", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
