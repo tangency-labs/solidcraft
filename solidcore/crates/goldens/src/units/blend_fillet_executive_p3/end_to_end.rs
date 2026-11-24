@@ -3777,7 +3777,9 @@ mod wr459_sphere_rows {
     const EDGE: u64 = 20001;
     const EDGEUSE: u64 = 20003;
 
-    /// One row: the case; main's (a2b7ec60e2) Level 2 failures of its result; the sphere
+    /// One row: the case; main's (a2b7ec60e2) Level 2 failures of its result, less the three
+    /// of edgeuse 142's trim that the clamped-sliver drop rule (#21353) took out of the
+    /// target itself (the target's own failures are checked in `check`); the sphere
     /// face whose seam failure the kept boundary adds; the round's vertex near the seam,
     /// with main's coordinate bits and the bound on its distance from the seam (the
     /// measured distance rounded up); the other vertices within 1e-4 of the seam that the
@@ -3796,39 +3798,30 @@ mod wr459_sphere_rows {
     }
 
     /// The failures every row's body shares with the target (`check_brep` of the target:
-    /// the cone faces 4, 5 and 7 near their seams and edgeuse 142's trim) less face 4,
+    /// the cone faces 4, 5 and 7 near their seams) less face 4,
     /// which the round splits, plus the round's rail on the cone (edge and edgeuse).
-    const fn shared(rail: u64, rail_use: u64, cone: u64) -> [Failure; 8] {
+    const fn shared(rail: u64, rail_use: u64, cone: u64) -> [Failure; 5] {
         [
             (SEAM, Some((FACE, 5))),
             (SEAM, Some((FACE, 7))),
             (SEAM, Some((FACE, cone))),
-            ("Bad SpeedPt", Some((EDGEUSE, 142))),
-            ("Bad CurveCusp", Some((EDGEUSE, 142))),
-            ("Bad Repeated CPts", Some((EDGEUSE, 142))),
             ("Bad Repeated CPts", Some((EDGE, rail))),
             ("Bad Repeated CPts", Some((EDGEUSE, rail_use))),
         ]
     }
 
-    const E1: [Failure; 8] = shared(40, 162, 9);
-    const E4_R01: [Failure; 8] = [
+    const E1: [Failure; 5] = shared(40, 162, 9);
+    const E4_R01: [Failure; 5] = [
         (SEAM, Some((FACE, 0))),
         (SEAM, Some((FACE, 4))),
         (SEAM, Some((FACE, 7))),
-        ("Bad SpeedPt", Some((EDGEUSE, 142))),
-        ("Bad CurveCusp", Some((EDGEUSE, 142))),
-        ("Bad Repeated CPts", Some((EDGEUSE, 142))),
         ("Bad Repeated CPts", Some((EDGE, 43))),
         ("Bad Repeated CPts", Some((EDGEUSE, 172))),
     ];
-    const E4_R05: [Failure; 10] = [
+    const E4_R05: [Failure; 7] = [
         (SEAM, Some((FACE, 0))),
         (SEAM, Some((FACE, 4))),
         (SEAM, Some((FACE, 7))),
-        ("Bad SpeedPt", Some((EDGEUSE, 142))),
-        ("Bad CurveCusp", Some((EDGEUSE, 142))),
-        ("Bad Repeated CPts", Some((EDGEUSE, 142))),
         ("Bad Repeated CPts", Some((EDGE, 41))),
         ("Bad Repeated CPts", Some((EDGEUSE, 164))),
         ("Bad Repeated CPts", Some((EDGE, 43))),
@@ -4033,6 +4026,16 @@ mod wr459_sphere_rows {
             }
             assert!(d <= tol, "{name}: vertex {v} is {d:e} off the seam, past its tolerance {tol:e}");
         }
+
+        // the target's own failures: the cone faces 4, 5 and 7 near their seams (edgeuse
+        // 142's trim failures went with the clamped-sliver drop rule, #21353, which leaves
+        // the trim's folded end span out on read)
+        let target_failures = failures(&mut target.clone_standing_for_self().unwrap());
+        assert_eq!(
+            target_failures,
+            [(SEAM, Some((FACE, 4))), (SEAM, Some((FACE, 5))), (SEAM, Some((FACE, 7)))],
+            "{name}: the target's Level 2 failures"
+        );
 
         // the kept boundary adds exactly one failure: the seam near miss on that patch
         let mut with_one: Vec<Failure> = row.main_failures.to_vec();
