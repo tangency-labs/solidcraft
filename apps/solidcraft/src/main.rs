@@ -1,6 +1,6 @@
 //! SolidCraft desktop app.
 //!
-//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [design.sc | part.step]`
+//! Usage: `solidcraft [--control <port>] [--sample] [--crash-log] [--safe-mode] [--read-only] [design.sc | part.step]`
 //!
 //! `--safe-mode` (or `SOLIDCRAFT_SAFE_MODE=1`) starts with default settings, no recovery offer and
 //! the software renderer; see `startup` and docs/book/src/guide/troubleshooting.md.
@@ -300,8 +300,12 @@ impl eframe::App for App {
         }
         // Files other launches handed over (single_instance.rs).
         if !self.solve.file_picker_busy() {
-            for f in single_instance::take() {
-                self.solve.open_chosen_file(&f);
+            for (f, read_only) in single_instance::take() {
+                if read_only {
+                    self.solve.open_chosen_file_read_only(&f);
+                } else {
+                    self.solve.open_chosen_file(&f);
+                }
             }
         }
         #[cfg(target_os = "macos")]
@@ -1627,12 +1631,16 @@ fn main() -> eframe::Result {
     let mut max_file_size = None;
     // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
     let mut new_instance = false;
+    // `--read-only`: the files named open read-only (Save asks for a new file), here or in the
+    // window they are handed to.
+    let mut read_only = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
+            "--read-only" => read_only = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1657,7 +1665,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--read-only] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1675,7 +1683,10 @@ fn main() -> eframe::Result {
         && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
     {
         let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
-        if single_instance::forward(&endpoint, &absolute) {
+        // A window from before `--read-only` refuses read-only files, and this launch opens them itself.
+        let handed =
+            if read_only { single_instance::forward_read_only(&endpoint, &absolute) } else { single_instance::forward(&endpoint, &absolute) };
+        if handed {
             return Ok(());
         }
     }
@@ -2050,6 +2061,10 @@ fn main() -> eframe::Result {
             if !new_instance && !sample && control_port.is_none() {
                 single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
             }
+            // `--read-only` covers the files named on the command line: the first this many of `files`.
+            // Finder's come after them, and the designs reopened from the last session only when none was
+            // named, so neither opens read-only.
+            let read_only_count = if read_only { files.len() } else { 0 };
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -2120,8 +2135,12 @@ fn main() -> eframe::Result {
                     // Lock files next to open designs: a design open on another computer says so (#5467),
                     // the files given at launch included.
                     solidcraft_ui_egui::open_elsewhere::start(app);
-                    for f in &files {
-                        app.open_chosen_file(f);
+                    for (i, f) in files.iter().enumerate() {
+                        if i < read_only_count {
+                            app.open_chosen_file_read_only(f);
+                        } else {
+                            app.open_chosen_file(f);
+                        }
                     }
                     // No file and no sample: the empty design takes Units of new designs (#1205).
                     // An opened file and the sample part keep the units they were saved or built with.
