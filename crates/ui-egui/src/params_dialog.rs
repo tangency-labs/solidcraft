@@ -2159,6 +2159,8 @@ mod tests {
         let mut other = crate::scenario::Harness::new();
         other.app.load_prefs(&saved);
         assert!(other.app.preferences.params_group_by_component, "the choice persists with the preferences");
+        // A new harness clears the published handles: draw the first window again before clicking.
+        h.frames(2);
         h.step(&json!({"click":{"handle":"params:group_by_component"}})).unwrap();
         assert!(!h.app.preferences.params_group_by_component, "and off again");
     }
