@@ -21,7 +21,7 @@ use solidcraft_geom::prelude::*;
 use crate::linalg::{self, Mat};
 use crate::model::{CEILING_CONSTRAINTS, Result, Sketch, SketchError, in_range3};
 use crate::union_find::{find, union};
-use crate::wire::{Wire, arc_from_3_points, arc_polyline, drawn_polyline};
+use crate::wire::{Wire, arc_from_3_points, arc_polyline};
 
 #[path = "wire_dual.rs"]
 mod dual;
@@ -1273,7 +1273,7 @@ impl Sketch {
                         [a, b, c] => arc_from_3_points(*a, *b, *c).map(|arc| (Some(arc), arc_polyline(&arc, ARC_TOL))),
                         _ => None,
                     },
-                    None => drawn_polyline(&fit).ok().map(|pts| (None, pts)),
+                    None => w.samples_of(&fit).ok().map(|pts| (None, pts)),
                 };
                 match built {
                     Some((arc, pts)) => rebuilt.push((wi, fit, arc, pts)),

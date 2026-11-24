@@ -27,6 +27,7 @@ static ITALIAN: Catalog = Catalog::packed("it", "Italiano", include_bytes!(conca
 static JAPANESE: Catalog = Catalog::packed("ja", "日本語", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.json.z")));
 static GEORGIAN: Catalog = Catalog::packed("ka", "ქართული", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.json.z")));
 static KOREAN: Catalog = Catalog::packed("ko", "한국어", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.json.z")));
+static LAO: Catalog = Catalog::packed("lo", "ພາສາລາວ", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lo.json.z")));
 static LATVIAN: Catalog = Catalog::packed("lv", "Latviešu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.json.z")));
 static MALAY: Catalog = Catalog::packed("ms", "Bahasa Melayu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.json.z")));
 static NORWEGIAN: Catalog = Catalog::packed("nb", "Norsk bokmål", include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.json.z")));
@@ -71,6 +72,7 @@ pub const LOCALES: &[&Catalog] = &[
     &JAPANESE,
     &GEORGIAN,
     &KOREAN,
+    &LAO,
     &LATVIAN,
     &MALAY,
     &NORWEGIAN,
@@ -1805,6 +1807,7 @@ mod tests {
         KitCall { name: "wide_primary_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "action_menu", args: &[1], id: false, trim: &[] },
         KitCall { name: "compact_button", args: &[2], id: false, trim: &[] },
+        KitCall { name: "compact_toggle", args: &[2], id: false, trim: &[] },
         KitCall { name: "icon_label_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "command_menu_button", args: &[2], id: false, trim: &[] },
         // choice.rs
@@ -2462,7 +2465,7 @@ mod tests {
         "use crate::ui_kit::{row, status_line, expr_row, hint_row, text_row, choice_row, section, section_count, ",
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
-        "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
+        "wide_primary_button, action_menu, compact_button, compact_toggle, icon_label_button, command_menu_button, ",
         "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
@@ -2510,6 +2513,7 @@ mod tests {
             ("wide_primary_button(ui, \"wide_primary_button\")", &["wide_primary_button"]),
             ("action_menu(ui, \"action_menu\", |ui| {})", &["action_menu"]),
             ("compact_button(ui, glyph, \"compact_button\", true, false)", &["compact_button"]),
+            ("compact_toggle(ui, glyph, \"compact_toggle\", true, false)", &["compact_toggle"]),
             ("icon_label_button(ui, \"icon_label_button\", icon, true, false)", &["icon_label_button"]),
             ("command_menu_button(ui, id, \"command_menu_button\", icon, shortcut, true)", &["command_menu_button"]),
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
@@ -2835,5 +2839,13 @@ mod tests {
         assert_eq!(literals("use crate :: i18n :: tr;\nfn live() { tr(\"Preferences\"); }"), id);
         assert_eq!(literals("use crate::i18n::{format, tr};\nfn live() { tr(\"Preferences\"); }"), id);
         assert_eq!(literals("fn live() { let tr = crate::i18n::tr; tr(\"Preferences\"); }"), id);
+    }
+
+    #[test]
+    fn lao_catalog_is_registered_and_translates_keys() {
+        install();
+        let lo = Locale::for_language("lo");
+        assert_eq!(lo.name(), "ພາສາລາວ");
+        assert!(is_supported("lo"));
     }
 }

@@ -112,8 +112,8 @@ script inside the Cyrillic text. Serbian in Latin script (`sr-Latn`, Srpski (lat
 of its own: `crates/ui-egui/build.rs` transliterates `sr.json`, pending messages included, letter for
 letter (Љ, Њ and Џ become Lj, Nj and Dž, or LJ, NJ and DŽ inside capitals), so translate Serbian once,
 in Cyrillic, and both scripts follow. Latin script is used only when chosen in the preferences:
-every Serbian system language, `sr-Latn-RS` included, keeps Cyrillic. Command IDs, shortcuts, file formats, units and user-provided names
-are not translated.
+every Serbian system language, `sr-Latn-RS` included, keeps Cyrillic. Command IDs, shortcuts, file
+formats, units and user-provided names are not translated.
 
 The Georgian catalog (`ka`, shown as ქართული) uses ესკიზი (Sketch), სხეული (Body), ოპერაცია (timeline Feature), შეზღუდვა (Constraint), ზომა (Dimension), ამოწევა (Extrude), ბრუნვით აგება (Revolve), მომრგვალება (Fillet), ფასკა (Chamfer), მასივი (Pattern), შეერთება (Joint), წახნაგი (Face), წიბო (Edge) and წვერო (Vertex); a design is a პროექტი. The Browser panel is მოდელის ხე (model tree) and the timeline ქრონოლოგია, apart from the undo history (ისტორია). Georgian has no letter case, so capitalised English labels are written in ordinary Mkhedruli, never in Mtavruli; a count stays singular after its number, so counted labels are written as `კომპონენტი: {count}`. The catalog is written in Mkhedruli; where no Georgian system font is found, egui's built-in Hack draws it in its monospace design. Command IDs, shortcuts, file formats, units and user-provided names stay unchanged. Written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker (@devius).
 
