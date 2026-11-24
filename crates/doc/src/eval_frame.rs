@@ -23,6 +23,8 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 
 #[path = "frame_earlier.rs"]
 mod earlier;
+#[path = "frame_paths.rs"]
+mod paths;
 #[path = "eval_frame_trim.rs"]
 mod trimming;
 
@@ -34,8 +36,6 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 const MAX_PROFILE_PIECES: usize = 256;
 /// Shortest member (mm).
 const MIN_LENGTH: f64 = 1e-6;
-/// How far (mm) a 3D sketch curve may stray from the line between its ends and still be a line.
-const STRAIGHT_TOL: f64 = 1e-3;
 
 /// Evaluate a `FrameMember` feature: one new body per member (a line, a pair, or under every type but None each
 /// piece of a line cut where tubes cross, [`pieced`], but for a piece left wholly inside the tubes it is fitted to),
@@ -44,6 +44,26 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    evaluate_members(doc, vals, f, st)?;
+    // Use the final naming/identity pass: Auto frames may split, notch or drop members.
+    // Metadata must not change whether the frame itself can build.
+    let names: Vec<String> = st.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.to_string()).collect();
+    let picked: Vec<&str> = names.iter().map(String::as_str).collect();
+    if let Ok(lines) = members_of_bodies(doc, st, f, &picked)
+        && lines.len() == names.len()
+    {
+        for (body, line) in st.bodies.iter_mut().filter(|b| b.feature == f.id).zip(lines) {
+            body.frame_member_line = line.map(Into::into);
+        }
+    }
+    Ok(())
+}
+
+// Preserve main's complete flat/grouped evaluation before adding optional provenance.
+fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    if paths::uses(st, &f.kind)? {
+        return paths::evaluate(doc, vals, f, st);
+    }
     if let Some(groups) = frame::group_features(f)? {
         let FeatureKind::FrameMember { profile, names, .. } = &f.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));
@@ -1843,10 +1863,27 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     if matches!(&f.kind, FeatureKind::FrameMember { groups, .. } if !groups.is_empty()) {
         return Err(DocError::Invalid("not supported yet: joint layout across frame member groups".into()));
     }
+    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
+    let Section { regions, description, at, turn, turns, centre, origin } = section(doc, vals, f, st)?;
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, origin })
+}
+
+/// Shared section settings; Auto seam handling remains in the unchanged section preparation.
+struct Section {
+    /// The unmirrored profile origin, also used by the straight-member section view.
+    origin: Vec2,
+    regions: Vec<Region2>,
+    description: String,
+    at: Vec2,
+    turn: f64,
+    turns: BTreeMap<String, f64>,
+    centre: Vec2,
+}
+
+fn section(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Section> {
     let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, corner, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
@@ -1880,7 +1917,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre, origin })
+    Ok(Section { regions, description, at, turn, turns, centre, origin })
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -1969,6 +2006,9 @@ type Path = (Vec<(String, Vec3, Vec3)>, Option<Vec3>, Vec<usize>, Vec<MemberPlan
 /// Each member's centreline where the view shows it: (member id, start, end), in the world.
 /// `st` is the model the feature was evaluated on (`Model::state_before`).
 pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<Vec<(String, Vec3, Vec3)>> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_segments(doc, st, f);
+    }
     let m = doc.component_transform(f.component);
     let place = |p: Vec3| crate::apply_point(&m, p);
     Ok(segments(doc, &doc.evaluation_values(), f, st)?.0.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
@@ -2069,6 +2109,9 @@ fn untrimmed_member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_section(doc, vals, f, st, line);
+    }
     if let Some(groups) = frame::group_features(f)? {
         let group = groups
             .into_iter()
@@ -2128,6 +2171,9 @@ fn untrimmed_member_section(
 /// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
 /// bounding box, which a Rotate step's turn leaves where it is ([`turned_at`]).
 pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_pivot(doc, vals, f, st, line);
+    }
     if let Some(groups) = frame::group_features(f)? {
         let group = groups
             .into_iter()
@@ -2274,6 +2320,9 @@ pub(super) fn check_turn(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
     if !member_line_ids(st, &source.kind)?.contains(&member.line) {
         return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
     }
+    if paths::uses(st, &source.kind)? {
+        paths::member_pivot(doc, vals, source, st, &member.line)?;
+    }
     turn_angle(vals, angle).map(|_| ())
 }
 
@@ -2285,6 +2334,9 @@ pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String
 
 /// [`member_line_ids`], and which of them are later pieces of a cut line ([`LaterPieces`]).
 pub fn member_parts(st: &ModelState, kind: &FeatureKind) -> Result<(Vec<String>, LaterPieces)> {
+    if paths::uses(st, kind)? {
+        return paths::member_parts(st, kind);
+    }
     if let FeatureKind::FrameMember { groups, path_sketch: Some(path), .. } = kind
         && !groups.is_empty()
     {
@@ -2620,7 +2672,7 @@ pub fn is_member_line(sk: &Sketch, ci: usize) -> bool {
 /// Whether wire `wi` of `sk` is a 3D line a frame member is laid on unless lines are picked: a
 /// straight one drawn in it (not projected or otherwise linked), as [`member_lines`] takes them.
 pub fn is_member_wire(sk: &Sketch, wi: usize) -> bool {
-    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && straight(&w.pts).is_some())
+    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && wire_line(w).is_ok_and(|line| line.is_some()))
 }
 
 /// Each member's place in the sketch's drawing order: a 2D line's curve index, a 3D line's wire
@@ -2648,7 +2700,7 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             }
         }
         for w in sk.wires.iter().filter(|w| w.link.is_none()) {
-            if let Some((a, b)) = straight(&w.pts)
+            if let Some((a, b)) = wire_line(w)?
                 && a.dist(b) > MIN_LENGTH
             {
                 out.push((w.id.clone(), a, b));
@@ -2671,12 +2723,15 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             return Err(DocError::Invalid(format!("line `{id}` is listed twice")));
         }
         let line = if let Some(wi) = sk.wire_index(id) {
-            sk.wires.get(wi).and_then(|w| straight(&w.pts))
+            match sk.wires.get(wi) {
+                Some(w) => wire_line(w)?,
+                None => None,
+            }
         } else {
             let ci = sk.curve_index(id).ok_or_else(|| DocError::Unknown(format!("line `{id}` in {}", ss.name)))?;
             planar_line(ss, ci)
         };
-        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line (members run along lines)")))?;
+        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line or an exact circular arc")))?;
         if !(a.dist(b) > MIN_LENGTH) {
             return Err(DocError::Invalid(format!("line `{id}` has no length")));
         }
@@ -2692,22 +2747,15 @@ fn planar_line(ss: &SolvedSketch, ci: usize) -> Option<(Vec3, Vec3)> {
     Some((ss.plane.to_world(pa), ss.plane.to_world(pb)))
 }
 
-/// The ends of a 3D polyline that runs straight from its first point to its last: every point
-/// within [`STRAIGHT_TOL`] of the line between them, none behind the start, past the end or back
-/// from a point before it.
-fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
-    let (a, b) = (*pts.first()?, *pts.last()?);
-    let (len, d) = (a.dist(b), (b - a).normalized()?);
-    let mut reached = 0.0_f64;
-    for p in pts {
-        let q = *p - a;
-        let t = q.dot(d);
-        if (q - d * t).len() > STRAIGHT_TOL || t < reached - STRAIGHT_TOL || t > len + STRAIGHT_TOL {
-            return None;
-        }
-        reached = reached.max(t);
-    }
-    Some((a, b))
+/// Exact straight stock only: defining line points or one retained analytic line.
+/// A display polyline never turns a spline into straight member stock.
+fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<(Vec3, Vec3)>> {
+    paths::wire_line(w).map(|line| {
+        line.map(|p| {
+            let d = p.data();
+            (d.a, d.b)
+        })
+    })
 }
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,

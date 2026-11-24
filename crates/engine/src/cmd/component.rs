@@ -327,7 +327,7 @@ pub(super) fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u6
 
 pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
-    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk) {
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == kk || o.name == kk) {
         return Ok(o.id);
     }
     // A component name: its occurrence when it has exactly one (a name that is only digits is an id, never a component).
@@ -336,7 +336,7 @@ pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
         Err(_) => s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.filter(|c| *c != 0),
     };
     let Some(component) = component else { return Err(bad(cmd, format!("no occurrence `{kk}`"))) };
-    let of: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == component).collect();
+    let of: Vec<_> = s.doc.active_occurrences().filter(|o| o.component == component).collect();
     match of.as_slice() {
         [only] => Ok(only.id),
         [] => Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` is not placed anywhere"))),
@@ -603,7 +603,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         features_of.entry(f.component).or_default().push(f);
     }
     let (mut occurrences_of, mut children_of): (HashMap<u64, Vec<&Occurrence>>, HashMap<u64, Vec<&Occurrence>>) = Default::default();
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         occurrences_of.entry(o.component).or_default().push(o);
         children_of.entry(o.parent).or_default().push(o);
     }
@@ -958,7 +958,7 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
         // A world frame requires an explicit containing placement when any ancestor is instanced.
         for ancestor in &path {
             if let Some(a) = s.doc.occurrences.iter().find(|a| a.id == *ancestor)
-                && s.doc.occurrences.iter().filter(|x| x.component == a.component).count() > 1
+                && s.doc.active_occurrences().filter(|x| x.component == a.component).take(2).count() > 1
             {
                 return Err(bad(cmd, "occurrence has multiple placements; supply its `path`"));
             }

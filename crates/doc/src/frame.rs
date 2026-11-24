@@ -40,7 +40,7 @@ pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = 1e-6;
+pub const VERTICAL_TOLERANCE: f64 = solidcore_ops::frame_member::VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -997,15 +997,7 @@ pub fn mirrored(region: &Region2) -> Region2 {
 /// profile counter-clockwise about the line, seen looking back from its end. `None` for a
 /// direction of no length.
 pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    let d = d.normalized()?;
-    let up = Vec3::Z - d * Vec3::Z.dot(d);
-    // `up` is as long as the sine of the line's lean from vertical.
-    let (x, y) = match up.normalized().filter(|_| up.len() > VERTICAL_TOLERANCE) {
-        Some(y) => (y.cross(d), y),
-        None => (Vec3::X, d.cross(Vec3::X)),
-    };
-    let (c, s) = (angle.cos(), angle.sin());
-    Some((x * c + y * s, y * c - x * s))
+    solidcore_ops::frame_member::member_axes(d, angle).ok().flatten()
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the

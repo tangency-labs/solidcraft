@@ -2,21 +2,22 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates and trimming or extending to members, planes and faces.
-Gussets, welds and the cut list follow.
+members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
+attached gusset plates, and trimming or extending to members, planes and faces.
+Welds and the cut list follow.
 
 ## The workflow
 
-1. **Sketch the frame**: lines in a sketch, or a 3D sketch for a frame that leaves one plane
-   (`sketch.options sketch_3d: true`, then `sketch.line3d`). Drive the sizes with parameters as
+1. **Sketch the frame**: lines and circular arcs in a sketch, or a 3D sketch for a frame that leaves one plane
+   (`sketch.options sketch_3d: true`, then `sketch.line3d` and `sketch.arc3d`). Drive the sizes with parameters as
    usual; members follow.
 2. **Choose a profile**: a standard steel size by name (`{"size": "RSC 203x89"}`, below), a
    built-in one from its dimensions (below), or your own drawn in a sketch
    (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's origin is
    the point that sits on each line, and its x and y are the profile's.
-3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per line,
-   square to it, from its start to its end. Repeat with another profile for the next group of
-   lines.
+3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per selected
+   line or arc. Enable **One Continuous Member** to make a connected tangent line–arc–line run
+   into one tube. Select its segments in path order. Repeat for another physical member.
 4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
    members they meet, or trims or extends them to a plane or face (below).
 
@@ -29,13 +30,22 @@ Members are ordinary bodies: mirror, pattern, move, drill and combine them with 
 commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap,
-Mounting Plate, Trim/Extend and Parameters. Like Sheet Metal it is always there, and it selects itself when a
-frame member, end cap or mounting plate is the selected body (or the last body of the active component).
+Mounting Plate, Gusset, Trim/Extend and Parameters. Like Sheet Metal it is always there, and it selects itself when a
+frame member, end cap, mounting plate or gusset is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 
-- **Path**: pick the frame sketch's lines in the view (2D or 3D sketch lines). **All Lines**
+- **Path**: pick the frame sketch's lines or circular arcs in the view (2D or 3D). **All Lines**
   makes a member on every line of that sketch instead, including lines drawn later.
+- **One Continuous Member**: turn off **All Lines** and select lines and arcs in connected,
+  tangent path order. Backwards curves are reversed automatically. Sharp joins need an explicit
+  tangent bend arc. A continuous member cannot include point pairs.
+
+Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
+Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
+Curved and continuous members cannot yet be combined with multiple placement groups.
+Separate curved members may share a plain None feature with point-pair members. Ordinary straight
+members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
   circles makes a tube). With nothing picked, **Profile** chooses a built-in profile and its
   dimensions follow; optional ones left empty take their defaults.
@@ -401,10 +411,16 @@ placement axes, expressions and hole-pattern limits.
 
 ## frame.member
 
-- `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D lines or 3D sketch
-  lines), each once; left out, every straight line drawn in the sketch: not construction, not
+- `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D or 3D sketch
+  lines and circular arcs), each once; left out, every straight line drawn in the sketch: not construction, not
   projected or otherwise linked (a sketch on a face projects the face's edges; they are
   references, not members), and with a length.
+- `continuous`: false by default. When true, explicitly selected `lines` form one physical
+  member, in path order. Their ends must meet within 0.000001 mm and their tangents within
+  0.000001 rad. Open line/arc paths are supported; splines and closed members are refused.
+  The section starts with the orientation below and rotates through each bend, carrying that
+  orientation into subsequent straights and bends in other planes. A bend whose axis crosses
+  the anchored section is refused. This models nominal geometry, not tube deformation or springback.
 - `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them. A profile sketch's
   section is its material as nested loops alternate (an outline is material, a loop inside it a
   hole, a loop inside that material again), so two circles make a tube; pick other regions with
@@ -431,11 +447,30 @@ placement axes, expressions and hole-pattern limits.
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
   `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
   them unless the edit changes `body_name`.
+  A continuous member uses `names: {"$path": "Main hoop"}` so its name survives reversing
+  the path or changing the first selected segment.
+
 - `groups` (`[{lines, anchor?, locate?, angle?, mirror?, body_name?}]`): several groups of lines
   in the feature's one profile, each placed and named its own way. Each group lists its lines, and
   no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
   `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
   groups don't change.
+
+### A bent chassis tube
+
+Draw a line from `(100, -200)` to `(100, 0)`, a quarter-circle arc with centre `(0, 0)` from
+`(100, 0)` to `(0, 100)`, and a line to `(-300, 100)`. With those curve ids `l1`, `a1`, `l2`:
+
+```json
+{"command":"frame.member","params":{"sketch":"Chassis","lines":["l1","a1","l2"],"continuous":true,"profile":{"kind":"round_tube","diameter":20,"wall":2},"body_name":"Main hoop"}}
+```
+
+The result is one tube, with two straight lengths of 200 and 300 mm and a 100 mm centreline
+bend radius. Its nominal centreline length is `500 + 50π` mm. Grouping three separate
+members or combining their solids does not record this continuous manufacturing path.
+
+Bend-list output and flattened round-tube cope DXF templates are subsequent fabrication
+steps tracked under #4003. A continuous member does not yet produce either export.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). Standard steel sizes (below) fill in a profile's dimensions from a
@@ -449,6 +484,8 @@ separate body per end, named after the member (`Post End Cap`). Pick the end fac
 each must be a flat open end of a frame member, square to its line: an uncut end, or the through
 member's end of a Butt corner, coped or not. The butting member's end and a cope face are refused ("not
 an open end of the member"), as is a mitre ("not square to the member's line").
+Curved or multi-piece continuous members are refused until End Cap supports their transported
+terminal frames. A continuous member consisting of one straight line retains both open ends.
 
 - The plate covers the outside of the profile: on a closed section (a square or rectangular
   tube, a pipe, a bar) it is the profile's outer outline; on an open section (an angle, a
@@ -639,3 +676,19 @@ given larger than the room for it.
 ```json
 {"command": "frame.profile.insert", "params": {"profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}, "at": [0, 0], "anchor": "bottom_left"}}
 ```
+
+## Gussets
+
+**Weldments › Create › Gusset** (`frame.gusset`) adds a separate reinforcing plate between two planar support faces. Select the faces in order, enter the two leg lengths and thickness, and use the preview to check placement. A triangular outline uses zero outer clipping; **Clipped Tips** cuts equal distances from the two outer tips. **Corner Relief** removes the inside vertex, leaving room at the existing weld corner. The plate is named **Gusset**, then **Gusset (2)** and so on, unless you give it a name.
+
+The legs follow the selected faces into their outward-facing joint space. This also supports non-right-angle joints. The three thickness-placement icons show the plate on the negative side, centred on the gusset plane, or on the positive side. Click an icon to update the live preview; the selected button stays highlighted and its tooltip names the placement. Positive direction is the cross product of the first and second support normals; swapping supports reverses it. **Joint Offset** moves the plate along that direction from the centre of the faces' common span.
+
+```json
+{"command":"frame.gusset","params":{"supports":[{"body":"Post","index":2,"face":[20,0,100]},{"body":"Rail","index":5,"face":[100,0,40]}],"leg1":"80 mm","leg2":"100 mm","thickness":"6 mm","relief":"10 mm","clip":"0 mm","placement":"center","offset":"0 mm","body_name":"Joint plate"}}
+```
+
+Face indices in this example are illustrative: obtain the current exact picks from selection or `model.faces`. The saved feature holds persistent face identities, not those transient indices. Length numbers use the design unit; picked point coordinates are world millimetres. Every length can instead be a parameter expression.
+
+The entire contact strip must fit on material on both finite faces. Oversize legs/thickness, holes crossing a contact strip, parallel faces and lost or replaced supports return an error. The supporting bodies stay separate and unchanged; the gusset is not a weld or a strength calculation. The first tool requires planar faces. Curved/coped supports and fastener patterns remain separate work.
+
+Edit Feature restores both exact picks and dimensions; preview, undo/redo and save/reopen use the same command. Frame-member supports also retain the producing sketch line, so another line cannot silently take over an attachment through a reused body name.

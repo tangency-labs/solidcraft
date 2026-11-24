@@ -1123,7 +1123,7 @@ fn member_required(schema: &mut Schema) {
                 {"properties": {"groups": {"type": "null"}}},
                 {"required": ["sketch"], "properties": {
                     "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "angle": {"type": "null"},
-                    "mirror": {"type": "null"}, "body_name": {"type": "null"}
+                    "mirror": {"type": "null"}, "body_name": {"type": "null"}, "continuous": {"type": "null"}
                 }}
             ]},
             // One group is canonical flat form. Several currently stay independent and square-ended.
@@ -1152,7 +1152,7 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    /// The lines to lay members along, by curve id, one member each. Default: every straight
+    /// The lines or arcs to lay members along, by curve id. One member each, unless continuous. Default: every straight
     /// line drawn in the sketch that isn't construction, projected or otherwise linked, or of no
     /// length.
     #[serde(default)]
@@ -1161,6 +1161,10 @@ pub struct FrameMemberKeys {
     /// sketch lines with corner none and no corner overrides, point pairs or finishing options.
     #[serde(default)]
     pub groups: Option<MemberGroups>,
+    /// One member along explicit, ordered tangent lines and circular arcs. Default: false.
+    /// Requires corner None without overrides, fitting, coping, Flip, gap or point pairs.
+    #[serde(default)]
+    pub continuous: Option<bool>,
     /// Members between two points, one each, after the lines' members; each point is found
     /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
     #[serde(default)]

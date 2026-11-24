@@ -273,7 +273,9 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         let made = record(rec.feature, &rec.line, &rec.body, ends, &body.body);
         // Its faces keep the names the member feature gave them, so what later features picked
         // on it stays picked.
-        let rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
+        let mut rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
+        // Trimming preserves this physical member, which later gusset/plate attachments identify.
+        rebuilt.frame_member_line = mb.frame_member_line.clone();
         if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(m.record)) {
             *slot = rebuilt;
             *r = made;

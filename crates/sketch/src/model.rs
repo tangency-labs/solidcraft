@@ -2700,7 +2700,12 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curves.get(self.curve_index(cid)?)?;
+        Self::curve_point(self.curves.get(self.curve_index(cid)?)?, role)
+    }
+
+    /// The point a role (`start`, `end`, `center`, `major` or `apex`) names on a curve. A reversed
+    /// curve swaps its start and end, so they keep their as-drawn meaning.
+    pub(crate) fn curve_point(c: &Curve, role: &str) -> Option<usize> {
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",

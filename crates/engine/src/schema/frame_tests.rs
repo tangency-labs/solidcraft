@@ -45,6 +45,7 @@ fn schemas_and_the_key_check_agree() {
             "anchor",
             "angle",
             "body_name",
+            "continuous",
             "coped",
             "corner",
             "corners",
@@ -828,6 +829,10 @@ fn the_group_schema_requires_lines_and_refuses_mixed_placement() {
         (json!({"groups": [{"lines": ["l1"]}], "mirror": false}), false),
         (json!({"groups": [{"lines": ["l1"]}], "continuous": true}), false),
         (json!({"groups": [{"lines": ["l1"]}], "continuous": false}), false),
+        (json!({"groups": [{"lines": ["l1"]}], "continuous": null}), true),
+        (json!({"groups": null, "lines": ["l1"], "continuous": true}), true),
+        (json!({"groups": [{"lines": ["l1"], "continuous": true}]}), false),
+        (json!({"groups": [{"lines": ["l1"], "continuous": false}]}), false),
         (json!({"groups": [{"lines": ["l1"]}], "anchor": "origin"}), false),
         (json!({"groups": [{"lines": ["l1"]}], "body_name": "Rail"}), false),
         (json!({"groups": [{"lines": ["l1"]}], "locate": [0, 0]}), false),
@@ -885,4 +890,24 @@ fn schemas_cover_trim_parameters_and_results() {
     let output = output_schema_for::<FeatureResult>();
     assert!(conforms(output.as_value(), output.as_value(), &result), "{result}");
     assert_eq!(result["changed_bodies"], json!(["Bar"]));
+}
+
+#[test]
+fn continuous_member_matches_the_strict_contract_and_result_schema() {
+    let schema = input_schema_for::<FrameMemberParams>();
+    let p = json!({"sketch": "Chassis", "lines": ["l1", "a1", "l2"], "continuous": true,
+        "profile": {"kind": "round_tube", "diameter": "20 mm", "wall": 2}, "names": {"$path": "Hoop"}});
+    assert!(conforms(schema.as_value(), schema.as_value(), &p));
+    assert!(serde_json::from_value::<FrameMemberParams>(p).is_ok());
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Line"})).unwrap();
+    s.execute("sketch.line", &json!({"points": [[0, 0], [100, 0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let p = json!({"sketch": "Line", "lines": ["l1"], "continuous": true, "profile": {"kind": "bar", "width": 10, "height": 5}});
+    let result = s.execute("frame.member", &p).unwrap();
+    let schema = output_schema_for::<FeatureResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &result), "{result}");
+    let mut unknown = p;
+    unknown["typo"] = json!(true);
+    assert!(s.execute("frame.member", &unknown).unwrap_err().to_string().contains("typo"));
 }

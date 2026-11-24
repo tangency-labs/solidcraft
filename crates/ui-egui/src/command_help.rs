@@ -76,6 +76,7 @@ pub const DOCUMENTED: &[&str] = &[
     "file.save_mesh",
     "file.send_to_slicer",
     "frame.end_cap",
+    "frame.gusset",
     "frame.member",
     "frame.plate",
     "frame.rotate_member",
