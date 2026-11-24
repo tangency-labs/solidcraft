@@ -158,6 +158,30 @@ pub enum Target {
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
+/// Collision Shape ▸ a choice for `target` (a body, or a component's bodies).
+fn collision_menu(app: &SolveApp, target: serde_json::Value) -> Item {
+    let mut menu = cmd(app, "body.collision", "Collision Shape");
+    // Each choice shows its own shape; the command's icon is the body.
+    menu.children = [
+        ("auto", "Automatic", "collision_auto"),
+        ("mesh", "Full mesh", "mesh_body"),
+        ("box", "Box", "box"),
+        ("cylinder", "Cylinder", "cylinder"),
+        ("sphere", "Sphere", "sphere"),
+        ("none", "No collision", "contact_off"),
+    ]
+    .into_iter()
+    .map(|(shape, label, icon)| {
+        let mut p = target.clone();
+        p["shape"] = json!(shape);
+        let mut item = cmd(app, "body.collision", label).with(p);
+        item.icon = icon.into();
+        item
+    })
+    .collect();
+    menu
+}
+
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
@@ -1044,6 +1068,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
+        v.push(collision_menu(app, json!({ "body": b })));
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
@@ -1465,6 +1490,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id != 0 {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
+    v.push(collision_menu(app, json!({ "component": id })));
     v.push(Item::sep());
     v.push(
         act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
@@ -4627,6 +4653,21 @@ mod tests {
         let item = remove_tube(&items(&h.app, &Target::Body { name: bodies[3].clone() })).cloned().unwrap();
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"members": [{"feature": rail, "line": line_of(&h, rail, &bodies[3])}]})), "the row's own tube");
+    }
+
+    /// Collision Shape ▸ each choice shows its own shape, a drawn icon and not the body's cube
+    /// the command has, nor the placeholder.
+    #[test]
+    fn each_collision_shape_choice_has_its_own_icon() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        let menu = items(&h.app, &Target::Body { name: "Block".into() });
+        let shapes = menu.iter().find(|i| i.id == "body.collision").expect("a body offers Collision Shape");
+        let icons: Vec<&str> = shapes.children.iter().map(|c| &*c.icon).collect();
+        assert_eq!(icons, ["collision_auto", "mesh_body", "box", "cylinder", "sphere", "contact_off"]);
+        for icon in icons {
+            assert!(!crate::icon_svg::resolve(icon).placeholder, "{icon} is drawn");
+        }
     }
 }
 
