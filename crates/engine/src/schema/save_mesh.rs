@@ -364,6 +364,9 @@ pub struct SaveMeshResult {
     /// chord tolerance (led by its body's name).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// The bodies left out because they could not be meshed (each also has a line in `warnings`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// With `slicer` only: what happened when the file was handed over.
     #[serde(flatten)]
     pub delivery: SlicerDelivery,

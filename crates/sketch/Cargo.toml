@@ -11,6 +11,8 @@ workspace = true
 [features]
 # Opt-in developer instrumentation; normal builds contain no collection or clocks.
 solver-profiling = []
+# Test hook: holds the font search's answer for chosen characters until released, so a test can watch text wait.
+test-font-gate = []
 
 [[example]]
 name = "solve_profile"

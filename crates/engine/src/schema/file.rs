@@ -40,6 +40,60 @@ pub enum ObjectsParam {
     Component,
 }
 
+/// Which program writes a STEP or IGES file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportWriter {
+    /// SolidCraft's own STEP and IGES writers (the default).
+    Solidcraft,
+    /// cadmpeg's, from the design written into its neutral model.
+    Cadmpeg,
+}
+
+/// What an OpenUSD file is for: the defaults of what it holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum UsdPurpose {
+    /// For another CAD program: each body's exact shape beside its mesh (the default).
+    #[default]
+    Interchange,
+    /// For a viewer, a game engine or a store: meshes only, with the pictures shown on the model.
+    Distribution,
+}
+
+/// `purpose` as `file.export` reads it: `None` when left out (interchange); refused for a format
+/// other than OpenUSD, and for any other word.
+pub(crate) fn usd_purpose(value: Option<&Value>, format: Format) -> Result<Option<UsdPurpose>, String> {
+    let purpose = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(_) if format != Format::Usd => {
+            return Err("`purpose` is for OpenUSD: other formats written here have one form".into());
+        }
+        Some(Value::String(s)) if s == "interchange" => UsdPurpose::Interchange,
+        Some(Value::String(s)) if s == "distribution" => UsdPurpose::Distribution,
+        Some(_) => return Err("`purpose` must be interchange or distribution".into()),
+    };
+    Ok(Some(purpose))
+}
+
+/// `writer` as `file.export` reads it for `format`: `None` when left out (SolidCraft's own writer);
+/// refused for a format other than STEP and IGES, and for any other word.
+pub(crate) fn export_writer(value: Option<&Value>, format: Format) -> Result<Option<ExportWriter>, String> {
+    let writer = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(w)) => match w.trim().to_ascii_lowercase().as_str() {
+            "solidcraft" => ExportWriter::Solidcraft,
+            "cadmpeg" => ExportWriter::Cadmpeg,
+            _ => return Err(format!("`writer` must be solidcraft or cadmpeg, not {w}")),
+        },
+        Some(v) => return Err(format!("`writer` must be solidcraft or cadmpeg, not {v}")),
+    };
+    if !matches!(format, Format::Step | Format::Iges) {
+        return Err(format!("`writer` is for STEP and IGES only: {format:?} has one writer"));
+    }
+    Ok(Some(writer))
+}
+
 /// Export bodies as a STEP file. With no `bodies`, a design with components exports as a STEP
 /// assembly, otherwise its bodies as placed. The file is STEP whatever the path's extension.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -97,6 +151,24 @@ pub struct ExportStlParams {
     /// instead of the world's. Not with `lay_on_print_faces`.
     #[serde(default)]
     pub frame: Option<String>,
+    /// True writes ASCII STL instead of binary. Default: false.
+    #[serde(default)]
+    pub ascii: Option<bool>,
+    /// `body` (the default) writes one solid for the file; `face` writes one `solid <name>` block
+    /// for each B-rep face, named by the face's persistent name, for CFD meshers
+    /// (docs/formats/stl-face-solids.md). `face` needs `ascii: true`.
+    #[serde(default)]
+    pub solids: Option<SolidsParam>,
+}
+
+/// What `solids` splits an STL export into.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SolidsParam {
+    /// One solid for the file, as always.
+    Body,
+    /// One named solid for each B-rep face (ASCII STL only).
+    Face,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
@@ -130,17 +202,26 @@ pub struct Export3mfParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportUrdfParams {
-    /// The `.urdf` file to write; the meshes go in its folder.
+    /// The `.urdf` file to write; the meshes go in its folder unless `mesh_prefix` names another.
     pub path: String,
-    /// Put before each mesh file name in the URDF, such as `package://robot/meshes/`. Default: none.
+    /// Put before each mesh file name in the URDF, such as `meshes/` or
+    /// `package://robot/meshes/`; a folder in it is where the meshes are written, made if missing.
+    /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
-    /// Each joint's effort limit, a positive number. Default: 1000.
+    /// Write the meshes where `mesh_prefix` points, making its folder if missing; false keeps
+    /// every mesh next to the `.urdf` whatever the prefix says. Default: false.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
+    /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,
-    /// Each joint's velocity limit, a positive number. Default: 10.
+    /// The velocity limit of joints with none saved (`joint.dynamics`), a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Write motion links as `<mimic>`. Default: false (each joint free).
+    #[serde(default)]
+    pub mimic: Option<bool>,
     /// Also write each picture shown on the model (Canvas or Decal) as a textured COLLADA quad
     /// and its image, in one more `<visual>` of its part's link. Default: false.
     #[serde(default)]
@@ -177,9 +258,9 @@ pub struct ExportSdfParams {
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; SDF takes `name`,
-/// `static`, `model_uris` and `quality` and writes a model folder; design JSON the complete
-/// document.
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `images` and exports the whole
+/// assembly; SDF takes `name`, `static`, `model_uris` and `quality` and writes a model folder;
+/// design JSON the complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
 pub struct ExportParams {
@@ -188,15 +269,21 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
-    /// whose extension names it. Default: from the path's extension.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, sdf or json, or a
+    /// file name whose extension names it, or an installed exporter plugin as `plugin_id.entry`
+    /// (`plugin.list`'s `exporters`). Default: from the path's extension; an extension SolidCraft
+    /// does not write goes to the exporter plugin that claims it.
     #[serde(default)]
     pub format: Option<String>,
+    /// An exporter plugin's options, as its slot declares them. Refused for SolidCraft's own
+    /// formats. Default: the slot's defaults.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
-    /// How closely the mesh follows curved faces (STL, OBJ, 3MF and GLB). Default: standard. Not read
+    /// How closely the mesh follows curved faces (STL, OBJ, 3MF, GLB, OpenUSD and Rhino). Default: standard. Not read
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
@@ -213,7 +300,8 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
-    /// URDF only: also write each picture shown on the model as a textured visual. Default: false.
+    /// URDF and OpenUSD only: also write each picture shown on the model as a textured visual
+    /// (OpenUSD: in a `.usdz` package). Default: false.
     #[serde(default)]
     pub images: Option<bool>,
     /// STL and 3MF only: true writes each body with a print face laid on it, as
@@ -221,9 +309,50 @@ pub struct ExportParams {
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
     /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
-    /// instead of the world's. Not with URDF, SDF or the design file.
+    /// instead of the world's. Not with URDF, SDF, the design file, or a format cadmpeg or a plugin writes.
     #[serde(default)]
     pub frame: Option<String>,
+    /// URDF only: write motion links as `<mimic>`. Default: false, each joint free.
+    #[serde(default)]
+    pub mimic: Option<bool>,
+    /// URDF only: write the meshes where `mesh_prefix` points, making the folder. Default: false,
+    /// next to the `.urdf` whatever the prefix says.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
+    /// GLB only: true writes each component occurrence as a node named after it, holding its
+    /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
+    /// every body directly under the root in world coordinates, named as the model names it (as
+    /// SolidCraft 0.40 did). Default: true. Not read for the other formats.
+    #[serde(default)]
+    pub hierarchy: Option<bool>,
+    /// ASCII STL (`stla`) only: `face` writes one named solid for each B-rep face, as
+    /// `file.export_stl` has it; refused for the other formats. Default: body.
+    #[serde(default)]
+    pub solids: Option<SolidsParam>,
+    /// OpenUSD only: also write the joints, the grounded placements and each component's mass as
+    /// OpenUSD physics, for a simulator. Default: false.
+    #[serde(default)]
+    pub physics: Option<bool>,
+    /// OpenUSD only: what the file is for. `interchange` (for another CAD program: each body's
+    /// exact shape beside its mesh) or `distribution` (for a viewer or a game engine: meshes only,
+    /// with the pictures shown on the model). `exact_brep` and `images` override it. Default:
+    /// interchange.
+    #[serde(default)]
+    pub purpose: Option<UsdPurpose>,
+    /// OpenUSD only: write each body's exact shape (B-rep) beside its mesh. Default: from
+    /// `purpose` (true for interchange, false for distribution).
+    #[serde(default)]
+    pub exact_brep: Option<bool>,
+    /// OpenUSD only: the saved render setup whose image textures a `.usdz` package holds.
+    /// Default: none, each body written with its look.
+    #[serde(default)]
+    pub render_setup: Option<String>,
+    /// STEP and IGES only: which program writes the file. Default: solidcraft, SolidCraft's own
+    /// writers; cadmpeg writes it from the design through cadmpeg's neutral model (STEP AP242 with
+    /// the components, IGES 5.3 with each body where the design shows it), with warnings for what
+    /// it leaves out. Refused for the other formats.
+    #[serde(default)]
+    pub writer: Option<ExportWriter>,
     /// SDF only: the model's name. Default: the folder's name.
     #[serde(default)]
     pub name: Option<String>,
@@ -297,6 +426,7 @@ impl<'de> Deserialize<'de> for ExportParams {
         let mut out = ExportParams {
             path: None,
             format: None,
+            options: None,
             bodies: None,
             quality: None,
             objects: None,
@@ -306,9 +436,18 @@ impl<'de> Deserialize<'de> for ExportParams {
             images: None,
             lay_on_print_faces: None,
             frame: None,
+            hierarchy: None,
+            solids: None,
+            physics: None,
+            render_setup: None,
+            purpose: None,
+            exact_brep: None,
+            writer: None,
             name: None,
             is_static: None,
             model_uris: None,
+            mimic: None,
+            place_meshes: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -318,12 +457,55 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse::<D::Error>("`path` is required")),
         };
         out.format = text::<D::Error>(&m, "format")?;
+        out.options = match m.get("options") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(options)) => Some(options.clone()),
+            Some(_) => return Err(refuse("`options` must be an object")),
+        };
         let Some(format) = out.format.as_deref().or(out.path.as_deref()).and_then(|n| Format::from_name(n).ok()) else {
             // The handler refuses a format it does not know before it reads anything else.
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
         out.frame = text::<D::Error>(&m, "frame")?;
+        // `solids` is checked for every format, so URDF and SDF refuse `face` as binary STL does.
+        out.solids = match m.get("solids") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(v)) if v == "body" => Some(SolidsParam::Body),
+            Some(Value::String(v)) if v == "face" && format == Format::StlAscii => Some(SolidsParam::Face),
+            Some(Value::String(v)) if v == "face" => {
+                return Err(refuse(
+                    "`solids: face` needs ASCII STL (format stla, or ascii: true): binary STL and other formats have no named solids",
+                ));
+            }
+            Some(v) => return Err(refuse(format!("`solids` must be body or face, not {v}"))),
+        };
+        // Read before URDF and SDF read their own keys, as the handler reads it.
+        out.physics = match m.get("physics") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(false)) => Some(false),
+            Some(Value::Bool(true)) if format == Format::Usd => Some(true),
+            Some(Value::Bool(true)) => {
+                return Err(refuse("`physics` is for OpenUSD: URDF and SDF always write their joints and masses, and the other formats hold none"));
+            }
+            Some(_) => return Err(refuse("`physics` must be true or false")),
+        };
+        out.render_setup = match m.get("render_setup") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(n)) if format == Format::Usd && !n.trim().is_empty() => Some(n.clone()),
+            Some(Value::String(_)) if format == Format::Usd => return Err(refuse("`render_setup` must name a render setup")),
+            Some(Value::String(_)) => return Err(refuse("`render_setup` is for OpenUSD: other formats written here hold no image textures")),
+            Some(_) => return Err(refuse("`render_setup` must be the name of a render setup")),
+        };
+        // Read before URDF and SDF return, so neither takes an OpenUSD option silently.
+        out.purpose = usd_purpose(m.get("purpose"), format).map_err(refuse::<D::Error>)?;
+        out.exact_brep = match m.get("exact_brep") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) if format == Format::Usd => Some(*b),
+            Some(Value::Bool(_)) => return Err(refuse("`exact_brep` is for OpenUSD: other formats written here choose their own")),
+            Some(_) => return Err(refuse("`exact_brep` must be true or false")),
+        };
+        out.writer = export_writer(m.get("writer"), format).map_err(refuse::<D::Error>)?;
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -342,6 +524,16 @@ impl<'de> Deserialize<'de> for ExportParams {
             out.images = match m.get("images") {
                 None | Some(Value::Null) => None,
                 Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
+            out.mimic = match m.get("mimic") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse::<D::Error>("`mimic` must be true or false")),
+            };
+            out.place_meshes = match m.get("place_meshes") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse::<D::Error>("`place_meshes` must be true or false")),
             };
             return Ok(out);
         }
@@ -363,12 +555,24 @@ impl<'de> Deserialize<'de> for ExportParams {
                 _ => return Err(refuse(format!("`objects` must be body or component, not {v}"))),
             },
         };
+        if format == Format::Usd {
+            out.images = match m.get("images") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
+        }
         out.lay_on_print_faces = match m.get("lay_on_print_faces") {
             None | Some(Value::Null) => None,
             Some(Value::Bool(false)) => Some(false),
             Some(Value::Bool(true)) if matches!(format, Format::StlBinary | Format::StlAscii | Format::ThreeMf | Format::ThreeMfTagged) => Some(true),
             Some(Value::Bool(true)) => return Err(refuse("`lay_on_print_faces` is for STL and 3MF: other formats are not printed")),
             Some(_) => return Err(refuse("`lay_on_print_faces` must be true or false")),
+        };
+        out.hierarchy = match m.get("hierarchy") {
+            _ if format != Format::Glb => None,
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(b)) => Some(*b),
+            Some(_) => return Err(refuse("`hierarchy` must be true or false")),
         };
         Ok(out)
     }
@@ -382,7 +586,8 @@ pub struct ExportResult {
     /// Its size in bytes.
     pub bytes: usize,
     /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
-    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design and Glb).
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design, Glb, Usd
+    /// and Rhino).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -587,11 +792,11 @@ pub enum HistoryParam {
     Solids,
 }
 
-/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, FreeCAD or Rhino
-/// file, `solidcraft` (SolidCraft's own STEP reader, which keeps the STEP text; a FreeCAD or
-/// Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's model read
-/// straight into B-rep records: a STEP file decoded by cadmpeg's STEP decoder), read as the
-/// handler reads it.
+/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, IGES, FreeCAD or
+/// Rhino file, `solidcraft` (SolidCraft's own STEP or IGES reader, which keeps the STEP text; a
+/// FreeCAD or Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's
+/// model read straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES
+/// decoder), read as the handler reads it.
 #[derive(Clone, Copy, Debug)]
 pub struct ReaderParam(pub solidcraft_io::StepReader);
 
@@ -611,11 +816,15 @@ impl JsonSchema for ReaderParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "solidcraft (the default) is SolidCraft's own STEP reader, which keeps the STEP text (a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP file decoded by cadmpeg's STEP decoder), to compare the two. Matching ignores case and surrounding spaces.",
+            "description": "solidcraft (the default) is SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file is restated as STEP; a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder), to compare the two. Matching ignores case and surrounding spaces.",
             "type": "string",
             "enum": ["solidcraft", "cadmpeg"]
         })
     }
+}
+
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["all", "folder"]})
 }
 
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
@@ -624,12 +833,21 @@ impl JsonSchema for ReaderParam {
 /// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
 /// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
-/// makes). The open design is replaced.
+/// makes). The open design is replaced, unless it is not empty: the window opens the file in a
+/// tab of its own then, and with `new_tab` it always does.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OpenParams {
     /// The file to open; the kind of file is read from its extension.
     pub path: OpenPath,
+    /// true opens the file in a tab of its own, after the active one, and shows it, even when the
+    /// active design is empty: the design that was open stays open, as it was. A design that is
+    /// already open in a tab is shown instead, as the same file opened twice is. A person at the
+    /// window who is in the middle of something (a dialog, a tool) gets the tab behind the active
+    /// one: `document.list` says which design is active. Only a window with design tabs has them:
+    /// the command line and headless servers refuse it. Default: false.
+    #[serde(default)]
+    pub new_tab: Option<bool>,
     /// For a STEP, IGES, FreeCAD, Rhino or glTF file only (refused for any other): which way is up
     /// in the file. Default: z for STEP, IGES, FreeCAD and Rhino, y for glTF.
     #[serde(default)]
@@ -647,8 +865,8 @@ pub struct OpenParams {
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]
     pub history: Option<HistoryParam>,
-    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
-    /// reader reads it.
+    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino file (ignored for
+    /// other files): which reader reads it.
     /// Default: solidcraft.
     #[serde(default)]
     pub reader: Option<ReaderParam>,
@@ -665,6 +883,14 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): which linked design files are read for those bodies as it opens.
+    /// all (the default): every one the caller may read. folder: only those in the design's own
+    /// folder or below it; the other links have no bodies until `component.update_links` reads
+    /// them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]
@@ -1021,6 +1247,14 @@ pub struct RecoverParams {
     /// Delete the entry once the design is open. Default: false.
     #[serde(default)]
     pub discard: Option<bool>,
+    /// For a design saved without the bodies of its linked designs, whose copy lacks the bodies
+    /// of a link: which linked design files are read for them, as `doc.open`'s `linked_bodies`.
+    /// `all` (the default): every link's file the caller may read. `folder`: only files in the
+    /// design's own folder or below it; the other links have no bodies until
+    /// `component.update_links` reads them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
 }
 
 /// `id` of `doc.recover`: text, which the handler gives its own message for when it is not.
@@ -1044,6 +1278,10 @@ pub struct RecoverResult {
     pub features: usize,
     /// How many of them failed to evaluate.
     pub errors: usize,
+    /// The links of a design saved without linked bodies that were not read, or whose file
+    /// changed, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1083,6 +1321,8 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+    /// A format an exporter plugin writes.
+    Plugin(crate::schema::plugin::ExportedFile),
     /// A Gazebo model folder (SDF).
     Sdf(SdfExportResult),
 }
@@ -1090,6 +1330,12 @@ pub enum FileExportResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ImportCacheClearParams {}
+
+/// Read the active design again from the file it was opened or saved as, as File > Revert to
+/// Saved does. It takes nothing and never asks: unsaved changes are lost.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevertSavedParams {}
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImportCacheClearResult {

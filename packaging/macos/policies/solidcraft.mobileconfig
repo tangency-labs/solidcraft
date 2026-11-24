@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A sample configuration profile for SolidCraft's policies on macOS
+  (docs/book/src/guide/managed-deployment.md). The app reads these keys of the domain
+  io.tangencylabs.solidcraft in crates/ui-egui/src/policy.rs: keep the two in step.
+  Remove the keys you don't set, and give the profile your organization's identifiers and new UUIDs
+  (uuidgen) before deploying it with your MDM, or install it by double-clicking it.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadIdentifier</key>
+  <string>com.example.solidcraft-policy</string>
+  <key>PayloadUUID</key>
+  <string>6F1A6C55-2B5E-4C1F-9C3B-0B2C2D5E8A01</string>
+  <key>PayloadDisplayName</key>
+  <string>SolidCraft settings</string>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>io.tangencylabs.solidcraft</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadIdentifier</key>
+      <string>com.example.solidcraft-policy.settings</string>
+      <key>PayloadUUID</key>
+      <string>6F1A6C55-2B5E-4C1F-9C3B-0B2C2D5E8A02</string>
+      <key>PayloadDisplayName</key>
+      <string>SolidCraft</string>
+      <key>CheckForUpdates</key>
+      <integer>0</integer>
+      <key>UsageStatistics</key>
+      <integer>0</integer>
+      <key>OrganizationName</key>
+      <string>Example Corp</string>
+    </dict>
+  </array>
+</dict>
+</plist>

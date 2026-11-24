@@ -56,6 +56,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | SHEET METAL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | WELDMENTS | SKETCH | **`sketch.create`** |
 | WELDMENTS | CREATE | **`frame.member`** |
+| WELDMENTS | MODIFY | **`frame.trim`** |
 | WELDMENTS | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | SKETCH | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | RENDER | SCENE | **`render.scene`** |
@@ -116,6 +117,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
 | SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
 | WELDMENTS / CREATE | WELDMENTS / CREATE | `frame.member` |
+| WELDMENTS / MODIFY | WELDMENTS / MODIFY | `frame.trim` |
 
 ## Placement decisions and missing commands
 

@@ -4,7 +4,7 @@
 //! point and the curve's trim merged away) and crashed; fork tangency-labs/smlib 80d307d
 //! checks the curve against the face's trims first. The port holds the face's curves by
 //! index (`built.curve_edges`), so a curve the face creator dropped is a missing edge,
-//! never a stale read: the sweep returns an error or a sound body, and never panics.
+//! never a stale read: the sweep builds a sound body and never panics.
 //!
 //! The same quarter horn torus through the whole-body check gates WR-505 (#1515, the
 //! fork's smlib#41) at operation level (#1954): upstream's `HasInternalPole` takes the
@@ -61,27 +61,21 @@ fn revolve_disc(k: &mut Kernel, axis_x: f64) -> solidcore::Result<solidcore::Bre
 }
 
 #[test]
-fn issue_1511_disc_touching_the_axis_errs_or_builds_a_sound_body() {
-    // a quarter of the horn torus: (pi / 2) * (pi 5^2) * 5 (Pappus)
+fn issue_1511_disc_touching_the_axis_builds_a_sound_body() {
+    // a quarter of the horn torus: (pi / 2) * (pi 5^2) * 5 (Pappus). The sweep has one
+    // path since WR-448's flag retired, and it builds this body, so a refusal is a
+    // regression (valid input never becomes a refusal).
     let want = PI / 2.0 * PI * 25.0 * 5.0;
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.revolve_analytic_profile_faces = fix;
-        match revolve_touching_disc(&mut k) {
-            Err(e) => eprintln!("fix {fix}: no body: {e}"),
-            Ok(mut b) => {
-                // a sound body: intact topology and the quarter horn torus's volume (to a
-                // coarse integration tolerance, which keeps the test cheap)
-                solidcore::topology::integrity::check(&b).unwrap();
-                let got = volume(&k, &mut b);
-                eprintln!("fix {fix}: body, volume {got} (horn torus quarter {want})");
-                assert!(
-                    (got - want).abs() <= 1e-2 * want,
-                    "fix {fix}: unsound body, volume {got}, want {want}"
-                );
-            }
-        }
-    }
+    let mut k = Kernel::default();
+    let mut b = revolve_touching_disc(&mut k).expect("the quarter horn torus builds");
+    // a sound body: intact topology and the quarter horn torus's volume (to a coarse
+    // integration tolerance, which keeps the test cheap)
+    solidcore::topology::integrity::check(&b).unwrap();
+    let got = volume(&k, &mut b);
+    assert!(
+        (got - want).abs() <= 1e-2 * want,
+        "unsound body, volume {got}, want {want}"
+    );
 }
 
 /// The body's volume, to a coarse integration tolerance (cheap, and far tighter than the

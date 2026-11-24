@@ -19,7 +19,10 @@
 //! `AngleBetween` reports. Edge uses, vertex uses and edges that upstream dereferences
 //! are input errors when missing. There is no recursion.
 
-use super::{edge_of, find_side_edgeuse, need, new_corner_vertex, radial, vertex_of, OP_NX2};
+use super::{
+    edge_of, find_side_edgeuse, missing_defect, need, new_corner_vertex, radial, shape_not_built,
+    vertex_of, OP_NX2,
+};
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses,
 };
@@ -28,6 +31,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -235,11 +239,15 @@ impl FilletCorner {
         } // end loop on all (both) non-filleted edges.
 
         let fv_on_common_face = fv_on_common_face.ok_or_else(|| {
-            SolidError::blend_missing(OP_NX2, "the fillet vertex on the common face")
+            missing_defect(
+                OP_NX2,
+                "no side edge of the 4x2 concave corner is on the concave side, though the \
+                 corner is built as one only after the same concavity check found such a side",
+            )
         })?;
-        let fv_on_convex_edge = fv_on_convex_edge.ok_or_else(|| {
-            SolidError::blend_missing(OP_NX2, "the fillet vertex on the convex edge")
-        })?;
+        // both side edges on the concave side of the blends
+        let fv_on_convex_edge = fv_on_convex_edge
+            .ok_or_else(|| shape_not_built(OP_NX2, CornerShape::NoConvexSideEdge))?;
         pseudo
             .fillet_vertex_mut(fv_on_common_face)?
             .set_mate(0, Some(fv_on_convex_edge));

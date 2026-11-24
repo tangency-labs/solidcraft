@@ -26,9 +26,9 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
     arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
-    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
-    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
-    SweepRoute, Verdict,
+    loft_to_point, loft_to_point_through, planar_faces, project_curves, revolve, screw_sweep,
+    sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
+    SweepFrame, SweepRoute, Verdict,
 };
 use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
@@ -132,6 +132,8 @@ enum Op {
     Sweep(Vec<Curve>, Vec<Curve>, SweepFrame, bool),
     Loft(Vec<Vec<Curve>>, u32, bool),
     LoftToPoint(Vec<Curve>, [f64; 3]),
+    /// A loft from the first section through the rest (stations) to the apex, at the parameters.
+    LoftToPointThrough(Vec<Vec<Curve>>, [f64; 3], Vec<f64>),
     Stations(Vec<Curve>, Vec<Affine>, Ends),
     Screw(Vec<Curve>, [f64; 3], [f64; 3], f64, f64, f64),
     /// A screw sweep with a radial law.
@@ -419,6 +421,29 @@ fn case(name: &str) -> Case {
             Op::LoftToPoint(square(0.0, 0.0, 10.0, 0.0), [5.0, 5.0, 6.0]),
             Expect::Volume(200.0),
         ),
+        // Through the square halved at half height: the pyramid's own station, so the pyramid,
+        // A h / 3.
+        "loft_to_point_through_pyramid" => c(
+            Op::LoftToPointThrough(
+                vec![square(0.0, 0.0, 10.0, 0.0), square(2.5, 2.5, 5.0, 3.0)],
+                [5.0, 5.0, 6.0],
+                vec![0.0, 0.5, 1.0],
+            ),
+            Expect::Volume(200.0),
+        ),
+        // A circle of radius 5 through the circle of 2.5 halfway to an apex 10 up: the cone,
+        // pi r^2 h / 3.
+        "loft_to_point_through_cone" => c(
+            Op::LoftToPointThrough(
+                vec![
+                    vec![circle([0.0; 3], Z, [1.0, 0.0, 0.0], 5.0)],
+                    vec![circle([0.0, 0.0, 5.0], Z, [1.0, 0.0, 0.0], 2.5)],
+                ],
+                [0.0, 0.0, 10.0],
+                vec![0.0, 0.5, 1.0],
+            ),
+            Expect::Volume(PI * 25.0 * 10.0 / 3.0),
+        ),
         // A square of 2 carried up 10: 40.
         "sweep_stations_prism" => c(
             Op::Stations(
@@ -491,6 +516,7 @@ fn run(op: &Op) -> solidcore_ops::Result<Body> {
         Op::Sweep(p, path, frame, cap) => sweep_placed(p, path, *frame, *cap).map(|(b, _, _)| b),
         Op::Loft(s, d, cap) => loft(s, *d, *cap),
         Op::LoftToPoint(s, apex) => loft_to_point(s, *apex),
+        Op::LoftToPointThrough(s, apex, params) => loft_to_point_through(s, *apex, params),
         Op::Stations(p, s, e) => sweep_stations(p, s, *e),
         Op::Screw(p, o, a, pitch, turns, tol) => screw_sweep(p, *o, *a, *pitch, *turns, None, *tol),
         Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => {
@@ -563,6 +589,8 @@ cases!(
     loft_two_squares,
     loft_two_circles,
     loft_to_point_pyramid,
+    loft_to_point_through_pyramid,
+    loft_to_point_through_cone,
     sweep_stations_prism,
     sweep_stations_scaled,
     screw_sweep_square_thread,
@@ -1401,4 +1429,121 @@ fn a_loft_s_hostile_ends_are_refused() {
     let beside = [square(0.0, 0.0, 10.0, 0.0), square(20.0, 0.0, 10.0, 0.0)];
     assert!(refused(&beside, [square_end(1.0), LoftEnd::Free]));
     assert!(refused(&beside, [LoftEnd::Free, square_end(1.0)]));
+}
+
+/// A loft to a point through a station that bulges out (the base square again, half way up):
+/// a closed solid fuller than the pyramid (200) and inside the prism over the base (600). Rows of
+/// different counts, an apex in the base's plane, a single row, and parameters that do not run
+/// from 0 to 1 by increasing steps, one a row, are refused.
+#[test]
+fn loft_to_point_through_a_bulge_and_its_refusals() {
+    rig_fixes();
+    let base = square(0.0, 0.0, 10.0, 0.0);
+    let apex = [5.0, 5.0, 6.0];
+    let half = [0.0, 0.5, 1.0];
+    let bulge = [base.clone(), square(0.0, 0.0, 10.0, 3.0)];
+    let v = loft_to_point_through(&bulge, apex, &half)
+        .unwrap()
+        .volume(1e-8)
+        .unwrap();
+    assert!(v > 200.0 && v < 600.0, "volume {v}");
+    let fewer = vec![
+        line([2.5, 2.5, 3.0], [7.5, 7.5, 3.0]),
+        line([7.5, 7.5, 3.0], [2.5, 2.5, 3.0]),
+    ];
+    let refused = |sections: &[Vec<Curve>], apex: [f64; 3], params: &[f64]| {
+        loft_to_point_through(sections, apex, params).err() == Some(Error::Argument)
+    };
+    assert!(refused(&[base.clone(), fewer], apex, &half), "counts");
+    assert!(
+        refused(&bulge, [5.0, 5.0, 0.0], &half),
+        "apex in the base's plane"
+    );
+    assert!(refused(&[base], apex, &[0.0, 1.0]), "one row");
+    for params in [
+        &[0.0, 1.0][..],
+        &[0.0, 0.5, 0.9],
+        &[0.1, 0.5, 1.0],
+        &[0.0, 0.0, 1.0],
+        &[0.0, f64::NAN, 1.0],
+    ] {
+        assert!(refused(&bulge, apex, params), "{params:?}");
+    }
+}
+
+/// A square whose corners take different weights from the two lines that meet there (each line
+/// weight 1 at its start and 2 at its end), through the same square halved at half height, to
+/// the apex: neighbouring walls meet on the same curves because each corner keeps one ratio of
+/// weights through the rows, so the walls stitch into the plain pyramid, A h / 3 = 200.
+#[test]
+fn loft_to_point_through_corners_of_different_weights_stitch() {
+    rig_fixes();
+    let weighted = |pts: [[f64; 3]; 4]| -> Vec<Curve> {
+        (0..4)
+            .map(|i| {
+                let (a, b) = (pts[i], pts[(i + 1) % 4]);
+                Curve::Nurbs {
+                    degree: 1,
+                    points: vec![[a[0], a[1], a[2], 1.0], [b[0], b[1], b[2], 2.0]],
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                }
+            })
+            .collect()
+    };
+    let base = weighted([
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+    ]);
+    let half = weighted([
+        [2.5, 2.5, 3.0],
+        [7.5, 2.5, 3.0],
+        [7.5, 7.5, 3.0],
+        [2.5, 7.5, 3.0],
+    ]);
+    let b = loft_to_point_through(&[base, half], [5.0, 5.0, 6.0], &[0.0, 0.5, 1.0]).unwrap();
+    assert!(
+        b.check(CheckLevel::All).unwrap().is_valid(),
+        "a closed valid solid"
+    );
+    let v = b.volume(1e-8).unwrap();
+    assert!(rel(v, 200.0) < 1e-9, "volume {v} vs 200");
+}
+
+/// A circle swept along a line, at a small radius and far from the origin: the record it writes
+/// opens again (tangency-labs/solidcore#3377, where a cap plane was written with axes off square
+/// by 1e-15 to 1e-14 and `from_record` refused it).
+#[test]
+fn a_swept_circle_s_record_opens_again() {
+    let (s, c) = 15f64.to_radians().sin_cos();
+    let mut failed = Vec::new();
+    for (r, start, dir) in [
+        (1.0, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (0.01, [0.0, 0.0, 0.0], [c, s, 0.0]),
+        (1.0, [10010.0, 9997.58, 10.0], [0.0, 1.0, 0.0]),
+    ] {
+        let end = [0, 1, 2].map(|i| start[i] + 10.0 * dir[i]);
+        let circle = Curve::Arc {
+            center: start,
+            axis: dir,
+            reference: [0.0, 0.0, 1.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        };
+        let (body, _, _) =
+            sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+        let (record, _) = body.to_record().unwrap();
+        let again = Body::from_record(&record, true).and_then(|(back, _)| {
+            let (second, _) = back.to_record()?;
+            Body::from_record(&second, true).map(|_| second)
+        });
+        match again {
+            Ok(second) if second == record => {}
+            Ok(_) => failed.push(format!("r {r} from {start:?}: the second record differs")),
+            Err(e) => failed.push(format!("r {r} from {start:?}: {e:?}")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }

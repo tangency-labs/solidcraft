@@ -765,6 +765,66 @@ fn fillet_and_chamfer_the_top_loop_of_rounded_overlapping_cylinders() {
     assert!((v - expect).abs() < 1.5, "{v} vs {expect}");
 }
 
+/// #20411: the top edge of an 8 mm extrusion of a closed control-point spline (24 and 48 poles
+/// on the superellipse |x/35.75|⁴ + |y/73.75|⁴ = 1, at equal angles, as the report gives them)
+/// rounds 1 mm. The round along the whole closed edge starts and ends at the wall's seam, and
+/// was taken for a piece of one ball there (its two feet on the wall a rounding apart): it
+/// failed with "the curve's cache is missing" (24) or "Fillet Face Creation Error" (48).
+#[test]
+fn a_closed_control_point_spline_s_extrusion_rounds_its_top_edge() {
+    use std::f64::consts::TAU;
+    let (a, b, h, r) = (35.75_f64, 73.75_f64, 8.0, 1.0);
+    for n in [24_usize, 48] {
+        let round5 = |v: f64| (v * 1e5).round() / 1e5;
+        let poles: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let t = TAU * i as f64 / n as f64;
+                let (c, s) = (t.cos(), t.sin());
+                [round5(a * c.signum() * c.abs().sqrt()), round5(b * s.signum() * s.abs().sqrt())]
+            })
+            .collect();
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.spline.control_point", json!({"points": poles, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": h}));
+        let base = volume(&mut s);
+        // the edge picked 0.2 mm outside its middle on the +x side, as in the report
+        run(&mut s, "solid.fillet", json!({"edges": [[a, 0, h]], "radius": r}));
+        // The outline's length: each span of the uniform cubic B-spline by Simpson's rule.
+        let pole = |i: usize| poles[i % n];
+        let speed = |i: usize, t: f64| {
+            let w = [-3.0 * (1.0 - t).powi(2), 9.0 * t * t - 12.0 * t, -9.0 * t * t + 6.0 * t + 3.0, 3.0 * t * t];
+            let (mut x, mut y) = (0.0, 0.0);
+            for (j, wj) in w.iter().enumerate() {
+                let p = pole(i + n - 1 + j);
+                x += wj * p[0] / 6.0;
+                y += wj * p[1] / 6.0;
+            }
+            x.hypot(y)
+        };
+        let steps = 400;
+        let length: f64 = (0..n)
+            .map(|i| {
+                let dt = 1.0 / steps as f64;
+                (0..steps)
+                    .map(|k| {
+                        let t = k as f64 * dt;
+                        (speed(i, t) + 4.0 * speed(i, t + dt / 2.0) + speed(i, t + dt)) * dt / 6.0
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        // By Pappus: the corner's section, (1 − π/4)·r², swept along the outline drawn in by its
+        // centroid's inset, (10 − 3π)/(3(4 − π))·r; a closed convex outline drawn in by d is
+        // 2πd shorter (its curvature radius is over 14 mm everywhere).
+        let inset = (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)) * r;
+        let removed = (1.0 - PI / 4.0) * r * r * (length - TAU * inset);
+        let v = volume(&mut s);
+        assert!(((base - v) - removed).abs() < 1e-3 * removed, "{n} poles: removed {} vs {removed}", base - v);
+    }
+}
+
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.
 #[test]
 fn box_fillet_cut_part() {
@@ -1143,166 +1203,177 @@ fn hostile_params_never_panic() {
     let _reset = mesh_convert::MadeUp;
     *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
-        "plane",
-        "offset",
-        "name",
-        "sketch",
-        "points",
+        "a",
+        "add",
+        "anchor",
+        "angle",
+        "apex",
+        "ascii",
+        "at",
+        "axis",
+        "b",
+        "base",
+        "bodies",
+        "body",
+        "body_name",
+        "center",
+        "chain",
+        "clip",
         "closed",
+        "comment",
+        "configuration",
         "construction",
+        "continuity",
+        "copy",
+        "corner",
+        "count",
+        "count2",
+        "crown",
+        "curve",
+        "curves",
+        "damping",
+        "datum",
+        "delete",
+        "density",
+        "depth",
+        "detail",
+        "diameter",
+        "dir",
+        "direction",
+        "distance",
+        "distance2",
+        "dot_grid",
+        "drills",
+        "drills_text",
+        "driven",
+        "edges",
+        "effort",
+        "end",
+        "entities",
+        "entity",
+        "expression",
+        "extend",
+        "face",
+        "faces",
+        "factor",
+        "favorite",
+        "favorites",
+        "feature",
+        "features",
+        "filter",
+        "fixed",
+        "format",
+        "friction",
+        "from",
+        "gap",
+        "head",
+        "head_gap",
+        "height",
+        "id",
         "ids",
         "infer",
+        "items",
+        "keep",
+        "keep_tools",
+        "keep_with",
+        "kind",
+        "length",
+        "line",
+        "line_group",
+        "lines",
+        "link",
+        "major",
+        "margin",
+        "measure",
+        "members",
+        "mid",
+        "minor",
+        "minor_radius",
+        "mode",
+        "name",
+        "names",
+        "near",
+        "new_name",
+        "next_pair",
+        "offset",
+        "operation",
+        "orientation",
+        "origin",
+        "outline",
+        "outline_text",
         "p0",
         "p1",
         "p2",
-        "center",
-        "corner",
-        "radius",
-        "diameter",
-        "start",
-        "end",
-        "through",
-        "sides",
-        "angle",
-        "width",
-        "point",
-        "id",
-        "entities",
-        "type",
-        "value",
-        "line",
-        "mode",
-        "a",
-        "b",
-        "entity",
-        "fixed",
-        "curves",
-        "to",
-        "distance",
-        "profiles",
-        "direction",
+        "pairs",
         "parallel_to",
-        "distance2",
-        "start_offset",
-        "operation",
-        "targets",
-        "body_name",
-        "axis",
-        "length",
-        "height",
-        "base",
-        "major",
-        "minor",
-        "top_radius",
-        "top_diameter",
-        "edges",
-        "body",
-        "target",
-        "tools",
-        "keep_tools",
-        "bodies",
-        "translate",
-        "expression",
-        "unit",
-        "comment",
-        "delete",
-        "features",
-        "feature",
-        "position",
-        "suppressed",
-        "set",
-        "items",
-        "add",
         "path",
-        "format",
-        "ascii",
-        "measure",
-        "refs",
-        "link",
-        "project_edges",
-        "mid",
-        "near",
-        "factor",
-        "copy",
-        "count",
-        "spacing",
-        "count2",
-        "spacing2",
-        "dir",
-        "side",
-        "chain",
-        "at",
-        "curve",
-        "minor_radius",
-        "apex",
-        "rho",
-        "text",
-        "lines",
-        "driven",
-        "from",
-        "datum",
-        "tolerance",
-        "face",
-        "new_name",
-        "favorite",
-        "favorites",
-        "filter",
-        "kind",
-        "detail",
+        "plane",
+        "point",
+        "points",
+        "position",
+        "position_mm",
         "prefix",
-        "orientation",
-        "seam",
-        "twist",
-        "scale",
-        "continuity",
-        "crown",
-        "faces",
-        "u",
-        "v",
-        "keep",
-        "with",
-        "keep_with",
-        "stitch",
-        "extend",
-        "view",
-        "visual_style",
-        "reference_style",
+        "profile",
+        "profiles",
+        "project_edges",
+        "radius",
         "reference_hides_model",
         "reference_shown_percent",
-        "tangent_edges",
-        "line_group",
-        "sheet",
-        "position_mm",
-        "profile",
-        "anchor",
-        "density",
-        "names",
+        "reference_style",
         "references",
-        "head",
-        "head_gap",
-        "configuration",
-        "outline",
-        "outline_text",
-        "drills",
-        "drills_text",
-        "thickness",
-        "origin",
+        "refs",
+        "rho",
+        "scale",
+        "seam",
+        "set",
         "shape",
+        "sheet",
+        "side",
+        "sides",
         "size",
-        "web",
-        "clip",
-        "margin",
+        "sketch",
+        "spacing",
+        "spacing2",
+        "start",
+        "start_offset",
+        "stitch",
+        "suppressed",
+        "tangent_edges",
+        "target",
+        "targets",
+        "text",
+        "thickness",
+        "through",
         "through_all",
-        "depth",
-        "dot_grid",
+        "to",
+        "tolerance",
+        "tools",
+        "top_diameter",
+        "top_radius",
+        "translate",
         "turn",
+        "twist",
+        "type",
+        "u",
+        "unit",
+        "v",
+        "value",
+        "velocity",
+        "view",
+        "visual_style",
+        "web",
+        "width",
+        "with",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .filter(|id| {
+            !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf" | "sketch.export_svg")
+        }) // file system side effects are covered by their own tests
         .collect();
+    assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let internal: Vec<String> = std::thread::scope(|scope| {
@@ -1338,6 +1409,7 @@ fn hostile_params_never_panic() {
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -3600,6 +3672,8 @@ fn forgetting_a_checkpoint_keeps_the_later_ones() {
 fn a_checkpoint_survives_file_new() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 1.0, "width": 1.0, "height": 1.0}));
+    let original_token = s.design_token();
+    let original_bytes = s.doc.to_json();
     let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "file.new", json!({"name": "Replacement"}));
     // The volume as SMLib integrates it, to rounding (a unit box measures 1 + 2e-16).
@@ -3607,6 +3681,10 @@ fn a_checkpoint_survives_file_new() {
     run(&mut s, "solid.box", json!({"length": 2.0, "width": 2.0, "height": 2.0}));
     assert!((volume(&mut s) - 8.0).abs() < 1e-12);
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    assert_eq!(s.design_token().document_id, original_token.document_id);
+    assert_ne!(s.design_token().revision, original_token.revision);
+    assert_eq!(s.doc.to_json(), original_bytes);
+    assert_eq!(run(&mut s, "document.revision", json!({}))["document_id"], original_token.document_id);
     assert!((volume(&mut s) - 1.0).abs() < 1e-12);
     // The undo history is the restored design's own: one step back is the empty design.
     run(&mut s, "edit.undo", json!({}));
@@ -4060,6 +4138,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
         // Each half holds the half of both squares: two pieces, half the body each.
         assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
         assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
+}
+
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
     }
 }
 
@@ -4667,6 +4781,53 @@ fn counterbore_for_a_cap_screw_head() {
     assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
     run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
     assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
+}
+
+/// #17728: a countersunk screw's head (ISO 10642) gets a 90° countersink as wide as its head plus
+/// `head_gap` each side, so the head sits `head_gap` below the face.
+#[test]
+fn countersink_for_a_countersunk_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    let hole = cmd::clearance_diameter("M6", "normal").unwrap();
+    // A through hole with a 90° countersink `d` wide at the face: the cone's frustum, then the hole.
+    let removed = |d: f64| {
+        let h = (d - hole) / 2.0;
+        PI * h / 12.0 * (d * d + d * hole + hole * hole) + PI * hole * hole / 4.0 * (10.0 - h)
+    };
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Countersink { cs_diameter, cs_angle, .. }, .. }) => {
+            (cs_diameter.as_str().to_string(), cs_angle.as_str().to_string())
+        }
+        other => panic!("not a countersink: {other:?}"),
+    };
+    // ISO 10642 M6: dk 13.44, plus the 0.5 mm gap each side; the type follows the head.
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M6", "head": "ISO 10642"}));
+    let v1 = volume(&mut s);
+    assert_eq!(recess(&s), ("14.44 mm".to_string(), "90 deg".to_string()));
+    assert!(rel(v0 - v1, removed(14.44)) < 1e-3, "{} vs {}", v0 - v1, removed(14.44));
+    // The family name parts.insert takes, no gap, and the type written out: flush with the face.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [30, 15, 10], "clearance": "M6", "head": "countersunk_socket_screw", "head_gap": 0, "type": "countersink"}),
+    );
+    let v2 = volume(&mut s);
+    assert_eq!(recess(&s).0, "13.44 mm");
+    assert!(rel(v1 - v2, removed(13.44)) < 1e-3, "{}", v1 - v2);
+    // A diameter given by hand keeps its value.
+    run(&mut s, "solid.hole", json!({"position": [50, 15, 10], "clearance": "M6", "head": "ISO 10642", "cs_diameter": 15}));
+    assert_eq!(recess(&s).0, "15");
+}
+
+#[test]
+fn head_countersink_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
+    assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
+    assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
@@ -5507,6 +5668,271 @@ fn extrude_to_a_slanted_face_reaches_its_plane_and_stops_at_material_first() {
     assert!((lo - 2.5).abs() < 1e-6 && (hi - 40.0).abs() < 1e-6 && rel(v, 4050.0) < 1e-9, "{lo} {hi} {v}");
 }
 
+/// A 20 mm block, z 0 to 10, with a slot 2 mm wide cut through it whose walls slant across X:
+/// x = 4 (y + 11) / 7 and 2 mm further along x, from the block's side at y -10 to y -4, where
+/// the slot ends. Its volume is 4000 - 6 * 2 * 10 = 3880 mm3. Ends in an open sketch on the
+/// plane x 3, whose x and y run along world Y and Z.
+fn slanted_slot_block(s: &mut Session) {
+    run(s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Block", "name": "Block"}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
+    run(s, "sketch.line", json!({"closed": true, "points": [[0, -11], [2, -11], [6, -4], [4, -4]]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"sketch": "SlotSketch", "distance": 20, "operation": "cut", "name": "Slot"}));
+    run(s, "sketch.create", json!({"plane": "YZ", "offset": 3, "name": "Across"}));
+}
+
+/// From one slanted wall of a slot To the other runs between the two walls' planes (#18825).
+/// The walls lie 2 mm apart along the extrusion everywhere, so the prism over a square 2 mm
+/// across, y -5 to -3 and z 4 to 6, holds 8 mm3: a new body over x 4 (6 / 7) to 2 + 4 (8 / 7).
+/// As a cut it removes only the half past the slot's end, y -4 to -3, 4 mm3. The same square
+/// moved to y -7 to -5 lies wholly in the slot, so its cut removes nothing and says so. From the
+/// slanted wall To the block's flat side at x 10, the square at y -3 to -1 starts on the wall's
+/// plane, x 4 (8 / 7) at y -3, and holds 2 (2 * 10 - 4 * 18 / 7) = 136 / 7 mm3.
+#[test]
+fn extrude_from_a_slanted_face_to_another_runs_between_their_planes() {
+    let square = |s: &mut Session, y: f64| {
+        run(s, "sketch.rectangle.two_point", json!({"p0": [y, 4], "p1": [y + 2.0, 6]}));
+        run(s, "sketch.finish", json!({}));
+    };
+    let walls = json!({"sketch": "Across", "from": [20.0 / 7.0, -6, 5], "to": [2.0 + 20.0 / 7.0, -6, 5]});
+    let with = |base: &Value, extra: Value| {
+        let mut p = base.clone();
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            p[k] = v.clone();
+        }
+        p
+    };
+    let x_span_and_volume = |s: &mut Session, body: &str| {
+        let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+        let b = &m["bodies"][0];
+        let f = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+        (f(&b["bbox"]["min"][0]), f(&b["bbox"]["max"][0]), f(&b["volume_mm3"]))
+    };
+    let warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    assert!(rel(volume(&mut s), 3880.0) < 1e-9, "{}", volume(&mut s));
+    square(&mut s, -5.0);
+    run(&mut s, "solid.extrude", with(&walls, json!({"operation": "new", "body_name": "Fill"})));
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 24.0 / 7.0).abs() < 1e-6 && (hi - (2.0 + 32.0 / 7.0)).abs() < 1e-6 && rel(v, 8.0) < 1e-9, "{lo} {hi} {v}");
+    assert!(!warning(&s).contains("From Object starts on a plane"), "{:?}", warning(&s));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.extrude", with(&walls, json!({"operation": "cut", "name": "Notch"})));
+    assert!(rel(volume(&mut s), 3876.0) < 1e-9, "{} {:?}", volume(&mut s), warning(&s));
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -7.0);
+    run(&mut s, "solid.extrude", with(&walls, json!({"operation": "cut", "name": "InTheSlot"})));
+    assert!(rel(volume(&mut s), 3880.0) < 1e-9, "{}", volume(&mut s));
+    assert!(warning(&s).contains("the cut removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -3.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "Across", "from": [20.0 / 7.0, -6, 5], "to": [10, 5, 5], "operation": "new", "body_name": "Fill"}));
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 32.0 / 7.0).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6 && rel(v, 136.0 / 7.0) < 1e-9, "{lo} {hi} {v}");
+}
+
+/// What an extrude From a slanted wall of `slanted_slot_block` with To Object does not run
+/// between the two planes for (#18825). With a second side it starts at the From pick's level,
+/// x 20 / 7, as before, and says why: the square at y -3 to -1 runs from x 20 / 7 - 3 to the
+/// block's side at x 10, 4 (10 + 1 / 7) = 284 / 7 mm3. To the plane x 4.6, which crosses the
+/// wall's plane over the square at y -5 to -1, it is refused rather than dropping part of the
+/// profile. An extrude marked to start at the From face's level (`from_level`, as a design saved
+/// with From and To is) starts on the wall once an edit takes To off, as a new one does: x 4 (8 /
+/// 7) to 4 (10 / 7) + 3. A pin hole 1 mm across in a 1 m cube is a cut, and says nothing.
+#[test]
+fn extrude_from_a_slanted_face_with_to_and_a_second_side_crossing_planes_or_to_taken_off() {
+    let warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+    let x_span_and_volume = |s: &mut Session, body: &str| {
+        let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+        let b = &m["bodies"][0];
+        let f = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+        (f(&b["bbox"]["min"][0]), f(&b["bbox"]["max"][0]), f(&b["volume_mm3"]))
+    };
+    let wall = json!([20.0 / 7.0, -6, 5]);
+    let square = |s: &mut Session, y0: f64, y1: f64| {
+        run(s, "sketch.rectangle.two_point", json!({"p0": [y0, 4], "p1": [y1, 6]}));
+        run(s, "sketch.finish", json!({}));
+    };
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -3.0, -1.0);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Across", "from": wall, "to": [10, 5, 5], "distance2": 3, "operation": "new", "body_name": "Fill"}),
+    );
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - (20.0 / 7.0 - 3.0)).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6 && rel(v, 284.0 / 7.0) < 1e-9, "{lo} {hi} {v}");
+    assert!(warning(&s).contains("second side"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -5.0, -1.0);
+    let crossed =
+        s.execute("solid.extrude", &json!({"sketch": "Across", "from": wall, "to": [4.6, 30, 30], "operation": "new", "body_name": "Fill"}));
+    assert!(crossed.as_ref().is_err_and(|e| e.to_string().contains("cross over the profile")), "{crossed:?}");
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    square(&mut s, -3.0, -1.0);
+    run(&mut s, "solid.extrude", json!({"sketch": "Across", "from": wall, "to": [10, 5, 5], "operation": "new", "body_name": "Fill", "name": "FT"}));
+    run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"from_level": true}}}));
+    let (lo, _, _) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 20.0 / 7.0).abs() < 1e-6, "{lo}");
+    // Kept on the level start, it still says why.
+    assert!(warning(&s).contains("because the design was saved before the start followed the slanted face"), "{:?}", warning(&s));
+    run(&mut s, "timeline.edit", json!({"feature": "FT", "set": {"extent": {"to": null, "distance": "3"}}}));
+    let (lo, hi, v) = x_span_and_volume(&mut s, "Fill");
+    assert!((lo - 32.0 / 7.0).abs() < 1e-6 && (hi - (40.0 / 7.0 + 3.0)).abs() < 1e-6 && rel(v, 12.0) < 1e-9, "{lo} {hi} {v}");
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 1000, "width": 1000, "height": 1000, "name": "Big"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 1000, "name": "Pin"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [500, 500], "radius": 0.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pin", "distance": -1, "operation": "cut", "name": "PinHole"}));
+    assert!(rel(volume(&mut s), 1e9 - PI * 0.25) < 1e-12, "{}", volume(&mut s));
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+}
+
+/// The "removes no material" warning on cuts that remove very little from a large body, and From
+/// and To planes that cross over a curved profile by a hair (#18825). A groove 0.2 mm across
+/// turned round Z at radius 5 into the top of a 1 m cube removes 2 pi 5 pi 0.01 / 2 = 0.49 mm3.
+/// A cut that takes away a wall 0.005 mm thick between two pockets removes 0.005 * 10 * 10 = 0.5
+/// mm3, and every face it leaves lies on a plane the pockets had already. Neither warns. A circle
+/// of radius 1 at y -4 on the plane x 3, From the slot's slanted wall To the plane x 3.4303,
+/// which the wall's plane crosses 0.003 mm above the circle's lowest point, is refused.
+#[test]
+fn a_cut_that_removes_very_little_says_nothing_and_planes_crossing_a_curved_profile_are_refused() {
+    let warning = |s: &Session| s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+    let big = |s: &mut Session| {
+        run(s, "solid.box", json!({"corner": [-500, -500, 0], "length": 1000, "width": 1000, "height": 1000, "body_name": "Big", "name": "Big"}));
+    };
+
+    let mut s = Session::default();
+    big(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [5, -1000], "radius": 0.1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Ring", "axis": "Z", "operation": "cut", "name": "Groove"}));
+    let removed = 1e9 - volume(&mut s);
+    assert!((removed - PI * PI * 0.05).abs() < 1e-3, "{removed}");
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    big(&mut s);
+    run(&mut s, "solid.box", json!({"corner": [-500, -500, 990], "length": 10, "width": 10, "height": 10, "operation": "cut", "name": "PocketA"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-489.995, -500, 990], "length": 10, "width": 10, "height": 10, "operation": "cut", "name": "PocketB"}),
+    );
+    let pockets = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 1000, "name": "Wall"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-491, -500], "p1": [-489, -490]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Wall", "distance": -10, "operation": "cut", "name": "WallGone"}));
+    let removed = pockets - volume(&mut s);
+    assert!((removed - 0.5).abs() < 1e-3, "{removed}");
+    assert!(!warning(&s).contains("removes no material"), "{:?}", warning(&s));
+
+    let mut s = Session::default();
+    slanted_slot_block(&mut s);
+    run(&mut s, "sketch.circle.center", json!({"center": [-4, 5], "radius": 1}));
+    run(&mut s, "sketch.finish", json!({}));
+    let p = json!({"sketch": "Across", "from": [20.0 / 7.0, -6, 5], "to": [3.430285714285714, 30, 30], "operation": "new", "body_name": "Fill"});
+    let crossed = s.execute("solid.extrude", &p);
+    assert!(crossed.as_ref().is_err_and(|e| e.to_string().contains("cross over the profile")), "{crossed:?}");
+}
+
+/// The extrude window's start rule (`from_slope_height`, which places its arrow) and the build
+/// agree on whether an extrude From the slanted wall of `slanted_slot_block` starts on it, for
+/// seven To picks (none, a point, a face square to the extrusion, the other slanted wall, a
+/// cylinder's side, the tangent edge between a block's side and a fillet, the fillet) with and
+/// without Through All, a taper and a second side (#18825). With To and Through All both set,
+/// To decides the end and the warning doesn't blame Through All.
+#[test]
+fn the_arrow_and_the_build_agree_where_an_extrude_from_a_slanted_face_starts() {
+    let wall = [20.0 / 7.0, -6.0, 5.0];
+    let tos: Vec<(&str, Option<[f64; 3]>)> = vec![
+        ("none", None),
+        ("point", Some([30.0, 30.0, 30.0])),
+        ("square face", Some([10.0, 5.0, 5.0])),
+        ("other wall", Some([2.0 + 20.0 / 7.0, -6.0, 5.0])),
+        ("cylinder side", Some([11.0, -2.0, 5.0])),
+        ("fillet tangent edge", Some([16.0, 10.0, 7.0])),
+        ("fillet face", Some([16.0, 10.0 - 3.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2, 7.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2])),
+    ];
+    let mut report = Vec::new();
+    for (to_name, to) in &tos {
+        for through_all in [false, true] {
+            for taper in [false, true] {
+                for two_sided in [false, true] {
+                    let mut s = Session::default();
+                    slanted_slot_block(&mut s);
+                    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 4], "p1": [-1, 6]}));
+                    run(&mut s, "sketch.finish", json!({}));
+                    run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 12, "base": [14, -2, -1], "body_name": "Cyl"}));
+                    run(&mut s, "solid.box", json!({"corner": [12, 0, 0], "length": 8, "width": 10, "height": 10, "body_name": "Edge"}));
+                    run(&mut s, "solid.fillet", json!({"edges": [[16, 10, 10]], "radius": 3}));
+                    let mut p = json!({"sketch": "Across", "from": wall, "distance": 4, "operation": "new", "body_name": "Fill", "name": "FT"});
+                    if let Some(t) = to {
+                        p["to"] = json!(t);
+                    }
+                    if through_all {
+                        p["through_all"] = json!(true);
+                    }
+                    if taper {
+                        p["taper"] = json!("5 deg");
+                    }
+                    if two_sided {
+                        p["distance2"] = json!(3);
+                    }
+                    let built = s.execute("solid.extrude", &p);
+                    // A taper with two sides is refused, and so is the other wall with a level
+                    // start, which lies in the empty slot; every other row builds.
+                    let refused = (taper && two_sided) || (*to_name == "other wall" && (two_sided || taper || through_all));
+                    assert_eq!(built.is_ok(), !refused, "to {to_name} all {through_all} taper {taper} two {two_sided}: {built:?}");
+                    let warn = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+                    let level_build = warn.contains("From Object starts on a plane parallel");
+                    let st = s.world_state().unwrap();
+                    let centre = solidcore_record::Vec3::new(3.0, -2.0, 5.0);
+                    let plane = solidcore_record::Plane::from_normal(centre, solidcore_record::Vec3::new(1.0, 0.0, 0.0)).unwrap();
+                    let ends = solidcraft_doc::ExtrudeEnds { to: None, through_all, tapered: taper, two_sided };
+                    let arrow = solidcraft_doc::from_slope_height(
+                        &st,
+                        &plane,
+                        centre,
+                        solidcore_record::Vec3::new(wall[0], wall[1], wall[2]),
+                        to.map(|t| solidcore_record::Vec3::new(t[0], t[1], t[2])),
+                        ends,
+                    );
+                    let line = format!(
+                        "to={to_name:20} all={through_all:5} taper={taper:5} two={two_sided:5} | build ok={:5} level={level_build:5} | arrow level={:5} {}",
+                        built.is_ok(),
+                        arrow.is_none(),
+                        if built.is_ok() && level_build != arrow.is_none() { "MISMATCH" } else { "" }
+                    );
+                    if to.is_some() && through_all {
+                        assert!(!warn.contains("because Through All is set"), "{line}: {warn}");
+                    }
+                    report.push(line);
+                }
+            }
+        }
+    }
+    let mismatched: Vec<&String> = report.iter().filter(|l| l.ends_with("MISMATCH")).collect();
+    assert!(mismatched.is_empty(), "{}", report.join("\n"));
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {
@@ -5893,7 +6319,7 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     let saved = s.doc.clone();
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.path.as_deref(), Some("existing.solidcraft"));
     assert!(s.is_dirty());
     assert_eq!(s.model.state().bodies.len(), 2);
@@ -5902,6 +6328,207 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(!s.is_dirty());
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().bodies.is_empty());
+}
+
+/// Plugin tracking lives in the session, never in authored bytes or undo snapshots.
+#[test]
+fn design_tokens_stay_outside_authored_documents_and_history() {
+    let mut s = Session::default();
+    let before = s.doc.to_json();
+    let token = s.design_token();
+    let value: Value = serde_json::from_str(&before).unwrap();
+    assert!(value.get("document_id").is_none() && value.get("revision").is_none());
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    let edited_bytes = s.doc.to_json();
+    assert_ne!(edited, token);
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_eq!(s.doc.to_json(), before);
+    assert_ne!(undone, token);
+    assert_ne!(undone, edited);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), edited_bytes);
+    assert_ne!(s.design_token(), undone);
+    assert_ne!(s.design_token(), edited);
+    assert_eq!(s.design_token().document_id, token.document_id);
+    let reopened = Session::opened_at((*s.doc).clone(), None, None);
+    assert_eq!(reopened.doc.to_json(), edited_bytes);
+    assert_ne!(reopened.design_token().document_id, s.design_token().document_id);
+}
+
+/// Plugin result tokens follow committed history for one open session and never
+/// give a branched edit the token of a discarded state. Reopening starts a new identity.
+#[test]
+fn design_tokens_follow_edits_history_save_and_reopen() {
+    let folder = Folder::new("design-revision-token");
+    let path = folder.path("part.sc");
+    let mut s = Session::default();
+    let initial = s.design_token();
+    assert_ne!(initial.document_id, Session::default().design_token().document_id);
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    assert_eq!(initial.document_id, edited.document_id);
+    assert_ne!(initial, edited);
+    run(&mut s, "file.save_as", json!({"path": path}));
+    assert_eq!(s.design_token(), edited, "saving is not an edit");
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_ne!(undone, edited);
+    run(&mut s, "edit.redo", json!({}));
+    assert_ne!(s.design_token(), undone);
+    assert_ne!(s.design_token(), edited);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "20 mm"}));
+    assert_ne!(s.design_token(), edited, "a branched edit never reuses the discarded token");
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    assert_ne!(reopened.design_token().document_id, edited.document_id, "reopening starts a new open-design identity");
+    run(&mut reopened, "parameters.change", json!({"name": "width", "expression": "30 mm"}));
+    assert_ne!(reopened.design_token(), edited);
+    assert_ne!(reopened.design_token(), s.design_token(), "independent open copies do not reuse an edit token");
+}
+
+/// Per-part undo can combine a drawing snapshot with a model edited later. Such
+/// a composite must not inherit either previous whole-document state's token.
+#[test]
+fn design_tokens_distinguish_composite_drawing_history() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "drawing.create", json!({}));
+    let drawing_created = s.design_token();
+    run(&mut s, "drawing.set", json!({"name": "Detail"}));
+    let drawing_edited = s.design_token();
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let model_edited = s.design_token();
+    run(&mut s, "edit.undo", json!({}));
+    let composite = s.design_token();
+    assert_ne!(composite, drawing_created);
+    assert_ne!(composite, drawing_edited);
+    assert_ne!(composite, model_edited);
+    assert!(s.doc.params.iter().any(|p| p.name == "width"), "drawing undo keeps the model edit");
+    run(&mut s, "edit.redo", json!({}));
+    assert_ne!(s.design_token(), composite);
+}
+
+/// Drawing history creates fresh whole-design tokens even when undo restores
+/// exactly the saved authored content. Those tokens are not unsaved changes.
+#[test]
+fn design_tokens_drawing_undo_restores_saved_content_without_dirtying() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "drawing.create", json!({}));
+    s.mark_saved();
+    let saved = s.design_token();
+    assert!(!s.is_dirty());
+    run(&mut s, "drawing.set", json!({"name": "Detail"}));
+    let edited = s.design_token();
+    assert_ne!(edited, saved);
+    assert!(s.is_dirty());
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_ne!(undone, saved, "drawing undo retains a fresh whole-design token");
+    assert_ne!(undone, edited);
+    assert_eq!(s.doc.drawings, s.saved.drawings);
+    assert!(!s.is_dirty(), "undo restored the saved content despite its new token");
+    run(&mut s, "edit.redo", json!({}));
+    let redone = s.design_token();
+    assert_ne!(redone, saved);
+    assert_ne!(redone, edited);
+    assert_ne!(redone, undone);
+    assert!(s.is_dirty(), "redo restored the drawing edit");
+}
+
+#[test]
+fn design_tokens_computed_save_preserves_the_saved_token() {
+    let folder = Folder::new("computed-save-token");
+    let mut s = Session::default();
+    let token = s.design_token();
+    let commands = vec![("file.save_as".to_string(), json!({"path": folder.path("part.sc")}))];
+    let computed = s.scratch().compute_commands(&commands, None).unwrap();
+    s.accept_commands(computed).unwrap();
+    assert_eq!(s.design_token(), token);
+    let mut saved = s.scratch();
+    run(&mut saved, "file.save_as", json!({"path": folder.path("renamed.sc")}));
+    s.adopt_save(&saved);
+    let unchanged = s.scratch();
+    s.accept_computed(unchanged).unwrap();
+    assert_eq!(s.design_token(), token, "adopting a save preserves the association too");
+}
+
+#[test]
+fn design_tokens_open_pinning_preserves_token_on_noop_acceptance() {
+    let mut original = Session::default();
+    run(&mut original, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    let mut doc = (*original.doc).clone();
+    for feature in &mut doc.features {
+        feature.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    let mut opened = Session::opened_at(doc, None, None);
+    let token = opened.design_token();
+    let unchanged = opened.scratch();
+    opened.accept_computed(unchanged).unwrap();
+    assert_eq!(opened.design_token(), token);
+}
+
+#[test]
+fn design_tokens_direct_computed_mutations_after_commands_get_a_fresh_token() {
+    let mut s = Session::default();
+    let mut computed = s.scratch();
+    run(&mut computed, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let executed = computed.design_token();
+    computed.doc_mut().name = "Direct candidate edit".into();
+    s.accept_computed(computed).unwrap();
+    assert_ne!(s.design_token(), executed);
+}
+
+#[test]
+fn design_tokens_accepting_historical_candidates_never_reuses_their_tokens() {
+    let mut s = Session::default();
+    let older = s.scratch();
+    let historical = older.design_token();
+    let bytes = s.doc.to_json();
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    let edited_bytes = s.doc.to_json();
+    let older_edited = s.scratch();
+    run(&mut s, "edit.undo", json!({}));
+    let current = s.design_token();
+    s.accept_computed(older).unwrap();
+    assert_eq!(s.design_token(), current, "an identical historical candidate keeps the live token");
+    assert_eq!(s.doc.to_json(), bytes);
+    s.accept_computed(older_edited).unwrap();
+    assert_eq!(s.doc.to_json(), edited_bytes);
+    assert_ne!(s.design_token(), historical);
+    assert_ne!(s.design_token(), edited);
+    assert_ne!(s.design_token(), current);
+}
+
+#[test]
+fn design_tokens_sketch_cancel_restores_authored_bytes_with_a_fresh_token() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    let bytes = s.doc.to_json();
+    let original = s.design_token();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    let edited = s.design_token();
+    run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(s.doc.to_json(), bytes);
+    assert_ne!(s.design_token(), original);
+    assert_ne!(s.design_token(), edited);
+}
+
+/// Selection, view refresh and a refused edit do not invalidate a computed design result.
+#[test]
+fn design_tokens_ignore_view_changes_and_refused_commands() {
+    let mut s = Session::default();
+    let token = s.design_token();
+    s.invalidate_view(s.revision);
+    run(&mut s, "select.clear", json!({}));
+    assert!(s.execute("parameters.add", &json!({"name": "width", "expression": "invalid +"})).is_err());
+    assert_eq!(s.design_token(), token);
 }
 
 /// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
@@ -6026,7 +6653,7 @@ fn a_model_put_back_from_an_earlier_copy_lets_go_of_the_bodies_it_replaces() {
     warm(&changed);
     run(&mut s, "inspect.measure", json!({}));
     assert_eq!(warm_bodies(&changed), ["Other", "Block"]);
-    s.accept_computed(original);
+    s.accept_computed(original).unwrap();
     assert_eq!(warm_bodies(&changed), ["Other"]);
 }
 
@@ -6042,6 +6669,9 @@ fn a_body_the_cache_keeps_after_its_state_is_gone_lets_go_of_its_forms() {
     let block = first.body("Block").unwrap().body.clone();
     let state = std::sync::Arc::downgrade(&first);
     drop(first);
+    // A full cache drops the result that took the least time to compute per byte, which a clock
+    // decides: the state goes here, before the edit, and the cache keeps the body in `Change`.
+    s.model.cache.lock().unwrap().forget_states();
     run(&mut s, "parameters.change", json!({"name": "w", "expression": "50 mm"}));
     assert!(state.upgrade().is_none(), "the state is gone");
     assert!(!block.holds_kernel_form());
@@ -6181,7 +6811,7 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
@@ -6313,6 +6943,32 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     assert_eq!(s.model.state().bodies.len(), 3);
     let expected = (900.0 - 400.0 + 100.0 + 100.0) * 5.0;
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
+}
+
+/// Four closed strips laid out as a # cross each other and close off a square in the middle that
+/// lies inside none of them. A cut with `profiles` left out takes the strips and keeps the middle
+/// (#19963); four separate cuts give the same block.
+#[test]
+fn default_extrude_profiles_leave_the_gap_overlapping_loops_enclose() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, 0], "operation": "new_body", "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strips"}));
+    for points in [
+        [[-6, 3], [6, 3], [6, 4], [-6, 4]],
+        [[-6, -4], [6, -4], [6, -3], [-6, -3]],
+        [[-4, -6], [-3, -6], [-3, 6], [-4, 6]],
+        [[3, -6], [4, -6], [4, 6], [3, 6]],
+    ] {
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+    }
+    run(&mut s, "sketch.solve", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Strips", "distance": 5, "start_offset": -1, "operation": "cut", "targets": ["Block"]}));
+    // The block, 300, less the strips inside it: four 10 x 1 x 3 bars less the four 1 x 1 x 3
+    // crossings counted twice. The 6 x 6 middle, the four corners and the four edge pieces stay.
+    let expected = 300.0 - (4.0 * 30.0 - 4.0 * 3.0);
     let actual = volume(&mut s);
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }
@@ -6875,6 +7531,28 @@ fn an_unequal_chamfer_too_large_for_a_notch_names_the_scale_that_fits() {
     assert_eq!(chamfer(4.0 * scale, 2.0 * scale), Ok(()), "the scale named builds");
 }
 
+/// #19691: a 1 mm extrusion of a closed spline with a 0.48 mm notch in its top rim 0.0001 mm
+/// from the spline's seam, its top loop chamfered 0.4 by 0.2 mm, failed with a bare "status
+/// 1007: the chamfer size": the notch's rim was taken to open to a half turn, where an unequal
+/// chamfer folds. Its faces meet square; no scale of the sizes builds beside the sliver the
+/// notch leaves, so it is refused as too large, saying the smaller scales tried do not build.
+#[test]
+fn an_unequal_chamfer_beside_a_notch_at_a_spline_s_seam_is_refused_by_its_size() {
+    let mut s = Session::default();
+    let points = [[500.0, 0.0], [379.0, 75.7], [0.0, 90.0], [-379.0, 75.7], [-500.0, 0.0], [-329.0, -65.7], [-0.0, -110.0], [329.0, -65.7]];
+    run(&mut s, "sketch.create", json!({"name": "Outline", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.spline.fit_point", json!({"periodic": true, "points": points}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 1.0, "operation": "new", "body_name": "Part"}));
+    let notch = json!({"radius": 0.24, "height": 0.5, "base": [499.97443718225014, 0.23873292279060757, 0.5], "axis": "Z", "operation": "cut", "targets": ["Part"]});
+    run(&mut s, "solid.cylinder", notch);
+    let edges = json!([[0.0, -110.0, 1.0], [499.7360050660453, 0.2113444952693031, 1.0]]);
+    let e = s.execute("solid.chamfer", &json!({"edges": edges, "distance": 0.4, "distance2": 0.2})).unwrap_err().to_string();
+    assert!(!e.contains("1007"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    assert!(e.contains("scales of its sizes tried builds"), "{e}");
+}
+
 /// #18823: a block whose front half slopes at 45 degrees, a groove down the slope (a cylinder of
 /// radius 3, its axis 2.5 above the slope) with both edges rounded 1 mm, and a slot slanted 65
 /// degrees in plan whose inner wall runs into the round and the groove. The wall's top edge, where
@@ -7334,6 +8012,61 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     let small = big - h * 5f64.to_radians().tan();
     let expect = PI * h / 3.0 * (big * big + big * small + small * small);
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
+/// #19686: a 2400 x 1600 x 1000 block with a Ø190 blind hole from the top, 500 deep, its four
+/// sides drafted 3° about the base. 3° leans the +X side in by 1000 tan 3° = 52.4 at the top, so a
+/// hole whose wall is nearer the side than that is cut through by the drafted side, which no
+/// draft does: it is refused naming the hole's wall, for the issue's 0.00002 wall as for a 10 one,
+/// and the design is left as it was. A 60 wall stays clear of the drafted side and builds: the
+/// drafted block less the whole hole.
+#[test]
+fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
+    let block = |hole: Option<f64>| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2400, "width": 1600, "height": 1000, "corner": [-1200, -800, 0], "operation": "new", "body_name": "Part"}),
+        );
+        if let Some(x) = hole {
+            run(
+                &mut s,
+                "solid.cylinder",
+                json!({"radius": 95, "height": 500, "base": [x, 0, 500], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+            );
+        }
+        s
+    };
+    let draft = json!({"faces": [[1200, 0, 500], [-1200, 0, 500], [0, 800, 500], [0, -800, 500]], "angle": "3 deg", "neutral": "XY"});
+    for wall in [0.00002, 10.0] {
+        let mut s = block(Some(1200.0 - 95.0 - wall));
+        let features = s.doc.features.len();
+        let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
+        // The whole sentence, the point and depth between its words, with no run of spaces.
+        let words = [
+            "draft: the drafted face would cut through the face at (",
+            concat!(
+                " mm past it without meeting it (a hole's or pocket's wall near the side); ",
+                "a draft only extends or trims the faces around the drafted face: use a smaller draft angle, ",
+                "or move that face farther from the drafted one"
+            ),
+        ];
+        let (Some(start), Some(end)) = (error.find(words[0]), error.find(words[1])) else { panic!("wall {wall}: {error}") };
+        let between = &error[start + words[0].len()..end];
+        assert!(between.contains("), which reaches at least ") && !error.contains("  "), "wall {wall}: {error}");
+        assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
+    }
+    let mut plain = block(None);
+    run(&mut plain, "solid.draft", draft.clone());
+    let mut s = block(Some(1200.0 - 95.0 - 60.0));
+    run(&mut s, "solid.draft", draft);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    drop(state);
+    let expect = volume(&mut plain) - PI * 95.0 * 95.0 * 500.0;
+    assert!(rel(volume(&mut s), expect) < 1e-9, "{} vs {expect}", volume(&mut s));
 }
 
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a
