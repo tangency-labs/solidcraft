@@ -195,6 +195,11 @@ pub(crate) fn moved(unit_id: &str, case: &str) -> bool {
 pub(crate) const BELOW_COMPARATOR: &[(&str, &str)] = &[
     ("corpus.parity", "Fillet__blade_hub_3.smb"),
     ("corpus.parity", "Solids__revolution_mold.smb"),
+    // `merged_vertex_rows` (#21340) holds their moved vertex tolerances to the bit: the
+    // exact copies move them in the last digits (gen0012's 12.803875079777875 to ...878)
+    ("boolean.topology_intersector_p3", "gen0012"),
+    ("boolean.topology_intersector_p3", "gen0017"),
+    ("boolean.topology_intersector_p3", "gen0165"),
 ];
 
 /// Whether `case` of `unit_id` is a [`BELOW_COMPARATOR`] row.
@@ -210,10 +215,6 @@ pub(crate) fn below_comparator(unit_id: &str, case: &str) -> bool {
 pub(crate) const REPLAY_ONLY: &[(&str, &str)] = &[
     ("blend.feature_executive", "extended_surface_7_LShape_I"),
     ("topology.brep_p10", "subdivide_cylinder_face0_cinf"),
-    // `merged_vertex_rows` (#21340) checks its moved vertex tolerances to the bit: the
-    // WR-450 choices move them in the last digits (12.803875079777875 to ...878,
-    // 14.280483461997958 to ...921) and the golden line not at all
-    ("boolean.topology_intersector_p3", "gen0012"),
 ];
 
 /// Runs `f` with main's choices at the WR-450 seams (the two choices and the carry gate,

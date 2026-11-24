@@ -133,8 +133,8 @@ fn body(b: &Brep) -> Body {
     Body { ends }
 }
 
-/// Runs `case` of `unit` (with main's WR-450 choices where `wr450_rows::REPLAY_ONLY` lists
-/// it): its output and each body the runner observes.
+/// Runs `case` of `unit` (with main's WR-450 choices where `wr450_rows::BELOW_COMPARATOR`
+/// lists it): its output and each body the runner observes.
 fn run(unit: &str, case: &str) -> (Output, Vec<Body>) {
     let u = crate::registry()
         .into_iter()
@@ -143,7 +143,7 @@ fn run(unit: &str, case: &str) -> (Output, Vec<Body>) {
     let c = regression_case(u.as_ref(), case);
     let bodies: Rc<RefCell<Vec<Body>>> = Rc::default();
     let into = Rc::clone(&bodies);
-    // with main's WR-450 choices on a row whose raw values they move (`REPLAY_ONLY`): the
+    // with main's WR-450 choices on a row whose raw values they move (`BELOW_COMPARATOR`): the
     // tolerances listed are main's run's to the bit
     let out = crate::wr450_rows::with_mains_choices_for(unit, case, || {
         crate::trim_hook::with_hook(
