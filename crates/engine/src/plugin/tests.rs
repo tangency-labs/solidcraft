@@ -590,6 +590,8 @@ fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        input_folders: Vec::new(),
+        user_data: None,
     };
     host.session.plugin_state.file_grants = vec![
         FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write: true },
