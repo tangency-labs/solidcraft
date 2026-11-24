@@ -81,7 +81,10 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{
+    ignore_or_pass_on, ignore_status, ignored, passed_on, Failure, Result, SolidError,
+    SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
@@ -119,6 +122,12 @@ const OP_PP: &str = "surface::plane::p2::Plane::intersect_with_plane";
 const OP_NURB: &str = "surface::plane::p2::Plane::is_nurb_surface_plane";
 const OP_XFORM: &str = "surface::plane::p2::Plane::transform";
 const OP_TRIM: &str = "surface::plane::p2::Plane::trim_with_domain";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClipPurpose {
+    Trim,
+    Section,
+}
 
 pub(super) struct PlaneClip {
     pub curves: Vec<Curve>,
@@ -1012,7 +1021,9 @@ impl Plane {
         curve: &Curve,
         tol_3d: f64,
     ) -> Result<Vec<Curve>> {
-        Ok(self.clip_curve(k, uv_domain, curve, tol_3d)?.curves)
+        Ok(self
+            .clip_curve(k, uv_domain, curve, tol_3d, ClipPurpose::Trim)?
+            .curves)
     }
 
     #[allow(clippy::too_many_lines)] // one upstream function
@@ -1022,7 +1033,9 @@ impl Plane {
         uv_domain: &Extent2d,
         curve: &Curve,
         tol_3d: f64,
+        purpose: ClipPurpose,
     ) -> Result<PlaneClip> {
+        let section = purpose == ClipPurpose::Section;
         let mut proper_crossings = true;
         // init output
         let mut curves_3d = Vec::new();
@@ -1040,6 +1053,15 @@ impl Plane {
         let p01 = self.evaluate_point(Point2::new(min_x, max_y));
         let p10 = self.evaluate_point(Point2::new(max_x, min_y));
         let p11 = self.evaluate_point(Point2::new(max_x, max_y));
+
+        // Sides that coincide within the model tolerance cannot distinguish a
+        // crossing from a point contact. Let the surface intersector classify them.
+        if section && (p00.distance(p10) <= tol_3d || p00.distance(p01) <= tol_3d) {
+            return Ok(PlaneClip {
+                curves: curves_3d,
+                proper_crossings: false,
+            });
+        }
 
         // boundary line segments - a PlaneSurface domain boundary is a line
         let line_ivl = Extent1d::from_min_max(0.0, 1.0);
@@ -1063,9 +1085,9 @@ impl Plane {
 
         // for every boundary line
         for (line_id, line) in (1u8..).zip(&lines) {
-            // Intersect Curve with boundary lines (status ignored)
+            // A section needs every boundary solve. Ordinary trimming keeps the upstream status policy.
             let line_curve = Curve::from(line.clone());
-            let Some(t_solutions) = ignored(curve.global_curve_intersect(
+            let boundary_hits = curve.global_curve_intersect(
                 k,
                 &ivl,
                 &line_curve,
@@ -1082,9 +1104,8 @@ impl Plane {
                         Some(CurveHandle(10 + line_id, line.natural_interval())),
                     ],
                 },
-            ))?
-            else {
-                proper_crossings = false;
+            );
+            let Some(t_solutions) = ignored(passed_on(boundary_hits, section)?)? else {
                 continue;
             };
 
@@ -1111,10 +1132,10 @@ impl Plane {
                     continue;
                 }
 
-                // (status ignored)
-                proper_crossings &=
-                    ignored(gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true))?
-                        .is_some();
+                ignore_or_pass_on(
+                    gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true),
+                    section,
+                )?;
             }
             solutions = gs.set_solutions(SolutionArray::new());
         }
@@ -1234,9 +1255,8 @@ impl Plane {
             // copy, trim, and add curve to output
             let mut trim_ivl = Extent1d::from_min_max(s_param, e_param);
             let mut new_curve = curve.copy(k)?;
-            // may snap sIvl by tol to existing knots (status ignored)
-            proper_crossings &=
-                ignored(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?.is_some();
+            // Trimming may snap the interval to existing knots.
+            ignore_or_pass_on(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify), section)?;
             // A full circle has coincident endpoints. Bound the whole analytic
             // interval using its diameter and arc length, with signed sizes by magnitude.
             // Round each computed upper bound outward, including norm underflow.
@@ -1982,6 +2002,58 @@ mod tests {
             section.is_none(),
             "a crossing alone would lose the endpoint contact"
         );
+    }
+
+    #[test]
+    fn spline_sections_distinguish_a_thin_plane_patch_from_a_failed_boundary_solve() {
+        use crate::error::{curve::CurveFailure, Reason};
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let rows = [-1.0, 1.0].map(|z| {
+            [(-1.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        });
+        let spline = BSplineSurface::from_data(
+            1,
+            2,
+            1,
+            2,
+            3,
+            5,
+            &rows,
+            &[0., 0., 1., 1.],
+            &[0., 0., 0., 1., 1., 1.],
+        )
+        .unwrap();
+        let domain = spline.natural_uv_domain();
+        let loft = Surface::from(spline);
+        let plane = Surface::from(rect());
+        let intersect = |top| {
+            loft.global_surface_intersect(
+                &k,
+                &domain,
+                &plane,
+                &Extent2d::from_bounds(-1., 0., 1., top),
+                [false; 2],
+                Some(1e-6),
+                None,
+            )
+        };
+        // Both horizontal sides meet the parabola at its ends within tolerance.
+        let thin = intersect(1e-14).unwrap();
+        assert!(!thin.curve_types.is_empty());
+        assert!(thin
+            .curve_types
+            .iter()
+            .all(|kind| *kind == TsectCurveType::Touching));
+        // A non-finite upper boundary prevents the curve solver from building its cache.
+        let error = intersect(f64::NAN).unwrap_err();
+        assert!(matches!(
+            error.failure().unwrap().reason,
+            Reason::Curve(CurveFailure::CacheNotBuilt)
+        ));
     }
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {

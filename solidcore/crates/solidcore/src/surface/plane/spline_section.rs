@@ -3,6 +3,7 @@
 //! is linear in the loft parameter and independent of the profile parameter.
 //! The isocurve keeps the knots of the profile, including across joined spans.
 
+use super::p2::ClipPurpose;
 use super::Plane;
 use crate::curve::curve::Curve;
 use crate::error::Result;
@@ -95,7 +96,13 @@ pub(crate) fn intersect(
             uv_iso_curve: false,
         },
     )?;
-    let clip = plane.clip_curve(k, plane_domain, &Curve::from(iso.curve), tolerance)?;
+    let clip = plane.clip_curve(
+        k,
+        plane_domain,
+        &Curve::from(iso.curve),
+        tolerance,
+        ClipPurpose::Section,
+    )?;
     if !clip.proper_crossings || clip.curves.is_empty() {
         return Ok(None);
     }
