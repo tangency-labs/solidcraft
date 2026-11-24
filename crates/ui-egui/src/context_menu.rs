@@ -1911,12 +1911,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.selectOther" => {
             // The list picks instead of the right-click.
-            if let Some((opened, before, made)) = app.menu.picked.take()
-                && opened == at
-                && app.session.selection == made
-            {
-                let _ = app.run("select.set", json!({ "items": before }));
-            }
+            restore_picked(app, at);
             let held = app.menu.opened.filter(|(opened, _)| *opened == at).map(|(_, held)| held).unwrap_or_default();
             crate::select_other::open(app, at, held);
         }
@@ -2882,11 +2877,32 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
     app.menu.radial = false;
 }
 
-/// Open a menu for a target (the radial ring only for the viewport).
-pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
-    if browser_took_the_click(app) {
+/// Restore the selection made automatically when opening a right-click menu at `at`.
+fn restore_picked(app: &mut SolveApp, at: Pos2) {
+    if let Some((opened, before, made)) = app.menu.picked.take()
+        && opened == at
+        && app.session.selection == made
+    {
+        let _ = app.run("select.set", json!({ "items": before }));
+    }
+}
+
+/// If post-release confirmation reports that the browser swallowed `contextmenu` (#21229),
+/// dismiss any right-click menu that opened on release and restore its pre-click selection.
+pub fn dismiss_if_browser_took(app: &mut SolveApp) {
+    if app.menu.browser_menu != BrowserMenu::Taken {
         return;
     }
+    let Some(at) = app.viewport.context_menu else { return };
+    if app.menu.opener.is_some() {
+        return;
+    }
+    restore_picked(app, at);
+    close(app);
+    app.set_status(app.tr("ui.context_menu_browser_took").to_owned(), false);
+}
+
+fn open_target(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.key_row = None;
     app.menu.submenu.clear();
     app.menu.submenu_key = None;
@@ -2899,15 +2915,20 @@ pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.viewport.context_menu = Some(at);
 }
 
-/// A button's menu: a click opens it, and a click on the same button while it is open closes it.
-pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
+/// Open a menu for a target (the radial ring only for the viewport).
+pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     if browser_took_the_click(app) {
         return;
     }
+    open_target(app, at, target);
+}
+
+/// A button's menu: a click opens it, and a click on the same button while it is open closes it.
+pub fn toggle_for(app: &mut SolveApp, opener: Rect, at: Pos2, target: Target) {
     if open_from(app, opener, &target) {
         close(app);
     } else {
-        open_for(app, at, target);
+        open_target(app, at, target);
         app.menu.opener = Some(opener);
     }
 }
@@ -3207,6 +3228,7 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Show the open menu, the rename box and the Properties window.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    dismiss_if_browser_took(app);
     if let Some((at, target)) = app.menu.pending.clone()
         && app.synthetic.is_empty()
     {
@@ -4301,6 +4323,57 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none(), "the browser's menu is open: ours must not open under it");
         let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
         assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
+    /// #21229: on Windows, `pointerup` opens SolidCraft's menu before the browser confirms whether
+    /// `contextmenu` was swallowed. When post-release confirmation reports `Taken`, the next frame
+    /// closes the menu, restores any auto-picked selection, and tells the user why.
+    #[test]
+    fn windows_post_release_browser_take_dismisses_menu_and_restores_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,-12],[20,-12]],"connect":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.settle();
+        assert!(h.app.session.selection.is_empty());
+
+        h.step(&json!({"click":{"world":[10,-12,0]},"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "menu opens on pointerup before confirmation");
+        assert!(!h.app.session.selection.is_empty(), "right-click picked the curve under the pointer");
+
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        h.frames(1);
+        h.app.menu.browser_menu = BrowserMenu::Offered;
+
+        assert!(h.app.viewport.context_menu.is_none(), "post-release confirmation dismisses our menu");
+        assert!(h.app.session.selection.is_empty(), "auto-picked selection is restored when dismissed");
+        let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+        assert!(status.contains("browser"), "the user is told why: {status:?}");
+    }
+
+    /// #21229: `Taken` with no open menu (for example after a right-drag orbit) does not post a
+    /// status message, and left-click toolbar/button dropdowns (`toggle_for`) are never dismissed.
+    #[test]
+    fn browser_took_without_open_menu_stays_silent_and_spares_button_dropdown() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.settle();
+        h.app.status = None;
+
+        h.app.menu.browser_menu = BrowserMenu::Taken;
+        dismiss_if_browser_took(&mut h.app);
+        assert!(h.app.status.is_none(), "no menu open: must not post a false browser-took notice");
+
+        let opener = egui::Rect::from_min_size(pos2(40.0, 60.0), egui::vec2(28.0, 28.0));
+        toggle_for(&mut h.app, opener, opener.left_bottom(), Target::Units);
+        assert_eq!(h.app.viewport.context_menu, Some(opener.left_bottom()));
+        assert_eq!(h.app.menu.opener, Some(opener));
+
+        dismiss_if_browser_took(&mut h.app);
+        assert_eq!(h.app.viewport.context_menu, Some(opener.left_bottom()), "left-click dropdown stays open");
+        assert!(h.app.status.is_none());
     }
 
     #[test]
