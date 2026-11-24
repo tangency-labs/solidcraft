@@ -4209,7 +4209,7 @@ pub struct Document {
     /// its own `Arc`, so an undo step shares every drawing it didn't change. Each is read by its own
     /// family's rules ([`crate::format::read`]), never as a field of the design; a container keeps
     /// each in its own entry.
-    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty", serialize_with = "crate::drawing::serialize_inline")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
@@ -5014,7 +5014,7 @@ impl Document {
         if self.canvases.iter().any(|c| !c.data.is_empty()) {
             kinds.push("images");
         }
-        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+        if self.drawings.iter().any(|d| d.has_binary_data()) {
             kinds.push("drawing images");
         }
         if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
@@ -5032,14 +5032,26 @@ impl Document {
     /// The design as the text of a `.json` file. The same design always gives the same text, and a
     /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
+        self.to_json_checked().unwrap_or_default()
+    }
+
+    /// The same text as `to_json`, reporting serialization failures to a file writer.
+    pub fn to_json_checked(&self) -> Result<String> {
+        let error = |why: serde_json::Error| DocError::Invalid(format!("design not saved: {why}"));
+        let opaque_drawings = self.drawings.iter().any(|drawing| drawing.newer_file.is_some());
         let compact = if self.newer_file.is_some() {
-            let mut value = serde_json::to_value(self).unwrap_or_default();
+            let mut value = serde_json::to_value(self).map_err(error)?;
             crate::newer_file::restore(self, &mut value);
-            serde_json::to_string(&value).unwrap_or_default()
+            if opaque_drawings && let Some(fields) = value.as_object() {
+                return crate::json_layout::pretty_serialized(&crate::drawing::InlineDocument { fields, drawings: &self.drawings }).map_err(error);
+            }
+            serde_json::to_string(&value).map_err(error)?
+        } else if opaque_drawings {
+            return crate::json_layout::pretty_serialized(self).map_err(error);
         } else {
-            serde_json::to_string(self).unwrap_or_default()
+            serde_json::to_string(self).map_err(error)?
         };
-        crate::json_layout::pretty(&compact)
+        Ok(crate::json_layout::pretty(&compact))
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
@@ -5917,6 +5929,21 @@ impl Document {
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
     pub fn solve_sketch_with_analysis(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        sk: &mut Sketch,
+        stored: &solidcraft_sketch::DrivingValues,
+        moved_from: Option<&Sketch>,
+        analysis: solidcraft_sketch::Analysis,
+    ) -> Result<solidcraft_sketch::SolveReport> {
+        // The solve stops with the evaluation it runs for: the app's Cancel, a design that closed.
+        match solidcraft_kernel::stop_token() {
+            Some(token) => solidcraft_sketch::cancel::within(&token, || self.solve_sketch_now(vals, sk, stored, moved_from, analysis)),
+            None => self.solve_sketch_now(vals, sk, stored, moved_from, analysis),
+        }
+    }
+
+    fn solve_sketch_now(
         &self,
         vals: &std::collections::BTreeMap<String, expr::Value>,
         sk: &mut Sketch,

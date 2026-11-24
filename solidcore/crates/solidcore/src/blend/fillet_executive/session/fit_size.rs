@@ -37,7 +37,7 @@ use crate::blend::fillet_executive::FitKind;
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolverType, SeamDomain,
 };
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, SolverFailure};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -73,6 +73,19 @@ fn null_defect(why: &'static str) -> SolidError {
     Failure::new(OP, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
+}
+
+/// The caller's solver without an offset surface it reads
+/// ([`SolverFailure::OffsetSurfaceMissing`]): the solver is the caller's, built and passed
+/// in through the public fits, so its state is the caller's input. Status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`, as the phrase cause it replaces had.
+fn offset_surface_missing() -> SolidError {
+    Failure::new(
+        OP,
+        BlendFailure::Solver(SolverFailure::OffsetSurfaceMissing),
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
 }
 
 /// The target's edge use `id` without its edge: caller-body state.
@@ -161,7 +174,8 @@ impl Through {
 /// # Errors
 ///
 /// Those of the drops and evaluations; `SM_ERR_NULL_POINTER` without both offset surfaces
-/// or an edge curve;
+/// ([`SolverFailure::OffsetSurfaceMissing`]), the solver's edge use
+/// ([`SolverFailure::SolverEdgeUseMissing`]) or an edge curve;
 /// [`BlendFailure::SolverFaceIndexInvalid`](crate::error::blend::BlendFailure::SolverFaceIndexInvalid)
 /// for `lk` past 1.
 pub fn ball_through(
@@ -196,12 +210,8 @@ fn ball_through_at(
     let ratio = ratio.unwrap_or([1.0, 1.0]);
     let (bases, radii) = {
         let base = solver.base();
-        let s0 = base
-            .surface(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
-        let s1 = base
-            .surface(1)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        let s0 = base.surface(0)?.ok_or_else(offset_surface_missing)?;
+        let s1 = base.surface(1)?.ok_or_else(offset_surface_missing)?;
         (
             [
                 s0.surface.base_surface().clone(),
@@ -301,10 +311,9 @@ fn ball_through_at(
         let _ = h(&mut st, solver, rho)?;
         let chord = q.distance(st.foot_at);
         // the ball's centre square to the filleted edge within it, not past an end
-        let edgeuse = solver
-            .base()
-            .edgeuse(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+        let edgeuse = solver.base().edgeuse(0)?.ok_or_else(|| {
+            SolidError::blend_solver(OP, SolverFailure::SolverEdgeUseMissing { index: 0 })
+        })?;
         let e = eu::edge(target, edgeuse)?.ok_or_else(|| edgeuse_without_edge(edgeuse))?;
         let curve = edge::evaluation_curve(target, e)?.ok_or_else(|| edge_without_curve(e))?;
         let ivl = edge::interval(target, e)?;
@@ -694,7 +703,8 @@ fn rolls_through(
 ///
 /// # Errors
 ///
-/// Those of the section solves, [`ball_through`] and the evaluations.
+/// Those of the section solves, [`ball_through`] and the evaluations; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn bands_meet_at(
     k: &Kernel,
     target: &mut Brep,
@@ -714,14 +724,14 @@ pub fn bands_meet_at(
     let own = this
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+        .ok_or_else(offset_surface_missing)?
         .surface
         .offset_distance()
         .abs();
     let other_own = other
         .base()
         .surface(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+        .ok_or_else(offset_surface_missing)?
         .surface
         .offset_distance()
         .abs();
@@ -764,7 +774,7 @@ pub fn bands_meet_at(
             let q = this
                 .base()
                 .surface(mine)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+                .ok_or_else(offset_surface_missing)?
                 .surface
                 .base_surface()
                 .evaluate_point(k, pnt.uv_pos(side))?;
@@ -874,7 +884,8 @@ pub struct OnFace<'s> {
 ///
 /// # Errors
 ///
-/// Those of the evaluations, [`ball_through`] and the topology lookups.
+/// Those of the evaluations, [`ball_through`] and the topology lookups; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn polygon_fit(
     k: &Kernel,
     target: &Brep,
@@ -958,7 +969,7 @@ pub fn polygon_fit(
             .solver
             .base()
             .surface(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+            .ok_or_else(offset_surface_missing)?
             .surface
             .offset_distance()
             .abs();
@@ -1030,7 +1041,8 @@ pub fn polygon_fit(
 ///
 /// # Errors
 ///
-/// Those of the evaluations, [`ball_through`] and the topology lookups.
+/// Those of the evaluations, [`ball_through`] and the topology lookups; `SM_ERR_NULL_POINTER` without an offset
+/// surface the fit reads ([`SolverFailure::OffsetSurfaceMissing`]).
 pub fn circle_top_fit(
     k: &Kernel,
     target: &Brep,
@@ -1089,7 +1101,7 @@ pub fn circle_top_fit(
             * solver
                 .base()
                 .surface(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+                .ok_or_else(offset_surface_missing)?
                 .surface
                 .offset_distance()
                 .abs();

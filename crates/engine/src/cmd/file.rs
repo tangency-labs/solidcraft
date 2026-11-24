@@ -196,7 +196,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "quality?: standard|fine|finest (default standard); ",
             "lay_on_print_faces?: bool (default false: as file.export); ",
             "ascii?: bool (default false: true writes ASCII STL); ",
-            "solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, warnings?}: STL (binary unless ascii), whatever the path's extension",
+            "solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: STL (binary unless ascii), whatever the path's extension",
         )),
     CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
         .icon("mesh_export")
@@ -208,7 +208,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies?: [names] (default: every body); ",
             "quality?: standard|fine|finest (default standard); ",
             "objects?: body|component (as file.export); ",
-            "lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, warnings?}: 3MF, whatever the path's extension",
+            "lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: 3MF, whatever the path's extension",
         )),
     CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
         .icon("export")
@@ -218,7 +218,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "path; ",
             "bodies?: [names] (default: every body); ",
-            "quality?: standard|fine|finest (default standard) → {path, bytes, format, files, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
+            "quality?: standard|fine|finest (default standard) → {path, bytes, format, files, skipped?, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
         )),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
@@ -2158,7 +2158,9 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
+    // The bytes just written, read back without the open-size limit: a save over it keeps its
+    // history for the next save (#18686).
+    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
     let bytes_len = bytes.len();
@@ -2853,6 +2855,7 @@ fn export_laid_to(
         bytes,
         format: format!("{format:?}"),
         print_faces: laid.bodies,
+        skipped: skipped_from_warnings(&laid.warnings),
         warnings: laid.warnings,
         delivery: SlicerDelivery::default(),
         param_warnings: Vec::new(),
@@ -3096,6 +3099,10 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
     // What meshing the bodies reported: each face the mesh path left short of the smallest angle
     // or the chord tolerance.
     if !files.warnings.is_empty() {
+        let skipped = skipped_from_warnings(&files.warnings);
+        if !skipped.is_empty() {
+            reply["skipped"] = json!(skipped);
+        }
         reply["warnings"] = json!(files.warnings);
     }
     Ok(reply)

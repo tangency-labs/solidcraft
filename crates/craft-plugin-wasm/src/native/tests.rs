@@ -1141,6 +1141,56 @@ fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_aga
 }
 
 #[test]
+#[cfg(unix)]
+fn a_link_in_the_middle_of_a_new_folder_path_is_refused_before_anything_is_made() {
+    // #20493: `link/New/x.json` where `link` points outside the grant makes no folder, inside or outside.
+    use files::Host;
+    let base = std::env::temp_dir().join(format!("craft-plugin-midlink-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    let root = base.join("grant");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+    for path in ["link/New/x.json", "link/New/Deeper/x.json"] {
+        let mut state = state(App::default());
+        state.folders.insert(
+            "data".into(),
+            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        );
+        let refused = state.write_file("data".into(), path.into(), b"{}".to_vec()).unwrap_err();
+        assert!(matches!(refused, PluginError::PermissionDenied(_)), "{path}: {refused:?}");
+        assert!(state.created_dirs.is_empty() && state.staged.is_empty(), "{path}");
+    }
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "nothing made outside the grant");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing made inside it but the link");
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-deep-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut state = state(App::default());
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
+    let deep = |folders: usize| format!("{}x.json", "d/".repeat(folders));
+    // 63 folders and the file are 64 components: allowed.
+    state.write_file("data".into(), deep(63), b"{}".to_vec()).unwrap();
+    // 64 folders and the file are 65: refused as a wrong path, naming the limit.
+    let refused = state.write_file("data".into(), deep(64).replacen("d/", "e/", 1), b"{}".to_vec()).unwrap_err();
+    assert!(
+        matches!(&refused, PluginError::InvalidInput(types::FieldFailure { field, reason }) if field == "path" && reason.contains("at most 64")),
+        "{refused:?}"
+    );
+    assert!(!root.join("e").exists(), "no folder made for a refused path");
+    state.discard_writes();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-hidden-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
@@ -1383,6 +1433,110 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     assert_eq!(import(&slow, root.join("loop.smp"), false).unwrap_err(), HostError::Exhausted { limit: "deadline_ms".into(), allowed: 50 });
     std::fs::remove_dir_all(root).unwrap();
 }
+/// Runs `check` with every compile on this thread made by `tier`'s compiler, bypassing the cache.
+fn on_tier(tier: Tier, check: impl FnOnce()) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            FORCED_TIER.with(|forced| forced.set(None));
+        }
+    }
+    let _reset = Reset;
+    FORCED_TIER.with(|forced| forced.set(Some(tier)));
+    check();
+}
+#[test]
+fn fuel_memory_the_deadline_and_cancel_stop_plugins_under_both_compilers() {
+    for tier in [Tier::Baseline, Tier::Optimized] {
+        on_tier(tier, || {
+            for (code, diagnostic) in [
+                ("call $box (loop $forever br $forever)", "used all 100000 fuel it asks for and was stopped"),
+                ("call $box i32.const 10000 memory.grow drop", "needed more than the 1 MiB of memory it asks for and was stopped"),
+            ] {
+                let failure = run(&mut App::default(), &manifest(), &component(code), "make", &json!({})).unwrap_err();
+                assert!(failure.to_string().contains(diagnostic), "{tier:?} {code}: {failure}");
+            }
+            let root = import_folder(&[("loop.smp", b"L"), ("fine.smp", b"fine")]);
+            let manifest = importer_manifest(false);
+            let fuel = import(&manifest, root.join("loop.smp"), false).unwrap_err();
+            assert_eq!(fuel, HostError::Exhausted { limit: "fuel".into(), allowed: 10_000_000 }, "{tier:?}");
+            assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine", "{tier:?}");
+            let mut slow = importer_manifest(false);
+            let limits = &mut slow.runtime.as_mut().unwrap().limits;
+            (limits.fuel, limits.deadline_ms) = (1 << 40, 50);
+            let deadline = import(&slow, root.join("loop.smp"), false).unwrap_err();
+            assert_eq!(deadline, HostError::Exhausted { limit: "deadline_ms".into(), allowed: 50 }, "{tier:?}");
+            std::fs::remove_dir_all(root).unwrap();
+            let mut cancelled = App { cancelled: true, ..Default::default() };
+            assert_eq!(
+                run(&mut cancelled, &super::tests::manifest(), &component("(loop br 0)"), "make", &json!({})).unwrap_err(),
+                HostError::Cancelled
+            );
+        });
+    }
+}
+/// The cached code's compiler, if the cache holds `bytes`.
+fn cached_tier(bytes: &[u8]) -> Option<Tier> {
+    cache().compiled.lock().unwrap().as_ref().filter(|cached| cached.bytes.as_ref() == bytes).map(|cached| cached.tier)
+}
+#[test]
+fn imports_never_wait_for_the_cranelift_swap_and_give_the_same_design_before_and_after() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let manifest = importer_manifest(false);
+    let component = importer_component();
+    // Hold the background compile back: every import below runs while it has not finished.
+    let gate = cache().gate.lock().unwrap();
+    let first = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    // The first import started the Cranelift compile; a second one now finds it running.
+    assert!(cache().optimizing.load(Ordering::Acquire));
+    assert!(optimize_in_background().is_none());
+    let during = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    drop(gate);
+    while cache().optimizing.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    let after = import_with(&component, &manifest, root.join("bracket.smp"), false).unwrap();
+    for imported in [&first, &during, &after] {
+        assert_eq!((imported.design.as_slice(), imported.report.summary.as_str()), (&b"design bytes"[..], "Copied the file"));
+    }
+    // Already Cranelift's: nothing more to compile.
+    assert!(optimize_in_background().is_none());
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn a_late_cranelift_compile_never_replaces_another_components_code() {
+    let stack_bytes = 512 * 1024;
+    let first: Arc<[u8]> = Arc::from(importer_component());
+    let (engine, component) = compile_with(&first, stack_bytes, Tier::Baseline).unwrap();
+    *cache().compiled.lock().unwrap() =
+        Some(Compiled { bytes: first, stack_bytes, engine: engine.clone(), component: component.clone(), tier: Tier::Baseline });
+    let gate = cache().gate.lock().unwrap();
+    let worker = optimize_in_background().unwrap();
+    // Another component (the same bytes in another allocation stand in for one) takes the cache
+    // while the first one's Cranelift compile waits.
+    let second: Arc<[u8]> = Arc::from(importer_component());
+    *cache().compiled.lock().unwrap() = Some(Compiled { bytes: second.clone(), stack_bytes, engine, component, tier: Tier::Baseline });
+    drop(gate);
+    worker.join().unwrap();
+    let cached = cache().compiled.lock().unwrap();
+    let cached = cached.as_ref().unwrap();
+    assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
+}
+#[test]
+fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
+    // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.
+    let code = "call $box v128.const i64x2 0 0 v128.const i64x2 0 0 v128.const i64x2 0 0 f32x4.relaxed_madd drop";
+    let bytes = component(code);
+    assert!(compile_with(&bytes, 512 * 1024, Tier::Baseline).is_err());
+    let (_, _, tier) = compile_fresh(&bytes, 512 * 1024, None).unwrap();
+    assert_eq!(tier, Tier::Optimized);
+    run(&mut App::default(), &manifest(), &bytes, "make", &json!({})).unwrap();
+    assert_eq!(cached_tier(&bytes), Some(Tier::Optimized));
+    crate::check_component(&manifest(), &bytes).unwrap();
+}
 #[test]
 fn an_importer_says_a_valid_file_is_not_supported() {
     let root = import_folder(&[("sketch.smp", b"U"), ("broken.smp", b"I")]);
@@ -1527,7 +1681,7 @@ fn cache_entries(root: &Path) -> Vec<PathBuf> {
     found
 }
 fn compile_cached(bytes: &[u8], cache: &wasmtime::Cache) -> Result<(Engine, Component)> {
-    compile_with(bytes, 512 * 1024, Some(cache.clone()))
+    compile_on(bytes, 512 * 1024, Tier::Optimized, true, Some(cache.clone()))
 }
 #[test]
 fn a_compiled_component_is_read_back_from_the_disk_cache_by_a_new_engine() {
@@ -1631,7 +1785,7 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
     let blocked = root.join("blocked");
     std::fs::write(&blocked, b"a file").unwrap();
     assert!(open_disk_cache(&blocked.join("plugin-compile")).is_none());
-    compile_with(&importer_component(), 512 * 1024, None).unwrap();
+    compile_with(&importer_component(), 512 * 1024, Tier::Optimized).unwrap();
     // A folder that opens but can't be written: every compile still succeeds.
     #[cfg(unix)]
     {
@@ -1647,4 +1801,65 @@ fn a_cache_folder_that_cannot_be_made_or_written_still_compiles() {
         std::fs::set_permissions(&read_only, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let _ = std::fs::remove_dir_all(root); // best effort: Wasmtime's cache worker may still be writing here
+}
+
+/// Gives this test thread's runtime a disk cache in a new folder, as the app's startup does.
+/// Returns the folder Wasmtime's cache writes in, inside the app's folder, as the app lays it out.
+fn with_disk_cache() -> (PathBuf, wasmtime::Cache) {
+    let root = cache_folder().join("wasmtime");
+    let disk = open_disk_cache(&root).unwrap();
+    assert!(cache().disk.set(Some(disk.clone())).is_ok());
+    (root, disk)
+}
+#[test]
+fn a_cache_miss_starts_on_winch_and_caches_the_cranelift_code_for_the_next_session() {
+    let (root, disk) = with_disk_cache();
+    let folder = import_folder(&[("bracket.smp", b"design bytes")]);
+    let component = importer_component();
+    let gate = cache().gate.lock().unwrap();
+    let first = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    // Nothing cached yet: Winch's code, and Winch's code is never written to the disk cache.
+    assert_eq!(cached_tier(&component), Some(Tier::Baseline));
+    assert!(cache_entries(&root).is_empty());
+    drop(gate);
+    while cache().optimizing.load(Ordering::Acquire) {
+        std::thread::yield_now();
+    }
+    // The background compile swapped in Cranelift's code and wrote it to the disk cache.
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_misses(), cache_entries(&root).len()), (1, 1));
+    // A new session, which starts with nothing in memory, loads that entry: no Winch.
+    *cache().compiled.lock().unwrap() = None;
+    let next = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (1, 1));
+    assert_eq!((first.design, next.design), (b"design bytes".to_vec(), b"design bytes".to_vec()));
+    std::fs::remove_dir_all(folder).unwrap();
+    // Best effort: Wasmtime's cache worker may still be writing here.
+    let _ = std::fs::remove_dir_all(root.parent().unwrap());
+}
+#[test]
+fn a_cache_hit_loads_cranelift_code_without_compiling_with_winch() {
+    let (root, disk) = with_disk_cache();
+    let component = importer_component();
+    // An earlier session cached Cranelift's code for this component.
+    optimize_and_cache(&component, 512 * 1024, true, Some(&disk)).unwrap();
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (0, 1));
+    let folder = import_folder(&[("bracket.smp", b"design bytes")]);
+    let imported = import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!(imported.design, b"design bytes");
+    // Read from the disk cache, Cranelift's from the start: nothing left to optimise.
+    assert_eq!(cached_tier(&component), Some(Tier::Optimized));
+    assert_eq!((disk.cache_hits(), disk.cache_misses()), (1, 1));
+    assert!(optimize_in_background().is_none());
+    // A deleted entry is only a slower start: Cranelift compiles it again and caches it.
+    for entry in cache_entries(&root) {
+        std::fs::remove_file(entry).unwrap();
+    }
+    *cache().compiled.lock().unwrap() = None;
+    import_with(&component, &importer_manifest(false), folder.join("bracket.smp"), false).unwrap();
+    assert_eq!((cached_tier(&component), disk.cache_misses(), cache_entries(&root).len()), (Some(Tier::Optimized), 2, 1));
+    std::fs::remove_dir_all(folder).unwrap();
+    // Best effort: Wasmtime's cache worker may still be writing here.
+    let _ = std::fs::remove_dir_all(root.parent().unwrap());
 }

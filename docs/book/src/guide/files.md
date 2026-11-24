@@ -157,6 +157,11 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+If a body cannot be meshed, STL, OBJ and 3MF exports still write the other bodies. The toast
+names each body that was left out and stays until you dismiss it, and the command's reply lists
+them in `skipped`, with the reason for each in `warnings`. If no body can be meshed, the export
+fails.
+
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
 `file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
