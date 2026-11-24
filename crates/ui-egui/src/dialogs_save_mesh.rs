@@ -637,7 +637,13 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 fn report(app: &mut SolveApp, result: &Value) {
     let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
     let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
-    let skipped_suffix = if skipped.is_empty() { String::new() } else { format!(" (skipped {})", skipped.join(", ")) };
+    // Bodies left out of the file: said plainly, naming each one, in a warning that stays until it is dismissed.
+    let skipped_suffix = if skipped.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", solidcraft_ui_text::format("ui.export_skipped", &[("bodies", &skipped.join(", "))]))
+    };
+    let say = |app: &mut SolveApp, line: String| if skipped.is_empty() { app.set_status(line, false) } else { app.set_status_sticky(line) };
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
@@ -658,12 +664,12 @@ fn report(app: &mut SolveApp, result: &Value) {
                 if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
                     line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
                 }
-                app.set_status(line, false);
+                say(app, line);
             }
             None => {
                 let saved = solidcraft_ui_text::format("ui.saved_to", &[("path", path)]);
                 let line = if skipped_suffix.is_empty() { saved } else { format!("{saved}{skipped_suffix}") };
-                app.set_status(line, false);
+                say(app, line);
             }
         },
     }
@@ -1148,7 +1154,10 @@ mod tests {
         report(&mut h.app, &result);
         let status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
         assert!(status.contains("BrokenSliver"), "{status}");
-        assert!(status.contains("skipped"), "{status}");
+        assert!(status.contains("could not be meshed"), "{status}");
+        // A warning that stays until it is dismissed, not a status that goes after a few seconds.
+        let at = h.app.status.as_ref().map(|s| s.1);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2) && h.app.status_sticky_at == at, "{:?}", h.app.status);
 
         let slicer_result = json!({
             "path": "/tmp/out.3mf",
@@ -1158,6 +1167,24 @@ mod tests {
         report(&mut h.app, &slicer_result);
         let slicer_status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
         assert!(slicer_status.contains("BrokenSliver"), "{slicer_status}");
-        assert!(slicer_status.contains("skipped"), "{slicer_status}");
+        assert!(slicer_status.contains("could not be meshed"), "{slicer_status}");
+
+        // Nothing skipped: the plain, passing message.
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| !s.2) && h.app.status_sticky_at != h.app.status.as_ref().map(|s| s.1));
+    }
+
+    /// The toast of a skipped body is still up after the usual time, and goes when it is dismissed.
+    #[test]
+    fn the_skipped_body_toast_stays_until_dismissed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf", "skipped": ["BrokenSliver"]}));
+        let text = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        let old = crate::now_ms() - 60_000.0;
+        h.app.status = h.app.status.take().map(|(t, _, e)| (t, old, e));
+        h.app.status_sticky_at = Some(old);
+        h.frames(3);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0 == text), "a minute later the warning is still shown");
     }
 }

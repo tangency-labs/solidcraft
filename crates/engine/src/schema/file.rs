@@ -773,18 +773,31 @@ impl JsonSchema for ReaderParam {
     }
 }
 
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["all", "folder"]})
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
 /// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
 /// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
-/// makes). The open design is replaced.
+/// makes). The open design is replaced, unless it is not empty: the window opens the file in a
+/// tab of its own then, and with `new_tab` it always does.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OpenParams {
     /// The file to open; the kind of file is read from its extension.
     pub path: OpenPath,
+    /// true opens the file in a tab of its own, after the active one, and shows it, even when the
+    /// active design is empty: the design that was open stays open, as it was. A design that is
+    /// already open in a tab is shown instead, as the same file opened twice is. A person at the
+    /// window who is in the middle of something (a dialog, a tool) gets the tab behind the active
+    /// one: `document.list` says which design is active. Only a window with design tabs has them:
+    /// the command line and headless servers refuse it. Default: false.
+    #[serde(default)]
+    pub new_tab: Option<bool>,
     /// For a STEP, IGES, FreeCAD, Rhino or glTF file only (refused for any other): which way is up
     /// in the file. Default: z for STEP, IGES, FreeCAD and Rhino, y for glTF.
     #[serde(default)]
@@ -820,6 +833,14 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): which linked design files are read for those bodies as it opens.
+    /// all (the default): every one the caller may read. folder: only those in the design's own
+    /// folder or below it; the other links have no bodies until `component.update_links` reads
+    /// them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]
@@ -1176,6 +1197,14 @@ pub struct RecoverParams {
     /// Delete the entry once the design is open. Default: false.
     #[serde(default)]
     pub discard: Option<bool>,
+    /// For a design saved without the bodies of its linked designs, whose copy lacks the bodies
+    /// of a link: which linked design files are read for them, as `doc.open`'s `linked_bodies`.
+    /// `all` (the default): every link's file the caller may read. `folder`: only files in the
+    /// design's own folder or below it; the other links have no bodies until
+    /// `component.update_links` reads them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
 }
 
 /// `id` of `doc.recover`: text, which the handler gives its own message for when it is not.
@@ -1199,6 +1228,10 @@ pub struct RecoverResult {
     pub features: usize,
     /// How many of them failed to evaluate.
     pub errors: usize,
+    /// The links of a design saved without linked bodies that were not read, or whose file
+    /// changed, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

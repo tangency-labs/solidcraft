@@ -476,8 +476,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "new_design",
             "New design",
-            "Start a new, empty design (unsaved changes to the current one are discarded).",
-            object(json!({"name": string("Design name (default Untitled)")}), &[]),
+            "Start a new, empty design (unsaved changes to the current one are discarded). With `new_tab: true` in the desktop app it opens in a \
+             tab of its own and the current design stays open; every later call acts on the new design, and `document_id` in the reply \
+             names it (`document.list` and `document.activate` list and switch between the open designs, through `execute`).",
+            object(
+                json!({
+                    "name": string("Design name (default Untitled)"),
+                    "new_tab": {"type": "boolean", "description": "Open the new design in a tab of its own, after the active one, and show it, instead of replacing the active design. Desktop app only. Default: false"},
+                }),
+                &[],
+            ),
             Effect::Replaces,
         ),
         tool(
@@ -499,6 +507,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
                     "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
+                    "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
                 &["path"],
@@ -1177,8 +1186,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         }
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
-        "new_design" => exec(b, "file.new", pick(a, &["name"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "up", "names", "geometry"])),
+        "new_design" => exec(b, "file.new", pick(a, &["name", "new_tab"])),
+        "open" => exec(b, "doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
         "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -1400,8 +1409,8 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             ),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
-        "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
-        "new_design" => mapped("file.new", pick(a, &["name"])),
+        "open" => mapped("doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "new_design" => mapped("file.new", pick(a, &["name", "new_tab"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
             None => mapped("diagnostics.crash_reports", pick(a, &["limit"])),

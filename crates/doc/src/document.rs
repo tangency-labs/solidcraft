@@ -623,22 +623,25 @@ impl EmbossFace {
         if sketch_owner == author {
             return Self::component_frame(doc, author, &self.author_path);
         }
-        let path = doc.first_path(sketch_owner);
+        let inactive = doc.inactive_pattern_occurrences();
+        let mut path = Vec::new();
         let mut component = sketch_owner;
         for _ in 0..64 {
             if component == 0 {
                 break;
             }
-            let mut occurrences = doc.occurrences.iter().filter(|o| o.component == component);
+            let mut occurrences = doc.occurrences.iter().filter(|o| o.component == component && !inactive.contains(&o.id));
             let occurrence = occurrences.next().ok_or_else(|| DocError::Invalid("sketch placement no longer exists".into()))?;
             if occurrences.next().is_some() {
                 return Err(DocError::Invalid("sketch placement is ambiguous".into()));
             }
+            path.push(occurrence.id);
             component = occurrence.parent;
         }
         if component != 0 {
             return Err(DocError::Invalid("sketch placement exceeds depth limit".into()));
         }
+        path.reverse();
         Self::component_frame(doc, sketch_owner, &path)
     }
 
@@ -674,9 +677,13 @@ impl Document {
         if path.len() > 64 || self.occurrences.len() > 100_000 {
             return Err(DocError::Invalid("the placement path exceeds work limits".into()));
         }
+        if path.is_empty() {
+            return Ok(crate::IDENTITY);
+        }
         let mut frame = crate::IDENTITY;
         let mut component = 0;
         let mut seen = std::collections::BTreeSet::new();
+        let inactive = self.inactive_pattern_occurrences();
         for id in path {
             if *id == 0 || !seen.insert(*id) {
                 return Err(DocError::Invalid("invalid placement path".into()));
@@ -684,7 +691,7 @@ impl Document {
             let occurrence = self
                 .occurrences
                 .iter()
-                .find(|o| o.id == *id && o.parent == component)
+                .find(|o| o.id == *id && o.parent == component && !inactive.contains(id))
                 .ok_or_else(|| DocError::Invalid("the placement no longer exists".into()))?;
             frame = crate::mat_mul(&frame, &occurrence.transform);
             component = occurrence.component;
@@ -1447,6 +1454,23 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
+    /// A separate fabrication plate attached to two planar support faces.
+    FrameGusset {
+        supports: Vec<crate::gusset::Support>,
+        #[walk(length = "First Leg")]
+        leg1: Expr,
+        #[walk(length = "Second Leg")]
+        leg2: Expr,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        #[walk(length = "Corner Relief")]
+        relief: Expr,
+        #[walk(length = "Outer Tip Clip")]
+        clip: Expr,
+        #[walk(length = "Joint Offset")]
+        offset: Expr,
+        placement: crate::gusset::Placement,
+    },
     /// Plates closing open ends of frame members (#4003), one body per end, each the outside of
     /// the member's profile, optionally set in from its edge.
     FrameEndCap {
@@ -1474,9 +1498,8 @@ pub enum FeatureKind {
         #[walk(angle = "Angle")]
         angle: Expr,
     },
-    /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), then one per pair of points (#15705), its cross-section the profile,
-    /// square to the line from end to end.
+    /// Structural members (#4003): one body per selected line, arc or pair of points,
+    /// or one continuous tangent sketch path. Ordinary straight members retain corner processing.
     FrameMember {
         /// The frame sketch; none: a Frame Member of pairs only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1485,6 +1508,10 @@ pub enum FeatureKind {
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<String>,
+        /// The explicitly selected curves form one open, tangent line/arc chain, in selection
+        /// order. Otherwise each selected curve makes a separate member.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continuous: bool,
         profile: crate::frame::MemberProfile,
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
@@ -1544,6 +1571,20 @@ pub enum FeatureKind {
         /// unset. None: those fields are the feature's one group (`frame::member_groups`).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         groups: Vec<crate::frame::MemberGroup>,
+    },
+    /// Trim or extend frame members (#4003) to other members (butt joints), planes or planar
+    /// faces: each member's end that meets a target is rebuilt flat against it, `gap` short of
+    /// it. The member keeps its body and name.
+    FrameTrim {
+        members: Vec<crate::frame::TrimMemberRef>,
+        to: Vec<crate::frame::TrimTarget>,
+        /// Which end of each member moves (default: the end nearer the target).
+        #[serde(default, skip_serializing_if = "crate::frame::TrimEnd::is_auto")]
+        end: crate::frame::TrimEnd,
+        /// The weld gap between a member's end and its target (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
     },
     /// A separate mounting or end plate, centred on a persistently identified planar face.
     FramePlate {
@@ -3469,7 +3510,9 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
+            FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
             FeatureKind::FramePlate { .. } => "FramePlateFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -3559,7 +3602,9 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "pipe",
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
+            FeatureKind::FrameGusset { .. } => "frame_gusset",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FrameTrim { .. } => "frame_trim",
             FeatureKind::FramePlate { .. } => "frame_plate",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -3652,6 +3697,8 @@ impl FeatureKind {
             "EndCapFeature" => "frame_end_cap",
             "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
+            "FrameTrimFeature" => "frame_trim",
+            "GussetFeature" => "frame_gusset",
             "FramePlateFeature" => "frame_plate",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -3742,7 +3789,9 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMemberTurn { .. } => "Rotate",
+            FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FrameTrim { .. } => "MemberTrim",
             FeatureKind::FramePlate { .. } => "MountingPlate",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
@@ -4012,15 +4061,15 @@ pub struct StandardPart {
     pub length: Option<f64>,
 }
 
-/// A component whose contents come from another design file (Insert Design): where that file
+/// A component whose contents come from a design or STEP source file: where that file
 /// is, and the Import feature in the component that holds its bodies (Update Links replaces
 /// them; Break Link keeps them and forgets the file).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DesignLink {
-    /// The design file: relative to this design's folder once this design is saved, else as
+    /// The source file: relative to this design's folder once this design is saved, else as
     /// given (`/` separates folders).
     pub path: String,
-    /// The Import feature holding the linked design's bodies.
+    /// The Import feature holding the linked source's bodies.
     pub feature: u64,
     /// The source configuration row's stable id. Without one, the link follows the source's
     /// saved state. A renamed row keeps its id; a deleted row must not select another row.
@@ -4040,7 +4089,10 @@ pub struct DesignLink {
     /// keep none, so a property the component already has stays and one it lacks is added.
     #[serde(default, skip_serializing_if = "crate::Metadata::is_empty")]
     pub inherited_metadata: crate::Metadata,
-    /// SHA-256 of the design file's bytes as this design last read them ([`Self::file_digest`]):
+    /// STEP source naming policy; absent for linked designs and older unlinked imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_names: Option<String>,
+    /// SHA-256 of the source file's bytes as this design last read them ([`Self::file_digest`]):
     /// opened again, this design tells which linked files changed meanwhile (#9739). Links made
     /// before it was kept have none and are taken as up to date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4048,7 +4100,7 @@ pub struct DesignLink {
 }
 
 impl DesignLink {
-    /// What [`Self::file_sha256`] keeps for a design file's `bytes`.
+    /// What [`Self::file_sha256`] keeps for a source file's `bytes`.
     pub fn file_digest(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(bytes))
@@ -4147,6 +4199,13 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
+    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
+    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// file carries it: the session keeps the choice, and a design in memory always holds the
+    /// bodies it could read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked_bodies_left_out: bool,
     /// Configurations (rows of parameter values and suppressions).
     #[serde(default, skip_serializing_if = "crate::config::ConfigTable::is_empty")]
     pub configs: crate::config::ConfigTable,
@@ -4209,7 +4268,7 @@ pub struct Document {
     /// its own `Arc`, so an undo step shares every drawing it didn't change. Each is read by its own
     /// family's rules ([`crate::format::read`]), never as a field of the design; a container keeps
     /// each in its own entry.
-    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty", serialize_with = "crate::drawing::serialize_inline")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
@@ -4501,6 +4560,7 @@ impl Document {
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
+            linked_bodies_left_out: false,
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),
@@ -5014,7 +5074,7 @@ impl Document {
         if self.canvases.iter().any(|c| !c.data.is_empty()) {
             kinds.push("images");
         }
-        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+        if self.drawings.iter().any(|d| d.has_binary_data()) {
             kinds.push("drawing images");
         }
         if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
@@ -5032,14 +5092,26 @@ impl Document {
     /// The design as the text of a `.json` file. The same design always gives the same text, and a
     /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
+        self.to_json_checked().unwrap_or_default()
+    }
+
+    /// The same text as `to_json`, reporting serialization failures to a file writer.
+    pub fn to_json_checked(&self) -> Result<String> {
+        let error = |why: serde_json::Error| DocError::Invalid(format!("design not saved: {why}"));
+        let opaque_drawings = self.drawings.iter().any(|drawing| drawing.newer_file.is_some());
         let compact = if self.newer_file.is_some() {
-            let mut value = serde_json::to_value(self).unwrap_or_default();
+            let mut value = serde_json::to_value(self).map_err(error)?;
             crate::newer_file::restore(self, &mut value);
-            serde_json::to_string(&value).unwrap_or_default()
+            if opaque_drawings && let Some(fields) = value.as_object() {
+                return crate::json_layout::pretty_serialized(&crate::drawing::InlineDocument { fields, drawings: &self.drawings }).map_err(error);
+            }
+            serde_json::to_string(&value).map_err(error)?
+        } else if opaque_drawings {
+            return crate::json_layout::pretty_serialized(self).map_err(error);
         } else {
-            serde_json::to_string(self).unwrap_or_default()
+            serde_json::to_string(self).map_err(error)?
         };
-        crate::json_layout::pretty(&compact)
+        Ok(crate::json_layout::pretty(&compact))
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
@@ -5416,6 +5488,8 @@ impl Document {
     }
 
     pub fn param(&self, name: &str) -> Option<&Param> {
+        #[cfg(test)]
+        crate::params::param_rows_tests::count_param_search();
         self.params.iter().find(|p| p.name == name)
     }
 
@@ -5917,6 +5991,21 @@ impl Document {
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
     pub fn solve_sketch_with_analysis(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        sk: &mut Sketch,
+        stored: &solidcraft_sketch::DrivingValues,
+        moved_from: Option<&Sketch>,
+        analysis: solidcraft_sketch::Analysis,
+    ) -> Result<solidcraft_sketch::SolveReport> {
+        // The solve stops with the evaluation it runs for: the app's Cancel, a design that closed.
+        match solidcraft_kernel::stop_token() {
+            Some(token) => solidcraft_sketch::cancel::within(&token, || self.solve_sketch_now(vals, sk, stored, moved_from, analysis)),
+            None => self.solve_sketch_now(vals, sk, stored, moved_from, analysis),
+        }
+    }
+
+    fn solve_sketch_now(
         &self,
         vals: &std::collections::BTreeMap<String, expr::Value>,
         sk: &mut Sketch,

@@ -33,6 +33,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Measure { .. } => Some("inspect.measure"),
         Kind::Section { .. } => Some("inspect.section"),
         Kind::Rename { .. } => Some("timeline.rename"),
+        Kind::RenameGroup { .. } => Some("timeline.rename_group"),
         Kind::ConfirmDelete { .. } => Some("timeline.delete"),
         Kind::Extrude { .. } => Some("solid.extrude"),
         Kind::Fillet { chamfer, .. } => Some(if *chamfer { "solid.chamfer" } else { "solid.fillet" }),
@@ -89,6 +90,8 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
+        Kind::FrameTrim(_) => Some("frame.trim"),
+        Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
@@ -507,6 +510,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     tr("This face cannot provide a durable attachment. Choose another face or explicitly use a fixed plane."),
                     ui_kit::Text::Hint("attachment"),
                 );
+                // What the button does, said plainly: the sketch is made on the face's plane as it is
+                // now, and does not follow later edits of the face (#16523).
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.sketch_use_fixed_plane_explained"), ui_kit::Text::Hint("attachment"));
                 if ui_kit::button(ui, tr("Use fixed plane"), ui_kit::Button::Normal).clicked() {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
@@ -588,9 +594,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
             let mut ext = cur;
             form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+                // The dropdown says when the user picked an option, the one shown included: a
+                // pick of To Object takes the pick, so the next click in the view picks the face
+                // to run to (#19671).
+                let picked = ui_kit::dropdown_picked(ui, "ex_ext", &mut ext, &["Distance", "To Object", "All"]);
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+                if picked
+                    && ext == 1
+                    && let Some(at) = d.inputs.iter().position(|i| i.label == TO_OBJECT)
+                {
+                    d.active = at;
+                }
             });
             if ext == 0 {
                 enter |= expr_row(ui, "Distance", distance);
@@ -1337,6 +1352,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
+        Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
+        Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
@@ -1351,7 +1368,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }
-        Kind::Rename { name, .. } => {
+        Kind::Rename { name, .. } | Kind::RenameGroup { name, .. } => {
             form_row(ui, "Name", |ui| {
                 enter |= ui_kit::focused_text_field(ui, name, "");
             });
