@@ -1089,7 +1089,9 @@ fn certify(unit: &str) -> Tally {
             .find(|c| c.name == row.case)
             .unwrap_or_else(|| panic!("{unit}: no case {}", row.case));
         super::watch_written();
-        let out = runner.run_rust(case);
+        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
+        let out =
+            crate::wr450_rows::with_mains_choices_for(unit, &row.case, || runner.run_rust(case));
         let bodies = super::take_written();
         let mut mass_bands = std::collections::BTreeMap::new();
         let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
@@ -1823,6 +1825,8 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             _ => Ok(text),
         }
         .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // (the rows the WR-450 retirement moved: main's lines, [`crate::wr450_rows::DATA`])
+        let text = crate::wr450_rows::with_mains_lines(unit, &text);
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
@@ -1863,8 +1867,7 @@ fn replay_case(unit: &str, case: &str) -> Result<crate::Output, String> {
         .iter()
         .find(|c| c.name == case)
         .ok_or_else(|| format!("{unit}: no case {case}"))?;
-    runner
-        .run_rust(c)
+    crate::wr450_rows::with_mains_choices_for(unit, case, || runner.run_rust(c))
         .map_err(|e| format!("{unit} {case}: {e:?}"))
 }
 

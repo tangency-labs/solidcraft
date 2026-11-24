@@ -3945,7 +3945,7 @@ pub fn clamped_trim_gap_bound(
         return Ok(None);
     }
     let (a, b) = (lo.max(d0), hi.min(d1));
-    if !(a < b) {
+    if a.partial_cmp(&b) != Some(core::cmp::Ordering::Less) {
         return Ok(None);
     }
     let Some(inner) = trim_image_gap_bound(k, surface, curve, uv, [a, b], floor)? else {
@@ -3953,7 +3953,7 @@ pub fn clamped_trim_gap_bound(
     };
     let mut worst = Ivl::from(0.0);
     for (s0, s1) in [(lo, a), (b, hi)] {
-        if !(s0 < s1) {
+        if s0.partial_cmp(&s1) != Some(core::cmp::Ordering::Less) {
             continue;
         }
         let d = curve_derivs_over(&cn, Ivl::new(s0, s1), 1, None)?;

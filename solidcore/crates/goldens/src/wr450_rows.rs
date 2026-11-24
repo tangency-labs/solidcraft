@@ -73,7 +73,7 @@ mod data;
 use data::DATA;
 
 /// The main commit [`DATA`] was recorded against.
-const MAIN_COMMIT: &str = "e5199bcb17";
+const MAIN_COMMIT: &str = "e34d772cb6";
 
 /// Main's golden line of each row of [`DATA`], in its order (`{"unit": .., "line": ..}`).
 const MAIN_LINES: &str = include_str!("wr450_rows/main.jsonl");
@@ -88,6 +88,25 @@ fn main_line(unit_id: &str, case: &str) -> Value {
             || panic!("{unit_id}: no main line of {case}"),
             |v| v["line"].clone(),
         )
+}
+
+/// `text`, an expected file of `unit_id`, with the line of each of its rows of [`DATA`] put
+/// back to main's ([`MAIN_LINES`]): for the other ledgers that rebuild main's file from this
+/// branch's. [`data_covers_the_moved_rows`] shows those rows are the only lines this retirement
+/// moved.
+pub(crate) fn with_mains_lines(unit_id: &str, text: &str) -> String {
+    let mut out = String::new();
+    for line in text.lines() {
+        let case = serde_json::from_str::<Value>(line)
+            .ok()
+            .and_then(|v| v["case"].as_str().map(str::to_string));
+        match case {
+            Some(c) if moved(unit_id, &c) => out.push_str(&main_line(unit_id, &c).to_string()),
+            _ => out.push_str(line),
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// How many calls of each seam the substituted run changed.
@@ -149,14 +168,55 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
     (line, flips)
 }
 
+/// Whether `case` of `unit_id` is a row of [`DATA`]: a row this retirement moved, whose
+/// committed line is this branch's output (re-blessed) unless [`WITHIN_RULE`] lists it.
+pub(crate) fn moved(unit_id: &str, case: &str) -> bool {
+    DATA.iter().any(|r| r.0 == unit_id && r.1 == case)
+}
+
+/// Rows of other ledgers this retirement moves by less than the goldens' comparator, unit
+/// and case: the bless keeps their committed line, main's, which the run agrees with but not
+/// to the bit (so they are not in [`DATA`]). Each keeps an exact copy where main had the
+/// analytic, and with main's choices put back it is its committed line to the bit, or, for a
+/// row whose committed line the WR-493 retirement already left within the comparator
+/// (`tolsub::replay`'s `WITHIN_COMPARATOR`), agrees with it and is the run
+/// `wr493_rows::corpus_parity_rows_are_closer` pins to the bit
+/// ([`below_comparator_rows_are_mains_with_mains_choices`]). Listed are those another
+/// replay rebuilds main's run of (main's row hash or bits); a row no replay rebuilds needs no
+/// entry, since its committed line already holds it.
+pub(crate) const BELOW_COMPARATOR: &[(&str, &str)] = &[
+    ("corpus.parity", "Fillet__blade_hub_3.smb"),
+    ("corpus.parity", "Solids__revolution_mold.smb"),
+];
+
+/// Whether `case` of `unit_id` is a [`BELOW_COMPARATOR`] row.
+pub(crate) fn below_comparator(unit_id: &str, case: &str) -> bool {
+    BELOW_COMPARATOR.contains(&(unit_id, case))
+}
+
+/// Rows whose run as is this retirement leaves at their committed line to the bit, but whose
+/// substituted run, which another replay (`operand_trim_rows`) compares with main's row hash,
+/// reaches the two seams: those replays rebuild main's run with main's choices put back, and
+/// at least one call's choice differs from this branch's
+/// ([`replay_only_rows_reach_the_seams`]).
+pub(crate) const REPLAY_ONLY: &[(&str, &str)] = &[
+    ("blend.feature_executive", "extended_surface_7_LShape_I"),
+    ("topology.brep_p10", "subdivide_cylinder_face0_cinf"),
+];
+
 /// Runs `f` with main's choices at both WR-450 seams when `case` of `unit_id` is a row of
-/// [`DATA`] (a row this retirement moved), else as is: for the other replays that rebuild
-/// main's run of a row (main's row hash), which since this retirement differs from this
-/// branch's through these two choices as well (the WR-493 retirement's
-/// `wr493_rows::without_classified_trims` precedent). [`replay_unit`] proves those rows move
-/// only through these choices.
+/// [`DATA`], [`BELOW_COMPARATOR`] or [`REPLAY_ONLY`] (a row this retirement moved, or whose
+/// replayed run it moved), else as is: for the other
+/// replays that rebuild main's run of a row (main's row hash), which since this retirement
+/// differs from this branch's through these two choices as well (the WR-493 retirement's
+/// `wr493_rows::without_classified_trims` precedent). [`replay_unit`] and
+/// [`below_comparator_rows_are_mains_with_mains_choices`] prove those rows move only through
+/// these choices.
 pub(crate) fn with_mains_choices_for<R>(unit_id: &str, case: &str, f: impl FnOnce() -> R) -> R {
-    if !DATA.iter().any(|r| r.0 == unit_id && r.1 == case) {
+    if !moved(unit_id, case)
+        && !below_comparator(unit_id, case)
+        && !REPLAY_ONLY.contains(&(unit_id, case))
+    {
         return f();
     }
     with_hook(
@@ -263,6 +323,92 @@ replay_tests! {
     topology_face_p2: "topology.face_p2", 1;
     topology_face_p3: "topology.face_p3", 14;
     vertex: "topology.vertex", 1;
+}
+
+/// Each [`BELOW_COMPARATOR`] row: not in [`DATA`]; as run, it agrees with its committed
+/// line under the goldens' comparator but not to the bit; with main's choices put back at
+/// both seams, at least one call's choice differing from this branch's, it is that line to
+/// the bit.
+#[test]
+fn below_comparator_rows_are_mains_with_mains_choices() {
+    let mut failures = Vec::new();
+    for &(unit_id, name) in BELOW_COMPARATOR {
+        assert!(!moved(unit_id, name), "{unit_id} {name}: in DATA");
+        let u = unit(unit_id);
+        let all = cases(u.as_ref());
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        let golden = read(&default_dir(), unit_id).unwrap();
+        let committed = golden
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no committed line of {name}"));
+        let line = row(u.as_ref(), case);
+        if &line == committed {
+            failures.push(format!("{unit_id} {name}: the run is the committed line"));
+        } else if let Some(change) = diff(committed, &line, u.abs_floors()) {
+            failures.push(format!(
+                "{unit_id} {name}: beyond the comparator: {change:?}"
+            ));
+        }
+        let (mains, flips) = with_mains_choices(u.as_ref(), case);
+        if flips.class() == "none" {
+            failures.push(format!(
+                "{unit_id} {name}: no call's choice differs from main's"
+            ));
+        }
+        if crate::tolsub::replay::within_comparator(unit_id, name) {
+            // (the WR-493 retirement left this committed line within the comparator: with
+            // main's choices the run is the one `wr493_rows` pins, agreeing with the line)
+            if let Some(change) = diff(committed, &mains, u.abs_floors()) {
+                failures.push(format!(
+                    "{unit_id} {name}: with main's choices beyond the comparator: {change:?}"
+                ));
+            }
+        } else if &mains != committed {
+            failures.push(format!(
+                "{unit_id} {name}: with main's choices not the committed line"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Each [`REPLAY_ONLY`] row: not in [`DATA`] or [`BELOW_COMPARATOR`]; as run, it is its
+/// committed line to the bit; with main's choices put back, at least one call's choice
+/// differs from this branch's (the replays that compare its substituted run with main's
+/// row hash then pass only through those choices).
+#[test]
+fn replay_only_rows_reach_the_seams() {
+    let mut failures = Vec::new();
+    for &(unit_id, name) in REPLAY_ONLY {
+        assert!(!moved(unit_id, name), "{unit_id} {name}: in DATA");
+        assert!(
+            !below_comparator(unit_id, name),
+            "{unit_id} {name}: listed twice"
+        );
+        let u = unit(unit_id);
+        let all = cases(u.as_ref());
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        let golden = read(&default_dir(), unit_id).unwrap();
+        let committed = golden
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no committed line of {name}"));
+        if &row(u.as_ref(), case) != committed {
+            failures.push(format!(
+                "{unit_id} {name}: the run is not the committed line"
+            ));
+        }
+        let (_, flips) = with_mains_choices(u.as_ref(), case);
+        if flips.class() == "none" {
+            failures.push(format!(
+                "{unit_id} {name}: no call's choice differs from main's"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// [`DATA`] lists exactly the rows the units above moved, with the counts above.

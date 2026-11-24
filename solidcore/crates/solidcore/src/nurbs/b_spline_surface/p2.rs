@@ -424,13 +424,7 @@ impl BSplineSurface {
     /// test-only feature `wr57-replay`, the replay seam's.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
-        // SmPlane, then SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
-        let analytic = if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
-            Some(Surface::from(plane))
-        } else {
-            recognise_analytic(k, self)?
-        };
-        let Some(analytic) = analytic else {
+        let Some(analytic) = self.recognised_analytic(k)? else {
             // arrive here - make sure it's a copy
             return Ok(Surface::from(self.copy()));
         };
@@ -449,6 +443,23 @@ impl BSplineSurface {
             Ok(Surface::from(self.copy()))
         } else {
             Ok(analytic)
+        }
+    }
+
+    /// The analytic surface [`Self::copy_and_add_analytics`] recognises in this surface, a
+    /// plane, else a cone, sphere, surface of revolution or extrusion (`None`: none), before
+    /// it chooses between that analytic and an exact copy. (Before the WR-450 retirement,
+    /// #18923, the copy was this analytic whenever there was one; tests rebuild that.)
+    ///
+    /// # Errors
+    ///
+    /// Those of the recognisers, as [`Self::copy_and_add_analytics`].
+    pub fn recognised_analytic(&self, k: &Kernel) -> Result<Option<Surface>> {
+        // SmPlane, then SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
+        if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
+            Ok(Some(Surface::from(plane)))
+        } else {
+            recognise_analytic(k, self)
         }
     }
 
