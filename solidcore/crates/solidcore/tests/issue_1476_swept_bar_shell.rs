@@ -29,6 +29,12 @@
 //! the result's face services. With the kernel's defaults two marched edges between the
 //! inner planar walls become lines; with SolidCraft's fixes none does (see the last shell
 //! test); the volumes stay as above.
+//!
+//! Since WR-495's exact mate is the only path (#21301), `MateEdges` itself makes those two
+//! edges lines, so the default shell has 18 lines (it had 16, the two edges marched), as
+//! `shell_edges_on_analytics_exact` gave. Every line edge of each shell is proved on the
+//! surfaces of both its faces within the edge's tolerance (`curve_on_surfaces`, an
+//! enclosure certificate), so the two new lines are the exact intersections of their walls.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -45,6 +51,7 @@ use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
+use solidcore::offset::curve_on_surfaces::curve_on_surfaces;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::query::api_queries::brep_is_manifold_solid;
@@ -52,6 +59,8 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
+use solidcore::topology::edge;
+use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, Kernel};
 use solidcraft_fixes::solidcraft_fixes;
@@ -125,6 +134,25 @@ fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> 
         }
     }
     let v = volume(&k, &mut b).unwrap();
+    // every line edge lies on both its faces' surfaces, by certificate
+    for e in b.edge_list() {
+        let Some(curve) = b.edge(e).unwrap().curve.as_ref() else {
+            continue;
+        };
+        if !matches!(curve.kind(), CurveKind::Line(_)) {
+            continue;
+        }
+        let faces = edge::faces(&b, e, None).unwrap();
+        assert_eq!(faces.len(), 2, "edge {e:?}: two faces");
+        let s0 = face_p2::surface(&b, faces[0]).unwrap().expect("surface");
+        let s1 = face_p2::surface(&b, faces[1]).unwrap().expect("surface");
+        let tol = edge::tolerance(&b, e).unwrap();
+        let ivl = edge::interval(&b, e).unwrap();
+        assert!(
+            curve_on_surfaces(&k, curve, ivl, [s0, s1], tol).unwrap(),
+            "line edge {e:?} not proved on both faces within {tol:e}"
+        );
+    }
     let kinds: Vec<&str> = b
         .edge_list()
         .iter()
@@ -153,13 +181,13 @@ fn check_validated(fixes: &UpstreamFixes, want: Option<f64>, validate: bool) -> 
     kinds.iter().filter(|&&k| k == "line").count()
 }
 
-/// The default kernel, which keeps an inset's cavity regions (WR-667). The merge leaves one
+/// The default kernel (18 lines since the exact mate, WR-495; see the module docs), which keeps an inset's cavity regions (WR-667). The merge leaves one
 /// finite region (deduced: before #17064 the one-name fixture shelled with this selection, which
 /// the verdicts' point-solve cache would have refused), which `make_manifold` keeps whatever its cavity
 /// verdict, so the verdict's point solves over the operand are not run (#17393).
 #[test]
 fn issue_1476_swept_bar_shells() {
-    assert_eq!(check(&UpstreamFixes::default(), None), 16);
+    assert_eq!(check(&UpstreamFixes::default(), None), 18);
 }
 
 /// SolidCraft's configuration (which also keeps an inset's cavity regions, now the
