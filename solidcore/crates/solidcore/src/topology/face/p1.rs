@@ -2763,6 +2763,36 @@ pub fn complete_merged_face_seam(
     Ok(())
 }
 
+/// Test-only fault injection for [`complete_imported_face_seams`], compiled out of every
+/// other build: the retained-seam attempt is reached only by an import whose seam trim runs
+/// a sliver past the cut, which no small body makes, so a test forces the branch decisions
+/// and the error the attempt then returns.
+#[cfg(test)]
+mod seam_faults {
+    use std::cell::Cell;
+
+    /// What a test forces; the default forces nothing.
+    #[derive(Clone, Copy, Default)]
+    pub(super) struct SeamFaults {
+        /// Mark the face's internal seams for replacement and the face as needing completion.
+        pub(super) force_redundant: bool,
+        /// The deleting attempt reports that it inserted no seam.
+        pub(super) first_inserts_nothing: bool,
+        /// The retained-seam attempt fails with a cancellation once it has edited the body.
+        pub(super) retained_cancelled: bool,
+    }
+
+    thread_local! {
+        pub(super) static FAULTS: Cell<SeamFaults> = const {
+            Cell::new(SeamFaults {
+                force_redundant: false,
+                first_inserts_nothing: false,
+                retained_cancelled: false,
+            })
+        };
+    }
+}
+
 /// Complete an imported face after its trims have been lifted across periodic cuts.
 /// An edge used on both sides by this face is an internal cut: if its trim crosses the
 /// base-period cut or leaves a sector missing a seam, remove it before inserting the natural
@@ -2793,6 +2823,20 @@ pub fn complete_imported_face_seams(
         if imported_internal_seam_needs_replacement(k, b, f, e)? {
             redundant.push(e);
         }
+    }
+    #[cfg(test)]
+    if seam_faults::FAULTS.get().force_redundant {
+        for e in face_edges(b, f)? {
+            let uses = crate::topology::edge::edgeuses(b, e, None, None)?;
+            let mut all_on_f = true;
+            for &eu in &uses {
+                all_on_f &= eu1::face(b, eu)? == Some(f);
+            }
+            if uses.len() > 1 && all_on_f && !redundant.contains(&e) {
+                redundant.push(e);
+            }
+        }
+        needs_completion = true;
     }
     if !needs_completion && redundant.is_empty() {
         return Ok(None);
@@ -2886,6 +2930,9 @@ fn complete_face_seams_edit(
                 }
             }
         }
+        #[cfg(test)]
+        let inserted =
+            inserted && !(seam_faults::FAULTS.get().first_inserts_nothing && !redundant.is_empty());
         if !redundant.is_empty() && !inserted {
             // Nothing replaces the deleted seams: the caller undoes this edit.
             return Ok(Some((faces, false)));
@@ -2952,6 +2999,10 @@ fn complete_face_seams_edit(
             let domain =
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;
+        }
+        #[cfg(test)]
+        if untranslatable_is_none && seam_faults::FAULTS.get().retained_cancelled {
+            return Err(SolidError::Cancelled { operation: OP });
         }
         Ok(Some((faces, inserted)))
     })
@@ -4297,5 +4348,84 @@ mod swap_refused_tests {
         let e = swap_uv(&k, &mut b, face).unwrap_err();
         assert!(e.upstream_status().is_some(), "{e:?}");
         assert!(state(&b) == before, "the refused swap changed the face");
+    }
+}
+
+#[cfg(test)]
+mod seam_completion_fault_tests {
+    use super::seam_faults::{SeamFaults, FAULTS};
+    use super::*;
+    use crate::math::Point3;
+    use crate::primitive::api_primitives::create_cylinder;
+    use crate::surface::surface::SurfaceKind;
+
+    fn wall_of_a_cylinder(k: &mut Kernel) -> (Brep, FaceId) {
+        let b = create_cylinder(k, Point3::ZERO, 5.0, 3.0).unwrap();
+        let wall = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                b.face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .is_some_and(|s| matches!(s.kind(), SurfaceKind::Cone(_)))
+            })
+            .unwrap();
+        (b, wall)
+    }
+
+    /// #20575: the retained-seam attempt of the seam completion (the one made when deleting
+    /// the marked seam would insert none) hands an error that is not the untranslatable-trim
+    /// case to its caller, and the body is as it was. The error is injected after the attempt
+    /// has edited the body ([`seam_faults`]); an attempt that turned every error into "leave
+    /// the face as imported" would return `Ok(None)` here.
+    #[test]
+    fn the_retained_seam_attempt_returns_an_error_that_is_not_the_untranslatable_trim() {
+        let mut k = Kernel::default();
+        let (mut b, wall) = wall_of_a_cylinder(&mut k);
+        let before = (b.faces().ids().count(), b.edgeuses().iter().count());
+        FAULTS.set(SeamFaults {
+            force_redundant: true,
+            first_inserts_nothing: true,
+            retained_cancelled: true,
+        });
+        let r = complete_imported_face_seams(&mut k, &mut b, wall);
+        FAULTS.set(SeamFaults::default());
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
+        assert_eq!(
+            (b.faces().ids().count(), b.edgeuses().iter().count()),
+            before
+        );
+        // the seam is still there, used twice by the wall
+        let seam_uses = |b: &Brep| {
+            b.edges()
+                .ids()
+                .filter(|&e| {
+                    let uses = crate::topology::edge::edgeuses(b, e, None, None).unwrap();
+                    uses.len() > 1
+                        && uses
+                            .iter()
+                            .all(|&eu| eu1::face(b, eu).unwrap() == Some(wall))
+                })
+                .count()
+        };
+        assert_eq!(seam_uses(&b), 1);
+    }
+
+    /// The same face reaches the retained-seam attempt and, with nothing injected into it,
+    /// the attempt completes: the seam is kept and the face's pieces come back.
+    #[test]
+    fn the_retained_seam_attempt_keeps_the_seam_when_it_succeeds() {
+        let mut k = Kernel::default();
+        let (mut b, wall) = wall_of_a_cylinder(&mut k);
+        FAULTS.set(SeamFaults {
+            force_redundant: true,
+            first_inserts_nothing: true,
+            retained_cancelled: false,
+        });
+        let r = complete_imported_face_seams(&mut k, &mut b, wall);
+        FAULTS.set(SeamFaults::default());
+        assert_eq!(r.unwrap(), Some(vec![wall]));
     }
 }
