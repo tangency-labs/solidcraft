@@ -981,6 +981,12 @@ pub(crate) fn export(app: &mut SolveApp, ext: &str) {
 /// does what that File › Export item does: STEP, OBJ and URDF ask where to save, STL and 3MF
 /// open the mesh dialog with the format chosen. `false`: `id` is no such command.
 pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
+    if id == "file.export_urdf_options" {
+        if FileAction::Export("urdf").enabled(app) {
+            crate::dialogs_urdf::open(app);
+        }
+        return true;
+    }
     let (extension, mesh) = match id {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),

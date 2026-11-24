@@ -62,6 +62,11 @@ pub struct Profile {
     pub region: Region2,
     /// Curve ids of the outer loop.
     pub outer_curves: Vec<String>,
+    /// For each piece of `outer_curves`, the other curves lying on it: a side drawn on a projected
+    /// edge is named after the earlier curve, and a pick by the drawn curves still finds the
+    /// profile ([`profile_by_curves`], #20503).
+    #[serde(skip)]
+    outer_alternates: Vec<Vec<String>>,
     /// Curve ids of each hole loop.
     pub hole_curves: Vec<Vec<String>>,
     pub area: f64,
@@ -136,8 +141,9 @@ fn same_circle(c: Vec2, r: f64, c2: Vec2, r2: f64, tol: f64) -> bool {
 /// the first, so the earliest curve in sketch order names the shared edge, as when the pieces
 /// lie exactly on each other. Kept both, they would bound a sliver of no area, and the
 /// round-off in their directions would make the turns at their ends disagree, so the regions on
-/// both sides would be lost (#635).
-fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<bool> {
+/// both sides would be lost (#635). Each piece left out is given as the kept piece it lies on, so
+/// the curve it belongs to still bounds the regions beside it (#20503).
+fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<Option<usize>> {
     // Between the same nodes, two pieces of lines run along one path, and so do two pieces of
     // arcs or circles on one circle through the same middle (not the two halves of a circle). A
     // line and an arc never do, nor does a sampled piece of a free-form curve: a chord and its
@@ -156,11 +162,11 @@ fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<bool> {
         .enumerate()
         .map(|(i, e)| {
             let between = kept.entry((e.u.min(e.v), e.u.max(e.v))).or_default();
-            let first = !between.iter().any(|k| edges.get(*k).is_some_and(|f| same_path(f, e)));
-            if first {
+            let twin = between.iter().copied().find(|k| edges.get(*k).is_some_and(|f| same_path(f, e)));
+            if twin.is_none() {
                 between.push(i);
             }
-            first
+            twin
         })
         .collect()
 }
@@ -1190,6 +1196,8 @@ struct Island {
 struct IslandLoop {
     lp: Loop2,
     ids: Vec<String>,
+    /// For each piece of `ids`, the other curves lying on it ([`without_overlaps`]).
+    alternates: Vec<Vec<String>>,
     /// Connected component within the island (loops of one component never nest).
     comp: usize,
     complete: Option<Vec<String>>,
@@ -1204,12 +1212,17 @@ impl IslandLoop {
     fn new(lp: Loop2, ids: Vec<String>, comp: usize, complete: Option<Vec<String>>, key: (u8, usize, usize)) -> IslandLoop {
         let bounds = lp.polyline(1e-3).bounds();
         let area = lp.signed_area().abs();
-        IslandLoop { lp, ids, comp, complete, key, bounds, area }
+        IslandLoop { lp, ids, alternates: Vec::new(), comp, complete, key, bounds, area }
+    }
+
+    fn with_alternates(mut self, alternates: Vec<Vec<String>>) -> IslandLoop {
+        self.alternates = alternates;
+        self
     }
 
     /// Rough size, for bounding the cache.
     fn weight(&self) -> usize {
-        self.lp.segs.len() + self.ids.len() + 1
+        self.lp.segs.len() + self.ids.len() + self.alternates.iter().map(Vec::len).sum::<usize>() + 1
     }
 }
 
@@ -2016,7 +2029,17 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     }
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
-    let mut alive = without_overlaps(&edges, tol);
+    let twins = without_overlaps(&edges, tol);
+    let mut alive: Vec<bool> = twins.iter().map(Option::is_none).collect();
+    // The curves of the pieces left out on each kept piece (a side drawn on a projected edge).
+    let mut also: Vec<Vec<String>> = vec![Vec::new(); edges.len()];
+    for (e, twin) in edges.iter().zip(&twins) {
+        if let Some(list) = twin.and_then(|k| also.get_mut(k))
+            && !list.contains(&e.id)
+        {
+            list.push(e.id.clone());
+        }
+    }
     loop {
         let mut deg = vec![0usize; n];
         for (e, a) in edges.iter().zip(&alive) {
@@ -2082,6 +2105,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             let mut edge_nodes = Vec::new();
             let mut edge_analytic = Vec::new();
             let mut ids = Vec::new();
+            let mut alts: Vec<Vec<String>> = Vec::new();
             let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
             let mut coverage_tags = Vec::new();
             let mut h = start;
@@ -2099,6 +2123,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 edge_nodes.push((from, to));
                 if let Some(e) = edges.get(h / 2) {
                     ids.push(e.id.clone());
+                    alts.push(also.get(h / 2).cloned().unwrap_or_default());
                     ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
                     coverage_tags.push(e.coverage.map(|t| (t, h.is_multiple_of(2))));
                     edge_analytic.push(e.analytic);
@@ -2203,7 +2228,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
                 let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
                 let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
-                loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)));
+                loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)).with_alternates(alts));
             }
         }
         if pass == 0 && !slivers.is_empty() {
@@ -2383,6 +2408,7 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
             Profile {
                 region,
                 outer_curves: (*ids).clone(),
+                outer_alternates: all.get(i).map(|(_, l)| l.alternates.clone()).unwrap_or_default(),
                 hole_curves,
                 area,
                 centroid,
@@ -2443,19 +2469,35 @@ pub enum CurvePick {
 /// listed curve. Order and repeats don't matter. Holes don't take part (islands inside a profile
 /// are its holes, as for a profile picked by a point). When several profiles match, one whose
 /// loop has exactly the listed pieces (a curve listed twice for two pieces) wins; otherwise the
-/// pick is ambiguous, never a guess.
+/// pick is ambiguous, never a guess. When no loop is made of exactly the listed curves, a piece
+/// another curve lies on (a side drawn on a projected edge, #20503) may stand for that curve.
 pub fn profile_by_curves(profiles: &[Profile], ids: &[String]) -> Result<usize, CurvePick> {
     use std::collections::BTreeSet;
     let want: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
     if want.is_empty() {
         return Err(CurvePick::Missing);
     }
-    let hits: Vec<usize> = profiles
+    let mut hits: Vec<usize> = profiles
         .iter()
         .enumerate()
         .filter(|(_, p)| p.outer_curves.iter().map(String::as_str).collect::<BTreeSet<_>>() == want)
         .map(|(i, _)| i)
         .collect();
+    if hits.is_empty() {
+        // Every piece is a listed curve or lies on one, and every listed curve names a piece.
+        let covers = |p: &Profile| {
+            let mut named = BTreeSet::new();
+            p.outer_curves.iter().enumerate().all(|(k, id)| {
+                let on: Vec<&str> = std::iter::once(id.as_str())
+                    .chain(p.outer_alternates.get(k).into_iter().flatten().map(String::as_str))
+                    .filter(|c| want.contains(c))
+                    .collect();
+                named.extend(on.iter().copied());
+                !on.is_empty()
+            }) && named == want
+        };
+        hits = profiles.iter().enumerate().filter(|(_, p)| covers(p)).map(|(i, _)| i).collect();
+    }
     match hits.as_slice() {
         [] => Err(CurvePick::Missing),
         [i] => Ok(*i),
@@ -2879,6 +2921,18 @@ mod tests {
 
     /// An infinite or huge box spans more cells than an `i64` holds; it is checked against all
     /// shapes instead of wrapping the count and filling memory (solidcraft#5020).
+    /// The island cache bounds itself by each loop's weight: the curves a loop keeps as
+    /// alternates of its pieces (#20503) are held too, so they count.
+    #[test]
+    fn a_loops_weight_counts_the_alternates_of_its_pieces() {
+        let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(0.0, 1.0)]);
+        let ids: Vec<String> = ["l1", "l2", "l3", "l4"].map(String::from).to_vec();
+        let plain = IslandLoop::new(square.clone(), ids.clone(), 0, None, (1, 0, 0));
+        let alternates = vec![vec!["p1".to_string(), "p2".to_string()], Vec::new(), Vec::new(), Vec::new()];
+        let with = IslandLoop::new(square, ids, 0, None, (1, 0, 0)).with_alternates(alternates);
+        assert_eq!(with.weight(), plain.weight() + 2);
+    }
+
     #[test]
     fn grid_cells_refuse_infinite_and_huge_boxes() {
         let small = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };

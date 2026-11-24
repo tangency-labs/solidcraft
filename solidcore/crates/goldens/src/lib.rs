@@ -33,6 +33,8 @@ pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
 #[cfg(test)]
+mod merged_vertex_rows;
+#[cfg(test)]
 mod operand_trim_rows;
 pub mod output;
 pub(crate) mod own_builder;
