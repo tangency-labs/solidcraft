@@ -1868,9 +1868,11 @@ fn align_by_frames_follows_its_target() {
     assert_bounds(&mut s, "B", [15., -10., -10.], [25., 10., 0.]);
     run(&mut s, "parameters.change", json!({"name": "H", "expression": "15 mm"}));
     assert_bounds(&mut s, "B", [15., -10., -15.], [25., 10., 0.]);
-    // A face pick with an angle about the target face's normal; a sketch frame onto a fixed point.
+    // A face pick with an angle about the target face's normal, on a body that stays (one on B
+    // would move away with it); a sketch frame onto a fixed point.
     let mut s = target();
-    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 20], "to_face": [55, 10, 30], "angle": 0}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "body_name": "T"}));
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 20], "to_face": [5, 45, 10], "angle": 0}));
     run(&mut s, "solid.align", json!({"bodies": ["B"], "from_frame": {"sketch": "S", "point": "p"}, "to": [20, 0, 5]}));
     // Refused: a side given twice, an angle with no target direction, a frame on the bodies that
     // move, unknown or wrong sketch geometry, ids out of range, a degenerate frame.
@@ -4989,4 +4991,23 @@ fn align_refuses_a_start_on_a_body_that_stays() {
         assert!(e.contains("`A`") && e.contains("not moved"), "{from}: {e}");
     }
     run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [10, 10, 10], "to": [0, 0, 100]}));
+}
+
+/// A face or snap target on the bodies that move is refused as a frame on them is; a typed point
+/// is a coordinate, wherever it lies.
+#[test]
+fn align_refuses_a_target_on_a_body_that_moves() {
+    let mut s = blocks_and_pin();
+    for to in [json!({"to_face": [55, 5, 10]}), json!({"to": {"snap": "face_center", "at": [55, 5, 10]}})] {
+        let mut p = json!({"bodies": ["B"], "from_face": [55, 5, 0]});
+        p.as_object_mut().into_iter().for_each(|o| o.extend(to.as_object().cloned().unwrap_or_default()));
+        let e = align_error(&mut s, p);
+        assert!(e.contains("is on a body that moves"), "{to}: {e}");
+    }
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 0], "to": [50, 0, 5]}));
+    assert_bounds(&mut s, "B", [50., 0., 5.], [60., 10., 15.]);
+    // A snap where B touches a body that stays is on that body.
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 15], "length": 10, "width": 10, "height": 10, "body_name": "C"}));
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 5], "to": {"snap": "vertex", "at": [60, 10, 15]}}));
+    assert_bounds(&mut s, "B", [60., 10., 15.], [70., 20., 25.]);
 }
