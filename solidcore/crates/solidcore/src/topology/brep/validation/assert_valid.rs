@@ -662,9 +662,9 @@ pub fn validate_and_update_tolerances(
     };
     let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
     if status != SUCCESS {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             "topology::brep::validation::validate_and_update_tolerances",
-            "an edge use's vertex use has no vertex",
+            crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
         ));
     }
     Ok(gaps)
@@ -904,9 +904,7 @@ mod tests {
         );
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "an edge use's vertex use has no vertex"
-            ))
+            Some(&crate::error::topology::TopologyFailure::VertexuseWithoutVertex)
         );
     }
 
