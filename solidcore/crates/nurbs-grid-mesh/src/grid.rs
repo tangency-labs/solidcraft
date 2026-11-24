@@ -1,6 +1,6 @@
 //! Grid lines: as many in each knot span as its curvature needs for the tolerance.
 
-use crate::surface::{norm, sub, NurbsSurface};
+use crate::surface::NurbsSurface;
 use crate::MeshError;
 
 /// A parameter direction.
@@ -40,37 +40,15 @@ pub fn grid_lines(
     max_step: f64,
     max_per_span: usize,
 ) -> Result<GridLines, MeshError> {
-    let (p, k, n, m) = match dir {
-        Dir::U => (s.u_degree, &s.u_knots, s.nu, s.nv),
-        Dir::V => (s.v_degree, &s.v_knots, s.nv, s.nu),
+    let (n, k) = match dir {
+        Dir::U => (s.nu, &s.u_knots),
+        Dir::V => (s.nv, &s.v_knots),
     };
-    let at = |i: usize, j: usize| match dir {
-        Dir::U => i * s.nv + j,
-        Dir::V => j * s.nv + i,
+    let p = match dir {
+        Dir::U => s.u_degree,
+        Dir::V => s.v_degree,
     };
     let knot = |i: usize| k.get(i).copied().ok_or(MeshError::Internal);
-    let pole = |i: usize| s.poles.get(i).copied().ok_or(MeshError::Internal);
-    // r[i]: the largest second-derivative control point i over every row.
-    let mut r = vec![0.0_f64; n.saturating_sub(2)];
-    if p >= 2 {
-        for (i, ri) in r.iter_mut().enumerate() {
-            let d1 = knot(i + p + 1)? - knot(i + 1)?;
-            let d2 = knot(i + p + 2)? - knot(i + 2)?;
-            let d3 = knot(i + p + 1)? - knot(i + 2)?;
-            // A span of zero length is a kink, and kinks sit on knots, which are grid lines.
-            if !(d1 > 0.0 && d2 > 0.0 && d3 > 0.0) {
-                continue;
-            }
-            let pf = p as f64;
-            for j in 0..m {
-                let (a, b, c) = (pole(at(i, j))?, pole(at(i + 1, j))?, pole(at(i + 2, j))?);
-                let [x0, y0, z0] = sub(b, a);
-                let [x1, y1, z1] = sub(c, b);
-                let q = |e0: f64, e1: f64| ((pf - 1.0) * (pf * e1 / d2 - pf * e0 / d1)) / d3;
-                *ri = ri.max(norm([q(x0, x1), q(y0, y1), q(z0, z1)]));
-            }
-        }
-    }
     let mut lines = Vec::new();
     let mut capped_spans = 0;
     for span in p..n {
@@ -78,27 +56,97 @@ pub fn grid_lines(
         if b <= a {
             continue;
         }
-        // Span [k[span], k[span + 1]] uses second-derivative control points span - p ..= span - 2.
-        let bound = if p >= 2 {
-            r.get(span - p..=span - 2)
-                .map_or(0.0, |w| w.iter().copied().fold(0.0, f64::max))
-        } else {
-            0.0
-        };
-        let for_curvature = ((b - a) * (bound / (8.0 * tol)).sqrt()).ceil();
-        // A flat span needs no line for curvature, but a face still needs cells for its
-        // boundary to cross, so no step is longer than max_step.
-        let for_step = ((b - a) / max_step).ceil();
-        let cap = max_per_span.max(1) as f64;
-        if for_curvature > cap {
+        let mut span_lines = vec![a];
+        let mut segments = 0usize;
+        let cap = max_per_span.max(1);
+        let mut capped = false;
+        push_span_lines(
+            s,
+            dir,
+            a,
+            b,
+            tol,
+            max_step,
+            cap,
+            &mut span_lines,
+            &mut segments,
+            &mut capped,
+        )?;
+        if capped {
             capped_spans += 1;
         }
-        let count = for_curvature.max(for_step).max(1.0).min(cap) as usize;
-        lines.extend((0..count).map(|q| a + (b - a) * q as f64 / count as f64));
+        lines.extend(span_lines);
     }
     lines.push(knot(n)?);
+    lines.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-12 * a.abs().max(b.abs()).max(1.0));
     Ok(GridLines {
         lines,
         capped_spans,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_span_lines(
+    s: &NurbsSurface,
+    dir: Dir,
+    lo: f64,
+    hi: f64,
+    tol: f64,
+    max_step: f64,
+    cap: usize,
+    lines: &mut Vec<f64>,
+    segments: &mut usize,
+    capped: &mut bool,
+) -> Result<(), MeshError> {
+    if *segments >= cap.saturating_sub(1) {
+        *capped = true;
+        lines.push(hi);
+        *segments += 1;
+        return Ok(());
+    }
+    let step_too_long = hi - lo > max_step;
+    let sag = sampled_sag(s, dir, lo, hi)?;
+    if (sag > tol || step_too_long) && hi - lo > 1.0e-12 {
+        let mid = (lo + hi) * 0.5;
+        push_span_lines(s, dir, lo, mid, tol, max_step, cap, lines, segments, capped)?;
+        push_span_lines(s, dir, mid, hi, tol, max_step, cap, lines, segments, capped)?;
+    } else {
+        lines.push(hi);
+        *segments += 1;
+    }
+    Ok(())
+}
+
+fn sampled_sag(s: &NurbsSurface, dir: Dir, lo: f64, hi: f64) -> Result<f64, MeshError> {
+    let mid = (lo + hi) * 0.5;
+    let [[u0, u1], [v0, v1]] = s.domain();
+    let mut sag = 0.0f64;
+    for step in 0..=4 {
+        let other = (step as f64) / 4.0;
+        let (a, m, b) = match dir {
+            Dir::U => {
+                let v = v0 + (v1 - v0) * other;
+                (
+                    s.evaluate(lo, v)?.point,
+                    s.evaluate(mid, v)?.point,
+                    s.evaluate(hi, v)?.point,
+                )
+            }
+            Dir::V => {
+                let u = u0 + (u1 - u0) * other;
+                (
+                    s.evaluate(u, lo)?.point,
+                    s.evaluate(u, mid)?.point,
+                    s.evaluate(u, hi)?.point,
+                )
+            }
+        };
+        let chord = [
+            (a[0] + b[0]) * 0.5 - m[0],
+            (a[1] + b[1]) * 0.5 - m[1],
+            (a[2] + b[2]) * 0.5 - m[2],
+        ];
+        sag = sag.max((chord[0] * chord[0] + chord[1] * chord[1] + chord[2] * chord[2]).sqrt());
+    }
+    Ok(sag)
 }
