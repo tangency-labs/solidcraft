@@ -174,6 +174,7 @@ fold	false
 folder	false
 frame_member	false
 frame_plate	false
+frame_trim	false
 gear	false
 graph	false
 grid	false
@@ -386,6 +387,7 @@ svg	false
 sweep	false
 text	false
 thread	false
+timeline_2d	false
 timeline_play	false
 timeline_stop	false
 torus	false
