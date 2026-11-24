@@ -6,9 +6,9 @@ use solidcore::query::section_corners as k;
 use solidcore_convert::{loop2, vec3};
 use solidcore_record::{Loop2, Vec3};
 
-/// A side turning into the next by less than this (a cross product of side vectors times the
-/// winding) is not an inside corner.
-const TURN_TOL: f64 = 1e-9;
+/// A side turning into the next by more than this the wrong way (a cross product of side vectors
+/// times the winding, below it) is an inside corner.
+const INWARD: f64 = -1e-9;
 
 /// For each segment of `outline`, whether it is an inside corner's fillet: an arc turning against
 /// the outline's winding (an angle's or a channel's root). Squaring one would cut into the
@@ -24,7 +24,7 @@ pub fn inside_corner_arcs(outline: &Loop2) -> Vec<bool> {
 #[must_use]
 pub fn is_open(outline: &Loop2) -> bool {
     let m = k::measure_corner_turns(&loop2(outline));
-    m.inward_arcs.iter().any(|a| *a) || m.sharpest_turn < -TURN_TOL
+    m.inward_arcs.iter().any(|a| *a) || m.sharpest_turn < INWARD
 }
 
 /// How far past `end` along `toward` the furthest of `points` lies (mm); `None` for no points or
