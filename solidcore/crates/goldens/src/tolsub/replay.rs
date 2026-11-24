@@ -380,7 +380,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -691,7 +694,9 @@ fn record() {
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
 /// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
-/// the put-back is shown to keep them.
+/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
+/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
+/// (`certify::trim_tolerance` certifies its moved tolerance).
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -802,7 +807,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0xc8792b6ad7002c8b,
+        0x50fca59ea3c3d0cc,
     ),
     (
         "topology.face_p3",
@@ -849,7 +854,10 @@ fn classified_read_rows_are_mains_without_the_trims() {
             failures.push(format!("{unit_id} {name}: no read put back"));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{unit_id} {name}: not main's row"));
+            failures.push(format!(
+                "{unit_id} {name}: not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

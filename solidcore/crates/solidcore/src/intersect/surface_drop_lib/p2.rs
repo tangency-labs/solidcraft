@@ -1432,12 +1432,51 @@ pub(crate) fn add_to_curve_with_policy(
     fix_bc_change: &mut bool,
     policy: BoundaryPolicy<'_>,
 ) -> Result<()> {
+    add_span_with_policy(
+        k,
+        surface,
+        uv_domain,
+        start,
+        end,
+        end.t - start.t,
+        ctrl_poly,
+        knots,
+        approx_tol_3d,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        policy,
+    )
+}
+
+/// [`add_to_curve_with_policy`] with the tangents scaled by `tangent_scale` where that
+/// scales them by the span's length `end.t - start.t`. Not upstream: a span stretched
+/// over a clamped sliver (`clamped_sliver`) keeps its neighbour's polygon, made by the
+/// same operations from the neighbour's length, over the longer knot range.
+#[allow(clippy::too_many_arguments)] // add_to_curve_with_policy's, and the tangent scale
+pub(crate) fn add_span_with_policy(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    start: &DropPt,
+    end: &DropPt,
+    tangent_scale: f64,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    approx_tol_3d: f64,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    policy: BoundaryPolicy<'_>,
+) -> Result<()> {
     // locals for hermite curve segment
     let scale = end.t - start.t;
     let mut p1 = start.uv_pd[0];
-    let d1 = start.uv_pd[1] * scale;
+    let d1 = start.uv_pd[1] * tangent_scale;
     let mut p4 = end.uv_pd[0];
-    let d2 = end.uv_pd[1] * scale;
+    let d2 = end.uv_pd[1] * tangent_scale;
 
     // Bezier segement interior control points are end points +/- 1st derivs divided by
     // degree
