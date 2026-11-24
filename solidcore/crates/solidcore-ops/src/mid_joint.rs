@@ -55,8 +55,8 @@ pub fn planes_meeting(a: &OutwardPlane, b: &OutwardPlane) -> Result<Option<Line>
 
 /// Edge `edge` of the planar polygon `polygon` (from its corner `edge` to the next) moved onto
 /// `line`, with the edges beside it met again there: the sheet grows where the line lies outside
-/// the polygon and shrinks where it lies inside. `None` when the edge, or a neighbouring edge,
-/// is parallel to the line within the angular tolerance.
+/// the polygon and shrinks where it lies inside. `None` when the edge is not parallel to the line
+/// within the angular tolerance, or a neighbouring edge is.
 ///
 /// # Errors
 /// The kernel's refusal ([`crate::Error::Status`]) of fewer than three or too many corners, a
