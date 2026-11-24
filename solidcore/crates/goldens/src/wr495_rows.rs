@@ -10,7 +10,8 @@
 //!
 //! The rows are [`FILLET`] (2 in `blend.fillet_executive_p3`), [`OFFSET`] (109 in
 //! `offset.offset_executive_p2`) and [`LOCAL`] (56 in `topology.brep_local_operation`). Main's
-//! facts of each row were measured on main before this change with the same measures:
+//! facts of each row were measured on main with the same measures (written by the ignored
+//! [`main_facts`] generator):
 //! - [`crate::soundness`]: the kernel's soundness check, the manifold test, the volume's
 //!   certified enclosure, and the face, edge and vertex counts;
 //! - [`unproved`] on every body the runner hands to [`crate::dump`].
@@ -418,4 +419,66 @@ fn fillet_rows_keep_mains_facts_and_mass_within_accuracy() {
             assert_mass_within_accuracy(case, main[i], now[i], e.volume.lo, e.volume.hi);
         }
     }
+}
+
+/// One [`Row`] as `main_facts.rs` writes it: `case`'s soundness facts and the unproved edge
+/// count of each captured body, as this tree measures them.
+fn row_line(u: &dyn UnitDiff, case: &str) -> String {
+    let (_, found, bodies) = replay(u, case);
+    let fact = match found.as_slice() {
+        [] => "None".to_string(),
+        [s] => {
+            let volume = match &s.volume {
+                Some(VolumeSign::Positive(e)) => format!("Some(({:?}, {:?}))", e.lo, e.hi),
+                _ => "None".to_string(),
+            };
+            format!(
+                "Some(Fact {{ sound: {}, lines: {:?}, manifold: {:?}, counts: {:?}, volume: {volume} }})",
+                s.sound(),
+                s.check.as_ref().ok().map(Vec::len),
+                s.manifold,
+                s.counts,
+            )
+        }
+        many => panic!("{case}: {} soundness measures", many.len()),
+    };
+    let unproved: Vec<usize> = bodies
+        .iter()
+        .map(|c| unproved(c.brep.as_ref().unwrap_or_else(|e| panic!("{case}: {e}")), false).len())
+        .collect();
+    format!("    Row {{ case: {case:?}, fact: {fact}, unproved: &{unproved:?} }},\n")
+}
+
+/// Writes `main_facts.rs` (to `$WR495_FACTS_OUT`) as this tree measures [`FILLET`]'s,
+/// [`OFFSET`]'s and [`LOCAL`]'s cases. Run on main (`$MAIN_SHA`), with this module, `lib.rs`'s
+/// line for it, the runners' `crate::dump::body` hooks it reads and this branch's
+/// `offset/curve_on_surfaces.rs` (the measure [`unproved`] uses) copied in, it writes the
+/// committed file: the kernel is main's, so the facts are main's, counted by this branch's
+/// measure (`git diff origin/main -- <those files> | git apply` in a worktree at main, then
+/// `cargo test --profile goldens -p goldens --lib -- --ignored --exact wr495_rows::main_facts`).
+#[test]
+#[ignore = "generator: run on main with this module's hooks"]
+fn main_facts() {
+    let out = std::env::var("WR495_FACTS_OUT").expect("WR495_FACTS_OUT");
+    let sha = std::env::var("MAIN_SHA").expect("MAIN_SHA");
+    let mut s = format!(
+        "// Main's facts of each moved row, measured on main {sha} by `wr495_rows::main_facts`\n\
+         // (see the module docs), with this branch's `curve_on_surfaces`, so both sides are\n\
+         // counted by one measure. Generated: do not edit.\n"
+    );
+    let units: [(&str, &str, &[Row]); 3] = [
+        ("FILLET", "blend.fillet_executive_p3", &FILLET),
+        ("OFFSET", "offset.offset_executive_p2", &OFFSET),
+        ("LOCAL", "topology.brep_local_operation", &LOCAL),
+    ];
+    for (name, id, rows) in units {
+        let u = unit(id);
+        let n = rows.len();
+        s.push_str(&format!("\n/// `{id}`'s moved rows.\nconst {name}: [Row; {n}] = [\n"));
+        for row in rows {
+            s.push_str(&row_line(u.as_ref(), row.case));
+        }
+        s.push_str("];\n");
+    }
+    std::fs::write(&out, s).expect("written");
 }

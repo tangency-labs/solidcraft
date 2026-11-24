@@ -1,7 +1,6 @@
-// Main's facts of each moved row, measured on main before this change (generated from
-// the probe's output; see the module docs).
-// The offset rows' pairs of equal counts were one result body captured twice (the runner
-// dumped it once more after #21286 dumped it too); each is now its one entry.
+// Main's facts of each moved row, measured on main 7fcbcec16c by `wr495_rows::main_facts`
+// (see the module docs), with this branch's `curve_on_surfaces`, so both sides are
+// counted by one measure. Generated: do not edit.
 
 /// `blend.fillet_executive_p3`'s moved rows.
 const FILLET: [Row; 2] = [
@@ -31,11 +30,11 @@ const OFFSET: [Row; 109] = [
     Row { case: "extended_box_outset", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(false), counts: [6, 12, 8], volume: None }), unproved: &[0] },
     Row { case: "extended_cylinder_outset", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(false), counts: [3, 3, 2], volume: None }), unproved: &[0] },
     Row { case: "fuzz00035", fact: None, unproved: &[0] },
-    Row { case: "gen0005", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.6690999999984454e-05, 2.669100000001554e-05)) }), unproved: &[0] },
+    Row { case: "gen0005", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.6690999999984454e-5, 2.669100000001554e-5)) }), unproved: &[0] },
     Row { case: "gen0010", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((0.02148899999998113, 0.021489000000018892)) }), unproved: &[0] },
     Row { case: "gen0013", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((0.0020554999999597133, 0.0020555000000403163)) }), unproved: &[0] },
     Row { case: "gen0021", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((26690.999999984582, 26691.00000001541)) }), unproved: &[0] },
-    Row { case: "gen0054", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.260499999954229e-06, 2.2605000000457976e-06)) }), unproved: &[0] },
+    Row { case: "gen0054", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.260499999954229e-6, 2.2605000000457976e-6)) }), unproved: &[0] },
     Row { case: "gen0084", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((21488.99999998352, 21489.00000001648)) }), unproved: &[0] },
     Row { case: "gen0089", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((26.690999999978967, 26.691000000020995)) }), unproved: &[0] },
     Row { case: "gen0090", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((21.48899999997859, 21.48900000002144)) }), unproved: &[0] },
@@ -45,15 +44,15 @@ const OFFSET: [Row; 109] = [
     Row { case: "gen0155", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((21.488999999982944, 21.489000000017068)) }), unproved: &[0] },
     Row { case: "gen0162", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((0.026690999999981504, 0.026691000000018526)) }), unproved: &[0] },
     Row { case: "gen0172", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((21.4889999999786, 21.489000000021402)) }), unproved: &[0] },
-    Row { case: "gen0187", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.1488999999980038e-05, 2.1489000000019973e-05)) }), unproved: &[0] },
-    Row { case: "gen0195", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.365499999961207e-06, 2.3655000000388247e-06)) }), unproved: &[0] },
-    Row { case: "gen0218", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.1488999999988172e-05, 2.148900000001182e-05)) }), unproved: &[0] },
-    Row { case: "gen0226", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.2604999999704333e-06, 2.2605000000295985e-06)) }), unproved: &[0] },
+    Row { case: "gen0187", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.1488999999980038e-5, 2.1489000000019973e-5)) }), unproved: &[0] },
+    Row { case: "gen0195", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.365499999961207e-6, 2.3655000000388247e-6)) }), unproved: &[0] },
+    Row { case: "gen0218", fact: Some(Fact { sound: false, lines: Some(21), manifold: Some(true), counts: [6, 12, 8], volume: Some((2.1488999999988172e-5, 2.148900000001182e-5)) }), unproved: &[0] },
+    Row { case: "gen0226", fact: Some(Fact { sound: false, lines: Some(41), manifold: Some(true), counts: [11, 24, 16], volume: Some((2.2604999999704333e-6, 2.2605000000295985e-6)) }), unproved: &[0] },
     Row { case: "member_box_extend_inset", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((144.37499999990638, 144.37500000009373)) }), unproved: &[0] },
     Row { case: "member_box_extend_outset", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((248.62499999985477, 248.62500000014518)) }), unproved: &[0] },
     Row { case: "member_cylinder_extend_outset", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [3, 3, 2], volume: Some((230.9056650807408, 230.9084181461948)) }), unproved: &[0] },
     Row { case: "member_cylinder_extend_outset_large", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [3, 5, 4], volume: Some((7013.785259854306, 7013.818280647098)) }), unproved: &[0] },
-    Row { case: "member_cylinder_extend_outset_tiny", fact: Some(Fact { sound: false, lines: Some(6), manifold: Some(true), counts: [3, 3, 2], volume: Some((1.0857327385620128e-08, 1.0857360717157605e-08)) }), unproved: &[0] },
+    Row { case: "member_cylinder_extend_outset_tiny", fact: Some(Fact { sound: false, lines: Some(6), manifold: Some(true), counts: [3, 3, 2], volume: Some((1.0857327385620128e-8, 1.0857360717157605e-8)) }), unproved: &[0] },
     Row { case: "member_shell_cylinder_side", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(false), counts: [3, 3, 2], volume: None }), unproved: &[0] },
     Row { case: "pe_Fillet_box_diff_cyl_big_rad_f0_d0_in_ext", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [8, 15, 10], volume: Some((851351.2039102692, 851352.5641352346)) }), unproved: &[0] },
     Row { case: "pe_Fillet_box_diff_cyl_big_rad_f0_d0_out_ext", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [8, 15, 10], volume: Some((2380494.2695893967, 2380494.553835641)) }), unproved: &[0] },
@@ -138,9 +137,9 @@ const LOCAL: [Row; 56] = [
     Row { case: "box_face3_in", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((949.9999985094942, 950.0000014905054)) }), unproved: &[0] },
     Row { case: "box_face4_out", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((1049.9999985094832, 1050.0000014905172)) }), unproved: &[0] },
     Row { case: "box_face5_tilt", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((1019.9999985036535, 1020.0000014963466)) }), unproved: &[0] },
-    Row { case: "fc0000", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((1.637440741780018, 2659.4024317704334)) }), unproved: &[26] },
-    Row { case: "fc0008", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((2.1367214242347594, 2617.9227260991192)) }), unproved: &[26] },
-    Row { case: "fc0025", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((1.6585426556719196, 2577.5781528415687)) }), unproved: &[26] },
+    Row { case: "fc0000", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((1.637440741780018, 2659.4024317704334)) }), unproved: &[24] },
+    Row { case: "fc0008", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((2.1367214242347594, 2617.9227260991192)) }), unproved: &[24] },
+    Row { case: "fc0025", fact: Some(Fact { sound: false, lines: Some(4), manifold: Some(true), counts: [20, 47, 31], volume: Some((1.6585426556719196, 2577.5781528415687)) }), unproved: &[24] },
     Row { case: "gen0000", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [11, 27, 18], volume: Some((41.79159374393772, 1252.8167865587)) }), unproved: &[1] },
     Row { case: "gen0003", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [3, 3, 2], volume: Some((732.5375981119906, 732.8048410346888)) }), unproved: &[0] },
     Row { case: "gen0004", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [10, 21, 14], volume: Some((15.71616518189607, 1412.9636862426535)) }), unproved: &[2] },
@@ -181,4 +180,3 @@ const LOCAL: [Row; 56] = [
     Row { case: "gen0092", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((1106.685003520058, 1113.5728754117936)) }), unproved: &[0] },
     Row { case: "gen0095", fact: Some(Fact { sound: true, lines: Some(0), manifold: Some(true), counts: [6, 12, 8], volume: Some((927.1120423027227, 929.8803008327835)) }), unproved: &[0] },
 ];
-
