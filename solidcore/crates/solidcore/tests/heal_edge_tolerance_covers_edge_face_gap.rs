@@ -1043,7 +1043,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   ones), and every UV trim `GetOrCreateUVTrimCurve` makes after the read, are main's
 ///   bit for bit: trims fit at the edge's fit tolerance (`edgeuse::p3::fit_tolerance`),
 ///   not at the raised one;
-/// - `corpus.parity`'s areas are main's bit for bit, but for those WR-441's corner fix moves
+/// - `corpus.parity`'s areas are main's bit for bit, but for those WR-255's corner fix moves
 ///   ([`UVTC_AREA_MAIN`]: main's with those faces' terms put back, each face enclosed;
 ///   each the same with the tolerances lowered); its volumes are main's bit for bit
 ///   with the moved tolerances set back to main's, and as read differ only on
@@ -1064,7 +1064,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 /// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
 /// every other file; they are asserted to be those two files only. (`sphere_plane`'s
 /// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
-/// [`corpus_reads_change_only_the_covered_tolerances`]'s moved areas: WR-441's corner fix
+/// [`corpus_reads_change_only_the_covered_tolerances`]'s moved areas: WR-255's corner fix
 /// (`sm_FixUVTrimCurves` repairs a trim's end points at a corner, not its whole span) moves
 /// `Fillet/vase3.smb`'s integrated area by 1200 ulps (1.4e-13 relative), through the trims
 /// of its two planar faces 0 and 1. Each moved face's area on main (the file, the face's
@@ -1215,7 +1215,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                 area0.to_bits()
             ));
         } else if area.to_bits() != area_main {
-            // (WR-441's corner fix moves the trims of the faces in [`UVTC_AREA_MAIN`]: the
+            // (WR-255's corner fix moves the trims of the faces in [`UVTC_AREA_MAIN`]: the
             // area with main's terms put back for those faces is main's bit for bit, and each
             // moved face's area, now and on main, is classed against a certified enclosure
             // of its exact area, asked 1e-9 * |A| wide)
@@ -2200,7 +2200,7 @@ fn fillet_result_fed(name: &str, edge: usize, radius: f64, trims: bool) -> (u64,
 /// on face 16 is refit at that tolerance; that result is proved in
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]. Entries 3
 /// (`corner_box` e9, main's `0x7c0ce81dfdec54b0`) and 7 (`open_shell` e5, main's
-/// `0x9362785e2dee39d1`) are WR-441's: its corner fix moves their UV trims alone, proved in
+/// `0x9362785e2dee39d1`) are WR-255's: its corner fix moves their UV trims alone, proved in
 /// [`uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
@@ -2246,7 +2246,7 @@ const FILLET_MAIN: [u64; 29] = [
 /// integrator fits the trims it integrates over to the edges' tolerances);
 /// [`BOTTLE_E8_BEFORE`] holds main's bits and
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
-/// within the case's accuracy of a certified enclosure of the exact properties. WR-441's
+/// within the case's accuracy of a certified enclosure of the exact properties. WR-255's
 /// corner fix moves entry 3's area (main's `0x4076c10e1e1ce654`, [`UVTC_MASS_MAIN`]), proved
 /// in [`uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance`].
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
@@ -2542,10 +2542,10 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
 
 /// Main's [`fillet_result_fed`] digests of [`FILLETS`] entries 3 (`corner_box` e9 r0.1) and
 /// 7 (`open_shell` e5 r0.5) with the UV trims left out, made by this file's functions on
-/// main (the digests with the trims are [`FILLET_MAIN`]'s before WR-441).
+/// main (the digests with the trims are [`FILLET_MAIN`]'s before WR-255).
 const UVTC_BARE_MAIN: [(usize, u64); 2] = [(3, 0xf6234496e9791e51), (7, 0xcc5f0726ad557e8)];
 
-/// WR-441's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a
+/// WR-255's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a
 /// corner, no longer its whole span) moves [`FILLETS`] entries 3 and 7 in five UV trims
 /// alone ([`UVTC_MOVED_TRIMS`]). Proved here, on each result:
 /// - with the trims left out, the digest (status, counts, face tolerances, vertex points,
@@ -2626,7 +2626,7 @@ fn uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance() {
         }
         assert_eq!(
             kept.0, kept_main,
-            "{i}: the trims WR-441 leaves are not main's"
+            "{i}: the trims WR-255 leaves are not main's"
         );
         let listed: Vec<_> = UVTC_MOVED_TRIMS.into_iter().filter(|m| m.0 == i).collect();
         assert_eq!(moved, listed, "{i}: the moved trims");
@@ -2684,7 +2684,7 @@ fn uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance() {
     }
 }
 
-/// The UV trims WR-441's corner fix moves in [`FILLETS`] entries 3 and 7: the entry, the
+/// The UV trims WR-255's corner fix moves in [`FILLETS`] entries 3 and 7: the entry, the
 /// edge's index and the edgeuse's.
 const UVTC_MOVED_TRIMS: [(usize, u32, u32); 5] = [
     (3, 11, 32),
@@ -2699,7 +2699,7 @@ const UVTC_MOVED_TRIMS: [(usize, u32, u32); 5] = [
 const UVTC_KEPT_TRIMS_MAIN: [(usize, u64); 2] =
     [(3, 0x6ac6_bbdc_2974_024f), (7, 0x15c2_86c0_bdf4_5e5d)];
 
-/// [`FILLETS`] entry 3's mass bits on main, before WR-441's corner fix.
+/// [`FILLETS`] entry 3's mass bits on main, before WR-255's corner fix.
 const UVTC_MASS_MAIN: [u64; 12] = [
     0x4076c10e1e1ce654,
     0x407c829973ddde71,

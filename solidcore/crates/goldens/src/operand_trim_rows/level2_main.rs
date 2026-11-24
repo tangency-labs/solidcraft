@@ -1,6 +1,6 @@
 // Generated from main's (7d4445c0c) `check_brep` level 2 (`validation::soundness`) of each
 // row's result bodies (the body the check runs on); a body not listed had no line.
-// `single_face_fillet1019_8`'s (WR-441's row) are main's (223b506526).
+// `single_face_fillet1019_8`'s (WR-255's row) are main's (223b506526).
 const MAIN_LEVEL2: &[(&str, &str, &[&str])] = &[
     ("fc0000", "", &[
         "SmSurface::Test #4 Bad Surf Discontinuity: Surface sampled IsoLine contains a G1 or C0 discontinuity across a Knot Value [owner SmBSplineSurface]",

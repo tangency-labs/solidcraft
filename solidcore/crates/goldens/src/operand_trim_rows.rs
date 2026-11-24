@@ -1276,7 +1276,7 @@ mod local_operation {
 /// 4.4536e-4, main 5.657e-4) and at `base_geometry[267]` (main 4.4536e-4), which the row
 /// lists for it. Both are classed against main's values like any moved value.
 ///
-/// WR-441's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a corner)
+/// WR-255's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a corner)
 /// moves two rows further, the 11th listed: `single_face_fillet1019_6`'s `*_record` and
 /// sample moves (its `main` stays the copy's main), and the whole of
 /// `single_face_fillet1019_8`'s row, which the copy did not move: its `main` is main's
