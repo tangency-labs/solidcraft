@@ -2,7 +2,6 @@
 //! the view first; both the radius and overshoot given here are paper millimetres. Styling,
 //! reference resolution and gaps against other annotations belong to the scene builder.
 
-use crate::EPS;
 use crate::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
 use solidcore_record::{Seg2, Vec2};
 
@@ -25,13 +24,9 @@ pub fn strokes(centre_mm: Vec2, radius_mm: f64, overshoot_mm: f64) -> Result<[Se
     if !overshoot_mm.is_finite() || !(0.0..=MAX_SIDE_MM).contains(&overshoot_mm) {
         return Err(Invalid("the paper overshoot must be finite and between zero and the maximum sheet side"));
     }
-    let half = radius_mm + overshoot_mm;
-    if !half.is_finite() || half <= EPS || centre_mm.x.abs() + half > MAX_COORDINATE_MM || centre_mm.y.abs() + half > MAX_COORDINATE_MM {
-        return Err(Invalid("the mark must have length and fit within the paper scene's coordinate limit"));
-    }
-    let x = Vec2::X * half;
-    let y = Vec2::Y * half;
-    Ok([Seg2::Line { a: centre_mm - x, b: centre_mm + x }, Seg2::Line { a: centre_mm - y, b: centre_mm + y }])
+    solidcore_ops::paper_gaps::centre_cross([centre_mm.x, centre_mm.y], radius_mm, overshoot_mm)
+        .map(|strokes| strokes.map(|[a, b]| Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) }))
+        .ok_or(Invalid("the mark must have length and fit within the paper scene's coordinate limit"))
 }
 
 /// A centre line between two already projected paper points, extended by `overshoot_mm` at each

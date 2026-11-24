@@ -283,7 +283,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 percentage: String,
             },
             /// A construction axis, point or plane made from picks alone (#2474): input `i` is the
-            /// command's parameter `keys[i]`, and `t` (along a path) when it takes one.
+            /// command's parameter `keys[i]` (a list parameter takes everything picked into it),
+            /// and `t` (along a path) when it takes one.
             Construct {
                 command: &'static str,
                 title: &'static str,
@@ -433,6 +434,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 feature: u64,
                 name: String,
             },
+            RenameGroup {
+                group: u64,
+                name: String,
+            },
             /// Delete a feature that others depend on.
             ConfirmDelete {
                 features: Vec<u64>,
@@ -477,6 +482,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             EndCap(crate::dialogs_end_cap::EndCap),
             /// Rotate Member (`dialogs_rotate_member`).
             RotateMember(crate::dialogs_rotate_member::RotateMember),
+            Gusset(crate::dialogs_gusset::Gusset),
             FramePlate(crate::dialogs_frame_plate::Plate),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
@@ -1100,8 +1106,8 @@ impl Dialog {
             ),
             id if construct_picks(id).is_some() => {
                 let (command, title, picks) = construct_picks(id)?;
-                let inputs = picks.iter().map(|(label, accept, _)| SelInput::new(label, *accept, false)).collect();
-                let keys = picks.iter().map(|(_, _, key)| *key).collect();
+                let inputs = picks.iter().map(|(label, accept, _, many)| SelInput::new(label, *accept, *many)).collect();
+                let keys = picks.iter().map(|(_, _, key, _)| *key).collect();
                 let t = (command == "construct.point.along_path").then(|| "0.5".to_string());
                 Dialog::new(Kind::Construct { command, title, keys, t }, inputs)
             }
@@ -1272,6 +1278,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
+                    .or_else(|| crate::dialogs_gusset::start(app, id))
                     .or_else(|| crate::dialogs_frame_plate::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
@@ -1513,6 +1520,10 @@ impl Dialog {
         Dialog::new(Kind::Rename { feature, name: name.to_string() }, vec![])
     }
 
+    pub fn rename_group(group: u64, name: &str) -> Dialog {
+        Dialog::new(Kind::RenameGroup { group, name: name.to_string() }, vec![])
+    }
+
     #[cfg(test)]
     pub fn confirm_delete(feature: u64, with: Vec<String>, fail: Vec<String>) -> Dialog {
         Dialog::confirm_delete_many(vec![feature], Vec::new(), with, fail)
@@ -1558,7 +1569,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::Gusset(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -3061,6 +3072,7 @@ fn tr(text: &str) -> &str {
     solidcraft_ui_text::tr_label(text)
 }
 
+/// Publishes accessibility widget information for a dialog checkbox.
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
@@ -3116,6 +3128,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Combine { .. } => "COMBINE",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
+        Kind::RenameGroup { .. } => "RENAME GROUP",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
@@ -3129,6 +3142,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
+        Kind::Gusset(_) => "ui.gusset_title",
         Kind::FramePlate(_) => "ui.mounting_plate_title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
@@ -5484,11 +5498,14 @@ fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &m
     }
 }
 
-/// The plane an extrude's picked profiles lie in: the first pick's sketch plane, or its planar face.
+/// The plane an extrude's picked profiles lie in: the first pick's sketch plane (a profile's or a
+/// thin extrude's curve's), or its planar face.
 fn profile_plane(s: &Session, first: &Sel) -> Option<solidcore_record::Plane> {
     let st = crate::open_meshing::session_world(s);
     match first {
         Sel::Profile { sketch, .. } => st.sketch(*sketch).map(|ss| ss.plane),
+        // A thin extrude's curve: its sketch's plane (no sketch named: the active one's).
+        Sel::SketchCurve { sketch, .. } => st.sketch(sketch.or(s.active_sketch)?).map(|ss| ss.plane),
         Sel::Face { body, index, .. } => st.body(body)?.body.planar_face(*index),
         _ => None,
     }
@@ -6758,10 +6775,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 // Each curve's sketch, resolved one pick at a time: the path may join the curves
                 // of several sketches (#16168), so a pick in another sketch is saved with that
-                // sketch. A pick whose sketch cannot be resolved still refuses the path.
+                // sketch. A pick whose sketch cannot be resolved still refuses the path. A pick
+                // whose sketch no longer holds the curve is stale (the curve was deleted or
+                // renamed there): it is left out, so the path can be picked again (#17550).
+                let st = crate::open_meshing::session_world(s);
                 let mut resolved: Vec<(String, u64)> = Vec::new();
                 for sel in sels(d, 1) {
-                    let Sel::SketchCurve { id, .. } = sel else { continue };
+                    let Sel::SketchCurve { id, sketch: named } = sel else { continue };
+                    if let Some(sk) = named
+                        && !sketch_holds_curve(&st, *sk, id)
+                    {
+                        continue;
+                    }
                     let sk = picks_sketch(app, std::slice::from_ref(sel), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
                     resolved.push((id.clone(), sk));
                 }
@@ -6838,6 +6863,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (i, key) in keys.iter().enumerate() {
                 let input = d.inputs.get(i).map_or("", |inp| inp.label);
+                if d.inputs.get(i).is_some_and(|inp| inp.multi) {
+                    // A list parameter takes everything picked: two points or twenty, in any order.
+                    let picked = sels(d, i);
+                    if picked.len() < 2 {
+                        return Err(format!("pick two or more {}", input.to_lowercase()));
+                    }
+                    let refs = picked.iter().map(|sel| construct_ref(app, sel)).collect::<Result<Vec<_>, _>>()?;
+                    p.insert((*key).to_string(), Value::Array(refs));
+                    continue;
+                }
                 let sel = sels(d, i).first().ok_or_else(|| format!("pick the {}", input.to_lowercase()))?;
                 p.insert(
                     (*key).to_string(),
@@ -7440,6 +7475,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
+        Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
         Kind::SketchIntersect { projection_link, .. } => {
             need(0, "geometry or bodies")?;
@@ -7474,6 +7510,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
+        Kind::Gusset(k) => return crate::dialogs_gusset::commands(app, k, &d.inputs, &d.extra),
         Kind::FramePlate(k) => return crate::dialogs_frame_plate::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
@@ -7660,6 +7697,12 @@ pub(crate) fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) ->
         return Some(a);
     }
     st.sketches.iter().rev().map(|ss| ss.feature).find(|sid| Some(*sid) != not && has(*sid))
+}
+
+/// Whether the sketch `sketch` still holds the curve `id` (a 3D wire counts): a curve deleted
+/// or renamed in that sketch leaves a pick of it naming nothing the app can use (#17550).
+fn sketch_holds_curve(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str) -> bool {
+    st.sketch(sketch).is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some())
 }
 
 /// An axis selection as a line: a point on it and its unit direction (origin axes, or a straight
@@ -8049,56 +8092,64 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 }
 
 /// The construct tools that take only picks (#2474, #2494): their command, dialog title and
-/// inputs as (label, what it accepts, parameter). Offset Plane, Midplane, Plane Along Path and
-/// Plane At Angle have dialogs of their own.
-fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
+/// inputs as (label, what it accepts, parameter, whether it takes any number of picks). Offset
+/// Plane, Midplane, Plane Along Path and Plane At Angle have dialogs of their own.
+///
+/// An input that takes any number of picks fills a list parameter: everything picked goes into
+/// it, in the order it was picked. Only the average of points does, and its order means nothing.
+fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str, bool)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
     const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS | selection::CLOUD_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
-        "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face")]),
+        "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
         "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face"), ("Point", POINT, "point")])
+            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
         }
         "construct.axis.two_planes" => {
-            ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a"), ("Second plane", PLANE, "b")])
+            ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
         "construct.axis.two_points" => {
-            ("construct.axis.two_points", "AXIS THROUGH TWO POINTS", &[("First point", POINT, "a"), ("Second point", POINT, "b")])
+            ("construct.axis.two_points", "AXIS THROUGH TWO POINTS", &[("First point", POINT, "a", false), ("Second point", POINT, "b", false)])
         }
-        "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge")]),
-        "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point")]),
+        "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge", false)]),
+        "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point", false)]),
         "construct.point.two_edges" => {
-            ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a"), ("Second edge", CURVE, "b")])
+            ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a", false), ("Second edge", CURVE, "b", false)])
         }
         "construct.point.three_planes" => (
             "construct.point.three_planes",
             "POINT THROUGH THREE PLANES",
-            &[("First plane", PLANE, "a"), ("Second plane", PLANE, "b"), ("Third plane", PLANE, "c")],
+            &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false), ("Third plane", PLANE, "c", false)],
         ),
-        "construct.point.center" => ("construct.point.center", "POINT AT CENTER", &[("Circle or sphere", FACES | CURVE, "of")]),
+        "construct.point.center" => ("construct.point.center", "POINT AT CENTER", &[("Circle or sphere", FACES | CURVE, "of", false)]),
         "construct.point.edge_plane" => {
-            ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE | AXES, "edge"), ("Plane", PLANE, "plane")])
+            ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE | AXES, "edge", false), ("Plane", PLANE, "plane", false)])
         }
-        "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path")]),
-        "construct.plane.axis_point" => {
-            ("construct.plane.axis_point", "cmd.construct.plane.axis_point", &[("Axis", LINE | CURVES, "axis"), ("Point", POINT, "point")])
-        }
+        "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path", false)]),
+        "construct.point.average" => ("construct.point.average", "POINT AT AVERAGE OF POINTS", &[("Points", POINT, "points", true)]),
+        "construct.plane.axis_point" => (
+            "construct.plane.axis_point",
+            "cmd.construct.plane.axis_point",
+            &[("Axis", LINE | CURVES, "axis", false), ("Point", POINT, "point", false)],
+        ),
         "construct.plane.two_edges" => {
-            ("construct.plane.two_edges", "PLANE THROUGH TWO EDGES", &[("First edge", LINE, "a"), ("Second edge", LINE, "b")])
+            ("construct.plane.two_edges", "PLANE THROUGH TWO EDGES", &[("First edge", LINE, "a", false), ("Second edge", LINE, "b", false)])
         }
         "construct.plane.three_points" => (
             "construct.plane.three_points",
             "PLANE THROUGH THREE POINTS",
-            &[("First point", POINT, "a"), ("Second point", POINT, "b"), ("Third point", POINT, "c")],
+            &[("First point", POINT, "a", false), ("Second point", POINT, "b", false), ("Third point", POINT, "c", false)],
         ),
         "construct.plane.perpendicular" => {
-            ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane"), ("Line", LINE, "line")])
+            ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane", false), ("Line", LINE, "line", false)])
         }
-        "construct.plane.square_to_line" => {
-            ("construct.plane.square_to_line", "cmd.construct.plane.square_to_line", &[("Line", LINE | CURVES, "line"), ("Point", POINT, "point")])
-        }
+        "construct.plane.square_to_line" => (
+            "construct.plane.square_to_line",
+            "cmd.construct.plane.square_to_line",
+            &[("Line", LINE | CURVES, "line", false), ("Point", POINT, "point", false)],
+        ),
         _ => return None,
     })
 }
@@ -9210,9 +9261,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
                     None => path
                         .iter()
-                        .map(|e| {
+                        .filter_map(|e| {
                             let (sketch, curve) = e.split(*path_sketch);
-                            crate::selection::curve_pick(curve, sketch.0, s.active_sketch)
+                            // A curve the sketch no longer holds is left out: the path must be
+                            // picked again (#17550).
+                            if !sketch_holds_curve(&st, sketch.0, curve) {
+                                return None;
+                            }
+                            Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch))
                         })
                         .collect(),
                 };
@@ -9576,6 +9632,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
+                .or_else(|| crate::dialogs_gusset::for_feature(app, other, f.component, &feature_frame(s, f.component)))
                 .or_else(|| crate::dialogs_frame_plate::for_feature(app, other, f.component, &feature_frame(s, f.component)))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);
@@ -10607,6 +10664,7 @@ mod construct_ask_tests {
         "construct.point.center",
         "construct.point.edge_plane",
         "construct.point.along_path",
+        "construct.point.average",
         "construct.plane.axis_point",
         "construct.plane.two_edges",
         "construct.plane.three_points",

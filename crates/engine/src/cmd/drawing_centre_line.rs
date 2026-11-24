@@ -25,7 +25,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Center Line", crate::checked!("drawing.center_line.add", add))
         .icon("new")
         .in_drawing()
-        .doc_only()
         .contract(&ADD_CONTRACT)
         .output(output_schema_for::<LineResult>)
         .params("view: saved view id; a and b: model point picks; overshoot_mm: extension on paper at each end. The view must draw both parts and show the assembled design. One undo step."),
@@ -40,7 +39,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("inspect")
         .in_drawing()
         .noundo()
-        .doc_only()
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<LineResult>)
         .params("line: id → saved record and current endpoints or reference status, with a warning if its view no longer draws a part or draws another configuration or position."),

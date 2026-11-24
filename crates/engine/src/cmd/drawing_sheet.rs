@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name; name?, size?, orientation?, title_block?: a definition, \"built-in\" (its general tolerances empty) or null \
+            "sheet: id or name; name?, size?, orientation?, title_block?: a definition, \"built-in\" or \"compact\" (the built-in block's older 49 mm form, without scale, type, status, language, revision and department; its general tolerances empty) or null \
              (a new block keeps the overrides of the text cells it still has), dpi?, line_group?: the ISO 128 line group its views are drawn in \
              (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), or null for the drawing's; \
              documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
@@ -146,6 +146,7 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<Vec<String>> {
         None => Vec::new(),
         Some(Value::Null) => sheet.set_title_block(None),
         Some(Value::String(name)) if name == "built-in" => sheet.set_title_block(Some(title_block::default_block())),
+        Some(Value::String(name)) if name == "compact" => sheet.set_title_block(Some(title_block::compact_block())),
         Some(block) => {
             let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
             sheet.set_title_block(Some(block))

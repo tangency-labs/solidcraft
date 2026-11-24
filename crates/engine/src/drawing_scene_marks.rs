@@ -130,10 +130,12 @@ pub(super) fn group(id: u64, centre: Vec2, radius: f64, overshoot: f64) -> Resul
 }
 
 fn stroke(line: solidcore_record::Seg2) -> Item {
+    let (a, b) = (line.start(), line.end());
+    let length = solidcore_ops::paper_gaps::straight_length([a.x, a.y], [b.x, b.y]);
     let long = 3.6;
     let lengths_mm = vec![long, 0.54, 0.18, 0.54];
     let period = lengths_mm.iter().sum();
-    let phase_mm = (long / 2.0 - line.length() / 2.0).rem_euclid(period);
+    let phase_mm = (long / 2.0 - length / 2.0).rem_euclid(period);
     Item::Stroke { path: vec![line], closed: false, width_mm: WIDTH_MM, pattern: Some(Dashes { lengths_mm, phase_mm }) }
 }
 

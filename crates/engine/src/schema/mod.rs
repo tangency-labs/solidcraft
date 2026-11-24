@@ -98,6 +98,7 @@ pub mod file;
 pub mod file_library;
 pub mod frame;
 pub mod frame_plate;
+pub mod gusset;
 pub mod insert_mesh;
 pub mod insert_step;
 pub mod inspect;

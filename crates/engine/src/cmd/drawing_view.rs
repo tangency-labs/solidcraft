@@ -1102,10 +1102,11 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     let drawn = match sessions.of(view) {
         Ok(posed) => {
             // As the solver places them, after motion links: a screw's travel follows its turn.
-            let placed = solidcraft_doc::joints::joint_values(&posed.doc.assembly);
+            let active = posed.doc.active_assembly();
+            let placed = solidcraft_doc::joints::joint_values(&active.assembly);
             joints
                 .iter()
-                .filter_map(|joint| posed.doc.assembly.joints.iter().find(|driven| driven.id == *joint))
+                .filter_map(|joint| active.assembly.joints.iter().find(|driven| driven.id == *joint))
                 .map(|driven| DrawnJointResult {
                     joint: driven.id,
                     name: driven.name.clone(),

@@ -1876,16 +1876,22 @@ fn assemble<D: Borrow<Drawn>>(
     let mut border = layout.as_ref().map_or_else(Vec::new, |layout| layout.paper(record.id));
     // The block sits on the border. It joins with the border (its text's fonts too), so no view takes
     // its records, and its band paints it over the views.
-    let (block, fonts) = match (&record.title_block, &layout) {
+    let block = match (&record.title_block, &layout) {
         (Some(block), Some(layout)) => {
             let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
             let mut group = solidcraft_doc::drawing::projection_symbol::title_block_paper(&placed, record.id, projection);
             group.items.splice(0..0, logos.iter().cloned());
             group.items.extend(text.runs.iter().cloned().map(Item::Text));
-            (Some(group), text.fonts.clone())
+            Some(group)
         }
-        _ => (None, Vec::new()),
+        _ => None,
     };
+    // The frame's labels are the border's: its text follows the lines of the drawing border's own group,
+    // which a sheet with a border always has.
+    if let Some(first) = border.first_mut() {
+        first.items.extend(text.frame.iter().cloned().map(Item::Text));
+    }
+    let fonts = text.fonts.clone();
     // The border's groups are one object, measured before the images painted with them join them:
     // an image isn't one of the objects a sheet's commands pick.
     let bounds_mm = border.iter().map(|group| group_bounds(group, &[])).fold(Aabb2::EMPTY, |all, one| all.union(&one));
@@ -2060,13 +2066,23 @@ fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
 /// font and language: nothing without a block. Also whether a text waits for a font to fall back
 /// to, which only the window's sheet leaves to the search's thread (`wait` false).
 fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: bool) -> Result<(Set, bool)> {
-    Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
+    let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
+    let (mut set, mut pending) = match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
         (Some(block), Some(placed)) => {
-            let laid = title_block_text::lay(block, &placed, &PaperFonts::new(&lettering.font, &lettering.language, wait), cells);
+            let laid = title_block_text::lay(block, &placed, &fonts, cells);
             (laid.set(), laid.pending)
         }
         _ => (Set::default(), false),
-    })
+    };
+    // The frame's labels go with the border, which a sheet has with no title block.
+    if let Some(border) = &record.border {
+        let layout = border.layout(&record.sheet).map_err(|e| bad(CMD, e.to_string()))?;
+        let laid = title_block_text::lay_frame(&layout, &fonts);
+        let frame = laid.set();
+        (set.frame, pending) = (frame.runs, pending || laid.pending);
+        set.fonts.extend(frame.fonts);
+    }
+    Ok((set, pending))
 }
 
 /// The tables of sheet `record` of `d`, read from `s`'s design and measured in `lettering`'s font
@@ -2941,7 +2957,8 @@ fn provider_marks(
             mark
         }));
     }
-    for view in states.iter().map(|state| state.view).filter(|view| !placed.contains_key(view)) {
+    for state in states.iter().filter(|state| !placed.contains_key(&state.view)) {
+        let view = state.view;
         let local = if fresh.contains(&view) {
             let local = marks::unframed(d, view);
             updates.insert(view, local.clone());
@@ -2949,7 +2966,12 @@ fn provider_marks(
         } else {
             s.drawing_scenes.views.get(&view).map_or_else(Vec::new, |entry| entry.marks.clone())
         };
-        groups.extend(local.into_iter().filter(|mark| mark.group.is_none() && owner(mark.object) == Some(view)));
+        groups.extend(local.into_iter().filter(|mark| owner(mark.object) == Some(view)).map(|mut mark| {
+            if mark.group.take().is_some() {
+                mark.why.get_or_insert_with(|| state.status.reason().unwrap_or_else(|| "its view has no frame".to_string()));
+            }
+            mark
+        }));
     }
     // A retained host-model group must not survive if its view now names another design.
     for group in &mut groups {

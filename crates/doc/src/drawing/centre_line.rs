@@ -5,7 +5,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::prelude::*;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelPoint, Status, check_point};
@@ -53,8 +52,7 @@ impl Document {
                 let basis = drawing.resolve_view(line.view)?.basis;
                 let found = lookup.corner(&line.a).and_then(|(a, exact_a)| {
                     lookup.corner(&line.b).and_then(|(b, exact_b)| {
-                        let (local_a, local_b) = (basis.to_local(a), basis.to_local(b));
-                        if solidcore_ops::paper_gaps::extend([local_a.x, local_a.y], [local_b.x, local_b.y], 0.0).is_err() {
+                        if !solidcore_ops::paper_gaps::projected_endpoints_are_distinct(basis, [a, b]) {
                             Err(Status::Unmeasurable("the centre-line endpoints coincide in the view".into()))
                         } else {
                             Ok(([a, b], exact_a && exact_b))

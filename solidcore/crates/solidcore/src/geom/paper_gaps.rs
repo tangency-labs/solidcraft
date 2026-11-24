@@ -6,6 +6,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Vec2;
+use crate::geom::vector3d::Vec3;
 
 const LIMIT: f64 = 100_000.0;
 const MAX_MARGIN: f64 = 5_000.0;
@@ -36,6 +37,48 @@ fn bad() -> SolidError {
         operation: "geom::paper_gaps::cut",
         reason: "invalid or excessive paper gap geometry",
     }
+}
+
+/// The length of the straight stroke from `a` to `b`.
+pub fn straight_length(a: [f64; 2], b: [f64; 2]) -> f64 {
+    (Vec2::from_array(b) - Vec2::from_array(a)).length()
+}
+
+/// Whether the endpoints of a model line project to distinct points in the given plane.
+pub fn projected_endpoints_are_distinct(
+    origin: [f64; 3],
+    axes: [[f64; 3]; 2],
+    ends: [[f64; 3]; 2],
+) -> bool {
+    let origin = Vec3::from(origin);
+    let axes = axes.map(Vec3::from);
+    let [a, b] = ends.map(|point| axes.map(|axis| Vec3::from(point).distance_along(origin, axis)));
+    extend(a, b, 0.0).is_ok()
+}
+
+/// Two orthogonal strokes through a circle's centre, each reaching beyond its radius by
+/// `overshoot`. The strokes must fit within the permitted paper coordinates.
+pub fn centre_cross(centre: [f64; 2], radius: f64, overshoot: f64) -> Option<[[[f64; 2]; 2]; 2]> {
+    if !valid(centre)
+        || !radius.is_finite()
+        || radius <= 0.0
+        || !(0.0..=MAX_MARGIN).contains(&overshoot)
+    {
+        return None;
+    }
+    let half = radius + overshoot;
+    if half <= EPS
+        || centre
+            .iter()
+            .any(|coordinate| coordinate.abs() + half > LIMIT)
+    {
+        return None;
+    }
+    let centre = Vec2::from_array(centre);
+    Some(
+        [Vec2::new(half, 0.0), Vec2::new(0.0, half)]
+            .map(|delta| [(centre - delta).to_array(), (centre + delta).to_array()]),
+    )
 }
 
 /// Cut a line around intersections and ordered convex quadrilaterals, expanding by `margin`.
@@ -196,6 +239,34 @@ pub fn extend(a: [f64; 2], b: [f64; 2], overshoot: f64) -> Result<([f64; 2], [f6
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projected_endpoints_must_be_distinct_in_the_view() {
+        let origin = [10.0, 0.0, 0.0];
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
+        assert!(!projected_endpoints_are_distinct(
+            origin,
+            axes,
+            [[11.0, 2.0, 3.0], [11.0, 2.0, 9.0]]
+        ));
+        assert!(projected_endpoints_are_distinct(
+            origin,
+            axes,
+            [[11.0, 2.0, 3.0], [12.0, 2.0, 9.0]]
+        ));
+    }
+
+    #[test]
+    fn centre_cross_extends_beyond_the_circle_along_both_axes() {
+        let cross = centre_cross([10.0, 20.0], 3.0, 2.0).unwrap();
+        assert_eq!(
+            cross,
+            [[[5.0, 20.0], [15.0, 20.0]], [[10.0, 15.0], [10.0, 25.0]]]
+        );
+        let [a, b] = cross[0];
+        assert!((straight_length(a, b) - 10.0).abs() < EPS);
+        assert!(centre_cross([LIMIT, 0.0], 3.0, 2.0).is_none());
+    }
 
     #[test]
     fn crossings_and_text_boxes_merge_and_preserve_start_distances() {
