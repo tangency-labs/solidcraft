@@ -21,8 +21,8 @@ use crate::schema::edit::{
     TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
-    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams,
+    SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
@@ -245,6 +245,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
         .output(output_schema_for::<SelectClearResult>),
+    CommandSpec::new("select.invert", "Invert Selection", crate::checked!("select.invert", select_invert))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_INVERT_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("no parameters → in place of the selected faces, edges or bodies, the other faces or edges of their bodies, or the other shown bodies; a body selected with some of its faces or edges inverts inside it; other items stay selected"),
     CommandSpec::new("select.same_look", "Select Same Look", crate::checked!("select.same_look", select_same_look))
         .icon("select")
         .noundo()
@@ -282,6 +288,7 @@ const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new()
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
+const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
@@ -2039,6 +2046,73 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
     PickMode::deserialize(v).map_err(|_| "mode must be faces, bodies, features, parts, components or sketch".to_string())
 }
 
+/// Invert Selection (#18107): each kind of item, faces, edges and bodies, is swapped for the items
+/// of that kind that are not selected. Faces and edges stay inside the bodies they belong to; a
+/// body selected together with faces or edges of it is the body they invert in, not a body to
+/// swap for the others. Bodies swap for the other shown bodies. Other items stay as they are.
+fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
+    const MAX: usize = 10_000;
+    let state = s.world_state()?;
+    let mut picked_faces: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut picked_edges: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut bodies: Vec<&str> = Vec::new();
+    let mut kept: Vec<Sel> = Vec::new();
+    for sel in &s.selection {
+        match sel {
+            Sel::Face { body, index, .. } => picked_faces.entry(body.as_str()).or_default().push(*index),
+            Sel::Edge { body, index, .. } => picked_edges.entry(body.as_str()).or_default().push(*index),
+            Sel::Body { name } => bodies.push(name.as_str()),
+            other => kept.push(other.clone()),
+        }
+    }
+    // A body with some of its faces or edges selected is where those invert (triage on #18107).
+    bodies.retain(|b| !picked_faces.contains_key(b) && !picked_edges.contains_key(b));
+    if picked_faces.is_empty() && picked_edges.is_empty() && bodies.is_empty() {
+        return Err(bad("select.invert", "select faces, edges or bodies to invert"));
+    }
+    let mut items: Vec<Value> = Vec::new();
+    for (picked, face) in [(&picked_faces, true), (&picked_edges, false)] {
+        for (name, indices) in picked {
+            let Some(b) = state.body(name) else { continue };
+            let count = if face { b.body.face_count() } else { b.body.edge_count() };
+            let kind = if face { "face" } else { "edge" };
+            for index in (0..count).filter(|i| !indices.contains(i)) {
+                if kept.len() + items.len() >= MAX {
+                    return Err(bad("select.invert", "too many items"));
+                }
+                items.push(json!({"type": kind, "body": name, "index": index}));
+            }
+        }
+    }
+    if !bodies.is_empty() {
+        // Not the bodies the faces or edges invert in, and only bodies the view shows (a hidden
+        // folder or occurrence hides its bodies too).
+        let inverted_in = |name: &str| picked_faces.contains_key(name) || picked_edges.contains_key(name);
+        for b in state.bodies.iter().filter(|b| !bodies.contains(&b.name.as_str()) && !inverted_in(&b.name) && s.body_visible(&b.name)) {
+            if kept.len() + items.len() >= MAX {
+                return Err(bad("select.invert", "too many items"));
+            }
+            items.push(json!({"type": "body", "name": b.name}));
+        }
+    }
+    let mut sel = kept;
+    for item in items {
+        // An item with no point to stand for it (a degenerate face or edge) is left out.
+        if let Ok(one) = selection_item(s, item)
+            && !sel.contains(&one)
+        {
+            sel.push(one);
+        }
+    }
+    // The kept items count too; refused, the selection stays as it was.
+    if sel.len() > MAX {
+        return Err(bad("select.invert", "too many items"));
+    }
+    s.selection = sel;
+    s.refresh_display();
+    reply("select.invert", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+}
+
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
@@ -2536,6 +2610,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.perforate"
                 | "sheet.fold"
                 | "sheet.path_flange"
+                | "sheet.tab"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
@@ -2547,6 +2622,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.end_cap"
                 | "frame.rotate_member"
                 | "frame.member"
+                | "frame.plate"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -2689,6 +2765,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
+    if let FeatureKind::FramePlate { plane, .. } = &old.kind
+        && let Some(anchor) = solidcraft_doc::face_anchor::plane_face_anchor(plane)
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     trial.active_sketch = None;
     trial.sketching_view = None;
     trial.selection = s.selection.clone();
@@ -2731,10 +2812,26 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         *profiles = picked.clone();
     }
     // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    // An edit that says otherwise (the dialog's choice) changes it. An edit that makes a Join
+    // To Object out of an extrude that had none takes the new rule (#19671): what the old
+    // extent had to say about the body it runs to was about nothing.
     if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
         && after.to.is_some()
+        && before.to.is_some()
+        && params.get("to_body_apart").is_none()
     {
         after.to_body_apart = before.to_body_apart;
+    }
+    // A Pattern on Path saved before the rotation-minimising frame keeps its copies where they
+    // were through an edit that leaves its orientation as it was; choosing the orientation again
+    // gives the frame every pattern made now has.
+    if let (
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: was, follow_frame: before, .. }, .. },
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: is, follow_frame: after, .. }, .. },
+    ) = (&old.kind, &mut new.kind)
+        && was == is
+    {
+        *after = *before;
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);

@@ -613,6 +613,15 @@ fn local_operation_on(
             if old_normal.dot(new_normal) < 0.0 {
                 new.reverse(k, SurfParamType::U)?;
             }
+            // (not upstream, #21188) a cone moved toward its axis keeps the face's
+            // parameters at S + d n, and its apex can pass the image of an edge: that edge
+            // then lifts onto no surface and is lost. The same cone is the face's own moved
+            // along its axis and run on to its apex, on which the face's loops lift whole
+            if let Some(reanchored) =
+                moved_cone_past_its_apex(k, old, &new, &b.face(face)?.uv_domain, b.tolerance())?
+            {
+                new = reanchored;
+            }
             // (not upstream) a face that meets itself across seams keeps its UV loops on
             // the surface it takes (turned as it will be): each seam's two lines must lift
             // to one curve there, or it has no edge: refused before anything is changed
@@ -1766,6 +1775,100 @@ fn net_moved_translation(
         .iter()
         .all(|c| c.is_finite())
         .then_some(translation)
+}
+
+/// (not upstream, #21188) The moved cone `new` of a face on the cone `own`, as `own` moved
+/// along its axis onto it and run on to its apex, where the face's UV domain runs past `new`'s
+/// apex.
+///
+/// A cone's offset keeps the face's parameters, at `S + d n`, and is truncated at its new apex
+/// ([`Cone::create_offset_surface`]). Moved toward its axis by more than an edge's radius over
+/// the cosine of the semi-angle, that edge's image `r - d cos θ` has passed the axis: it lifts
+/// onto no surface past the apex, and the moved face is built without it, its loop open (a
+/// countersink's cone between a hole r 2 and a well r 4, moved 2.9 off the material: the
+/// hole's circle at `2 - 2.9 cos 45° < 0`). The same cone is `own` moved along its axis by the
+/// distance between their apexes ([`Cone::moved_along_axis_to_apex`], built as the offset's
+/// truncation is, its apex exactly on the axis). There each of the face's parameters keeps the
+/// radius it has on `own`: the face's whole domain lies on the cone and each edge lifts onto
+/// the circle of its own radius (for a neighbour on the same axis, the circle the neighbour
+/// meets the cone in). The edges are rebuilt from there where the new surfaces meet, as every
+/// moved face's are.
+///
+/// `None`, and the cone used as it came, unless both are cones with apexes (not cylinders)
+/// without a procedural definition, the face's domain is inside `own`'s and not inside
+/// `new`'s, and the moved cone holds the face's domain and, at nine points of it, is `own`
+/// moved along its axis and lies on `new`'s own nappe, within `tolerance`.
+///
+/// [`Cone::create_offset_surface`]: crate::surface::cone::Cone::create_offset_surface
+/// [`Cone::moved_along_axis_to_apex`]: crate::surface::cone::Cone::moved_along_axis_to_apex
+///
+/// # Errors
+///
+/// Those of the apexes, the construction and the evaluations.
+fn moved_cone_past_its_apex(
+    k: &Kernel,
+    own: &Surface,
+    new: &Surface,
+    face_domain: &crate::geom::extent2d::Extent2d,
+    tolerance: f64,
+) -> Result<Option<Surface>> {
+    use crate::geom::vector2d::Point2;
+
+    if own.procedural_definition().is_some() || new.procedural_definition().is_some() {
+        return Ok(None);
+    }
+    let (SurfaceKind::Cone(own_cone), SurfaceKind::Cone(new_cone)) = (own.kind(), new.kind())
+    else {
+        return Ok(None);
+    };
+    if own_cone.cylinder
+        || new_cone.cylinder
+        || face_domain.is_contained_by(&new.natural_uv_domain_with_nurb(k)?, EFF_ZERO)
+        || !face_domain.is_contained_by(&own.natural_uv_domain_with_nurb(k)?, EFF_ZERO)
+    {
+        return Ok(None);
+    }
+    let (own_apex, new_apex) = (own_cone.apex(k)?, new_cone.apex(k)?);
+    if own_apex.is_cylinder || new_apex.is_cylinder {
+        return Ok(None);
+    }
+    let Some(implicit::Implicit::Cone {
+        origin,
+        axis,
+        radius,
+        tan_angle,
+    }) = AnalyticSupport::of(new).map(|label| label.implicit())
+    else {
+        return Ok(None);
+    };
+    // `own` moved along its own axis by the distance between the apexes
+    let own_axis = own_cone.rev.position.z_axis();
+    let shift = (new_apex.point - own_apex.point).dot(own_axis);
+    let Some(moved) = own_cone.moved_along_axis_to_apex(k, shift)? else {
+        return Ok(None);
+    };
+    let moved = Surface::from(moved);
+    if !face_domain.is_contained_by(&moved.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
+        return Ok(None);
+    }
+    // it is: at nine points of the face's domain, `own`'s point moved by the shift, on
+    // `new`'s own nappe (where its radius `r + t X . a` is positive)
+    let (u, v) = (face_domain.u_interval(), face_domain.v_interval());
+    for s in [0.0, 0.5, 1.0] {
+        for t in [0.0, 0.5, 1.0] {
+            let uv = Point2::new(u.evaluate(s), v.evaluate(t));
+            let p = moved.evaluate_point(k, uv)?;
+            let from = own.evaluate_point(k, uv)? + shift * own_axis;
+            let x = p - origin;
+            let along = x.dot(axis);
+            let r = radius + tan_angle * along;
+            let off = (x - along * axis).length() - r;
+            if !(p.distance(from) <= tolerance && r > tolerance && off.abs() <= tolerance) {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(Some(moved))
 }
 
 /// The face's own surface moved along its normal onto `given`'s plane, when `given` is a

@@ -14,29 +14,86 @@
 /// line, so changing one of its numbers still changes one line.
 const MAX_INLINE: usize = 16;
 
+use std::cell::Cell;
+use std::io::{self, Write};
+use std::ops::Range;
+
+/// Lay out a serialized design without reformatting values supplied as raw JSON.
+pub(crate) fn pretty_serialized(value: &impl serde::Serialize) -> serde_json::Result<String> {
+    struct Output<'a> {
+        bytes: Vec<u8>,
+        written: &'a Cell<usize>,
+    }
+
+    impl Write for Output<'_> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            self.written.set(self.bytes.len());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct Fragments<'a> {
+        written: &'a Cell<usize>,
+        spans: &'a mut Vec<Range<usize>>,
+    }
+
+    impl serde_json::ser::Formatter for Fragments<'_> {
+        fn write_raw_fragment<W: ?Sized + Write>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()> {
+            let start = self.written.get();
+            writer.write_all(fragment.as_bytes())?;
+            self.spans.push(start..self.written.get());
+            Ok(())
+        }
+    }
+
+    let written = Cell::new(0);
+    let mut spans = Vec::new();
+    let output = Output { bytes: Vec::new(), written: &written };
+    let mut serializer = serde_json::Serializer::with_formatter(output, Fragments { written: &written, spans: &mut spans });
+    value.serialize(&mut serializer)?;
+    let output = serializer.into_inner();
+    let compact = std::str::from_utf8(&output.bytes).map_err(|why| serde_json::Error::io(io::Error::other(why)))?;
+    Ok(layout(compact, usize::MAX, &spans).unwrap_or_default())
+}
+
 /// `compact`, serde_json's compact text of a value, laid out for reading and diffing. Text that is
 /// not compact JSON comes back laid out as far as it goes, never a panic.
 pub fn pretty(compact: &str) -> String {
-    layout(compact, usize::MAX).unwrap_or_default()
+    layout(compact, usize::MAX, &[]).unwrap_or_default()
 }
 
 /// [`pretty`], or `None` once the laid-out text would pass `budget` bytes. Each line is indented two
 /// spaces a level, so text from a file can lay out to many times its size. A caller laying out text
 /// it did not write gives a budget.
 pub fn pretty_within(compact: &str, budget: usize) -> Option<String> {
-    layout(compact, budget)
+    layout(compact, budget, &[])
 }
 
-fn layout(compact: &str, budget: usize) -> Option<String> {
+fn layout(compact: &str, budget: usize, raw: &[Range<usize>]) -> Option<String> {
     let b = compact.as_bytes();
     let mut out = String::with_capacity(compact.len() + compact.len() / 2);
     let mut depth = 0usize;
     let mut i = 0;
+    let mut raw = raw.iter().peekable();
     while let Some(&c) = b.get(i) {
         // One step adds at most a string of the input or one indented line, so this stops soon
         // after the budget is passed.
         if out.len() > budget {
             return None;
+        }
+        while raw.peek().is_some_and(|span| span.end <= i) {
+            raw.next();
+        }
+        if let Some(span) = raw.peek().filter(|span| span.start == i) {
+            out.push_str(compact.get(span.start..span.end).unwrap_or_default());
+            i = span.end;
+            raw.next();
+            continue;
         }
         match c {
             b'"' => {
