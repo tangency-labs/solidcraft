@@ -33,7 +33,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
     "offset_analytic_mate_edges",
-    "new_edge_vertex_tolerance_covers_gap",
     "analytic_copy_keeps_parameterization",
     "offset_extension_from_base",
     "fillet_cleanup_keeps_target_faces",

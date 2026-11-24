@@ -39,7 +39,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
