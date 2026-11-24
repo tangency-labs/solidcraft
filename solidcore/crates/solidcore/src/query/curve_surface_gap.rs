@@ -1598,14 +1598,15 @@ fn bisection_residual(k: &Kernel, surface: &Surface, net: &NetSurface) -> Result
         (Some(_), SurfaceKind::OffsetSurface(off)) => {
             let base_surface = off.base_surface();
             if matches!(base_surface.kind(), SurfaceKind::Cone(_)) {
-                // An offset of a cone evaluates its base by its net at a nonzero distance
-                // (`evaluate_simple`), by the cone's formula at a zero one (its point the
-                // base's, its normals unused).
-                return if off.offset_distance() == 0.0 {
-                    net_to_surface_bound(k, base_surface, &net.net)
-                } else {
-                    Ok(Some(0.0))
-                };
+                // (#20643 review) An offset of a cone evaluates its point (`point_with`) as the
+                // cone's point plus the distance along the normal of the net's first
+                // partials, and the cone's point is its formula's (`Cone::evaluate_rows`),
+                // the partials its net's: the offset is off the net's offset by exactly the
+                // base's distance off its net, at any distance. (The step to the formula's
+                // normal where `|S_u × S_v|² < EFF_ZERO_SQ` is never reached on a box
+                // [`NetSurface::partials`] bounds: it refuses one whose cross product may be
+                // under `1e3 EFF_ZERO`.)
+                return net_to_surface_bound(k, base_surface, &net.net);
             }
             match net_to_surface_bound(k, base_surface, &net.net)? {
                 Some(base) => (base == 0.0).then_some(0.0),

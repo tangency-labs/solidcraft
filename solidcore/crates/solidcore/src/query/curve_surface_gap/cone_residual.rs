@@ -1384,4 +1384,44 @@ mod tests {
         assert!(gap > 1.0e-8, "the snap tears {gap:e}");
         assert!(gap <= b, "{gap:e} over the bound {b:e}");
     }
+
+    /// An offset of a cone evaluates the cone's formula point plus the distance along its
+    /// net's normal (#20643 review): at a nonzero distance it is off the net's offset by the
+    /// base's tear, which the bisections' residual counts (it was `0`).
+    #[test]
+    fn an_offset_cones_seam_snap_is_inside_its_residual() {
+        use super::super::bisection_residual;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let mut c = Cone::new_bounded(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            12.5,
+            12.5,
+            0.0,
+            360.0,
+            3.0,
+            false,
+            false,
+            true,
+        );
+        c.make_nurb(&k).unwrap();
+        let base = Surface::from(c.clone());
+        let d = c.rev.base.natural_uv_domain();
+        let v = 0.5 * (d.v_interval().min() + d.v_interval().max());
+        let uv = Point2::new(d.u_interval().max() - 5.0e-8, v);
+        let tear = (base.evaluate_point(&k, uv).unwrap() - c.rev.base.evaluate_point(uv).unwrap())
+            .length();
+        assert!(tear > 1.0e-8, "the snap tears {tear:e}");
+        let s = Surface::from(OffsetSurface::new(&k, 1.5, base.clone(), true, 0).unwrap());
+        // (the offset's point is the base's plus the distance along the net's normal)
+        let step =
+            (s.evaluate_point(&k, uv).unwrap() - base.evaluate_point(&k, uv).unwrap()).length();
+        assert!((step - 1.5).abs() < 1.0e-12, "the offset steps {step}");
+        let net = NetSurface::of_exact(&k, &s, &[]).unwrap().unwrap();
+        assert!(net.offset.is_some());
+        let r = bisection_residual(&k, &s, &net).unwrap().unwrap();
+        assert!(tear <= r, "{tear:e} over the residual {r:e}");
+    }
 }
