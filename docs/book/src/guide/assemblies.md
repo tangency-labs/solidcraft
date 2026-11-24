@@ -538,10 +538,15 @@ which. So does a link whose part file changed since the assembly read it, and a 
 older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
 part that is a plain `.json` design is evaluated the first time it is read this way, and that
 evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
-them), so later opens read an unchanged part without building it again. The
-mesh bodies of a linked part stay in the assembly's file, and so do the bodies of a linked STEP
-file. There is no button for this yet: run
-the command from a script, the command line or an agent.
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in

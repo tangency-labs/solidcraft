@@ -529,6 +529,7 @@ pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
 pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_with_rails;
+pub use surfaces::loft_sheet_with_rails_legacy_sides;
 pub use surfaces::patch_edges;
 pub use surfaces::patch_region;
 pub use surfaces::remove_faces;

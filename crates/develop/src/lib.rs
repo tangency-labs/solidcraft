@@ -20,6 +20,12 @@
 #![forbid(unsafe_code)]
 
 pub use solidcore_record::develop::Anchor;
+pub use solidcore_record::develop::Bead;
+pub use solidcore_record::develop::BeadFace;
+pub use solidcore_record::develop::BeadForm;
+pub use solidcore_record::develop::BeadOutline;
+pub use solidcore_record::develop::BeadPart;
+pub use solidcore_record::develop::BeadSection;
 pub use solidcore_record::develop::Bend;
 pub use solidcore_record::develop::Corner;
 pub use solidcore_record::develop::CornerRelief;
@@ -28,6 +34,9 @@ pub use solidcore_record::develop::Datum;
 pub use solidcore_record::develop::Development;
 pub use solidcore_record::develop::EdgeFrom;
 pub use solidcore_record::develop::FlatPanel;
+pub use solidcore_record::develop::FormEdge;
+pub use solidcore_record::develop::FormFace;
+pub use solidcore_record::develop::FormSurface;
 pub use solidcore_record::develop::Joint;
 pub use solidcore_record::develop::JointKind;
 pub use solidcore_record::develop::Lap;
@@ -43,11 +52,18 @@ pub use solidcore_record::develop::Tail;
 pub use solidcore_record::develop::Trim;
 pub use solidcore_record::develop::Zone;
 pub use solidcore_record::develop::ZoneEnds;
+pub use solidcraft_kernel::services::develop::BeadAgainst;
+pub use solidcraft_kernel::services::develop::BeadRefusal;
 pub use solidcraft_kernel::services::develop::Bent;
 pub use solidcraft_kernel::services::develop::Fold;
+pub use solidcraft_kernel::services::develop::MIN_BEAD_RADIUS;
+pub use solidcraft_kernel::services::develop::bead_against;
+pub use solidcraft_kernel::services::develop::bead_flank_angle;
+pub use solidcraft_kernel::services::develop::bead_footprint;
 pub use solidcraft_kernel::services::develop::crossings;
 pub use solidcraft_kernel::services::develop::curve_through;
 pub use solidcraft_kernel::services::develop::hermite;
+pub use solidcraft_kernel::services::develop::segment_in_region;
 pub use solidcraft_kernel::services::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.

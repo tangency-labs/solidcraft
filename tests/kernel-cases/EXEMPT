@@ -386,6 +386,7 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
