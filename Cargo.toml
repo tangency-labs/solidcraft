@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.45.0"
+version = "0.48.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -32,7 +32,9 @@ solidcraft-doc = { path = "crates/doc" }
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
-solidcraft-ui-egui = { path = "crates/ui-egui" }
+# Without its default features, so an app built with `--no-default-features` leaves out what
+# they bring (usage statistics); each app turns them on in its own defaults.
+solidcraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
 # The app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values
 solidcraft-panel-layout = { path = "crates/panel-layout" }
@@ -124,16 +126,17 @@ gethostname = "1"
 # FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
-# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
+# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through;
+# `iges` writes IGES when "Export STEP and IGES with cadmpeg" is on (no IGES import route).
 cadmpeg-core = "=0.6.12"
 cadmpeg-ir = "=0.6.12"
-cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "rhino", "step", "usd"] }
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["signal", "user"] }
 
 # images
 image = { version = "0.25", default-features = false, features = ["png", "hdr"] }
@@ -211,6 +214,14 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
+# Local performance work: release without its thin LTO, incremental. A rebuild after an edit
+# drops from 1.5-2 minutes to 3-10 seconds (the thin LTO link of the app was most of it), for
+# about 4-7% more CPU time when running. Measure with it while iterating, and take the final numbers with
+# --release. See docs/perf.md.
+[profile.profiling]
+inherits = "release"
+lto = false
+incremental = true
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]

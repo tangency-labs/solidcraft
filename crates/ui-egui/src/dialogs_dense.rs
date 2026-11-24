@@ -45,10 +45,11 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Sweep { .. } => Some("solid.sweep"),
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
+        Kind::MeshReduce { .. } => Some("mesh.reduce"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
-        Kind::Split => Some("solid.split_body"),
+        Kind::Split { .. } => Some("solid.split_body"),
         Kind::DeleteFaces => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
@@ -88,6 +89,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
+        Kind::FramePlate(_) => Some("frame.plate"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -299,6 +301,12 @@ fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>
 /// The most instances a solid pattern makes in one direction (the document's own limit).
 const MAX_PATTERN_INSTANCES: i64 = 1000;
 
+/// A length row that refuses zero and negative values when `positive` (a spacing that sets the
+/// count with an extent), else any length (a spacing may run backwards).
+fn expr_row_positive_if(ui: &mut egui::Ui, label: &str, value: &mut String, positive: bool) -> bool {
+    if positive { expr_row_positive(ui, label, value) } else { expr_row(ui, label, value) }
+}
+
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
 fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
@@ -316,23 +324,61 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// The distance types a rectangular pattern direction offers, in the order of
+/// [`PatternDistance`]'s words.
+const PATTERN_DISTANCES: [(PatternDistance, &str); 3] = [
+    (PatternDistance::CountSpacing, "ui.pattern_count_spacing"),
+    (PatternDistance::CountExtent, "ui.pattern_count_extent"),
+    (PatternDistance::SpacingExtent, "ui.pattern_spacing_extent"),
+];
+
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
-/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
-/// directions, so a direction's settings sit together (#9634).
+/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Copy at the
+/// end) and (for features) Alignment, in the same order for both directions, so a direction's
+/// settings sit together (#9634, #8523).
 fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
         ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
     } else {
         ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
     };
+    let (type_label, extent_label, end_label, type_key, end_key) = if index == 0 {
+        ("ui.pattern_distance_type", "ui.pattern_extent", "ui.pattern_copy_at_end", "distance1", "copy_at_end1")
+    } else {
+        ("ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2", "distance2", "copy_at_end2")
+    };
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
-        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
-            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
-            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
-            enter |= expr_row(ui, spacing_label, spacing);
+        let distance = pattern_distance(&d.extra, index);
+        let mut chosen = PATTERN_DISTANCES.iter().position(|(kind, _)| *kind == distance).unwrap_or(0);
+        let labels = PATTERN_DISTANCES.map(|(_, label)| label);
+        choice_row(ui, type_label, type_key, &mut chosen, &labels);
+        let distance = PATTERN_DISTANCES.get(chosen).map(|(kind, _)| *kind).unwrap_or_default();
+        if distance.is_default() {
+            d.extra.remove(type_key);
+        } else {
+            d.extra.insert(type_key.into(), json!(distance.as_str()));
+        }
+        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } = &mut d.kind {
+            let (count, spacing, extent) = if index == 0 { (count, spacing, extent) } else { (count2, spacing2, extent2) };
+            if distance.uses_count() {
+                enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            }
+            if distance.uses_spacing() {
+                enter |= expr_row_positive_if(ui, spacing_label, spacing, distance.uses_extent());
+            }
+            if distance.uses_extent() {
+                enter |= expr_row_positive(ui, extent_label, extent);
+            }
+        }
+        if distance == PatternDistance::SpacingExtent {
+            form_row(ui, end_label, |ui| {
+                extra_check(ui, &mut d.extra, end_key);
+            });
+        } else {
+            d.extra.remove(end_key);
         }
         if features {
             feature_pattern_alignment_row(ui, &mut d.extra, index);
@@ -428,8 +474,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::Frame(_)) {
+        // Corner Overrides shows among Frame Member's own rows, under the corner settings.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::command_sketch::offer_row(app, d, ui);
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
@@ -446,12 +496,20 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
         Kind::Sketch => {
+            let edge_on = edge_on_origin_planes(&app.cam);
+            if !edge_on.is_empty() {
+                let text = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", &edge_on.join(", "))]);
+                ui_kit::text(ui, &text, ui_kit::Text::Hint("edge_on"));
+            }
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(
                     ui,
                     tr("This face cannot provide a durable attachment. Choose another face or explicitly use a fixed plane."),
                     ui_kit::Text::Hint("attachment"),
                 );
+                // What the button does, said plainly: the sketch is made on the face's plane as it is
+                // now, and does not follow later edits of the face (#16523).
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.sketch_use_fixed_plane_explained"), ui_kit::Text::Hint("attachment"));
                 if ui_kit::button(ui, tr("Use fixed plane"), ui_kit::Button::Normal).clicked() {
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
@@ -499,6 +557,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             to_offset,
             start,
             offset_start,
+            symmetric_offset,
             all,
             thin,
             wall,
@@ -532,9 +591,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
             let mut ext = cur;
             form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+                // The dropdown says when the user picked an option, the one shown included: a
+                // pick of To Object takes the pick, so the next click in the view picks the face
+                // to run to (#19671).
+                let picked = ui_kit::dropdown_picked(ui, "ex_ext", &mut ext, &["Distance", "To Object", "All"]);
                 *all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+                if picked
+                    && ext == 1
+                    && let Some(at) = d.inputs.iter().position(|i| i.label == TO_OBJECT)
+                {
+                    d.active = at;
+                }
             });
             if ext == 0 {
                 enter |= expr_row(ui, "Distance", distance);
@@ -606,6 +674,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
                 if st != 0 {
                     enter |= expr_row(ui, "Offset", start);
+                    if *direction == 2 && st == 1 {
+                        form_row(ui, "Symmetric Offset", |ui| check(ui, symmetric_offset));
+                    }
                 }
                 if *direction < 2 {
                     form_row(ui, "Taper Angle", |ui| {
@@ -623,6 +694,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
             enter |= expr_row_positive(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            // A chamfer of two distances: the row the keyboard is in is the distance its arrow and
+            // the canvas box follow.
+            let mut editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 0usize);
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -642,6 +716,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if *chamfer && *ctype == 1 {
                 enter |= expr_row_positive(ui, "Distance 2", distance2);
+                editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 1usize).or(editing);
+            }
+            if let Some(k) = editing.filter(|_| *chamfer && *ctype == 1) {
+                crate::canvas::note_chamfer_editing(&mut d.extra, k);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
@@ -729,7 +807,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -770,9 +848,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
             if opts.clearance {
                 enter |= crate::dialogs_hole::clearance_rows(ui, opts);
-                // A counterbore for a cap screw: its head sets the counterbore (#12321).
-                if *kind == 1 {
-                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                // A counterbore for a cap screw, a countersink for a countersunk one: the screw's
+                // head sets the recess (#12321, #17728).
+                match *kind {
+                    1 => crate::dialogs_hole::head_row(ui, opts, 1, cb_diameter, cb_depth),
+                    2 => crate::dialogs_hole::head_row(ui, opts, 2, cs_diameter, cs_angle),
+                    _ => {}
                 }
             }
             if opts.tapped {
@@ -992,6 +1073,20 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
+        // A face tool cuts with that face extended, with the picked faces as they are, or with
+        // the whole surface body (#9305). The choice shows once a face is the tool.
+        Kind::Split { sheet } => {
+            let face_tool = d.inputs.get(1).and_then(|inp| inp.items.first()).is_some_and(|sel| matches!(sel, Sel::Face { .. }));
+            if face_tool {
+                let options = SPLIT_SHEETS.map(solidcraft_ui_text::tr);
+                choice_row(ui, solidcraft_ui_text::tr("ui.split_body.cut_with"), "split_sheet", sheet, &options);
+            }
+            let more = face_tool && *sheet == 1;
+            set_object_accepting(&mut d.inputs, &mut d.active, SPLIT_TOOL_FACES, FACES, more);
+            if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_FACES) {
+                inp.multi = true;
+            }
+        }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
             if d.inputs.get(1).is_some_and(|inp| !inp.items.is_empty()) {
@@ -1004,16 +1099,20 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::MeshConvert { tolerance } => {
             form_row(ui, "Tolerance", |ui| enter |= field(ui, tolerance));
         }
+        Kind::MeshReduce { mode, count, percentage } => {
+            form_row(ui, "Target", |ui| {
+                ui_kit::segmented(ui, mode, &["Retained percentage", "Triangle count"], Default::default());
+            });
+            if *mode == 0 {
+                form_row(ui, "Retained percentage", |ui| enter |= field(ui, percentage));
+            } else {
+                form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
+            }
+        }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split
-        | Kind::ReplaceFace
-        | Kind::Remove
-        | Kind::Midplane
-        | Kind::ChatContext
-        | Kind::PluginPick { .. }
-        | Kind::Construct { t: None, .. } => {}
+        Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1087,9 +1186,33 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             choice_row(ui, "Operation", "bf_op", operation, &OP_LABELS);
             extra_options(ui, "boundary_options", &mut d.extra, &[("Remove Tools", "remove_tools")]);
         }
-        Kind::PathPattern { count, spacing } => {
+        Kind::PathPattern { count, spacing, start, fraction } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, if d.extra.contains_key("distance") { "Distance" } else { "Spacing" }, spacing);
+            // Where along the path the original sits: a distance, or a fraction of the path's
+            // length that keeps its place as the path changes. Empty: the path's start.
+            form_row(ui, "pattern.start_point", |ui| {
+                let mut i = usize::from(*fraction);
+                if ui_kit::segmented(ui, &mut i, &["pattern.start_distance", "pattern.start_fraction"], Default::default()) && (i == 1) != *fraction {
+                    *fraction = i == 1;
+                    start.clear();
+                }
+            });
+            // Both labels about as wide as the dialog's others: switching keeps the label column
+            // where it is, so the rows don't shift and Start point's choice stays two buttons.
+            enter |= hint_row(ui, if *fraction { "  Position" } else { "  Distance" }, start, "0");
+            // Identical: copies keep the original's orientation; Path direction: they turn with
+            // the path, keeping the original's relation to it.
+            form_row(ui, "Orientation", |ui| {
+                extra_choice(
+                    ui,
+                    &mut d.extra,
+                    "pp_orientation",
+                    "orientation",
+                    &[("pattern.orientation_identical", "identical"), ("pattern.orientation_path", "path")],
+                );
+            });
+            extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
         Kind::Pipe { diameter, wall, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
@@ -1147,6 +1270,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
+            crate::dialogs_move::kept_axis_note(ui, &d.inputs, &d.extra);
             if shared {
                 ui_kit::text(
                     ui,
@@ -1222,9 +1346,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
-        Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
+        Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
+        Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch, add, edit } => {
@@ -1319,10 +1444,51 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     }
 }
 
+/// The origin planes the view sees edge-on, as lines with nothing to click (#17606): in a top
+/// view XZ and YZ, in a front view XY and YZ. Create Sketch then says where else to pick them.
+pub(crate) fn edge_on_origin_planes(cam: &solidcraft_viewport::Camera) -> Vec<&'static str> {
+    let back = cam.back();
+    [("XY", back.z), ("XZ", back.y), ("YZ", back.x)].into_iter().filter(|(_, along_normal)| along_normal.abs() < 1e-2).map(|(name, _)| name).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scenario::{self, Harness};
+
+    /// #17606: Create Sketch says how to pick a plane the view shows edge-on, and only then.
+    #[test]
+    fn create_sketch_hints_at_planes_seen_edge_on_only_when_there_are_some() {
+        use solidcraft_viewport::StandardView;
+        let mut cam = solidcraft_viewport::Camera::default();
+        assert!(edge_on_origin_planes(&cam).is_empty(), "the iso view sees every origin plane");
+        for (view, planes) in
+            [(StandardView::Top, vec!["XZ", "YZ"]), (StandardView::Front, vec!["XY", "YZ"]), (StandardView::Right, vec!["XY", "XZ"])]
+        {
+            cam.set_view(view);
+            assert_eq!(edge_on_origin_planes(&cam), planes, "{view:?}");
+        }
+        cam.yaw += 0.3;
+        cam.pitch = 0.4;
+        assert!(edge_on_origin_planes(&cam).is_empty(), "a turned view sees every plane again");
+
+        fn has_text(shape: &egui::Shape, text: &str) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text() == text,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_text(s, text)),
+                _ => false,
+            }
+        }
+        let mut h = Harness::new();
+        let hint = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", "XZ, YZ")]);
+        assert!(hint.starts_with("XZ, YZ are seen edge-on"), "{hint}");
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.frames(2);
+        assert!(!h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "no hint while every plane can be clicked");
+        h.app.cam.set_view(StandardView::Top);
+        h.frames(2);
+        assert!(h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "the panel says how to pick XZ and YZ: {hint}");
+    }
 
     const COMMANDS: [&str; 6] =
         ["solid.extrude", "solid.fillet", "solid.chamfer", "solid.hole", "solid.pattern.rectangular", "solid.pattern.circular"];
@@ -1462,6 +1628,61 @@ mod tests {
         h.step(&json!({"start":"solid.fillet"})).unwrap();
         h.frames(4);
         h
+    }
+
+    /// #10863: a round's joins are smooth and Fillet refuses them, so picking the top face of a
+    /// plate whose outer top edges are rounded rounds the hole's rim alone.
+    #[test]
+    fn a_face_pick_leaves_out_the_edges_a_round_already_meets() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        sample(&mut h);
+        h.app.run("solid.hole", json!({"position":[5,5,5],"diameter":2})).unwrap();
+        h.app.run("solid.fillet", json!({"edges":[[5,0,5],[5,10,5],[0,5,5],[10,5,5]],"radius":1})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(2.0, 2.0, 5.0)).unwrap();
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let p = parameters(&h);
+        let edges = p["edges"].as_array().unwrap();
+        assert!(!edges.is_empty(), "{p}");
+        for e in edges {
+            let (x, y) = (e[0].as_f64().unwrap(), e[1].as_f64().unwrap());
+            assert!(((x - 5.0).hypot(y - 5.0) - 1.0).abs() < 1e-3, "an edge off the hole's rim: {e}");
+        }
+        // The edges the dialog's corners and bodies are read from leave them out too.
+        let items = h.app.dialog.as_ref().unwrap().items();
+        let ids = super::super::fillet_edge_ids(&h.app.session, &items);
+        let world = crate::open_meshing::session_world(&h.app.session);
+        assert_eq!(ids.len(), edges.len(), "{ids:?}");
+        for (body, i) in &ids {
+            let mid = polyline_mid(&world.body(body).unwrap().mesh().edges[*i]);
+            assert!(((mid.x - 5.0).hypot(mid.y - 5.0) - 1.0).abs() < 1e-3, "an edge off the hole's rim: {mid:?}");
+        }
+        h.app.run("solid.fillet", p).unwrap();
+    }
+
+    /// A 1° crease is not a smooth join: Fillet rounds it, so a face pick keeps it.
+    #[test]
+    fn a_face_pick_keeps_a_one_degree_crease() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":1000}));
+        let rise = 10.0 * 1f64.to_radians().tan();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Crease"})).unwrap();
+        let outline = [[0.0, 0.0], [20.0, 0.0], [20.0, 5.0 + rise], [10.0, 5.0], [0.0, 5.0]];
+        for (i, a) in outline.iter().enumerate() {
+            h.app.run("sketch.line", json!({"points":[a, outline[(i + 1) % outline.len()]]})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":"5 mm"})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(5.0, 5.0, 2.5)).unwrap();
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let p = parameters(&h);
+        let edges = p["edges"].as_array().unwrap();
+        let crease = |e: &Value| (e[0].as_f64().unwrap() - 10.0).abs() < 1e-6 && (e[1].as_f64().unwrap() - 5.0).abs() < 1e-6;
+        assert!(edges.iter().any(crease), "the 1° crease at x = 10 left out: {p}");
     }
 
     fn parameters(h: &Harness) -> Value {

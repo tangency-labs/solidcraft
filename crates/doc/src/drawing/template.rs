@@ -66,9 +66,14 @@ pub fn default_for(assembly: bool) -> &'static str {
     if assembly { "iso-a2-assembly" } else { "iso-a3-part" }
 }
 
-/// Whether `doc`'s drawings are an assembly's, for the template they start from: it places components.
+/// Whether `doc`'s drawings are an assembly's: it places two or more components, or one beside a
+/// body of its own. A STEP file of one part opens as one component (#19753).
 pub fn is_assembly(doc: &Document) -> bool {
-    !doc.occurrences.is_empty()
+    match doc.occurrences.len() {
+        0 => false,
+        1 => doc.features.iter().any(|f| f.component == 0 && !matches!(f.kind, crate::FeatureKind::Sketch { .. }) && !f.kind.is_construction()),
+        _ => true,
+    }
 }
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template

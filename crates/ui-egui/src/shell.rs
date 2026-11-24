@@ -11,6 +11,10 @@ pub(crate) struct State {
     /// Per-window Render view state; neither preferences nor document data.
     pub render_focus: bool,
     pub cards: Vec<Rect>,
+    /// Pop-out ribbon pixels shield input but never take space from the views or controls.
+    pub ribbon_overlay: Option<Rect>,
+    /// The pop-out bar, grip and caption controls also shield input independently of layout.
+    pub top_bar_overlays: [Option<Rect>; 3],
     /// Actual workspace overlays above the panel host.
     pub workspace_panels: std::collections::BTreeMap<&'static str, Rect>,
     pub browser: Option<Rect>,
@@ -93,6 +97,10 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
     rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, rect)| *rect));
     rects.extend(crate::drawing_workspace::covered_rects(app));
     rects.extend(app.shell.cards.iter().copied());
+    if !fitting {
+        rects.extend(app.shell.ribbon_overlay);
+        rects.extend(app.shell.top_bar_overlays.into_iter().flatten());
+    }
     rects.extend(app.viewport.palette_rect);
     // Persistent feature windows come from the host's window ledger. This cache also
     // receives transient warnings, so include it only when checking input shields.

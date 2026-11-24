@@ -41,7 +41,7 @@ const INSPECT: &str = "drawing.table.inspect";
 const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Table", crate::checked!("drawing.table.add", add))
+    CommandSpec::new(ADD, "Add Table", crate::checked!("drawing.table.add", add)).begins_edit()
         .icon("new")
         .in_drawing()
         .doc_only()
@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              list saves the numbers its view shows, if it has none saved, so what is printed doesn't move. One undo step; no \
              model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Table", crate::checked!("drawing.table.edit", edit))
+    CommandSpec::new(EDIT, "Edit Table", crate::checked!("drawing.table.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
         .doc_only()

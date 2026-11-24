@@ -2084,16 +2084,14 @@ mod tests {
         // MakeRailEdgeuse (blend.fillet_geom_p5) needs the pseudo B-rep's region and
         // shell for its new edge use, which this bare FilletBrep lacks
         // (with topology.brep_p3 ported, this is a null pointer, not a deferral)
-        // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
+        // a defect with its reason (#15034) that keeps the bare `Upstream`'s status (#13790)
         assert_eq!(
-            (
-                e.operation(),
-                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
-                code(&e)
-            ),
+            (e.operation(), e.blend_failure(), code(&e)),
             (
                 "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-                true,
+                Some(&BlendFailure::Defect {
+                    why: crate::blend::fillet_geom::p5::SOLVER_NO_EU
+                }),
                 Some(SM_ERR_NULL_POINTER)
             ),
             "{e:?}"

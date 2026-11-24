@@ -28,7 +28,10 @@ pub struct JointOriginParam(pub Value);
 impl<'de> Deserialize<'de> for JointOriginParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            v @ (Value::String(_) | Value::Object(_)) => Ok(JointOriginParam(v)),
+            v @ (Value::String(_) | Value::Object(_)) => {
+                check_secondary_axis_request(&v).map_err(D::Error::custom)?;
+                Ok(JointOriginParam(v))
+            }
             _ => Err(D::Error::custom("must be a joint origin's name or an object")),
         }
     }
@@ -43,9 +46,80 @@ impl JsonSchema for JointOriginParam {
             "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
-                {"type": "object"}
+                {"type": "object", "allOf": [secondary_axis_origin_schema()]}
             ]
         })
+    }
+}
+
+fn alignment_reference_schema() -> Value {
+    let name = json!({"type":"string","minLength":1,"maxLength":512});
+    let id = json!({"type":"integer","minimum":1});
+    json!({"anyOf":[
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["edge"]},"name":name},"required":["type","name"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["cylinder"]},"name":name},"required":["type","name"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["circle_center"]},"name":name,"end":name},"required":["type","name","end"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["construction"]},"feature":id},"required":["type","feature"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["construction_plane"]},"feature":id},"required":["type","feature"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["sketch_line"]},"sketch":id,"curve":name},"required":["type","sketch","curve"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["origin_axis"]},"axis":{"enum":["X","Y","Z"]}},"required":["type","axis"]},
+        {"type":"object","additionalProperties":false,"properties":{"type":{"enum":["origin_plane"]},"plane":{"enum":["XY","XZ","YZ"]}},"required":["type","plane"]}
+    ]})
+}
+
+/// Optional secondary alignment: null clears, omission retains it during editing.
+#[derive(Clone, Debug, Serialize)]
+#[serde(transparent)]
+pub struct AlignmentArg(pub Value);
+
+impl AlignmentArg {
+    pub(crate) fn read(v: &Value) -> Result<Self, String> {
+        if v.is_null() {
+            return Ok(Self(Value::Null));
+        }
+        let m = v.as_object().ok_or("alignment must be an object or null")?;
+        if m.keys().any(|k| !matches!(k.as_str(), "face" | "reference" | "reverse" | "occurrence")) {
+            return Err("unknown alignment field".into());
+        }
+        if let Some(o) = m.get("occurrence") {
+            serde_json::from_value::<IdOrName>(o.clone()).map_err(|e| e.to_string())?;
+        }
+        let reverse = match m.get("reverse") {
+            None => false,
+            Some(Value::Bool(v)) => *v,
+            _ => return Err("alignment reverse must be a boolean".into()),
+        };
+        let x = match (m.get("face"), m.get("reference")) {
+            (Some(Value::String(face)), None) => solidcraft_doc::joints::XRef::Planar { planar_face: face.clone(), reverse },
+            (None, Some(r)) => {
+                solidcraft_doc::joints::XRef::Reference { reference: serde_json::from_value(r.clone()).map_err(|e| e.to_string())?, reverse }
+            }
+            _ => return Err("select one named face or typed alignment reference".into()),
+        };
+        if !x.is_finite() {
+            return Err("alignment identity is empty, invalid or out of range".into());
+        }
+        Ok(Self(v.clone()))
+    }
+}
+
+impl<'de> Deserialize<'de> for AlignmentArg {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Self::read(&Value::deserialize(d)?).map_err(D::Error::custom)
+    }
+}
+
+impl JsonSchema for AlignmentArg {
+    fn schema_name() -> Cow<'static, str> {
+        "SecondaryAlignment".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let occurrence = json!({"anyOf":[{"type":"integer","minimum":0},{"type":"string","minLength":1}]});
+        let name = json!({"type":"string","minLength":1,"maxLength":512});
+        json_schema!({"anyOf":[{"type":"null"},
+            {"type":"object","additionalProperties":false,"properties":{"face":name,"reverse":{"type":"boolean"},"occurrence":occurrence},"required":["face"]},
+            {"type":"object","additionalProperties":false,"properties":{"reference":alignment_reference_schema(),"reverse":{"type":"boolean"},"occurrence":occurrence},"required":["reference"]}
+        ]})
     }
 }
 
@@ -64,6 +138,12 @@ pub struct EditJointParams {
     /// Side b: a joint origin, as joint.create takes it. Default: b keeps its place.
     #[serde(default, deserialize_with = "present")]
     pub b: Option<JointOriginParam>,
+    /// Secondary reference on side a; null clears it, omission keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub a_alignment: Option<AlignmentArg>,
+    /// Secondary reference on side b; null clears it, omission keeps it.
+    #[serde(default, deserialize_with = "present")]
+    pub b_alignment: Option<AlignmentArg>,
     /// The joint's type, as joint.create takes it (rigid, revolute, slider, ...).
     #[serde(default, rename = "type", deserialize_with = "present")]
     pub kind: Option<String>,
@@ -73,10 +153,10 @@ pub struct EditJointParams {
     /// The distance from a's frame to b's along z: a length, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset: Option<LengthExpr>,
-    /// The lateral offset along a's frame x, in mm or a length expression evaluated once.
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset_x: Option<LengthExpr>,
-    /// The lateral offset along a's frame y, in mm or a length expression evaluated once.
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset_y: Option<LengthExpr>,
     /// The turn about that distance: an angle, or an expression the joint follows.
@@ -353,6 +433,7 @@ impl JointOriginArg {
         if v.is_string() {
             return Ok(JointOriginArg(v.clone()));
         }
+        check_secondary_axis_request(v)?;
         let named = ["face", "circle"].iter().any(|k| v.get(*k).and_then(Value::as_str).is_some());
         let picked = ["face", "circle", "edge", "point"].iter().any(|k| v.get(*k).and_then(params::vec3).is_some());
         // A plane or axis side, as the handler's plane_origin and axis_origin read them: a name
@@ -388,6 +469,7 @@ impl JsonSchema for JointOriginArg {
                 {"type": "string", "description": "The name of a joint origin."},
                 {
                     "type": "object",
+                    "allOf": [secondary_axis_origin_schema()],
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
                         "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
@@ -493,6 +575,12 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub b: Option<JointOriginArg>,
+    /// Optional persistent secondary reference on side a.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a_alignment: Option<AlignmentArg>,
+    /// Optional persistent secondary reference on side b.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub b_alignment: Option<AlignmentArg>,
     /// The joint's values to start at: one per coordinate (angles in degrees, distances in mm, or
     /// expressions the joint then follows). Default: 0 for each, or for a relation or a joint that
     /// closes a loop, where the parts are. Wins over `value`.
@@ -517,11 +605,11 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset: Option<JointValue>,
-    /// The lateral offset along a's frame x, in mm or an expression evaluated once. Default: 0.
+    /// The lateral offset along a's frame x, in mm or an expression the joint follows. Default: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset_x: Option<JointValue>,
-    /// The lateral offset along a's frame y, in mm or an expression evaluated once. Default: 0.
+    /// The lateral offset along a's frame y, in mm or an expression the joint follows. Default: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset_y: Option<JointValue>,
@@ -553,6 +641,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
         let kind = given(&m, "type", JointTypeParam::read)?;
         let a = given(&m, "a", JointOriginArg::read)?;
         let b = given(&m, "b", JointOriginArg::read)?;
+        let a_alignment = given(&m, "a_alignment", AlignmentArg::read)?;
+        let b_alignment = given(&m, "b_alignment", AlignmentArg::read)?;
         let offset = given(&m, "offset", JointValue::read)?;
         let offset_x = given(&m, "offset_x", JointValue::read)?;
         let offset_y = given(&m, "offset_y", JointValue::read)?;
@@ -565,6 +655,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
             kind,
             a,
             b,
+            a_alignment,
+            b_alignment,
             values,
             value,
             limits,
@@ -1033,6 +1125,12 @@ pub enum JointKindName {
 /// The expressions a joint's numbers follow, over the design's parameters.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct JointExpressions {
+    /// The lateral x offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    /// The lateral y offset's expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     /// The offset's expression.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,
@@ -1042,6 +1140,10 @@ pub struct JointExpressions {
     /// The expression of each value by index, `null` for a value that is a number.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The expressions of each value's limits by index, as `[minimum, maximum]`, `null` for an
+    /// end that is a number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 /// A joint origin's snap as saved, in the component's coordinates.
@@ -1914,6 +2016,43 @@ impl JsonSchema for JointKeyList {
     }
 }
 
+/// The values joints start from, as `joint.reach` reads `from`: `{joint, values}` items. The
+/// handler checks each item (its joint, and one finite value for each of the joint's coordinates).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachStarts(pub Vec<Value>);
+
+impl ReachStarts {
+    /// `from` as the handler takes it: a list of at most [`MAX_REACH_JOINTS`] items.
+    fn read(v: &Value) -> Result<Self, String> {
+        match v {
+            Value::Array(items) if items.len() <= MAX_REACH_JOINTS => Ok(ReachStarts(items.clone())),
+            _ => Err(format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}")),
+        }
+    }
+}
+
+impl JsonSchema for ReachStarts {
+    fn schema_name() -> Cow<'static, str> {
+        "ReachStarts".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let joint = generator.subschema_for::<JointKey>();
+        json_schema!({
+            "description": "Joints and the values each starts from, as joint.list gives them (degrees and mm), one value for each of the joint's coordinates.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "joint": joint,
+                    "values": {"type": "array", "items": {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9}}
+                },
+                "required": ["joint", "values"]
+            },
+            "maxItems": MAX_REACH_JOINTS
+        })
+    }
+}
+
 /// Two or more occurrences, by id or name, as `joint.rigid_group` reads them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OccurrenceList(pub Vec<OccurrenceKey>);
@@ -2030,6 +2169,42 @@ read_with!(CamProfileParam);
 /// A joint origin's turn about z: `x` of `joint.origin`.
 pub struct OriginX;
 
+fn secondary_axis_x_schema() -> Value {
+    json!({"anyOf":[
+        {"type":"object","additionalProperties":false,"properties":{"reference":alignment_reference_schema(),"reverse":{"type":"boolean"}},"required":["reference"]},
+        {"type":"object","additionalProperties":false,"properties":{"planar_face":{"type":"string","minLength":1,"maxLength":512},"reverse":{"type":"boolean"}},"required":["planar_face"]}
+    ]})
+}
+
+/// Only the reserved new X form adds restrictions; ignored legacy keys keep their meaning.
+fn secondary_axis_origin_schema() -> Value {
+    let point = json!({"anyOf": [
+        {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+        {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}, "required": ["x", "y", "z"]},
+        {"type": "string"}
+    ]});
+    json!({"anyOf": [
+        {"not": {"type": "object", "required": ["x"], "properties": {"x": {"type": "object", "anyOf":[{"required":["reference"]},{"required":["planar_face"]}]}}}},
+        {"allOf": [
+            {"properties": {"x": secondary_axis_x_schema()}},
+            {"anyOf": [
+                {"required": ["plane"]},
+                {"required": ["axis"], "not": {"anyOf": [{"required": ["edge"]}, {"required": ["point"]}]}},
+                {"required": ["face"], "properties": {"face": point}},
+                {"required": ["circle"], "properties": {"circle": point}}
+            ]}
+        ]}
+    ]})
+}
+
+fn check_secondary_axis_request(v: &Value) -> Result<(), String> {
+    if v.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
+        let m = v.as_object().ok_or("a secondary axis needs an origin object")?;
+        MakeJointOriginParams::check(m)?;
+    }
+    Ok(())
+}
+
 impl JsonSchema for OriginX {
     fn schema_name() -> Cow<'static, str> {
         "OriginX".into()
@@ -2038,11 +2213,12 @@ impl JsonSchema for OriginX {
         let direction = generator.subschema_for::<WorldDirection>();
         let point = generator.subschema_for::<WorldPoint>();
         json_schema!({
-            "description": "A direction [x, y, z] in world coordinates (for a point origin also {x, y, z}), a face's name, or {face: a point on a face of the origin's component, or its name}: a direction, the way to another hole's axis or a plane's normal.",
+            "description": "A world direction, a face's name or {face}, or {reference: {type: construction, feature: id}} for a secondary construction axis on the origin's component. A two-point axis keeps the direction from its first point to its second. Point origins take only a direction.",
             "anyOf": [
                 direction,
                 {"type": "string", "minLength": 1},
-                {"type": "object", "properties": {"face": {"anyOf": [point, {"type": "string", "minLength": 1}]}}, "required": ["face"]}
+                {"type": "object", "not": {"anyOf":[{"required":["reference"]},{"required":["planar_face"]}]}, "properties": {"face": {"anyOf": [point, {"type": "string", "minLength": 1}]}}, "required": ["face"]},
+                secondary_axis_x_schema()
             ]
         })
     }
@@ -2207,6 +2383,7 @@ pub struct MakeJointOriginParams {
 }
 
 fn origin_required(schema: &mut Schema) {
+    schema.insert("allOf".into(), json!([secondary_axis_origin_schema()]));
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
@@ -2235,6 +2412,10 @@ fn origin_x(m: &Map<String, Value>) -> Result<(), String> {
     match m.get("x") {
         None | Some(Value::Null) => Ok(()),
         Some(v) if face_name(v) => Ok(()),
+        Some(Value::Object(o)) if o.contains_key("reference") || o.contains_key("planar_face") => {
+            let r: solidcraft_doc::joints::XRef = serde_json::from_value(Value::Object(o.clone())).map_err(|e| format!("`x`: {e}"))?;
+            if r.is_finite() { Ok(()) } else { Err("invalid secondary reference".into()) }
+        }
         Some(Value::Object(o)) => match o.get("face") {
             Some(f) if face_name(f) => Ok(()),
             Some(p) => params::vec3(p).map(|_| ()).ok_or_else(|| ORIGIN_X.to_string()),
@@ -2326,6 +2507,9 @@ impl MakeJointOriginParams {
             }
             _ => return Err("a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name".into()),
         };
+        if matches!(what, "edge" | "frame" | "point") && m.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
+            return Err("secondary axis alignment requires a face, circle, plane or axis origin".into());
+        }
         m.get("occurrence").map(OccurrenceKey::read).transpose()?;
         match what {
             "face" => {
@@ -2438,7 +2622,8 @@ pub struct RigidGroupResult {
 
 /// Move an occurrence's point to a place in the world by changing the values of the joints on its
 /// chain, from where they are to the nearest pose within their limits, through motion links and
-/// keeping closed loops closed as joint.drive does (contact sets are not checked). With `z` the
+/// keeping closed loops closed as joint.drive does. With contact sets on, the joints stop where
+/// two parts of a set would pass into each other (`stopped_by_contact`). With `z` the
 /// occurrence's axis is turned to point that way too. Reaches as far as it can: the reply says how
 /// close it got and what stopped it.
 #[derive(Debug, JsonSchema)]
@@ -2474,6 +2659,13 @@ pub struct ReachParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointKeyList")]
     pub joints: Option<JointKeyList>,
+    /// The values some joints start from instead of the design's (at most 1000): the pose the last
+    /// frame of a drag showed, so the one reach that applies the drag ends where the view showed
+    /// it. With contact sets on, refused unless every value is already the design's, as the move
+    /// to it would not be checked for contact. Default: every joint starts where the design has it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ReachStarts")]
+    pub from: Option<ReachStarts>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2500,7 +2692,8 @@ impl<'de> Deserialize<'de> for ReachParams {
         let z = reach_vector(&m, "z", true)?;
         let axis = reach_vector(&m, "axis", true)?;
         let joints = given(&m, "joints", JointKeyList::read)?;
-        Ok(ReachParams { occurrence, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        let from = given(&m, "from", ReachStarts::read)?;
+        Ok(ReachParams { occurrence, point, at, z, axis, joints, from, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
     }
 }
 
