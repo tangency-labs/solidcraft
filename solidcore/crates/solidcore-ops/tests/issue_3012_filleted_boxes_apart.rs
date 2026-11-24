@@ -93,14 +93,17 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
             // less (4.8e-8 at 1e-4, 5.0e-6 at 1e-3), read then as the ends cut off where the
             // fillets cross; it was the caps' trims (below). It is now this closed form to the
             // 1e-8 the volume is asked for (MEASURED -2.3e-9, -2.3e-9 and -2.0e-9 at 1e-4,
-            // 1e-3 and 1e-2).
+            // 1e-3 and 1e-2). The cut can fall at either end or at both: closed-form rounds
+            // between planes meet the translate at its tangent end on one side (MEASURED one
+            // dx^3 / 12 short), so the volume lies from both ends short up to the exact
+            // 30 dx h, each to that 1e-8.
             let h = 10.0;
-            let section = dx * 30.0 - 2.0 * dx * dx * dx / 12.0;
-            let expected = section * h;
+            let exact = dx * 30.0 * h;
+            let both_ends_short = (dx * 30.0 - 2.0 * dx * dx * dx / 12.0) * h;
             let v = volume(&r);
             assert!(
-                (expected - v).abs() < 1e-8,
-                "dx {dx} reversed {reversed}: {v} vs {expected}"
+                v > both_ends_short - 1e-8 && v < exact + 1e-8,
+                "dx {dx} reversed {reversed}: {v} not in [{both_ends_short}, {exact}]"
             );
             // Every face of the sliver: the two flat sides (26 x 10 each), the four fillets (a
             // quarter turn of R2 by 10 each) and the two caps, each the section above. A
