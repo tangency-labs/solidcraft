@@ -145,15 +145,12 @@ fn hole_stacks(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let flip = big > 0.0;
             let axis = [if flip { -h.axis.x } else { h.axis.x }, if flip { -h.axis.y } else { h.axis.y }, if flip { -h.axis.z } else { h.axis.z }];
-            let (p, t0) = if flip {
-                ([h.point.x + h.axis.x * h.t[1], h.point.y + h.axis.y * h.t[1], h.point.z + h.axis.z * h.t[1]], -h.t[1])
-            } else {
-                ([h.point.x + h.axis.x * h.t[0], h.point.y + h.axis.y * h.t[0], h.point.z + h.axis.z * h.t[0]], h.t[0])
-            };
+            let end = if flip { h.t[1] } else { h.t[0] };
+            let at = [h.point.x + h.axis.x * end, h.point.y + h.axis.y * end, h.point.z + h.axis.z * end];
             LoneHole {
                 body: name(h.body).to_owned(),
                 d_mm: round(h.d),
-                at: [round(p[0]), round(p[1]), round(p[2])],
+                at: [round(at[0]), round(at[1]), round(at[2])],
                 axis: round3_v(axis),
                 depth_mm: round(h.t[1] - h.t[0]),
                 slot: h.slot.map(slot),
