@@ -2562,11 +2562,19 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
 }
 
 /// Remove History on a body, saying what went, what stayed and any feature that now fails.
+/// Remove History on a body, off the window thread when it takes a while (it builds the design
+/// again); [`remove_history_report`] says how it went.
 fn remove_history(app: &mut SolveApp, p: Value) {
-    let out = match app.run("body.remove_history", p) {
-        Ok(out) => out,
-        Err(error) => return app.set_status(crate::friendly_error("body.remove_history", &error), true),
-    };
+    match app.run_heavy("body.remove_history", p) {
+        // Still computing: the report follows when it is done.
+        Ok(Value::Null) => {}
+        Ok(out) => remove_history_report(app, &out),
+        Err(error) => app.set_status(crate::friendly_error("body.remove_history", &error), true),
+    }
+}
+
+/// What Remove History did, in the status line: what went, what stayed and any reference that broke.
+pub(crate) fn remove_history_report(app: &mut SolveApp, out: &Value) {
     let names = |key: &str| -> Vec<String> {
         out.get(key)
             .and_then(Value::as_array)

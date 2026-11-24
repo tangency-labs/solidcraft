@@ -141,7 +141,9 @@ pub struct RemoveHistoryParams {
 /// A feature that worked before Remove History and fails after it, with why.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RemoveHistoryBroken {
+    /// The feature's name.
     pub feature: String,
+    /// Why it fails now.
     pub error: String,
 }
 
@@ -159,12 +161,15 @@ pub struct RemoveHistoryResult {
     /// The Remove feature added before the base when kept features still build the body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remove: Option<String>,
-    /// The body's faces, edges and vertices after (the same as before).
+    /// The body's faces after (the same as before).
     pub faces: usize,
+    /// The body's edges after (the same as before).
     pub edges: usize,
+    /// The body's vertices after (the same as before).
     pub vertices: usize,
-    /// The body's volume before and after, in mm³.
+    /// The body's volume before, in mm³.
     pub volume_before: f64,
+    /// The body's volume after, in mm³ (the same as before, within the kernel's accuracy).
     pub volume_after: f64,
     /// Features that worked before and now fail: a reference the base feature's faces do not keep.
     pub broken: Vec<RemoveHistoryBroken>,

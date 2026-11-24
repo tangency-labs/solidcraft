@@ -3036,3 +3036,31 @@ fn remove_history_keeps_references_to_the_body_faces() {
     let painted = s.doc.appearances.faces.iter().find(|f| f.body == "Block").and_then(|f| f.name.clone()).expect("the face keeps its appearance");
     assert!(names.contains(&painted), "{painted} is a face of the base: {names:?}");
 }
+
+/// A sketch on the body's face that comes before the body's last features keeps the features
+/// before it, which made its face: only the features after it go, and the sketch still builds the
+/// other body.
+#[test]
+fn remove_history_keeps_what_a_sketch_on_the_body_needs() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10, "name": "Block Box"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}, "name": "On Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"profiles": [{"point": [3, 3]}], "distance": 5, "operation": "new_body", "body_name": "Peg", "name": "Peg Pad"}),
+    );
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 0]], "radius": 1, "body": "Block", "name": "Round"}));
+    let (block, peg) = (body_shape(&s, "Block"), body_shape(&s, "Peg"));
+
+    let out = run(&mut s, "body.remove_history", json!({"body": "Block"}));
+    assert_eq!(out["removed"], json!(["Round"]), "{out}");
+    assert_eq!(out["kept"], json!(["Block Box"]), "{out}");
+    assert_eq!(out["broken"], json!([]), "{out}");
+    assert_eq!(feature_names(&s), ["Block Box", "On Top", "Peg Pad", "Remove Block", "Block Base"]);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    same_body_shape(block, body_shape(&s, "Block"));
+    same_body_shape(peg, body_shape(&s, "Peg"));
+}

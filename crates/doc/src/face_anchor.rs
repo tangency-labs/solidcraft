@@ -127,7 +127,7 @@ impl Document {
             (target.origin_feature == feature && matches!(target.certificate, Some(crate::config::FaceCertificate::Imported { .. })))
                 .then(|| target.name.clone())
         };
-        self.rebind_faces(None, feature, before, after, &pick)
+        self.rebind_faces(None, feature, before, after, &pick, &|_| true)
     }
 
     /// Move the face attachments on `body` to the faces of the base feature `feature` that Remove
@@ -150,12 +150,17 @@ impl Document {
             }
             renamed.get(&target.name).or_else(|| renamed.get(crate::naming::strip_piece(&target.name))).cloned()
         };
-        self.rebind_faces(Some(before_doc), feature, before, after, &pick)
+        // A feature before the base feature still finds the faces the features kept before it
+        // made; only those after it are built on the base feature's faces.
+        let at = self.feature_index(feature).unwrap_or(usize::MAX);
+        let later: std::collections::BTreeSet<u64> = self.features.iter().skip(at.saturating_add(1)).map(|f| f.id).collect();
+        self.rebind_faces(Some(before_doc), feature, before, after, &pick, &|id| later.contains(&id))
     }
 
     /// The face attachments `pick` names a face of `feature`'s for (by its name there), given that
     /// face's certificate in `after`, with sketches on them kept where they were in `before`.
-    /// `before_doc` is the design `before` was evaluated from, when it is not this one.
+    /// `before_doc` is the design `before` was evaluated from, when it is not this one. Only the
+    /// features `moves` takes have their attachments moved.
     fn rebind_faces(
         &mut self,
         before_doc: Option<&Document>,
@@ -163,6 +168,7 @@ impl Document {
         before: &ModelState,
         after: &ModelState,
         pick: &dyn Fn(&ConfigFaceTarget) -> Option<String>,
+        moves: &dyn Fn(u64) -> bool,
     ) -> Vec<String> {
         use crate::config::FaceCertificate;
         use crate::feature_geometry::Geo;
@@ -261,7 +267,7 @@ impl Document {
                 }
             }
         };
-        for f in &mut self.features {
+        for f in self.features.iter_mut().filter(|f| moves(f.id)) {
             let mut targets = Vec::new();
             f.kind.walk_geometry_mut(&mut |g| match g {
                 Geo::Plane(p) => plane(p, 0, &mut targets),

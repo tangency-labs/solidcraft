@@ -351,7 +351,10 @@ fn trial(
         }
         solidcraft_doc::remap_topology_faces(text, &none, &none_bodies, &map).ok().filter(|new| new != text)
     };
-    for f in doc.features.iter_mut().filter(|f| !gone.contains(&f.id) && f.id != base && Some(f.id) != remove) {
+    // Features before the base still find the faces the features kept before them made.
+    let at = doc.feature_index(base).unwrap_or(usize::MAX);
+    let later: BTreeSet<u64> = doc.features.iter().skip(at.saturating_add(1)).map(|f| f.id).collect();
+    for f in doc.features.iter_mut().filter(|f| later.contains(&f.id) && !gone.contains(&f.id)) {
         moved(f, &rename)?;
     }
     for joint in &mut doc.assembly.joints {
