@@ -466,6 +466,9 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
 
 #[derive(Clone)]
 pub(super) struct AddSheet {
+    pub(super) document: u64,
+    pub(super) drawing: u64,
+    pub(super) window: solidcraft_views::WindowId,
     name: String,
     after: usize,
     paper: PaperChoice,
@@ -506,7 +509,15 @@ impl AddSheet {
             None => drawing.sheets.len().checked_sub(1)?,
         };
         let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
-        Some(Self { name: String::new(), after, paper, title_block: 0 })
+        Some(Self {
+            document: app.session.uid,
+            drawing: drawing.id,
+            window: app.view_windows.current_window(),
+            name: String::new(),
+            after,
+            paper,
+            title_block: 0,
+        })
     }
 }
 
@@ -576,6 +587,11 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
             Ok(result) => {
                 if let Some(id) = result.get("sheet").and_then(Value::as_str).and_then(ids::decode) {
                     select_sheet(app, id);
+                    if app.preferences.design_sub_tab_sheets
+                        && let Err(error) = crate::sheet_views::open_in(app, drawing.id, id, false)
+                    {
+                        app.set_status(error, true);
+                    }
                 }
                 return None;
             }

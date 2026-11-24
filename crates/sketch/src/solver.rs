@@ -18,10 +18,11 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve};
+use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
+use crate::sparse::Pattern;
 use crate::union_find::{find, union};
 
 #[path = "cursor.rs"]
@@ -33,6 +34,9 @@ mod redundancy;
 pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
 
 const MAX_ITERS: usize = 500;
+/// Components of at least this many unknowns solve LM's steps with the sparse factorisation
+/// ([`Pattern`]); smaller ones with the dense elimination, which costs little at their size.
+const SPARSE_MIN_VARS: usize = 64;
 /// Variables in one connected component. Each component is solved as a dense system: an n by n
 /// matrix for the Levenberg-Marquardt step, rows by n for the Jacobian. 4,000 variables is a
 /// 128 MB matrix; past that the request grows to gigabytes and an allocation failure aborts the
@@ -779,8 +783,15 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.extend([d.x, d.y]);
         }
         Midpoint { p, l } => {
-            let (a, b) = s.line(l);
-            let d = s.p(p) - (a + b) * 0.5;
+            // A line's middle is its ends' mean; an arc's is the point halfway along it, which
+            // is not the middle of its chord.
+            let middle = if matches!(s.sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
+                s.along(l, 0.5)
+            } else {
+                let (a, b) = s.line(l);
+                (a + b) * 0.5
+            };
+            let d = s.p(p) - middle;
             out.extend([d.x, d.y]);
         }
         Symmetric { p, q, l } => {
@@ -1144,6 +1155,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     use Ref::{Curve as C, Line as L, Point as P, Round as R};
     let is = |c: usize, f: fn(&CurveKind) -> bool| sk.curves.get(c).is_some_and(|x| f(&x.kind));
     let line = |c: usize| is(c, |k| matches!(k, CurveKind::Line { .. }));
+    let arc = |c: usize| is(c, |k| matches!(k, CurveKind::Arc { .. }));
     let freeform = |c: usize| is(c, CurveKind::is_freeform);
     // A tangency reads a free-form curve as such, else a line and a round, or two rounds.
     let tangent = |a: usize, b: usize| {
@@ -1172,6 +1184,8 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             | DistanceX { p, q, .. }
             | DistanceY { p, q, .. } => vec![P(p), P(q)],
             PointOnCurve { p, c } | PointAlong { p, c, .. } => vec![P(p), C(c)],
+            // The middle of an arc depends on its centre and both ends, as a point along it does.
+            Midpoint { p, l } if arc(l) => vec![P(p), C(l)],
             Midpoint { p, l } | PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => vec![P(p), L(l)],
             LineCircleDistance { l, c, .. } => vec![L(l), R(c)],
             PointCircleDistance { p, c, .. } => vec![P(p), R(c)],
@@ -1462,6 +1476,13 @@ fn lm_run(
     let n = vars.len();
     #[cfg(test)]
     lm_vars::add(n);
+    // A large component's steps are solved on the sparse structure of its normal equations
+    // (see `sparse`): the unknowns each block reads are where the matrix can have entries.
+    let pattern = (n >= SPARSE_MIN_VARS).then(|| {
+        let groups: Vec<Vec<usize>> =
+            blocks.iter().map(|(_, bv)| bv.iter().filter_map(|v| col.get(*v).copied().filter(|c| *c < n)).collect()).collect();
+        Pattern::new(n, &groups)
+    });
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
     let mut f = norm2(&r);
@@ -1470,6 +1491,11 @@ fn lm_run(
     // The sum of squares at the start of each iteration, while giving up is allowed.
     let mut costs = Vec::new();
     for it in 0..max_iters {
+        if cancelled() {
+            #[cfg(feature = "solver-profiling")]
+            profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+            return Some((it, max_abs(&r)));
+        }
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
@@ -1541,16 +1567,30 @@ fn lm_run(
                 profiling::finish_run(run, StopReason::WorkBudget, max_abs(&r));
                 return Some((it, max_abs(&r)));
             }
-            let mut m = a.clone();
-            for (i, w) in weight.iter().enumerate() {
-                m.add(i, i, lambda * w + 1e-12);
-            }
+            let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = lin_solve(m, rhs);
+            let dense = || {
+                let mut m = a.clone();
+                for (i, s) in shift.iter().enumerate() {
+                    m.add(i, i, *s);
+                }
+                solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
+            // is left to the dense elimination, as every step was before.
+            let step = match &pattern {
+                Some(p) => p.solve(&|i, k| a.get(i, k), &shift, &rhs, &cancelled).or_else(|| if cancelled() { None } else { dense() }),
+                None => dense(),
+            };
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
+            if cancelled() {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
             let Some(step) = step else {
                 #[cfg(feature = "solver-profiling")]
                 profiling::record_trial(run, it, _attempt, lambda, f, None, &g, &j, None, Decision::LinearFailure);
@@ -1600,6 +1640,11 @@ fn lm_run(
     #[cfg(feature = "solver-profiling")]
     profiling::finish_run(run, StopReason::IterationLimit, max_abs(&r));
     Some((max_iters, max_abs(&r)))
+}
+
+/// Whether the work this solve runs for was cancelled ([`crate::cancel`]).
+fn cancelled() -> bool {
+    crate::cancel::is_cancelled()
 }
 
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
@@ -2196,12 +2241,37 @@ fn solved_for(sk: &Sketch, old: &DrivingValues) -> bool {
 }
 
 /// The orientations of `stored` that `solved` (the same sketch, its links moved and solved
-/// again) turned over, by constraint id: the sides of unsigned offsets and the turns of
-/// distance triangles, each read where `stored` has its points and where `solved` has them.
-/// A solve after its links moved checks none of these when no value changed, so a jump can
-/// land on the mirror image of a part of the sketch and still report it solved. Empty when the
-/// two sketches are not the same entities (a link was rebuilt).
+/// again) turned over, by constraint id: the sides of unsigned offsets, the turns of distance
+/// triangles and which way lines held parallel or square to each other point, each read where
+/// `stored` has its points and where `solved` has them. A solve after its links moved checks
+/// none of these when no value changed, so a jump can land on the mirror image of a part of the
+/// sketch (or turn it half round a point) and still report it solved. Empty when the two
+/// sketches are not the same entities (a link was rebuilt).
 pub fn flips_from_stored(solved: &Sketch, stored: &Sketch) -> Vec<String> {
+    flips(solved, stored, Turned::Both, 0.0)
+}
+
+/// [`flips_from_stored`] without the senses of parallel and perpendicular lines: the turns a
+/// solve after a link move must not make. A turned sense only asks for the walk
+/// ([`solve_after_link_move`]): where the walk cannot keep it either, the links may run the line
+/// through zero length, which turns it end for end as the only solution.
+pub fn side_flips_from_stored(solved: &Sketch, stored: &Sketch) -> Vec<String> {
+    flips(solved, stored, Turned::Sides, 0.0)
+}
+
+/// Which orientations [`flips`] compares.
+#[derive(Clone, Copy, PartialEq)]
+enum Turned {
+    /// The sides and turns a value edit keeps too ([`orients`]).
+    Sides,
+    /// The senses of parallel and perpendicular lines ([`senses`]).
+    Senses,
+    Both,
+}
+
+/// [`flips_from_stored`] of the orientations `which` names; a sense is no reference for a line
+/// no longer than `reach` (see [`senses`]).
+fn flips(solved: &Sketch, stored: &Sketch, which: Turned, reach: f64) -> Vec<String> {
     let aligned = solved.points.len() == stored.points.len()
         && solved.curves.len() == stored.curves.len()
         && solved.constraints.len() == stored.constraints.len()
@@ -2216,8 +2286,15 @@ pub fn flips_from_stored(solved: &Sketch, stored: &Sketch) -> Vec<String> {
     let before = State { sk: stored, lay: &lay_before, x: &x_before };
     let now = State { sk: solved, lay: &lay_now, x: &x_now };
     let (blocks, _) = build_blocks(stored, &lay_before, &points_on_curves(stored));
+    let mut checked = Vec::new();
+    if which != Turned::Senses {
+        checked = orients(&before, &blocks);
+    }
+    if which != Turned::Sides {
+        checked.extend(senses(&before, &now, &blocks, reach));
+    }
     let mut out: Vec<String> = Vec::new();
-    for (o, cs) in orients(&before, &blocks) {
+    for (o, cs) in checked {
         if reference_orientation(&before, o).zip(orientation(&now, o)).is_some_and(|(b, n)| b != n) {
             for ci in cs {
                 if let Some(c) = stored.constraints.get(ci)
@@ -2238,6 +2315,10 @@ const LINK_STEPS: usize = 4096;
 const LINK_FIRST_STEP: usize = 4;
 /// Most solves one [`solve_after_link_move`] may spend.
 const LINK_STEP_SOLVES: usize = 400;
+/// In a finest step of the walk, a sense is no reference for a line no longer than this many
+/// times the farthest a linked point moves in the step: the links may run such a line through
+/// zero length within the step, which turns it end for end as the only solution.
+const THROUGH_ZERO: f64 = 4.0;
 
 /// [`solve_after_edit`] for a sketch whose linked (or fixed) points moved far from where
 /// `stored` has them, when that solve fails or turns the sketch over (also as
@@ -2276,6 +2357,12 @@ pub fn solve_after_link_move(sk: &mut Sketch, stored: &Sketch, old: &DrivingValu
     if moving.is_empty() && radii.is_empty() {
         return None;
     }
+    // The farthest a linked point (or radius) moves over the whole walk.
+    let span = moving
+        .iter()
+        .filter_map(|&i| Some(from.get(i)?.dist(*to.get(i)?)))
+        .chain(radii.iter().map(|(_, a, b)| (b - a).abs()))
+        .fold(0.0_f64, f64::max);
     let target = sk.clone();
     // The walk's sketch at `t` of the way: the moved points there, every other point where the
     // last solved step left it.
@@ -2326,8 +2413,11 @@ pub fn solve_after_link_move(sk: &mut Sketch, stored: &Sketch, old: &DrivingValu
         let mut step = at(next as f64 / LINK_STEPS as f64, &start);
         let last = at(t as f64 / LINK_STEPS as f64, &solved);
         let before = step.positions_in(&last);
+        // A sense that turns in a larger step halves it; in a finest one, a line the links move
+        // across zero length may come out end for end.
+        let reach = if h == 1 { THROUGH_ZERO * span * (next - t) as f64 / LINK_STEPS as f64 } else { 0.0 };
         if solve_after_edit_with_analysis(&mut step, &values, before.as_deref(), Analysis::StatusOnly).keeps_orientation()
-            && flips_from_stored(&step, &last).is_empty()
+            && flips(&step, &last, Turned::Both, reach).is_empty()
         {
             prev = Some((t, std::mem::replace(&mut solved, step.points.iter().map(|p| p.pos).collect())));
             t = next;
@@ -2347,11 +2437,17 @@ pub fn solve_after_link_move(sk: &mut Sketch, stored: &Sketch, old: &DrivingValu
     for (p, s) in done.points.iter_mut().zip(&solved) {
         p.pos = *s;
     }
+    let end = done.clone();
     let report = solve_with(&mut done, &Hold::default(), Some(&solved), analysis, None);
-    (report.keeps_orientation() && flips_from_stored(&done, stored).is_empty()).then(|| {
-        *sk = done;
-        report
-    })
+    // Sides and turns are the stored sketch's (the value edit kept them); the senses of parallel
+    // and perpendicular lines are the walk's end's: each step kept the last one's, from the
+    // value edit's (which keeps none) on, except where the links ran a line through zero length.
+    (report.keeps_orientation() && flips(&done, stored, Turned::Sides, 0.0).is_empty() && flips(&done, &end, Turned::Senses, 0.0).is_empty()).then(
+        || {
+            *sk = done;
+            report
+        },
+    )
 }
 
 impl Sketch {
@@ -2585,6 +2681,12 @@ enum Orient {
     /// both lie on `l` (its ends, points on it, or points coincident with either; one of them may
     /// lie on it by what else holds it).
     Along(usize, usize, usize, f64),
+    /// Which way line `a` points along line `b` (`Parallel`), or across it (`Perpendicular`,
+    /// `true`): either line turned end for end holds the constraint as well (a line from a
+    /// circle's centre to it reaches either end of a diameter). Only the solve after a link move
+    /// keeps it ([`flips_from_stored`]), not a value edit, and a turned sense only asks for the
+    /// walk: one the walk cannot keep either is not reported ([`side_flips_from_stored`]).
+    Sense(usize, usize, bool),
 }
 
 /// An orientation's signed offset in a state (a corner's distance from the opposite side, an
@@ -2623,6 +2725,16 @@ fn offset(s: &State, o: Orient) -> Option<(f64, f64, f64)> {
             let (pp, pq) = (s.p(p), s.p(q));
             ((b - a).normalized()?.dot(pq - pp), size, coords(&[pp, pq, a, b]))
         }
+        // The cosine (sine) of the angle between the lines, scaled to the shorter one: as the
+        // other offsets, it is no reference below `loci::side`'s tolerance, a line shorter than
+        // about 1e-9 mm (plus the rounding of its coordinates).
+        Orient::Sense(a, b, square) => {
+            let ((a0, a1), (b0, b1)) = (s.line(a), s.line(b));
+            let (da, db) = (a1 - a0, b1 - b0);
+            let (ua, ub) = (da.normalized()?, db.normalized()?);
+            let size = da.len().min(db.len());
+            ((if square { ua.cross(ub) } else { ua.dot(ub) }) * size, size, coords(&[a0, a1, b0, b1]))
+        }
     })
 }
 
@@ -2638,6 +2750,11 @@ fn orientation(s: &State, o: Orient) -> Option<f64> {
 /// triangle, a height of 1/1000 of its longest side, about 0.06°). Nearer degenerate, solver
 /// noise decides the sign, and no edit is refused for turning it over.
 const ORIENTED: f64 = 1e-3;
+
+/// A given line whose direction has come this close to the opposite one (one plus the cosine of
+/// its turn, about 2.6°) was turned end for end by its source: the senses of lines held parallel
+/// or square to it are no reference. Turned less, it is a rotation the walk follows.
+const END_FOR_END: f64 = 1e-3;
 
 /// The orientation of the stored state that an edit must keep: its sign where it is clear
 /// (see [`ORIENTED`]), else `None`.
@@ -2896,6 +3013,76 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
         }
     }
     out
+}
+
+/// The senses of the lines the driving constraints of `sub` hold parallel or square to each other
+/// ([`Orient::Sense`]), each with its constraint, where `before` is the reference state and `now`
+/// the solved one. A pair the solve cannot turn (both lines given: their ends fixed, linked or
+/// coincident with such a point) has none, nor one whose given line has come end for end since
+/// ([`END_FOR_END`]): a source walked the other way (projected points that come back swapped)
+/// turns its line so, which is not a flip of the solve. Nor has a pair with a line no longer
+/// than `reach` in either state (a step of the walk the links may have run it through zero
+/// length in).
+fn senses(before: &State, now: &State, sub: &[(Block, Vec<usize>)], reach: f64) -> Vec<(Orient, Vec<usize>)> {
+    let sk = before.sk;
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some([*a, *b]),
+        _ => None,
+    };
+    let pairs: Vec<(usize, usize, bool, usize)> = sub
+        .iter()
+        .filter_map(|(b, _)| {
+            let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _)) = b else { return None };
+            let (l, m, square) = match **kind {
+                ConstraintKind::Parallel { a, b } => (a, b, false),
+                ConstraintKind::Perpendicular { a, b } => (a, b, true),
+                _ => return None,
+            };
+            (ends(l).is_some() && ends(m).is_some()).then_some((l, m, square, *ci))
+        })
+        .collect();
+    if pairs.is_empty() {
+        return Vec::new();
+    }
+    let given = given_points(sk);
+    let is_given = |l: usize| ends(l).is_some_and(|e| e.iter().all(|p| given.get(*p).copied().unwrap_or(false)));
+    let turned = |l: usize| {
+        let ((a0, a1), (b0, b1)) = (before.line(l), now.line(l));
+        (a1 - a0).normalized().zip((b1 - b0).normalized()).is_none_or(|(u, v)| u.dot(v) < END_FOR_END - 1.0)
+    };
+    let short = |l: usize| {
+        let ((a0, a1), (b0, b1)) = (before.line(l), now.line(l));
+        a0.dist(a1).min(b0.dist(b1)) <= reach
+    };
+    pairs
+        .into_iter()
+        .filter(|&(l, m, ..)| !(is_given(l) && is_given(m)) && ![l, m].into_iter().any(|x| (is_given(x) && turned(x)) || short(x)))
+        .map(|(l, m, square, ci)| (Orient::Sense(l, m, square), vec![ci]))
+        .collect()
+}
+
+/// Points no solve moves: fixed or linked ones, and those coincident with one.
+fn given_points(sk: &Sketch) -> Vec<bool> {
+    let n = sk.points.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    for c in &sk.constraints {
+        if let ConstraintKind::Coincident { p, q } = c.kind
+            && p < n
+            && q < n
+        {
+            union(&mut parent, p, q);
+        }
+    }
+    let mut held = vec![false; n];
+    for (i, locked) in sk.locked_points().into_iter().enumerate() {
+        if locked {
+            let r = find(&mut parent, i);
+            if let Some(h) = held.get_mut(r) {
+                *h = true;
+            }
+        }
+    }
+    (0..n).map(|i| held.get(find(&mut parent, i)).copied().unwrap_or(false)).collect()
 }
 
 /// Dimension continuation: solve the component `sub` from `x` (its previous solved state) for
@@ -3189,7 +3376,22 @@ fn solve_sensed(
         .filter(|(_, t)| matches!(t, Turn::Mirror { .. }))
         .flat_map(|(arc, _)| before.iter().find(|b| b.arc == *arc).map(|b| b.lines.iter().map(|l| l.2).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    let folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    let mut folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    // A swap puts the arc on the other side of its chord: a point held at its middle would now sit
+    // at the opposite end of the circle while the solve reported success. Read it again.
+    for (arc, t) in &turns {
+        if !matches!(t, Turn::Swap) {
+            continue;
+        }
+        for (ci, c) in sk.constraints.iter().enumerate() {
+            if matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == *arc)
+                && constraint_residual(sk, ci).is_some_and(|r| r > 1e-6)
+                && !folded.contains(&c.id)
+            {
+                folded.push(c.id.clone());
+            }
+        }
+    }
     if folded.is_empty() {
         return report;
     }
@@ -3218,6 +3420,25 @@ fn solve_inner(
     let _timer = profiling::timer(Phase::Solve);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
+    // Cancelled: the work this solve was for is no longer wanted. Nothing is solved, and the
+    // geometry stays as it was. (An edit's continuation and its retries each solve again, and
+    // each would otherwise still construct its start.)
+    if cancelled() {
+        return SolveReport {
+            status: SolveStatus::Failed,
+            dof: 0,
+            iterations: 0,
+            max_residual: f64::MAX,
+            failing: Vec::new(),
+            folded: Vec::new(),
+            continuations: 0,
+            point_determined: Vec::new(),
+            curve_determined: Vec::new(),
+            redundant: Vec::new(),
+            oversized: None,
+            wires: None,
+        };
+    }
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
@@ -3467,6 +3688,8 @@ fn solve_inner(
         }
     }
 
+    // A cancelled solve's report is not shown: it only says whether it solved.
+    let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
@@ -3849,17 +4072,17 @@ mod typed_dimension_tests {
         assert_eq!(sk.points, points);
     }
 
-    /// A constraint read on a curve of the wrong kind (a midpoint of an arc, pushed past
+    /// A constraint read on a curve of the wrong kind (a midpoint of a circle, pushed past
     /// validation) reads constants for it: its component is tied to them, not floating, and the
     /// pinned analysis agrees with the dense one (checked in every test solve).
     #[test]
     fn a_curve_read_as_another_kind_ties_its_component() {
         let mut sk = Sketch::new();
-        let arc = sk.add_arc(Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0), Vec2::new(5.0, 15.0), [None, None, None], None).unwrap();
+        let circle = sk.add_circle(Vec2::new(5.0, 5.0), 10.0, None, None).unwrap();
         let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
         sk.constraints.push(crate::model::Constraint {
             id: "m".into(),
-            kind: ConstraintKind::Midpoint { p, l: arc },
+            kind: ConstraintKind::Midpoint { p, l: circle },
             param: None,
             driven: false,
             text: None,
@@ -3867,7 +4090,50 @@ mod typed_dimension_tests {
         let rep = solve(&mut sk);
         assert!(rep.ok(), "{rep:?}");
         assert!(rep.point_determined[p], "the midpoint of the constant line: {rep:?}");
-        assert_eq!(rep.dof, 5, "the arc's centre and ends, less its equal radii: {rep:?}");
+        assert_eq!(rep.dof, 3, "the circle's centre and radius: {rep:?}");
+    }
+
+    /// The middle of an arc is halfway along it, not the middle of its chord, for a short arc and
+    /// for one of more than half a turn.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_sits_halfway_along_it() {
+        let r = 10.0;
+        for (end, middle_angle) in [(Vec2::new(0.0, 10.0), 45.0_f64), (Vec2::new(0.0, -10.0), 135.0)] {
+            let mut sk = Sketch::new();
+            let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), end, [None, None, None], None).unwrap();
+            sk.curves[arc].fixed = true;
+            let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
+            sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+            let rep = solve(&mut sk);
+            assert!(rep.ok(), "{rep:?}");
+            let want = Vec2::new(r * middle_angle.to_radians().cos(), r * middle_angle.to_radians().sin());
+            assert!(sk.points[p].pos.dist(want) < 1e-6, "{:?} should be {want:?}", sk.points[p].pos);
+            assert!(rep.point_determined[p], "{rep:?}");
+            assert_eq!(rep.dof, 0, "{rep:?}");
+        }
+    }
+
+    /// The point keeps the middle when the arc changes: its radius is dimensioned afterwards.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_follows_its_radius() {
+        let mut sk = Sketch::new();
+        let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), [None, None, None], None).unwrap();
+        let p = sk.add_point(Vec2::new(7.0, 7.0), None).unwrap();
+        sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+        sk.curves[arc].fixed = false;
+        sk.add_constraint(ConstraintKind::Radius { c: arc, value: 20.0 }, None).unwrap();
+        let rep = solve(&mut sk);
+        assert!(rep.ok(), "{rep:?}");
+        let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!("the curve is an arc") };
+        let (centre, start, end) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
+        assert!((centre.dist(start) - 20.0).abs() < 1e-6, "radius 20: {}", centre.dist(start));
+        let mut sweep = (end - centre).angle() - (start - centre).angle();
+        while sweep <= 0.0 {
+            sweep += std::f64::consts::TAU;
+        }
+        let half = (start - centre).angle() + sweep / 2.0;
+        let want = centre + Vec2::new(20.0 * half.cos(), 20.0 * half.sin());
+        assert!(sk.points[p].pos.dist(want) < 1e-5, "{:?} should be {want:?}", sk.points[p].pos);
     }
 
     #[test]

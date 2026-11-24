@@ -2,8 +2,8 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles, corner cuts, the weld gap and end caps. Trims, gussets, welds and the cut
-list follow.
+members and their profiles, corner cuts, the weld gap, end caps, mounting plates and bolted end plates.
+Trims, gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -26,9 +26,9 @@ list follow.
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap unless you choose a corner type (see Corners).
 
-The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap and
-Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
-the selected body (or the last body of the active component).
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap,
+Mounting Plate and Parameters. Like Sheet Metal it is always there, and it selects itself when a
+frame member, end cap or mounting plate is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 
@@ -39,9 +39,19 @@ the selected body (or the last body of the active component).
   dimensions follow; optional ones left empty take their defaults.
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
-  gap). A new Frame Member starts on Auto (see Auto below); the command's own default stays None.
+  gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
+- **Groups**: one feature can lay several groups of lines in the same profile, each with its own
+  lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
+  **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
+  Group** removes the one shown. A line belongs to one group only.
+  Several groups currently require **None**, with no corner overrides, point pairs, **Flip**,
+  **Fit Ends**, **Coped** or weld gap. Unsupported combinations report an error and keep the
+  selected settings; they are not silently dropped. Use separate Frame Members for joined
+  corners or point pairs. A single group uses the normal flat form and retains all corner,
+  pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
+  using each group's actual anchor, mirror and rotation.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -374,6 +384,19 @@ shows ticked when its saved order differs from the order the frame would choose 
 edit that changes which member is longer a row can show ticked, and its saved order still holds. A
 row whose Flip is left alone goes back in its saved order on OK.
 
+## Mounting plates and bolted end plates
+
+In **Weldments > Create > Mounting Plate**, select a planar member end, including the
+ring at a hollow tube's opening. Choose a rectangular or round plate, its dimensions,
+thickness, offsets and rotation, and optional four-hole rectangular or bolt-circle patterns.
+The plate is a separate body; its holes do not drill the member. Preselection, live preview
+and Edit Feature work as for a frame member.
+
+The plate centres on the current face's area centroid and follows its persistent identity.
+A lost support produces an error rather than attaching to a nearby member. See the
+[Mounting Plate command guide](book/command-guides/frame.plate.md) for `frame.plate`,
+placement axes, expressions and hole-pattern limits.
+
 ## frame.member
 
 - `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D lines or 3D sketch
@@ -406,6 +429,11 @@ row whose Flip is left alone goes back in its saved order on OK.
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
   `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
   them unless the edit changes `body_name`.
+- `groups` (`[{lines, anchor?, locate?, angle?, mirror?, body_name?}]`): several groups of lines
+  in the feature's one profile, each placed and named its own way. Each group lists its lines, and
+  no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
+  `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
+  groups don't change.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). Standard steel sizes (below) fill in a profile's dimensions from a

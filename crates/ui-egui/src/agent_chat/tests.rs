@@ -5494,6 +5494,71 @@ fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
     assert!(h.widget("Result").is_some() && h.widget(output).is_some(), "and what it returned");
 }
 
+#[test]
+fn tool_details_copy_complete_arguments_and_results() {
+    use solidcraft_ui_registry::handle_at;
+    for status in [ToolStatus::Completed, ToolStatus::Failed] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1280, "height": 1100}));
+        h.call("ui.agent_chat", json!({"features": true, "open": true, "picker": false, "width": 400}));
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+        let input = json!({"notes": format!("{}ARGUMENT_END", "日本語 dimensions\n".repeat(700))});
+        let pretty = serde_json::to_string_pretty(&input).unwrap();
+        let output = format!("{}RESULT_END", "Measured: 20 mm³\n".repeat(700));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "copy-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(status),
+            input: Some(input),
+            output: Some(output.clone()),
+        }];
+        h.frames(4);
+        assert!(handle_at("agent_chat:tool:0:copy:arguments").is_none(), "collapsed details have no Copy action");
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let undo = h.app.session.undo.len();
+        for (field, expected) in [("arguments", &pretty), ("result", &output)] {
+            let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("each tool field has a Copy action");
+            assert!(solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap().contains(at), "Copy remains visible");
+            click_at(&mut h, at, egui::PointerButton::Primary);
+            assert_eq!(copied_text(&h).as_ref(), Some(expected), "copy the full field, including its undisplayed Unicode tail");
+        }
+        assert!(h.app.copied_bodies.is_empty(), "copying tool text does not copy the selected CAD body");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn tool_details_copy_only_present_fields_including_an_empty_result() {
+    use solidcraft_ui_registry::handle_at;
+    for (input, output, field, expected) in [(Some(json!(null)), None, "arguments", "null"), (None, Some(String::new()), "result", "")] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_chat", json!({"features": true, "open": true}));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "optional-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(ToolStatus::InProgress),
+            input,
+            output,
+        }];
+        h.frames(4);
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let absent = if field == "arguments" { "result" } else { "arguments" };
+        assert!(handle_at(&format!("agent_chat:tool:0:copy:{absent}")).is_none(), "an absent field has no Copy action");
+        let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("a present field has a Copy action");
+        click_at(&mut h, at, egui::PointerButton::Primary);
+        assert_eq!(copied_text(&h).as_deref(), Some(expected));
+    }
+}
+
 /// The card says "Screenshot"; the full temp path is only under Details.
 #[test]
 fn a_screenshot_card_hides_the_path_until_details() {
@@ -6329,6 +6394,50 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
 
+/// A task the agent could not finish (the provider's usage limit, or any other error) is kept,
+/// so the user can continue it when the agent can work again (#16318).
+#[test]
+fn a_task_interrupted_by_the_providers_usage_limit_can_be_continued() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::Error("usage limit reached, try again later".into()));
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert!(app.agent_chat.unfinished.is_some(), "the task waits to be continued");
+    // The user continues it: the task goes again, with a note that says it was cut short.
+    continue_task(&mut app);
+    assert_eq!(script.calls(), ["prompt: make a gearbox".to_string(), format!("prompt: {CONTINUE_NOTE}\n\nmake a gearbox")]);
+    assert!(app.agent_chat.unfinished.is_none(), "the task is under way again");
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    let users = app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count();
+    assert_eq!(users, 1, "the conversation does not repeat the task");
+}
+
+/// A turn that ends badly leaves the task to be continued; a turn that ends well leaves nothing
+/// to continue, and a task the user sends in between replaces the one that waits.
+#[test]
+fn only_a_failed_turn_leaves_a_task_to_continue() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_none(), "a turn that ended well has nothing to continue");
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    // Another task replaces the one that waits.
+    send(&mut app, &ctx, "make a lid".into());
+    assert!(app.agent_chat.unfinished.is_none(), "the new task replaces the one that waited");
+    // New chat throws it away.
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    new_chat(&mut app);
+    assert!(app.agent_chat.unfinished.is_none(), "a new chat keeps nothing to continue");
+}
+
 #[test]
 fn plugin_runs_always_keep_per_run_consent() {
     for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
@@ -6382,7 +6491,8 @@ fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
 
 /// An importer plugin's code runs only after the user's answer, in every mode and after "always
 /// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
-/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+/// opens, and `file.export` through an exporter, alone or in a batch. A file SolidCraft reads or
+/// writes itself keeps the mode's answer.
 #[test]
 fn importer_plugins_always_ask_like_plugin_runs() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
@@ -6391,25 +6501,41 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
     std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let exporter = dir.join("plugins").join("out");
+    std::fs::create_dir_all(&exporter).unwrap();
+    let manifest = json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"exporter","extensions":["smp"]}]}});
+    std::fs::write(exporter.join("plugin.json"), manifest.to_string()).unwrap();
     let file = dir.join("part.smp").to_string_lossy().into_owned();
     let (mut app, tx) = app_in_a_turn();
     app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
     app.agent_chat.running_id = "claude".into();
     app.preferences.ai_permissions = agents::Mode::All;
-    for command in ["file.import", "doc.open", "batch"] {
+    for command in ["file.import", "doc.open", "file.export", "batch"] {
         agents::remember(&mut app.preferences, "claude", command);
     }
     let calls = [
         ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
         ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
         ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":file}})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"file.export","params":{"path":file}}]})),
     ];
     pump_tools(&mut app);
-    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert_eq!(app.agent_chat.waiting(), 6, "each plugin import or export waits for an answer");
     assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
     let session = &app.session;
     assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file}})));
+    assert!(crate::plugins::runs_plugin_code(
+        session,
+        "engine.execute",
+        &json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})
+    ));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -31,11 +31,31 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 
 pub use integrate::simulate;
-pub use math::{Mat3, Quat};
-pub use model::{
-    Anchor, Body, Coord, Drive, Force, Integrator, Joint, JointKind, Link, MAX_BODIES, MAX_CONSTRAINT_ROWS, MAX_FORCES, MAX_JOINTS, MAX_MAGNITUDE,
-    MAX_PROFILE_POINTS, MAX_PROJECTION_ITERATIONS, MAX_SAMPLES, MAX_STEPS, Marker, Model, Profile, STANDARD_GRAVITY, Settings,
-};
+pub use math::Mat3;
+pub use math::Quat;
+pub use model::Anchor;
+pub use model::Body;
+pub use model::Coord;
+pub use model::Drive;
+pub use model::Force;
+pub use model::Integrator;
+pub use model::Joint;
+pub use model::JointKind;
+pub use model::Link;
+pub use model::MAX_BODIES;
+pub use model::MAX_CONSTRAINT_ROWS;
+pub use model::MAX_FORCES;
+pub use model::MAX_JOINTS;
+pub use model::MAX_MAGNITUDE;
+pub use model::MAX_PROFILE_POINTS;
+pub use model::MAX_PROJECTION_ITERATIONS;
+pub use model::MAX_SAMPLES;
+pub use model::MAX_STEPS;
+pub use model::Marker;
+pub use model::Model;
+pub use model::Profile;
+pub use model::STANDARD_GRAVITY;
+pub use model::Settings;
 
 /// Why a simulation could not run or stopped.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]

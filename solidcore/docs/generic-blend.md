@@ -83,7 +83,7 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 | n | section | surface |
 |---|---|---|
-| 0 | the chord | the chamfer |
+| 0 | the chord, or the circular arc over it at a sagitta h | the chamfer and the flat weld bead (h = 0), a weld bead's section (h ≠ 0) |
 | 1 | the circle of the ball between the rails | the exact canal surface, the envelope of the balls [35] |
 | 2 to 4 | the Gⁿ section | Hartmann's blend between the rails [14, 17] |
 
@@ -91,6 +91,15 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 *Figure 2. The section family on one cross-section, both rails set back s: chord (n = 0), circle
 (n = 1), order-2 section (n = 2, drawn without thumbweight).*
+
+**The order-0 section may bulge.** Its chord can carry a sagitta h: the circular arc between the
+rails whose middle stands h off the chord's middle, away from the edge for h > 0 (convex) and towards
+it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
+(`surface::procedural_blend::bead::BeadDefinition`). With c the chord and β1, β2 the angles at
+which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
+a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
+(c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
+planes along a straight edge it is a circular cylinder, an exact class (§4).
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -159,14 +168,13 @@ value (a support as its NURBS form, the one its stations are solved on, labelled
 plane, cylinder, cone, sphere, torus or free; a round on a round as its own record, three deep at
 most), sides, radius or law, order, thumbweight, leader, seeds, ε, the
 map from the net's parameters, and the net, every number as stored. The record holds no maths and
-moves into `solidcore-record` as it is (`docs/layers.md`). The record keeps no analytic parameters:
-rebuilding derives a labelled support's analytic surface from its form (its corners for a plane,
-the circles of its rational quadratic rows for a surface of revolution: exact, as rational NURBS
-represent these surfaces exactly), refusing a form whose implicit equation does not vanish on it,
-coefficient by coefficient on each Bézier patch, naming the face. So a support is written with its
-label only where that reading derives its surface back from the form written: a form whose
-control rows give the numbers only to more than the evaluation's rounding (a cone's short arc
-span) goes unlabelled, as its form, and is read as a free support. A corner's net and a draft's
+moves into `solidcore-record` as it is (`docs/layers.md`). If a labelled support has no stored analytic
+parameters, the reader derives its surface from the NURBS form. For example, it uses a plane's
+corners or the circles of a revolved surface's rational quadratic rows. A cone or cylinder can
+also store its placement, radius and semi-angle, since recovering the centre from a short arc can
+amplify rounding error. The reader verifies that the NURBS form lies on the resulting surface.
+On each Bézier patch, every coefficient of the implicit equation must vanish within rounding.
+If the writer cannot prove the analytic surface by either method, it stores the form as a free support. A corner's net and a draft's
 surfaces keep their label, which their records require. Rebuilding is exact, and the
 net is certified again (§2.4) before the round is an operand; a net not proved within ε is
 refused, naming its face. Evaluating S is a pure function of the definition: the station memo
@@ -519,7 +527,9 @@ rolling ball on a surface with rational offsets along a rational rail is rationa
 degrees with the two rails as boundary are in [27], and the variable-radius cylinder and cone cases
 in [24]. A pair whose offsets happen to touch at one radius is not taken as exact unless proved for
 that radius. Between planes, the Gⁿ section is rational too (the feet are linear), and a Gⁿ section
-with rotational symmetry is that section revolved; both are stored as rational surfaces.
+with rotational symmetry is that section revolved; both are stored as rational surfaces. Between
+planes the chord is the plane through the feet, and the chord with a sagitta (§2.2) the circular
+cylinder through the feet's lines; both are exact, stored with bound 0.
 
 ## 5. Design decisions that shape behaviour
 
@@ -616,7 +626,7 @@ The case gallery shows every fillet and chamfer case of the kernel corpus
 (`crates/solidcore/tests/kernel_cases/fillets/`) with its render and its status: passes, refused as
 the case expects, or known failing with its reason. It is the site's
 [Kernel cases page](https://tangency-labs.github.io/solidcore/cases.html), which `site/build.py`
-generates from the case entries, the renders beside them and `known_failing.json`; this page keeps
+generates from the case entries, the renders beside them and `kernel_cases_known_failing/`; this page keeps
 nothing about any case.
 
 ## 8. For contributors
@@ -667,7 +677,7 @@ is on [#2243](https://github.com/tangency-labs/solidcore/issues/2243).
 fillet and chamfer case with its state: passes, refused as expected, or known failing (with its
 reason). When a pull request makes a case pass, or turns a known failure into a correct refusal, it
 updates the case's entry (its expectation, and its `gallery_note` where the gallery needs to say
-more), its line in `known_failing.json` and its render
+more), its file in `kernel_cases_known_failing/` and its render
 (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) in the same pull request, never this page.
 The render shows the case's issue: the view is chosen for it (the corner, the seam, the edge's end,
 the spot refused or fixed), framed close on that region, with an inset of the whole part where it

@@ -63,6 +63,8 @@ pub(crate) struct State {
     next_dialog: u64,
     /// The runs waiting in the control queue: each one's request serial and the session it is for.
     pending: Vec<(u64, u64)>,
+    panel_pick: Option<PanelPick>,
+    panel_runs: Vec<std::sync::mpsc::Receiver<Value>>,
 }
 
 #[cfg(test)]
@@ -74,6 +76,53 @@ impl State {
 }
 
 pub(crate) use crate::plugins::Plugin as Listed;
+
+struct PanelPick {
+    id: u64,
+    session: u64,
+    document: Arc<solidcraft_engine::doc::Document>,
+    plugin: String,
+    approval: String,
+    entry: String,
+    event: solidcraft_engine::plugin::ui::UiEvent,
+    previous: Option<Sel>,
+}
+
+/// Panels use the same single-target selection control and viewport picker as entry forms.
+pub(crate) fn start_panel_picking(
+    app: &mut SolveApp,
+    plugin: String,
+    approval: String,
+    entry: String,
+    event: solidcraft_engine::plugin::ui::UiEvent,
+) {
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|dialog| !matches!(dialog.kind, crate::dialogs::Kind::PluginPick { .. })) {
+        return;
+    }
+    if let Some(dialog) = app.dialog.take() {
+        keep_picks(app, &dialog);
+    }
+    let id = app.plugin_menu.next_dialog;
+    app.plugin_menu.next_dialog = id.saturating_add(1);
+    let input = SelInput::new(
+        "ui.plugin_panel_selection",
+        crate::selection::PROFILES
+            | crate::selection::EDGES
+            | crate::selection::FACES
+            | crate::selection::BODIES
+            | crate::selection::PLANES
+            | crate::selection::AXES
+            | crate::selection::VERTICES
+            | crate::selection::SKETCH_LINES
+            | crate::selection::EXTERNAL_POINTS,
+        false,
+    );
+    let mut picker = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: id }, vec![input]);
+    picker.awaiting_pick = true;
+    app.plugin_menu.panel_pick =
+        Some(PanelPick { id, session: app.session.uid, document: app.session.doc.clone(), plugin, approval, entry, event, previous: None });
+    app.dialog = Some(picker);
+}
 
 /// One property of an entry's input schema, as a field of the dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -878,6 +927,7 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 
 /// Read the installed plugins again, as the menu shows them when it opens.
 pub(crate) fn refresh(app: &mut SolveApp) {
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
 }
 
@@ -931,6 +981,8 @@ pub(crate) struct EntryDialog {
     /// The command's icon ([`command_icon`]), in the window's header.
     pub(crate) icon: String,
     pub(crate) read: bool,
+    /// A long job: never previewed, since a preview would run it whole on every change.
+    pub(crate) job: bool,
     /// The fields, or `None` when the schema needs the agent or the CLI.
     pub(crate) fields: Option<Vec<(Field, Input)>>,
     pub(crate) running: Option<Running>,
@@ -940,6 +992,9 @@ pub(crate) struct EntryDialog {
     pub(crate) result: Option<String>,
     /// An importer's extensions: its button chooses the file to open, with these options.
     pub(crate) opens: Option<Vec<String>>,
+    /// An export slot's extensions: its button chooses where to save, then exports the design
+    /// with these options.
+    pub(crate) writes: Option<Vec<String>>,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -1167,6 +1222,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     }
     let mut fields = form(&entry.input_schema);
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
+    let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
     // What is selected fills the first selection field, as far as that field takes it; the
@@ -1194,6 +1250,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         icon: command_icon(&plugin, entry).to_owned(),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
+        job: entry.job,
         fields,
         plugin,
         session: app.session.uid,
@@ -1202,6 +1259,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         error: None,
         result: None,
         opens,
+        writes,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -1607,6 +1665,28 @@ pub(crate) fn stop_picking(app: &mut SolveApp, d: crate::dialogs::Dialog) {
 /// on this design. A field whose picks changed dates them to the design as it is now.
 fn keep_picks(app: &mut SolveApp, picker: &crate::dialogs::Dialog) {
     let crate::dialogs::Kind::PluginPick { dialog: id } = picker.kind else { return };
+    if let Some(panel) = app
+        .plugin_menu
+        .panel_pick
+        .as_mut()
+        .filter(|panel| panel.id == id && panel.session == app.session.uid && Arc::ptr_eq(&panel.document, &app.session.doc))
+    {
+        let selected = picker.inputs.first().and_then(|input| input.items.first()).cloned();
+        if selected != panel.previous {
+            panel.previous = selected.clone();
+            let value = selected
+                .and_then(|selected| serde_json::to_string(&selected).ok())
+                .map(solidcraft_engine::plugin::ui::UiValue::GeometryRef)
+                .unwrap_or(solidcraft_engine::plugin::ui::UiValue::None);
+            let mut event = panel.event.clone();
+            event.value = Some(value);
+            let plugin = panel.plugin.clone();
+            let entry = panel.entry.clone();
+            let approval = panel.approval.clone();
+            crate::panel_runtime::queue_selection(app, plugin, approval, entry, event);
+        }
+        return;
+    }
     let (session, doc) = (app.session.uid, app.session.doc.clone());
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id && d.session == session) {
         take_picks(dialog, picker, &doc);
@@ -1619,9 +1699,20 @@ fn keep_picks(app: &mut SolveApp, picker: &crate::dialogs::Dialog) {
 fn sync_picks(app: &mut SolveApp) {
     if let Some(id) = picking(app) {
         let owner = app.plugin_menu.dialogs.iter().find(|d| d.id == id);
-        if owner.is_none_or(|d| {
-            d.session != app.session.uid || d.running.is_some() || app.dialog.as_ref().is_some_and(|picker| !d.pickable(picker.active))
-        }) {
+        let panel_owner =
+            app.plugin_menu.panel_pick.as_ref().is_some_and(|panel| {
+                panel.id == id
+                    && panel.session == app.session.uid
+                    && Arc::ptr_eq(&panel.document, &app.session.doc)
+                    && app.session.plugin_panels().iter().any(|snapshot| {
+                        snapshot.plugin == panel.plugin && snapshot.panel.id == panel.event.panel && snapshot.approval == panel.approval
+                    })
+            });
+        if !panel_owner
+            && owner.is_none_or(|d| {
+                d.session != app.session.uid || d.running.is_some() || app.dialog.as_ref().is_some_and(|picker| !d.pickable(picker.active))
+            })
+        {
             if let Some(d) = app.dialog.take() {
                 keep_picks(app, &d);
             }
@@ -1745,7 +1836,7 @@ pub(crate) fn editing_dialog_open(app: &SolveApp) -> bool {
 
 /// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
 /// viewport, else the most recently opened one, when it is a command that edits the design on
-/// this design, has Preview on, is not running and its fields make parameters. `None` while a
+/// this design and is not a long job, has Preview on, is not running and its fields make parameters. `None` while a
 /// native tool is open: its own preview is the one shown.
 pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(String, Value)>)> {
     if app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, crate::dialogs::Kind::PluginPick { .. })) {
@@ -1755,7 +1846,7 @@ pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(Stri
         Some(id) => app.plugin_menu.dialogs.iter().find(|d| d.id == id),
         None => app.plugin_menu.dialogs.iter().rev().find(|d| d.session == app.session.uid),
     }?;
-    if dialog.read || dialog.opens.is_some() || !dialog.preview || dialog.running.is_some() {
+    if dialog.read || dialog.job || dialog.opens.is_some() || !dialog.preview || dialog.running.is_some() {
         return None;
     }
     let params = dialog.ready(app).ok()?;
@@ -1833,11 +1924,32 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         });
         return Ok(());
     }
+    // An export slot: choose where to save, then export the design on the worker, as a run is,
+    // with the options from this dialog. The dialog stays open with any error until it is done.
+    if let Some(extensions) = dialog.writes.clone() {
+        let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        let extension = extensions.first().cloned().unwrap_or_default();
+        let name = std::format!("{}.{extension}", crate::export_name::offered(app, None, &app.session.doc.name));
+        let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.pick_save(&name, &extensions, move |app, path| {
+            let Some(path) = path else { return };
+            let request = json!({"command":"file.export","params":{"path": path, "format": format, "options": params}});
+            queue(app, id, request);
+        });
+        return Ok(());
+    }
     let request = json!({"command":"plugin.run","params":{
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params, "form_guard": dialog.form_guard}});
+    queue(app, id, request);
+    Ok(())
+}
+
+/// Queue dialog `id`'s request on the control channel's worker, for the design it was opened on.
+fn queue(app: &mut SolveApp, id: u64, request: Value) {
+    let Some(session) = app.plugin_menu.dialogs.iter().find(|d| d.id == id).map(|d| d.session) else { return };
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
-    app.plugin_menu.pending.push((req.serial, app.session.uid));
+    app.plugin_menu.pending.push((req.serial, session));
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
         dialog.running = Some(Running { reply, ticket, received: None });
@@ -1845,6 +1957,17 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         dialog.error = None;
         dialog.result = None;
     }
+}
+
+/// Panel actions enter the same namespaced command queue as the control channel.
+pub(crate) fn run_panel(app: &mut SolveApp, command: String, params: Value) -> Result<(), String> {
+    if app.plugin_menu.panel_runs.len() >= 16 {
+        return Err(app.tr("prefs.plugin_busy").into());
+    }
+    let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":params}));
+    app.plugin_menu.pending.push((request.serial, app.session.uid));
+    app.plugin_menu.panel_runs.push(reply);
+    app.control_held.push_back(request);
     Ok(())
 }
 
@@ -1867,6 +1990,18 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
 /// stays in its dialog.
 pub(crate) fn poll(app: &mut SolveApp) {
+    for reply in std::mem::take(&mut app.plugin_menu.panel_runs) {
+        match reply.try_recv() {
+            Ok(value) => {
+                if value.get("ok") != Some(&Value::Bool(true)) {
+                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
+                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+        }
+    }
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
     for id in ids {
         poll_dialog(app, id);
@@ -1907,6 +2042,18 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         }
         dialog.revalidated = validation.get("changed") == Some(&Value::Bool(true));
         dialog.changed |= dialog.revalidated;
+        return;
+    }
+    if dialog.writes.is_some() {
+        let path = reply.pointer("/result/path").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let notes: Vec<String> =
+            reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+        app.plugin_menu.dialogs.remove(at);
+        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        for note in notes {
+            done = std::format!("{done} · {note}");
+        }
+        app.set_status(done, false);
         return;
     }
     if dialog.read {
@@ -2015,6 +2162,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() {
         "ui.plugin_dialog_choose_file"
+    } else if dialog.writes.is_some() {
+        "plugin_export.button"
     } else if dialog.form_guard.is_some() {
         "ui.plugin_edit_apply"
     } else {
@@ -2058,7 +2207,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     if let Some(key) = browse {
         let id = dialog.id;
-        app.pick_folder(move |app, path| {
+        app.pick_folder("", move |app, path| {
             if let Some(path) = path {
                 apply_browsed_folder(app, id, &key, path);
             }
@@ -2158,7 +2307,7 @@ fn body(
         }
     }
     // Preview: a command that edits the design, as the native tools have it.
-    if !dialog.read && dialog.opens.is_none() && dialog.fields.is_some() {
+    if !dialog.read && !dialog.job && dialog.opens.is_none() && dialog.fields.is_some() {
         ui.add_enabled_ui(editable, |ui| ui_kit::checkbox(ui, app.tr_label("Preview"), &mut dialog.preview));
         if dialog.preview
             && editable
