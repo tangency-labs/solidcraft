@@ -43,9 +43,12 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
         });
     });
     crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
-    form_row(ui, "dxf.tolerance", |ui| {
-        let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
-        crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+    // DxfTolerance sets the tolerance the same way.
+    crate::policy::row(ui, app.policy.locks("view_dxf_tolerance"), |ui| {
+        form_row(ui, "dxf.tolerance", |ui| {
+            let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
+            crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+        });
     });
     crate::ui_kit::text(
         ui,
@@ -56,6 +59,8 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
 }
 
 pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) -> Result<(), String> {
+    let tolerance_locked = app.policy.locks("view_dxf_tolerance");
+    let tolerance = if tolerance_locked { app.preferences.view_dxf_tolerance } else { tolerance };
     if !crate::viewport::section_planes(app).is_empty() {
         return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
     }
@@ -69,7 +74,9 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) 
     if !app.policy.locks("view_dxf_dashed") {
         app.preferences.view_dxf_dashed = dashed;
     }
-    app.preferences.view_dxf_tolerance = tolerance;
+    if !tolerance_locked {
+        app.preferences.view_dxf_tolerance = tolerance;
+    }
     if !app.policy.locks("view_dxf_zero") {
         app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
     }

@@ -57,6 +57,8 @@ enum Kind {
     /// A `REG_SZ`: the name of a font family. One the computer does not have leaves the
     /// built-in font showing.
     Font,
+    /// A `REG_SZ`: a length in millimetres from `min` to `max`, with a point or a comma.
+    Millimetres { min: f64, max: f64 },
 }
 
 /// `MeshExportFormat`: the formats the Save Mesh dialog offers.
@@ -106,6 +108,7 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
     Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
     Lock { policy: "DxfOrigin", pref: "view_dxf_zero", kind: Kind::Choice(DXF_ORIGINS) },
+    Lock { policy: "DxfTolerance", pref: "view_dxf_tolerance", kind: Kind::Millimetres { min: 0.001, max: 1.0 } },
     Lock { policy: "InterfaceFont", pref: "ui_font", kind: Kind::Font },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
     Lock { policy: "Layout", pref: "layout", kind: Kind::Choice(LAYOUTS) },
@@ -126,6 +129,7 @@ pub const LOCKS: &[Lock] = &[
 pub enum Setting {
     Switch(bool),
     Number(u32),
+    Decimal(f64),
     Text(String),
 }
 
@@ -269,6 +273,14 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
             let family = !text.is_empty() && !text.chars().any(|c| c.is_control() || c == '/' || c == '\\');
             family.then(|| Setting::Text(text.into()))
         }
+        (Kind::Millimetres { min, max }, Value::Number(n)) => {
+            let mm = f64::from(*n);
+            (min..=max).contains(&mm).then_some(Setting::Decimal(mm))
+        }
+        (Kind::Millimetres { min, max }, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let mm = text.trim().replace(',', ".").parse::<f64>().ok()?;
+            (mm.is_finite() && (min..=max).contains(&mm)).then_some(Setting::Decimal(mm))
+        }
         _ => None,
     }
 }
@@ -297,6 +309,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "theme" => Setting::Text(p.theme.clone()),
         "ui_font" => Setting::Text(p.ui_font.clone()),
         "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
+        "view_dxf_tolerance" => Setting::Decimal(p.view_dxf_tolerance),
         "view_dxf_zero" => Setting::Text(p.view_dxf_zero.clone()),
         _ => return None,
     })
@@ -332,6 +345,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("theme", Setting::Text(text)) => p.theme.clone_from(text),
         ("ui_font", Setting::Text(text)) => p.ui_font.clone_from(text),
         ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
+        ("view_dxf_tolerance", Setting::Decimal(mm)) => p.view_dxf_tolerance = *mm,
         ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
     }
@@ -395,7 +409,11 @@ impl Policy {
         let json = serde_json::from_str::<serde_json::Value>(text).unwrap_or_default();
         let layer = |object: Option<&serde_json::Value>| {
             Layer::read(&|name| match object?.get(name)? {
-                serde_json::Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()).map(Value::Number),
+                // A number with a fraction (a macOS real, say) is read as its text.
+                serde_json::Value::Number(n) => match n.as_u64() {
+                    Some(n) => u32::try_from(n).ok().map(Value::Number),
+                    None => Some(Value::Text(n.to_string())),
+                },
                 serde_json::Value::String(s) => Some(Value::Text(s.clone())),
                 _ => None,
             })
@@ -1051,6 +1069,56 @@ mod tests {
         // A value none of the choices is no policy: nothing is locked.
         let policy = Policy::from_json(r#"{"MeshExportFormat": "obj", "MeshExportQuality": "", "DxfOrigin": "corner"}"#);
         assert!(policy.locked().is_empty() && !policy.managed(), "{:?}", policy.locked());
+    }
+
+    #[test]
+    fn the_dxf_tolerance_is_set_by_the_policy_and_a_value_out_of_range_is_no_policy() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.view_dxf_tolerance = 0.1;
+        h.app.policy = Policy::from_json(r#"{"DxfTolerance": " 0,005 "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.view_dxf_tolerance, 0.005);
+        assert_eq!(saved(&h.app)["view_dxf_tolerance"], json!(0.1), "the tolerance is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"view_dxf_tolerance": 0.5}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // The export dialog starts with the organization's tolerance, greyed out and noted.
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        let Some(crate::dialogs::Kind::ViewDxf { tolerance, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the DXF dialog is open") };
+        assert_eq!(*tolerance, 0.005);
+        assert!(h.widget("Set by your organization").is_some(), "the dialog says who set the tolerance");
+        // Another tolerance reaching the export is replaced by the organization's and not saved.
+        h.app.services.pick_save = Some(Box::new(|_, _| Box::pin(std::future::ready(None))));
+        crate::dialogs_view_dxf::run(&mut h.app, false, 0.5, false).unwrap();
+        h.frame();
+        assert_eq!(h.app.preferences.view_dxf_tolerance, 0.005);
+        assert_eq!(saved(&h.app)["view_dxf_tolerance"], json!(0.1));
+        // A number works as well as text: a macOS real, or a whole millimetre.
+        for (json, mm) in [(r#"{"DxfTolerance": 0.02}"#, 0.02), (r#"{"DxfTolerance": 1}"#, 1.0), (r#"{"DxfTolerance": "0.001"}"#, 0.001)] {
+            assert_eq!(Policy::from_json(json).mandatory.settings.get("view_dxf_tolerance"), Some(&Setting::Decimal(mm)), "{json}");
+        }
+        // Out of range, not a number or too long is no policy: nothing is locked.
+        let long = format!("0.{}", "1".repeat(MAX_CHOICE));
+        for hostile in [
+            json!(0),
+            json!(2),
+            json!(0.0001),
+            json!(-0.01),
+            json!("0"),
+            json!("1.5"),
+            json!("abc"),
+            json!("NaN"),
+            json!("inf"),
+            json!(""),
+            json!(long),
+        ] {
+            let policy = Policy::from_json(&json!({"DxfTolerance": hostile}).to_string());
+            assert!(policy.locked().is_empty() && !policy.managed(), "{hostile}: {:?}", policy.locked());
+        }
     }
 
     #[test]

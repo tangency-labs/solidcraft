@@ -533,5 +533,12 @@
         <text id="InterfaceFont" valueName="InterfaceFont" maxLength="64" required="true" />
       </elements>
     </policy>
+    <policy name="DxfTolerance" class="Both" displayName="$(string.DxfTolerance)" explainText="$(string.DxfTolerance_Explain)" presentation="$(presentation.DxfTolerance)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <text id="DxfTolerance" valueName="DxfTolerance" maxLength="16" required="true" />
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

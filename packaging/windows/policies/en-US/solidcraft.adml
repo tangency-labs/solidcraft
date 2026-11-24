@@ -263,6 +263,14 @@ Enabled: SolidCraft draws its interface in this font family, and people cannot c
 Disabled or Not configured: each person chooses in Preferences.
 
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="DxfTolerance">Curve tolerance of DXF view exports</string>
+      <string id="DxfTolerance_Explain">How far, in millimetres, the straight segments File, Export Current View as DXF writes for a curve may stray from it. A smaller tolerance gives finer curves and takes more time and memory.
+
+Enabled: every export uses this tolerance, and people cannot change it. Enter a number from 0.001 to 1, for example 0.01. Any other value counts as not configured.
+
+Disabled or Not configured: each person chooses in the export dialog.
+
+In the export dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
       <string id="Theme_1-bit-dark">1-bit Dark</string>
       <string id="Theme_1-bit">1-bit</string>
       <string id="Theme_akari">Akari</string>
@@ -342,6 +350,11 @@ In Preferences the setting shows as set by the organization. The person's own ch
       <presentation id="InterfaceFont">
         <textBox refId="InterfaceFont">
           <label>Font family name:</label>
+        </textBox>
+      </presentation>
+      <presentation id="DxfTolerance">
+        <textBox refId="DxfTolerance">
+          <label>Tolerance in mm (0.001 to 1):</label>
         </textBox>
       </presentation>
     </presentationTable>
