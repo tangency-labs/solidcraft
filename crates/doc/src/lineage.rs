@@ -212,6 +212,20 @@ impl Traced {
         }
     }
 
+    /// Label this instance of a tool. A cached or moved tool can have the same geometry but
+    /// belong to a different sketch point.
+    pub fn with_part_prefix(mut self, prefix: Option<&str>) -> Traced {
+        if let (Some(prefix), Some(lineage)) = (prefix, self.lineage.as_mut()) {
+            for operand in &mut lineage.operands {
+                if let Operand::Made(roles) = operand.as_ref() {
+                    let roles = roles.iter().map(|names| names.iter().map(|role| format!("{prefix}:{role}")).collect()).collect();
+                    *operand = Arc::new(Operand::Made(roles));
+                }
+            }
+        }
+        self
+    }
+
     /// `copy`, this tool moved: instance `instance` of a pattern or mirror of feature `feature`,
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {

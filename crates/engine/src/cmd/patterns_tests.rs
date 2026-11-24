@@ -160,6 +160,35 @@ fn feature_pattern_plate() -> Session {
 }
 
 #[test]
+fn a_hole_pattern_keeps_each_copied_wall_with_its_sketch_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 8, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 8, "name": "HolePoints"}));
+    for x in [20, 50] {
+        run(&mut s, "sketch.point", json!({"point": [x, 15]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "HolePoints", "points": ["p1", "p2"], "diameter": 4, "name": "Holes"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Holes"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20}));
+    let copy_wall = |s: &mut Session, x: f64| {
+        let result = run(s, "model.faces", json!({"body": "Plate"}));
+        let face = result["faces"].as_array().unwrap().iter().find(|face| {
+            let axis = &face["cylinder"]["origin"];
+            axis[0].as_f64().is_some_and(|at| (at - x).abs() < 1e-6) && axis[1].as_f64().is_some_and(|at| (at - 35.0).abs() < 1e-6)
+        });
+        face.and_then(|face| face["name"].as_str()).map(str::to_string)
+    };
+    let left = copy_wall(&mut s, 20.0).unwrap();
+    let right = copy_wall(&mut s, 50.0).unwrap();
+    assert!(left.contains(":point:p1:") && right.contains(":point:p2:"), "{left}, {right}");
+    run(&mut s, "sketch.edit", json!({"sketch": "HolePoints"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(copy_wall(&mut s, 20.0), None);
+    assert_eq!(copy_wall(&mut s, 50.0), Some(right));
+}
+
+#[test]
 fn rectangular_hole_pattern_warns_for_copies_that_miss_and_clears_after_edit() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
