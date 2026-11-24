@@ -8317,6 +8317,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
             selection_all: app.session.all_bodies_selected(),
+            hover_place: None,
             product_lights: None,
             ssaa,
             ao_samples,

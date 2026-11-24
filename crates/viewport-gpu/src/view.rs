@@ -856,6 +856,9 @@ fn push_edge_seg(out: &mut Vec<u8>, a: [f32; 3], b: [f32; 3], flags: u32, edge: 
 pub struct GpuScene {
     /// The colours every vertex, line and instance index into.
     pub palette: Arc<Palette>,
+    /// The placement a whole-body hover lights, when the frame tints it in place of drawing a
+    /// copy: the scene instance-list index of its mesh, its row, and the palette entry.
+    pub hover_place: Option<(u32, u32, u32)>,
     /// Non-selectable virtual ground receiving viewport AO, separate from model triangles.
     pub ground_ao: Option<GroundAo>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
@@ -1522,6 +1525,12 @@ pub struct Frame {
     /// The highlight scene and its key.
     pub hl_key: u64,
     pub hl_slot: SceneSlot,
+    /// The placement a whole-body hover lights: the model scene's instance-list index of its
+    /// mesh, its row in that mesh's placements, and the palette entry it is drawn in. The cull
+    /// writes that entry into the row instead of the body's own, so the hover is the model's own
+    /// draw - lit and occluded like the rest - rather than a second copy of the geometry. A
+    /// draw or row that no longer resolves writes nothing and the frame draws today's highlight.
+    pub hover_place: Option<(u32, u32, u32)>,
     /// The live preview scene and its key.
     pub pv_key: u64,
     pub pv_slot: SceneSlot,
@@ -4932,6 +4941,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     // The theme's hover and selection tints: a theme change draws the frame again, so the
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
+    cb.hover_place.hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
     // Selecting every body tints them through the uniform alone: the picture must be drawn again
     // when that toggles, or a cached untinted frame would be shown.
