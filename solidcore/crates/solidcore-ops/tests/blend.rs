@@ -4027,6 +4027,44 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
 
 /// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
 /// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
+/// #19077, reduced: a quarter turn of a 20 wide, 6 high profile whose outer wall is a cone of
+/// slope 1/320, its two end faces through the axis, each end rounded 0.5 against the cone (the
+/// round's spine is a hyperbola, its plane square to the cone's axis) and shelled 0.4 inward.
+/// The reporter's own design (a 120 degree bent slot, the cone a 1 mm band between tangent
+/// arcs, 13 edges rounded 0.4) is not in the repository; rebuilt from its numbers, its rounds
+/// and shells are refused alike on main and here (see the PR), so this guards the reduced
+/// case only: a valid solid whose volume is between 0 and the part's.
+#[test]
+fn a_revolved_body_with_rounds_on_its_shallow_cone_shells_04_inward() {
+    let slope = 1.0 / 320.0;
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let (a, b) = ([40.0, 0.0, 0.0], [60.0, 0.0, 0.0]);
+    let (c, d) = ([60.0 + 6.0 * slope, 0.0, 6.0], [40.0, 0.0, 6.0]);
+    let part = solidcore_ops::sweep::revolve(
+        &[line(a, b), line(b, c), line(c, d), line(d, a)],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        PI / 2.0,
+        true,
+    )
+    .unwrap();
+    let middle = 60.0 + 3.0 * slope;
+    let ends = [
+        edge_at(&part, [middle, 0.0, 3.0]),
+        edge_at(&part, [0.0, middle, 3.0]),
+    ];
+    blend(&part, Blend::Round, &ends, &[0.5], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rounds build: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let whole = part.volume(1e-8).unwrap();
+    let (_, order) = part.to_record().unwrap();
+    solidcore_ops::shell(&part, &order, &[], -0.4)
+        .unwrap_or_else(|e| panic!("the shell builds: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let wall = part.volume(1e-8).unwrap();
+    assert!(0.0 < wall && wall < whole, "wall {wall} of {whole}");
+}
+
 #[test]
 fn both_flat_face_loops_of_a_notched_half_torus_round() {
     use solidcore_ops::boolean::boolean;
