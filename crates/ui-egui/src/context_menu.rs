@@ -4968,29 +4968,23 @@ mod tests {
         h.app.run("browser.visibility", json!({ "folder": "all", "visible": true })).unwrap();
         h.app.run("browser.visibility", json!({ "items": ["BoxA"], "visible": false })).unwrap();
 
-        let hide = items(&h.app, &Target::Body { name: "BoxA".into() })
-            .into_iter()
-            .find(|i| i.label == "Show/Hide")
-            .expect("body menu offers Show/Hide");
+        let hide =
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.label == "Show/Hide").expect("body menu offers Show/Hide");
         assert_eq!(hide.id, "ui.hide");
         assert_eq!(hide.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
         run_item(&mut h.app, &hide, Pos2::ZERO);
         assert!(!h.app.session.body_visible("BoxA") && !h.app.session.body_visible("BoxB"));
 
-        let show = items(&h.app, &Target::Body { name: "BoxA".into() })
-            .into_iter()
-            .find(|i| i.label == "Show/Hide")
-            .expect("body menu offers Show/Hide");
+        let show =
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.label == "Show/Hide").expect("body menu offers Show/Hide");
         assert_eq!(show.id, "ui.show");
         assert_eq!(show.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
         run_item(&mut h.app, &show, Pos2::ZERO);
         assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
 
         // A body outside the selection still targets only itself.
-        let other = items(&h.app, &Target::Body { name: "BoxC".into() })
-            .into_iter()
-            .find(|i| i.label == "Isolate")
-            .expect("other body menu offers Isolate");
+        let other =
+            items(&h.app, &Target::Body { name: "BoxC".into() }).into_iter().find(|i| i.label == "Isolate").expect("other body menu offers Isolate");
         assert_eq!(other.params, Some(json!({ "bodies": ["BoxC"] })));
     }
 
