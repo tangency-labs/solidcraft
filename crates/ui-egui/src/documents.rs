@@ -2963,12 +2963,16 @@ fn view_tab<'a>(
     }
 }
 
-/// A tab's menu: close it, the others, or all of them.
-const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
-    crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
-    crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
-    crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
-];
+/// A tab's menu: rename its design (`rename`: the translated label), close it, the others, or
+/// all of them.
+fn tab_menu(rename: &str) -> [crate::app_bar::TabMenuRow<'_>; 4] {
+    [
+        crate::app_bar::TabMenuRow::new("ui.renameTab", rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
+        crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
+        crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
+    ]
+}
 
 pub(crate) fn strip_view_id(app: &SolveApp, index: usize) -> Option<u64> {
     crate::view_windows::strip_views(app).get(index).map(|(_, view)| view.id)
@@ -3006,6 +3010,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
     let new_tip = app.tr("ui.start_page").to_string();
+    let rename_label = app.tr("ui.rename_design_tab").to_string();
+    let menu = tab_menu(&rename_label);
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
     let current_window = app.view_windows.current_window();
     let design_views: Vec<Vec<_>> = (0..n)
@@ -3135,7 +3141,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 focused: &mut r.focused,
                 max: MAX_DESIGN_NAME,
             }),
-            menu: &TAB_MENU,
+            menu: &menu,
             close_name: solidcraft_ui_text::tr("ui.close_tab"),
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
@@ -3262,13 +3268,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut renamed) = (None, None, None, None, None);
     let mut window_drop = false;
     for action in actions {
         match action {
             crate::app_bar::TabAction::Select(i) => pick = Some(i),
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
+                "ui.renameTab" => renamed = Some(tab),
                 "ui.closeTab" => shut = Some(tab),
                 "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
                 "ui.closeAllTabs" => many = Some((0..n).collect()),
@@ -3320,6 +3327,17 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             if let Some((from, to)) = dropped {
                 move_tab(app, from, to);
             }
+        }
+    }
+    // Rename from the menu: the design's tab is shown first (over the start page too), so its
+    // name is edited in place.
+    if let Some(tab) = renamed.filter(|_| idle) {
+        if tab != selected || app.home.open {
+            switch(app, tab);
+        }
+        let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+        if let Some((name, _)) = info.get(tab).filter(|_| shown == tab && !app.home.open) {
+            start_tab_rename(app, name, Rect::ZERO);
         }
     }
 }
@@ -5117,6 +5135,70 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// The menu's Rename edits the design's name in its tab, as a double-click does; on a tab
+    /// that isn't shown, that design is shown first. Enter keeps the name.
+    #[test]
+    fn rename_in_a_tabs_menu_edits_its_name_in_place() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.docs.active, 1);
+        let other = h.app.docs.slots.first().and_then(Option::as_ref).map(|d| d.session.doc.name.clone()).unwrap();
+        for (tab, name) in [(1, "Bracket"), (0, "Hinge")] {
+            h.step(&json!({"click": {"handle": format!("tab:design:{tab}")}, "button": "right"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.docs.active, tab, "the renamed design is the one shown");
+            assert!(renaming_tab(&h.app), "its name is being edited in the tab");
+            h.step(&json!({"text": name})).unwrap();
+            h.step(&json!({"key": "Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc.name, name);
+            assert!(!renaming_tab(&h.app));
+        }
+        // Each rename reached its own design only.
+        let names: Vec<String> = tabs_info(&h.app).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, vec!["Hinge".to_string(), "Bracket".to_string()]);
+        assert_ne!(other, "Hinge");
+    }
+
+    /// The menu's Rename is offered whatever the double-click preference says, and Escape keeps
+    /// the old name.
+    #[test]
+    fn rename_in_the_menu_works_with_the_double_click_preference_off() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.tab_double_click_renames = false;
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app));
+        h.step(&json!({"text": "Discarded"})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, before);
+        assert!(!renaming_tab(&h.app));
+        // Over the start page, Rename shows the design and edits its name.
+        h.app.home.open = true;
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.home.open, "the start page gives way to the design");
+        assert!(renaming_tab(&h.app), "its name is being edited in the tab");
     }
 
     /// Closing a batch through the tab menu must use the same final screen as closing one tab.

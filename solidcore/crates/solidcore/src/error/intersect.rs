@@ -881,14 +881,6 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for something an intersection or classification
-    /// routine needs that is not there, as the phrase says, with status
-    /// [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn intersect_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::intersect(operation, IntersectFailure::Missing(what))
-    }
-
     /// [`crate::SolidError::Failed`] for a traced curve whose UV control polygon is not
     /// proved inside the surface's domain ([`IntersectFailure::UvPolygonNotInDomain`]),
     /// with status [`SM_ERR`].
@@ -945,7 +937,11 @@ pub(super) mod tests {
             assert_eq!(typed.intersect_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::intersect_missing("intersect::op", "the edge's curve").to_string(),
+            SolidError::intersect(
+                "intersect::op",
+                IntersectFailure::Missing("the edge's curve")
+            )
+            .to_string(),
             "intersect::op: the edge's curve is missing"
         );
     }
@@ -1380,10 +1376,8 @@ pub(super) mod tests {
             ],
             wrappers: Wrappers::Phrase,
         };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/intersect/curve_class/p3.rs", 3),
-        ];
+        // every intersection site is converted (TE-O-10): none may come back
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned(
             "intersection phrase-cause sites",
             &crate_sites(&PHRASES),
