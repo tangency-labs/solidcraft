@@ -311,7 +311,11 @@ fn every_failure_notes_its_status() {
 }
 
 /// With the three fixes the arc's round followed by the front edge's fails in the rollover and
-/// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0.
+/// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0. Since
+/// tangency-labs/solidcraft#16686 the trace's flush that fails there fails the solver's
+/// geometry step, which notes it as upstream's step does ("Fillet Surface Computation
+/// Failure", at the solver's edge); before, the failure surfaced later unnoted, and the
+/// session noted it with the error's text after a ": ".
 #[test]
 fn the_rollover_failure_notes_its_status() {
     let failed = failures(arc_top(), LONG);
@@ -320,10 +324,7 @@ fn the_rollover_failure_notes_its_status() {
         .expect("the second round fails with the three fixes");
     assert_eq!(*which, "second");
     assert_eq!(*code, 4, "{comment}");
-    assert!(
-        comment.starts_with("Fillet Surface Computation Failure: "),
-        "{comment}"
-    );
+    assert_eq!(comment, "Fillet Surface Computation Failure");
 }
 
 /// Every vertex's point and tolerance; every edge's tolerance, its curve's points at the start,

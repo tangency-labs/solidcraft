@@ -1,6 +1,7 @@
 //! Regression test for tangency-labs/solidcore#1606: `Cone::lean_cylinder` kept the clone's
-//! `SmCylinder` flag. With `cylinder_rebuild_mean_radius` on, the rebuild refused every leaned
-//! cylinder (`SM_ERR`); with it off, the leaned surface still reported itself a cylinder.
+//! `SmCylinder` flag, so the rebuild's equal-radii rule for cylinders (WR-385) refused every
+//! leaned cylinder (`SM_ERR`); without that rule, the leaned surface still reported itself a
+//! cylinder.
 //!
 //! The case is SolidCraft's `draft_a_curved_face`: the side of a cylinder of radius 5 about +Z
 //! from the origin, heights 0 to 10, drafted by 0.1 rad about z = 0 (leaning in). Its solid is
@@ -76,23 +77,15 @@ fn check_draft(k: &Kernel) {
 }
 
 #[test]
-fn lean_cylinder_is_a_cone_with_the_mean_radius_fix() {
-    let mut k = Kernel::default();
-    k.fixes.cylinder_rebuild_mean_radius = true;
-    check_draft(&k);
-}
-
-#[test]
-fn lean_cylinder_is_a_cone_without_the_mean_radius_fix() {
+fn lean_cylinder_is_a_cone() {
     check_draft(&Kernel::default());
 }
 
 /// The frame and slopes of the unit test (frame at (1, 2, 3), neutral height 4), both signs,
-/// are no longer refused under `cylinder_rebuild_mean_radius`.
+/// are not refused by the cylinder rebuild's equal-radii rule.
 #[test]
-fn leaned_cylinders_are_not_refused_with_the_mean_radius_fix() {
-    let mut k = Kernel::default();
-    k.fixes.cylinder_rebuild_mean_radius = true;
+fn leaned_cylinders_are_not_refused() {
+    let k = Kernel::default();
     let cylinder = cylinder(&k, Point3::new(1.0, 2.0, 3.0));
     for slope in [0.1, -0.1, 1e-3, -0.4] {
         let cone = cylinder

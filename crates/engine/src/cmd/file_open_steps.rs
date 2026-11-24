@@ -30,10 +30,11 @@ pub struct OpenSteps {
     stop: usize,
     /// The model came from the file and needs no evaluation.
     adopted: bool,
-    /// Whether a signature check was asked for, and (when it was) its result, made on the worker
-    /// so landing the design does not hash its payloads on the window thread.
-    verify: bool,
+    /// The signature check's result when one was asked for, made on the worker so landing the
+    /// design does not hash its payloads on the window thread.
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    /// The file's provenance records, read with the design.
+    chain: Option<solidcraft_io::ProvenanceChain>,
 }
 
 impl OpenSteps {
@@ -54,11 +55,14 @@ impl OpenSteps {
         let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
-        let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        // One reading of the file gives the document, the model, whether it is signed, its
+        // provenance records and the signature check, so all describe the same bytes.
+        let file = read_design(&mut Session::default(), path, verify)?;
+        let (mut doc, saved, chain) = (file.doc, file.model, file.chain);
         // A file with provenance must not adopt its excluded cache: the shield would then vouch
         // for geometry the signature does not cover.
-        let signed = solidcraft_io::has_design_provenance(path);
-        let checked = verify.then(|| solidcraft_io::read_design_provenance_file(path));
+        let signed = file.signed;
+        let checked = verify.then_some(file.report);
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
@@ -79,8 +83,8 @@ impl OpenSteps {
             stop,
             adopted: adopted.is_some(),
             model: adopted.unwrap_or_else(|| under(validation)),
-            verify,
             checked,
+            chain,
         };
         Ok(Some(steps))
     }
@@ -106,7 +110,8 @@ impl OpenSteps {
     pub fn next_import(&self) -> Option<Arc<str>> {
         let f = self.doc.features.get(self.next).filter(|_| !self.done())?;
         match &f.kind {
-            FeatureKind::Import { step, .. } if !f.suppressed => Some(step.clone()),
+            // An import kept as records has no STEP text to read first.
+            FeatureKind::Import { step, records: None, .. } if !f.suppressed => Some(step.clone()),
             _ => None,
         }
     }
@@ -136,8 +141,8 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
-        opened_design(s, opened, &self.path, self.read_only, self.disk, self.verify, self.checked)
+        let opened = Session::with_model(self.doc, self.visibility, self.model).located_with(Some(&self.path), self.chain.clone());
+        opened_design(s, opened, &self.path, self.read_only, self.disk, self.checked, self.chain)
     }
 }
 

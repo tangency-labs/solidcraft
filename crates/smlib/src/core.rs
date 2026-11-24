@@ -1,5 +1,4 @@
-//! The solidcore backend: one kernel for the process (SMLib's context is process-global too, and
-//! some of its state, such as the fillet solver's latched step, lives for the whole process),
+//! The solidcore backend: one kernel for the process (SMLib's context is process-global too),
 //! every call under its lock and a panic guard.
 //!
 //! Upstream fixes ([`fixes`]) are solidcore's opt-in corrections of SMLib defects that the C++
@@ -10,7 +9,7 @@ use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -22,6 +21,7 @@ mod blend_tests;
 pub(crate) mod boolean;
 #[cfg(test)]
 mod boolean_tests;
+pub(crate) mod call;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
@@ -53,221 +53,28 @@ pub(crate) mod trim;
 #[cfg(test)]
 mod trim_tests;
 
-pub(crate) use convert::{from_arrays, to_arrays};
+#[cfg(test)]
+pub(crate) use convert::from_arrays;
+pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
-    area, bounds, check, check_with, classify_point, classify_points, edge_face_distance, is_manifold_solid, mass_properties, solid_count,
+    area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
+    mass_properties, solid_count,
 };
 
-/// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
-pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
-
-impl Body {
-    pub(crate) fn new(b: solidcore::topology::Brep) -> Body {
-        Body(Mutex::new(b))
-    }
-}
+/// A solidcore body: solidcore-ops' own, with its own lock (solidcore's operations take
+/// `&mut Brep`, even to measure). The operation families that still call the kernel crate here
+/// make one with `Body::from_kernel` and lock it with `Body::kernel`, a bridge solidcore-ops
+/// keeps until the last family calls it instead (tangency-labs/solidcore#3304).
+pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
-/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
-/// unless it appears broken. A test checks none is left off but those in `HELD_BACK`, so moving the
-/// solidcore pin to a rev with a new flag fails until it is added here.
+/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it.
+/// A flag new to the solidcore pin is on without an edit here, and a retired flag drops out of
+/// `UpstreamFixes::all` on its own. A fix that is broken is fixed or removed in solidcore, never
+/// held off here.
 pub(crate) fn fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_vertex_error_diagnostics = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
-    f.offset_extended_edges_mated = true;
-    f.keep_operand_uv_trims = true;
-    f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
-    f.oscillating_skips_failed_guesses = true;
-    f.refine_cc_range_ends = true;
-    f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
-    f.taper_tangent_corner_planes = true;
-    f.revolve_nested_shells_as_cavities = true;
-    f.revolve_holed_profile_void = true;
-    f.join_touching_loops = true;
-    f.offset_resolve_crossing_loops = true;
-    f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
-    f.local_operation_refuses_loose_tangent_edges = true;
-    f.torus_major_radius_from_origin = true;
-    f.fillet_nx1_opposite_continuation_side_edge = true;
-    f.torus_iso_circle_axis_from_midpoint = true;
-    f.internal_pole_row_through_knot = true;
-    f.extrusion_origin_scaled_zero = true;
-    f.transform_scales_each_tolerance = true;
-    f.transform_model_size_from_body_box = true;
-    f.offset_collapsed_rounds_mated = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
-    f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
-    f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
-    f.fillet_3x2_mixed_concave_side_edge = true;
-    f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
-    f.ssi_tangent_contact_points = true;
-    f.ssi_trace_tangent_curves_once = true;
-    f.ssi_singular_start_inside_direction = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f.local_operation_box_holds_new_surfaces = true;
-    f.shell_edges_on_analytics_exact = true;
-    f.ssi_pole_point_keeps_its_tangent = true;
-    f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean_splits_definition_across_split = true;
-    f.fillet_refuse_overlapping_bands = true;
-    f.ssi_tangent_curve_tracer = true;
-    f.torus_check_spindle_apex = true;
-    f.local_operation_step_walls = true;
-    f.edge_check_orders_tangent_faces = true;
-    f.thicken_planar_side_walls = true;
-    f.fillet_knife_edge_rounds = true;
-    f.revolution_round_offset_collapses = true;
-    f.fillet_chamfer_cone_stored_as_cone = true;
-    f.offset_point_vertex_caps = true;
-    f.proto_edge_splits_at_captured_vertices = true;
-    f.local_operation_closes_walls_to_nothing = true;
-    f.imprint_reuses_coincident_face_edge = true;
-    f.boolean_new_face_closure_both_sides = true;
-    f.linear_sweep_arc_is_cylinder = true;
-    f.loops_go_on_round_the_vertex = true;
-    f.revolve_splits_curves_on_axis = true;
-    f.cover_wraps_across_closed_seam = true;
-    f.fillet_rails_meet_at_one_end_point = true;
-    f.fillet_trace_reaches_rails = true;
-    f.delete_vertex_joins_seam_iso_curve = true;
-    f.box_face_failures_propagate = true;
-    f.fillet_rail_end_on_continued_surface = true;
-    f.fillet_removal_takes_ring_fillets = true;
-    // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.fillet_trim_inside_by_best_dot = true;
-    f.fillet_half_degree_crease = true;
-    f.curve_loop_normal_from_area = true;
-    // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
-    f.fillet_cliff_overflow = true;
-    f.offset_extension_as_itself = true;
-    f.fillet_mitre_concave_face_corners = true;
-    f.fillet_mitre_gap_patch = true;
-    f.good_drop_result_distances_in_order = true;
-    f.face_tight_box_searches_trim = true;
-    f.ssi_low_angle_start_on_probation = true;
-    f.fillet_variable_span_follows_fillet = true;
-    f.simple_coincidence_crossing_is_point = true;
-    f.planar_path_sweep_statuses = true;
-    f.planar_path_profile_placement_statuses = true;
-    f.fillet_trim_status = true;
-    f.plane_recognition_origin_after_axes = true;
-    f.brep_edit_statuses_pass_on = true;
-    f.fillet_run_on_bspline_trims = true;
-    f.query_statuses_pass_on = true;
-    f.sweep_statuses_pass_on = true;
-    f.ssi_proto_topology_statuses_pass_on = true;
-    f.analytic_inversion_answers_apart = true;
-    f.fillet_statuses_pass_on = true;
-    f.fillet_corner_per_vertex_fan = true;
-    f.fillet_rail_trim_at_near_knot = true;
-    f.offset_keep_cavity_regions = true;
-    f.ellipse_step_interval_checks = true;
-    f.corner_patch_face_side_twist = true;
-    f.boolean_union_refuses_solid_leak = true;
-    f.curve_loop_start_after_previous_end = true;
-    f.loop_use_reports_open_gaps = true;
-    f.face_points_span_domain = true;
-    f.drop_curve_v_domain_degeneracy = true;
-    f.mirror_curve_keeps_euclidean_control_points = true;
-    f.dupin_bottom_hyperbola_axis = true;
-    f.offset_swap_uv_extended_distance = true;
-    f.validation_does_not_make_uv_trims = true;
-    f.proto_edge_split_upper_keeps_the_old_max = true;
-    f.point_on_start_point_squared_tolerance = true;
-    f.bspline_trim_keeps_rational_end_spans = true;
-    f.fillet_exact_round_classes = true;
-    f.check_seam_crossing_unclosed = true;
-    f.ascii_doubles_round_trip = true;
-    f.offset_edges_keep_source_tolerance = true;
-    f.surface_continuity_checks_last_v_knot = true;
-    f.volume_lift_third_derivative_terms = true;
-    f.plane_reparameterize_moves_origin = true;
-    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
-    f.volume_representational_end_continuities = true;
-    f.offset_open_edge_second_trim_point = true;
-    f.close_loop_relates_only_coincident_edges = true;
-    f.ssi_split_curves_at_singular_points = true;
-    f.surface_parallel_to_vector_checks = true;
-    f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
-    f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.curve_sweep_closed_path_joins_ends = true;
-    f.validate_tolerances_fixes_reported_gaps = true;
-    f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
-    f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.cone_iso_circle_at_axial_height = true;
-    f.fillet_overflow_trim_at_creases = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_refuse_rounds_breaking_through = false;
-    f.cone_unbounded_parameterized_as_nurb = true;
-    f.fillet_round_as_definition = true;
-    f.fillet_overflow_crease_along_edge = true;
-    f.keep_exact_pcurves = true;
-    f.face_swap_uv_transposes_trims = true;
-    f.closed_smooth_pole_tangent_limit = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_round_ends_on_outline = false;
-    f.fillet_chamfer_corner = true;
-    f.brep_ray_classifies_current_trims = true;
-    f
+    UpstreamFixes::all()
 }
-
-/// The fixes held off, each with the case and the numbers that show it broken: a volume or topology
-/// wrong against the analytic value, a check failure, a crash, sound geometry refused that builds
-/// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
-/// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
-/// against its closed form is a win.
-///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
-/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
-/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
-/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
-/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
-/// off).
-///
-/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
-/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
-/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
-/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
-/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
-/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
-/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
-/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
-/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
-/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
-/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
-#[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
@@ -320,7 +127,23 @@ const MOST_RUNNING: usize = 256;
 
 static POOL: Mutex<Pool<Kernel>> = Mutex::new(Pool { idle: Vec::new(), running: 0, most_idle: 8, most_running: MOST_RUNNING });
 
+/// Names this crate's fixes ([`fixes`]) to solidcore-ops' session, once: the kernels of its
+/// calls then run with the fixes this crate's own kernels run with ([`fresh`]). Without it
+/// solidcore-ops runs with every fix off, so a call the app makes through solidcore-ops (a
+/// measure, a planar boolean) ran on another kernel behaviour than the modelling beside it.
+pub(crate) fn start() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let fixes = fixes();
+        let on = fixes.flags().filter(|(_, on)| *on).map(|(name, _)| name);
+        if let Err(e) = solidcore_ops::session::set_fixes(on) {
+            log::warn!(target: "smlib", "solidcore-ops' session did not take the fixes: {e}");
+        }
+    });
+}
+
 fn take_kernel() -> Option<Kernel> {
+    start();
     POOL.lock().unwrap_or_else(PoisonError::into_inner).take(fresh)
 }
 
@@ -329,13 +152,14 @@ fn put_kernel(k: Option<Kernel>) {
 }
 
 /// What a call must not find from the calls before it: the same operation on the same bodies
-/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
-/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. Tolerances and fixes are the same on every kernel.)
+/// answers the same on any kernel, however much that kernel did first. (The stations it
+/// remembers; marks, identities and what is only kept to reuse memory change no answer, and a
+/// kernel holds no position in a random sequence: each sampling call draws from the start of the
+/// seed's. The certificates it finished, kept by the exact content of their inputs
+/// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
+/// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
-    k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
-    k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
 }
 
@@ -364,10 +188,10 @@ thread_local! {
     static IN_CALL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside a solidcore call, whose panic [`run_on`] catches? (Crash reports mark such
-/// a panic recovered.)
+/// Is this thread inside a solidcore call, whose panic [`run_on`] or solidcore-ops' session
+/// catches? (Crash reports mark such a panic recovered.)
 pub(crate) fn in_call() -> bool {
-    IN_CALL.with(std::cell::Cell::get) > 0
+    IN_CALL.with(std::cell::Cell::get) > 0 || solidcore_ops::session::in_call()
 }
 
 /// [`run`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,
@@ -410,10 +234,15 @@ fn call_on<T: dump::Answer>(
     let depth = Depth;
     let caught = catch_unwind(AssertUnwindSafe(|| f(&mut k)));
     drop(depth);
+    let mut code = None;
     let r = match caught {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
+        Ok(Err(e)) => {
+            code = Some(crate::failure::FailureCode::of_kernel(call, &e));
+            Err(Error::Solidcore(format!("{call}: {e}")))
+        }
         Err(p) => {
+            code = Some(crate::failure::FailureCode { call, kind: crate::failure::FailureCode::OPS, operation: "Internal" });
             k = fresh();
             let why = p.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
             log::warn!(target: "smlib", "solidcore panicked in {call}: {why}");
@@ -430,6 +259,9 @@ fn call_on<T: dump::Answer>(
             Err(Error::Internal(e)) => Err(Error::Internal(e)),
             _ => Err(Error::Cancelled(call)),
         };
+    }
+    if let (Some(code), Err(e)) = (code, &r) {
+        crate::failure::failed(code, e);
     }
     let why = match &r {
         Ok(v) => v.refusal(),
@@ -450,12 +282,14 @@ fn call_on<T: dump::Answer>(
 /// (unported code, invalid input to an adapter, a missing record...) is not a status the C++
 /// path returns, so it fails the call instead of hiding as a skipped entity. So does a status
 /// error whose cause chain holds a solidcore-side failure or a cancellation
-/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), the rule of
+/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), or a blend
+/// certificate that spent its work budget
+/// ([`SolidError::is_not_certified`](solidcore::SolidError::is_not_certified)), the rule of
 /// solidcore-ops' `session::answer`.
 pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std::result::Result<Option<T>, solidcore::SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_status_answer() => Ok(None),
+        Err(e) if e.is_status_answer() && !std::iter::successors(Some(&e), |e| e.cause()).any(|e| e.is_not_certified()) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -467,11 +301,11 @@ pub(crate) fn with_body<T: dump::Answer>(
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
     // A body a panic interrupted may be half-edited: it is never used again.
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
-    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.kernel()))
 }
 
 /// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
@@ -481,14 +315,14 @@ pub(crate) fn with_own_body<T: dump::Answer>(
     body: &Body,
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
         return Err(Error::Cancelled(call));
     }
-    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.kernel()))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:
@@ -498,7 +332,7 @@ pub(crate) fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Body> {
         return Err(Error::Argument);
     }
     let [x, y, z] = size;
-    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::new)
+    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::from_kernel)
 }
 
 fn point(p: [f64; 3]) -> Result<Vec3> {
@@ -515,7 +349,7 @@ pub(crate) fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Resul
     if !(radius > 0.0 && height > 0.0 && radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::new)
+    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::from_kernel)
 }
 
 /// A sphere (`SmApiCreateSphere`; radius positive).
@@ -524,7 +358,7 @@ pub(crate) fn make_sphere(center: [f64; 3], radius: f64) -> Result<Body> {
     if !(radius > 0.0 && radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::new)
+    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::from_kernel)
 }
 
 /// A cone or frustum about +Z (`SmApiCreateCone`; `smlib_make_cone`'s checks: base radius and
@@ -535,7 +369,7 @@ pub(crate) fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, hei
     if !(ok && base_radius.is_finite() && top_radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::new)
+    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::from_kernel)
 }
 
 /// A ring torus about +Z (`SmApiCreateTorus`; major radius > minor radius > 0).
@@ -544,7 +378,7 @@ pub(crate) fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64)
     if !(minor_radius > 0.0 && minor_radius < major_radius && major_radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::new)
+    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::from_kernel)
 }
 
 /// The enclosed volume (`SmApiBrepComputeVolume`), its accuracy clamped as [`mass_properties`]
@@ -568,14 +402,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on_unless_shown_broken() {
-        let f = fixes();
-        let flags: Vec<(&str, bool)> = f.flags().collect();
-        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
+    fn every_upstream_fix_is_on() {
+        let off: Vec<&str> = fixes().flags().filter(|(_, on)| !on).map(|(name, _)| name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
-        for name in HELD_BACK {
-            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
-        }
     }
 
     #[test]

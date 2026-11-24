@@ -39,6 +39,11 @@ pub struct InterferenceParams {
     /// occurrence's id or name, matching every body under it. Default: none.
     #[serde(default)]
     pub exclude_pairs: Option<Vec<[PartRef; 2]>>,
+    /// Component envelopes (`solid.bounding_solid` with `component`) are left out unless named
+    /// (the default, false); true checks each one instead of the bodies inside it, and a body
+    /// named inside one means it. An envelope is never paired with a body inside it.
+    #[serde(default, deserialize_with = "super::clearance::envelopes_key")]
+    pub envelopes: Option<bool>,
 }
 
 /// `budget_s`: seconds above 0, at most a day, or `null`, as the handler reads it (with

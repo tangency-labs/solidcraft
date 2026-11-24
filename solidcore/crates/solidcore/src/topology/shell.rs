@@ -74,7 +74,8 @@
 //! still holds (upstream would splice it into a second list), or for a face use
 //! going into a shell whose head is a wire or vertex use.
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{with_mark_lock, ALL_MARKS};
 use crate::geom::object::Shape;
 use crate::kernel::Kernel;
@@ -485,7 +486,16 @@ pub fn wire_edges(kernel: &mut Kernel, brep: &Brep, id: ShellId) -> Result<Vec<E
                     // Upstream marks every listed vertex: a NULL start vertex is a
                     // NULL dereference.
                     let vertex = vertex.ok_or_else(|| {
-                        SolidError::topology_missing(WIRE_OP, "the edge's start vertex")
+                        Failure::new(
+                            WIRE_OP,
+                            TopologyFailure::Defect {
+                                why: "an edge of the wire shell has no vertex at one of its ends; \
+                                    the kernel makes every edge with a vertex use on a vertex at \
+                                    each end",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error()
                     })?;
                     if marks.is_marked(kernel, Entity::Vertex(vertex), mark) {
                         continue;
@@ -608,16 +618,21 @@ pub fn region_post_insert_shell(brep: &mut Brep, region: RegionId, shell: ShellI
 pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId) -> Result<()> {
     const OP: &str = "topology::shell::shell_remove_faceuse";
     if brep.faceuse(faceuse)?.shell != Some(shell) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the face use is not in the shell",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::FaceUseNotInShell));
     }
     let members = &mut brep.shell_mut(shell)?.members;
     match members {
         ShellMembers::Faceuses(list) => {
             let index = list.iter().position(|id| *id == faceuse).ok_or_else(|| {
-                SolidError::topology_failed(OP, "the face use is not in the shell's face uses")
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "the face use names this shell as its owner but is not in the \
+                            shell's list of face uses; the kernel sets a face use's owner \
+                            and its list entry together",
+                    },
+                )
+                .into_error()
             })?;
             list.remove(index);
             if list.is_empty() {
@@ -625,10 +640,15 @@ pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId)
             }
         }
         ShellMembers::Empty => {
-            return Err(SolidError::topology_failed(
+            return Err(Failure::new(
                 OP,
-                "the shell has no face uses",
-            ))
+                TopologyFailure::Defect {
+                    why: "the face use names this shell as its owner but the shell's \
+                        member list is empty; the kernel sets a face use's owner and \
+                        its list entry together",
+                },
+            )
+            .into_error())
         }
         _ => return Err(invalid_members()),
     }
@@ -707,16 +727,16 @@ pub fn transfer_children(
             return if shell_list_size(brep, source)? == 0 {
                 Ok(())
             } else {
-                Err(SolidError::topology_failed(
+                Err(SolidError::topology(
                     OP,
-                    "the recipient is a vertex shell and the source is not empty",
+                    TopologyFailure::RecipientIsVertexShell,
                 ))
             };
         }
         if brep.shell(source)?.is_vertex_shell() {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the source is a vertex shell",
+                TopologyFailure::SourceIsVertexShell,
             ));
         }
     }
@@ -818,8 +838,12 @@ fn remove_and_post_insert(
 /// from its shell's face-use list, a recipient holding wire/vertex members, or
 /// dangling ids.
 pub fn move_faceuse(brep: &mut Brep, faceuse: FaceuseId, recipient: ShellId) -> Result<()> {
+    // a face use taken out of its shell has none to move from: the caller's face use
     let source = brep.faceuse(faceuse)?.shell.ok_or_else(|| {
-        SolidError::topology_missing("topology::shell::move_faceuse", "the face use's shell")
+        SolidError::topology(
+            "topology::shell::move_faceuse",
+            TopologyFailure::FaceUseWithoutShell,
+        )
     })?;
     brep.shell(recipient)?;
     remove_and_post_insert(brep, faceuse, source, recipient)?;
@@ -1202,8 +1226,18 @@ where
         let radius = if let Some(radius) = input.sphere_bound {
             radius
         } else {
-            shell_brep(brep, shell_id)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the shell's B-rep"))?;
+            shell_brep(brep, shell_id)?.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "the shell the ray is fired at is in no region of the B-rep \
+                            that stores it; the kernel makes a shell inside a region of \
+                            its B-rep and deletes the shell when it leaves the region",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             // pBrep->CalculateBoundingBox(sBBox) (unit `query.brep`, default arguments)
             qbrep::calculate_bounding_box(kernel, &mut *brep, BoundingBoxOptions::default())?
                 .sphere_bound()
@@ -1213,32 +1247,50 @@ where
         let direction = (end - input.start)
             .unitize()
             // SmVector3d::Unitize returns SM_ERR_INVALID_INPUT.
-            .map_err(|_| {
-                SolidError::topology_invalid_value(OP, "the ray's direction has zero length")
+            .map_err(|e| {
+                Failure::new(OP, TopologyFailure::ZeroLengthVector)
+                    .caused_by(e)
+                    .into_error()
             })?;
         // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
-        let faces =
-            with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
-                let mut marks = Marks::default();
-                let mut faces = Vec::new();
-                for id in brep.shell(shell_id)?.get_faceuses()? {
-                    let faceuse = brep.faceuse(id)?;
-                    let face = faceuse
-                        .face
-                        .ok_or_else(|| SolidError::topology_missing(OP, "the face use's face"))?;
-                    if marks.is_marked(kernel, Entity::Face(face), mark) {
-                        continue;
-                    }
-                    marks.mark(kernel, Entity::Face(face), mark);
-                    let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
-                        SolidError::topology_missing(OP, "the face use's mate")
-                    })?)?;
-                    if mate.shell != Some(shell_id) {
-                        faces.push((brep_id, face));
-                    }
+        let faces = with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+            let mut marks = Marks::default();
+            let mut faces = Vec::new();
+            for id in brep.shell(shell_id)?.get_faceuses()? {
+                let faceuse = brep.faceuse(id)?;
+                let face = faceuse.face.ok_or_else(|| {
+                    Failure::new(
+                        OP,
+                        TopologyFailure::Defect {
+                            why: "a face use of the shell names no face; the kernel makes a \
+                                face's two face uses with the face and never unlinks one from \
+                                it",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
+                })?;
+                if marks.is_marked(kernel, Entity::Face(face), mark) {
+                    continue;
                 }
-                Ok::<_, SolidError>(faces)
-            })??;
+                marks.mark(kernel, Entity::Face(face), mark);
+                let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
+                    Failure::new(
+                        OP,
+                        TopologyFailure::Defect {
+                            why: "a face use of the shell has no mate; the kernel makes a face's \
+                                two face uses as a mated pair",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
+                })?)?;
+                if mate.shell != Some(shell_id) {
+                    faces.push((brep_id, face));
+                }
+            }
+            Ok::<_, SolidError>(faces)
+        })??;
         let shape = world.shell_ray_shape(kernel, (brep_id, brep), &faces)?;
         let vectors = [direction];
         let solutions = world.solve_shape_ray(
@@ -1288,17 +1340,20 @@ where
                 .set_class_object(PointClassType::Unknown, None);
         }
         if parameter < EFF_ZERO * (1.0 + input.start.max_dimension()) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the ray hits the shell at its start",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::RayHitsAtStart));
         }
-        let object = chosen
-            .objects
-            .first()
-            .copied()
-            .flatten()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the face the ray hits"))?;
+        let object = chosen.objects.first().copied().flatten().ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the nearest hit of the ray names no face; the ray solve is \
+                        given the shell's faces as its objects and records the face of \
+                        every hit it returns",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         state.classification.load_from_intersection(
             input.zone_tolerance,
             object,
@@ -1307,8 +1362,18 @@ where
             parameter,
         )?;
         let endpoint = input.start + direction * parameter;
-        shell_brep(brep, shell_id)?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's B-rep"))?;
+        shell_brep(brep, shell_id)?.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the shell the ray hit is in no region of the B-rep that stores \
+                        it; the kernel makes a shell inside a region of its B-rep and \
+                        deletes the shell when it leaves the region",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let curve = BSplineCurve::create_line_segment(3, input.start, endpoint)?;
         let sector = world.shell_ray_sector(
             &*kernel,
@@ -1564,9 +1629,16 @@ pub fn is_inner_shell_of_tri(
 /// shell (`ClosureTraversal` of its first face use; else [`SM_FALSE`]). Rays are cast
 /// from three sample points of each face use of the shell (along its normal), or from
 /// a wire shell's first edge or a vertex shell's vertex in random directions
-/// (`kernel.rng`, ND-1), against the whole B-rep; the first ray whose crossings are
+/// (ND-1), against the whole B-rep; the first ray whose crossings are
 /// all simple face crossings decides, by the stack of shells it exits and enters.
 /// Returns [`SM_TRUE`], [`SM_FALSE`] or [`SM_UNSURE`] (no ray decided).
+///
+/// The random directions and the face samples' dithers come from one generator the call
+/// makes from the kernel's seed ([`Kernel::seeded_rng`]); the face uses draw from it in
+/// the shell's face-use order, each taking the next draws, so two face uses are not
+/// sampled at the same relative places. So the rays, and with them the answer, are a
+/// function of the B-rep, the two shells and the seed: the same call on the same body
+/// gives the same answer whatever the kernel ran before.
 ///
 /// Upstream ignores the statuses of the closure traversal, the bounding box, the
 /// sample points, the ray solve, the classification insert and the crossing face's
@@ -1618,9 +1690,10 @@ pub fn is_inner_shell_of(
                 Some(fu) => crate::topology::topology_traverser::closure_traversal(
                     k, b, &mut marks, fu, &lock, None,
                 ),
-                None => Err(SolidError::topology_missing(
+                // a face-use shell that lists no face use: the caller's outer shell is empty
+                None => Err(SolidError::topology(
                     OP_ISO,
-                    "the outer shell's first face use",
+                    TopologyFailure::ShellHasNoFaceUses,
                 )),
             };
             let mut lock = lock;
@@ -1654,6 +1727,9 @@ pub fn is_inner_shell_of(
 
     // search the faceuses of the shells for likely ray casts (those that hit only faces)
     let smp_cnt = 3u64;
+    // this call's own draws, from the start of the seed's sequence: the face uses' sample
+    // dithers in face-use order, or a wire or vertex shell's ray directions
+    let mut rng = k.seeded_rng();
     let shell = b.shell(id)?.clone();
     let inner_vertex = shell.vertex(b)?;
     let inner_faceuses = shell.get_faceuses()?;
@@ -1680,7 +1756,7 @@ pub fn is_inner_shell_of(
             );
             // SmFaceuse::GetPointsInFace (which resets its outputs first; a failure
             // here leaves them empty)
-            let r = crate::topology::face::p2::points_in_face(k, b, f, smp_cnt);
+            let r = crate::topology::face::p2::points_in_face_drawing(k, b, f, smp_cnt, &mut rng);
             match checked(r)? {
                 Checked::Value(points) => {
                     let mut pv = points.pv;
@@ -1712,9 +1788,9 @@ pub fn is_inner_shell_of(
                     Checked::Decides => return Ok(SM_UNSURE),
                 };
                 let mut dir = Vec3::new(
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
                 );
                 dir = dir.unitize_or_z();
                 smp_pv.push(point);
@@ -1726,9 +1802,9 @@ pub fn is_inner_shell_of(
             for _ in 0..smp_cnt {
                 // pick varying directions for the vector
                 let mut dir = Vec3::new(
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
-                    k.rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
+                    rng.next_signed_unit(),
                 );
                 dir = dir.unitize_or_z();
                 smp_pv.push(point);

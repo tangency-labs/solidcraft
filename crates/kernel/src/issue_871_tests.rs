@@ -2,7 +2,11 @@
 
 use solidcore_record::Vec3;
 
-use crate::{Body, BoolOp, build::box_solid, ops::boolean};
+use crate::{
+    Body, BoolOp,
+    build::{box_solid, cylinder},
+    ops::boolean,
+};
 
 /// The part from #871: a plate with a narrower block on top and a window through both, filleted
 /// at radius 1 along every edge of both end faces.
@@ -73,4 +77,38 @@ fn rounds_that_fit_are_closed() {
     let removed = 2.0 * length * r * r * (1.0 - FRAC_PI_4);
     let v = crate::measure(&b).unwrap().volume;
     assert!((v - (part_volume - removed)).abs() < 1e-7 * part_volume, "{v} vs {}", part_volume - removed);
+}
+
+/// #19687: a 0.05 mm round of the top rim of a Ø1 × 1000 mm pin, with a 0.12 mm square notch on
+/// the rim and a Ø0.1 mm boss in the middle, fits: no wall or face there is narrower than two
+/// rounds. The check for crossed boundaries followed each edge at a thousandth of the body's
+/// 1000 mm, so it drew the Ø0.9 mm rim as two segments over its diameter, which crossed the notch,
+/// and refused the round. It removes what the round of the unnotched rim would, 2π (R − x̄) A
+/// (A = (1 − π/4) r², x̄ the section's centroid in from the rim), less the notch's 0.12 mm of rim
+/// and plus its three edges' 0.24 mm, each at A per length; the corners where they meet make up
+/// the rest (within 1 %).
+#[test]
+fn a_small_round_on_a_long_pin_is_not_refused_as_crossed() {
+    use std::f64::consts::{FRAC_PI_4, PI};
+    let pin = cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 0.5, 1000.0).unwrap();
+    let notch = box_solid(Vec3::new(-0.06, 0.44, 999.5), Vec3::new(0.06, 0.56, 1000.0)).unwrap();
+    let notched = boolean(&pin, &notch, BoolOp::Cut).unwrap().unwrap();
+    let boss = cylinder(Vec3::new(0.0, 0.0, 1000.0), Vec3::new(0.0, 0.0, 1.0), 0.05, 0.4).unwrap();
+    let p = boolean(&notched, &boss, BoolOp::Union).unwrap().unwrap();
+    let y = (0.5f64 * 0.5 - 0.06 * 0.06).sqrt();
+    let picks = [
+        Vec3::new(0.0, -0.5, 1000.0),
+        Vec3::new(0.0, 0.44, 1000.0),
+        Vec3::new(-0.06, (0.44 + y) / 2.0, 1000.0),
+        Vec3::new(0.06, (0.44 + y) / 2.0, 1000.0),
+    ];
+    let r = 0.05;
+    let b = crate::fillet(&p, &picks, r).unwrap();
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    assert_eq!(b.crossed_face_loops().unwrap(), 0);
+    let area = (1.0 - FRAC_PI_4) * r * r;
+    let xbar = (r * r * r / 2.0 - PI * r * r / 4.0 * (r - 4.0 * r / (3.0 * PI))) / area;
+    let expected = 2.0 * PI * (0.5 - xbar) * area + (0.24 - 0.12) * area;
+    let removed = crate::measure(&p).unwrap().volume - crate::measure(&b).unwrap().volume;
+    assert!((removed - expected).abs() < 0.01 * expected, "removed {removed}, expected about {expected}");
 }

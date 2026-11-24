@@ -65,6 +65,8 @@ pub use lattice::MAX_CELLS;
 
 /// Most sides of a polygon cell.
 pub const MAX_SIDES: u32 = 64;
+/// Most lattice lines a snapped field edge may be moved in.
+pub const MAX_SNAP_INSET: u32 = 1000;
 /// Largest coordinate (mm) of the field or the anchor.
 pub const MAX_COORD: f64 = 1e9;
 /// Smallest cell size and web (mm).
@@ -133,6 +135,11 @@ pub struct CellGridSpec {
     pub anchor: Vec2,
     /// What happens to a cell the field's edge crosses.
     pub clip: Clip,
+    /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
+    pub keepout_clip: Option<Clip>,
+    /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
+    /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
+    pub snap_inset: u32,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -149,6 +156,8 @@ impl Default for CellGridSpec {
             angle: 0.0,
             anchor: Vec2::ZERO,
             clip: Clip::Snap,
+            keepout_clip: None,
+            snap_inset: 0,
             margin: 0.0,
         }
     }
@@ -177,13 +186,27 @@ impl CellGridSpec {
                 self.web
             )));
         }
+        if self.snap_inset > MAX_SNAP_INSET {
+            return Err(CellGridError::Parameter(format!(
+                "the snap inset must be from 0 to {MAX_SNAP_INSET} lattice lines, not {}",
+                self.snap_inset
+            )));
+        }
+        if self.snap_inset > 0 && self.clip != Clip::Snap {
+            return Err(CellGridError::Parameter(
+                "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
+                    .into(),
+            ));
+        }
         if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
             return Err(CellGridError::Parameter(format!(
                 "the margin must be from 0 to {MAX_COORD} mm, not {}",
                 self.margin
             )));
         }
-        if self.margin > 0.0 && self.clip != Clip::Whole {
+        if self.margin > 0.0
+            && (self.clip != Clip::Whole || self.keepout_clip.is_some_and(|c| c != Clip::Whole))
+        {
             return Err(CellGridError::Parameter(
                 "a margin needs `clip: whole`: snapped and trimmed cells meet the edge by design"
                     .into(),
@@ -349,13 +372,25 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
-    let mut clip = spec.clip;
-    if clip == Clip::Snap && !lat.snappable() {
-        clip = Clip::Whole; // no lattice lines to snap to
-    }
+    // Without lattice lines there is nothing to snap to.
+    let usable = |c: Clip| {
+        if c == Clip::Snap && !lat.snappable() {
+            Clip::Whole
+        } else {
+            c
+        }
+    };
+    let field_clip = usable(spec.clip);
+    let keepout_clip = usable(spec.keepout_clip.unwrap_or(spec.clip));
+    let any_snap = field_clip == Clip::Snap || keepout_clip == Clip::Snap;
     let mut region = Region::from_loops(loops, lat.p);
-    if clip == Clip::Snap {
-        let (snapped, notes) = snap::snap_region(&region, &lat);
+    if any_snap {
+        let (snapped, notes) = snap::snap_region(
+            &region,
+            &lat,
+            (field_clip == Clip::Snap, keepout_clip == Clip::Snap),
+            spec.snap_inset,
+        );
         region = snapped;
         warnings.extend(notes);
     }
@@ -389,7 +424,7 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
                 // The exact edges are the field as drawn. Snapping moves the straight loops off
                 // them (fields shrink, keep-outs grow), so with `Snap` the hits on the moved
                 // loops must stay: only the other modes may clear a hit the chords made.
-                if clip != Clip::Snap {
+                if !any_snap {
                     hits.clear();
                 }
             } else if hits.is_empty() {
@@ -416,6 +451,21 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
             }
             continue;
         }
+        // A cell is clipped by the mode of the loops it meets; one that meets both kinds gets
+        // the stricter: dropped for whole, else trimmed for free, else cut along the grid.
+        let on_keepout = |h: &usize| region.keepout.get(*h).copied().unwrap_or(false);
+        let clip = match (
+            hits.iter().any(|h| !on_keepout(h)),
+            hits.iter().any(on_keepout),
+        ) {
+            (false, true) => keepout_clip,
+            (_, false) => field_clip,
+            (true, true) => match (field_clip, keepout_clip) {
+                (Clip::Whole, _) | (_, Clip::Whole) => Clip::Whole,
+                (Clip::Free, _) | (_, Clip::Free) => Clip::Free,
+                _ => Clip::Snap,
+            },
+        };
         match clip {
             Clip::Whole => {}
             Clip::Free => {
@@ -590,7 +640,7 @@ fn lattice_loops(
             return Err(wrong("has no segments"));
         }
         let mut prims: Vec<Prim> = Vec::new();
-        let mut curved = false;
+        let mut loop_flattened = false;
         for seg in &lp.segs {
             check_seg(seg, MAX_COORD).map_err(wrong)?;
             edges.push(
@@ -606,11 +656,10 @@ fn lattice_loops(
                     start,
                     sweep,
                 } => {
-                    curved = true;
                     prims.push(Prim::arc(center, radius, start, sweep));
                 }
                 _ => {
-                    curved = true;
+                    loop_flattened = true;
                     flattened = true;
                     let pts = flatten(seg, FLATTEN_TOL)
                         .ok_or_else(|| wrong("has a curve too complex to follow"))?;
@@ -632,7 +681,7 @@ fn lattice_loops(
         }
         let moved: Vec<Prim> = prims.iter().map(|p| p.moved(turn, shift)).collect();
         loops.push(
-            Loop::new(moved, Some(curved))
+            Loop::new(moved, Some(loop_flattened))
                 .ok_or_else(|| wrong("has a coordinate that is not finite"))?,
         );
     }
@@ -802,7 +851,11 @@ fn flatten(seg: &Seg2, tol: f64) -> Option<Vec<Vec2>> {
 ///   `gamma_4 (|f.x d.y| + |f.y d.x|) <= sqrt(2) gamma_4 |f| |d|`, and the division and root add
 ///   `gamma_2`'s worth of `h`, so the error is at most `sqrt(2) gamma_4 |f| + 4 u h <= 5.7 u *
 ///   2.83 M + 4 u * 2.83 M <= 28 u M`; at an end it is the length of `f` (`gamma_5 |f| <= 15 u
-///   M`). Taken as `E = 32 u M`.
+///   M`). Taken as `E = 32 u M`. When `|d|^2 < MIN_POSITIVE / EPSILON` (below that, `gamma_3`
+///   no longer bounds its rounding, for it may underflow) `h` is instead the smaller of the
+///   distances of the apex from the two ends, never less than its distance from the segment;
+///   each is a `hypot` of one-subtraction differences (no underflow, within `gamma_5 |f|`), so
+///   the same `E` covers it.
 /// - (d) the decision. Accepted, the computed `h_c <= tol - 2 slack`, so the computed triangle's
 ///   true height is at most `tol - 2 slack + E`. The computed piece lies in that triangle, so is
 ///   within that of its chord, and the true curve within `D` more of it (and the other way for
@@ -839,7 +892,17 @@ fn flatten_conic(a: Vec2, apex: Vec2, b: Vec2, w: f64, tol: f64) -> Option<Vec<V
             return None;
         }
         let [p0, p1, p2] = p;
-        let h = exact::to_segment(p1, p0, p2);
+        let d = p2 - p0;
+        let h = if d.x * d.x + d.y * d.y < f64::MIN_POSITIVE / f64::EPSILON {
+            // The chord's squared length is too small to be a normal number, so `to_segment`'s
+            // division is not within the bound of (c): the nearer end's distance stands in.
+            (p1 - p0)
+                .x
+                .hypot((p1 - p0).y)
+                .min((p1 - p2).x.hypot((p1 - p2).y))
+        } else {
+            exact::to_segment(p1, p0, p2)
+        };
         if !h.is_finite() {
             return None;
         }

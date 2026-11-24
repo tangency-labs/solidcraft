@@ -68,6 +68,12 @@ pub struct CellGridSpec {
     /// with `Clip::Whole`.
     #[serde(default)]
     pub margin: f64,
+    /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
+    #[serde(default)]
+    pub keepout_clip: Option<Clip>,
+    /// With `Clip::Snap`, how many lattice lines further in each straight field edge moves.
+    #[serde(default)]
+    pub snap_inset: u32,
 }
 
 /// How a cell's opening came about.

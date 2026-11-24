@@ -1,10 +1,11 @@
 # Blur behind panels (#9809, #9810)
 
-Implementation note for PRs 5 and 6 of the #8876 series. Native rendering,
-theme-declared controls, runtime availability and a transient quality guard are
-present. Built-in themes/defaults are unchanged. No build, test, GPU run,
-screenshot, benchmark or pixel comparison has been run by this worker.
-The 22 ms/60-sample threshold remains a starting policy, not a measured tuning result.
+Implementation note for the #8876 series, updated for #19213 (one backdrop mechanism for every view and
+window). Native rendering, theme-declared controls, runtime availability and a transient quality
+guard are present. Built-in themes/defaults are unchanged. The sections on the frame path, the
+backdrop contract, allocation and capability describe the code as of #19213; the sections after
+"Internal activation" are the older validation notes and still mention a viewport source and a
+source cache, which no longer exist. The 22 ms/60-sample threshold remains a starting policy, not a measured tuning result.
 
 ## Theme controls and runtime intent
 
@@ -22,7 +23,7 @@ runtime activation. It uses the actual installed adapter's device type (cached
 at installation, `Cpu` means `gpu-software`) and PR5's lazy cached renderer
 capabilities, rather than renderer-name matching. Both current browser paths
 are unavailable because they lack the native compositor integration. Unsupported
-source/device paths and device/resource failures also fall back to ordinary painting.
+device paths and device/resource failures also fall back to ordinary painting.
 There are no effect resources or markers on unavailable paths or at zero.
 Opening Preferences alone does not activate a declared zero-radius effect.
 
@@ -79,7 +80,7 @@ After **60 consecutive eligible intervals strictly over 22 ms**, lower the effec
 pass tier by one, down to two down/up steps. The natural tier remains determined
 by radius; the effective tier is `min(natural tier, session cap)`. Radius is never
 reduced or switched off. Recompute the normalized Kawase offset for that step
-count, include the cap in the source cache signature, and reset the streak.
+count, and reset the streak.
 
 One inline notice is offered per session. Dismiss hides it; further eligible
 reductions can continue to the minimum without reannouncing it. **Undo restores
@@ -114,10 +115,7 @@ single-check requirement. The implementation has cheap per-host checks, a root
 UI scope, and outer GPU preparation/composition/submission checks. It does **not**
 claim one check per frame, two total dispatches, or measured zero CPU overhead.
 There are no blur branches in `egui_wgpu::Renderer::render`'s primitive loop.
-The initial source integration is for the root native viewport. The pass owner
-supplies its viewport id before preparation; other native viewports use plain
-painting and `capability_for` reports their missing source integration. They
-cannot sample the root window's source or retain its pending submission key.
+Every native window has its own blur state, keyed by its viewport id: the pass owner supplies the id of the window it is about to paint, and each window's UI begins its own frame.
 
 At radius zero, `Container` uses the original frame shape/painting path; no
 marker, Arc/Box for a blur callback, metadata vector, blur pipeline, texture,
@@ -131,69 +129,52 @@ at zero; leave `surface_alpha` null for comparisons against main.
 
 ## Actual frame path and insertion points
 
-The pinned dependencies are egui/egui-wgpu/eframe 0.36.2 and wgpu 30.0.1.
-eframe and egui remain registry dependencies; only egui-wgpu has local compositor
-changes for blur. The egui dependency is the published 0.36.2 crate.
+The pinned dependencies are egui/egui-wgpu/eframe (the vendored copy under `vendor/egui`) and
+wgpu 30. Only egui-wgpu has local compositor hooks. Design and decisions: `docs/design/backdrop-blur.md`.
 
 | Stage | Actual path |
 | --- | --- |
-| Build UI | Native `eframe::App::ui` calls `SolveApp::ui` (`crates/ui-egui/src/lib.rs`). `blur::State::begin` installs a stack-scoped thread-local host policy. `cad_ui` draws the workspace under floating cards, or in the remaining central rectangle for docked layout. |
-| View background | `viewport.rs::show` emits an egui gradient mesh before the viewport callback. `render_workspace.rs::show` emits its effective preview background, shared with the blur source. Neither is contained in the GPU renderer's scene texture. |
-| Prepare scene | `gpu.rs::ViewportCallback::prepare` calls `solidcraft_gpu::view::Renderer::prepare`. Native `set_wgpu_split` already draws scene depth/MSAA/OIT offscreen. The UI target has one sample and no depth. The resolved scene is transparent outside geometry. |
-| Acquire/order | `vendor/egui-wgpu/src/winit.rs::Painter::paint_and_update_textures` acquires/probes the drawable before preparing callbacks. `Renderer::update_buffers` uploads meshes, runs all callback `prepare`s, then all `finish_prepare`s. The enabled frame hook supplies actual physical target extent and the effective scale, including surface clamping. |
-| Build source | The enabled `blur_native.rs::Source` replaces the viewport callback. Its `prepare` delegates unchanged to the original callback. Its `finish_prepare` retains the independent background/prepared viewport source and availability/cache evidence. A source cache hit avoids rebuilding that source. |
-| UI composition | The native pass owner initializes C from the cached source and segments the original ordered UI stream at semantic backing markers. Before each marker it runs the existing blur pyramid from current C, then the marker samples B. Ordinary fill, border and content follow. The replaced source callback is skipped during composition. |
-| Present/capture | A final triangle presents C into the normal drawable or existing capture texture. Existing screenshot copying, queue guard, texture frees and presentation remain after that. `submitted` commits a pending source key only after queue submission. |
+| Build UI | Each native window's UI starts with `blur::State::begin(ctx)`: `SolveApp::ui` for the main window, the pop-out panel host (`panel_runtime/app.rs`) and the Assistant window (`agent_chat/panel.rs`) for the others. It installs a stack-scoped thread-local that names the window. `decorate` emits a marker only for the window that began. |
+| Prepare | `Renderer::update_buffers` uploads meshes and runs every callback's `prepare`. The viewport's callback renders its scene into its own offscreen picture there. The blur adds nothing to this stage. |
+| Plan | `FrameCompositor::render` first looks for markers among the paint jobs. A frame with none returns `false` and takes the ordinary pass. Otherwise `blur_plan::plan` groups the markers into runs (see below) from the pixel extent of every job. |
+| Composite | The pass owner clears the window's composition target C and draws the primitive stream into it in order, ending the pass at each run's first marker. At that point it blurs the padded regions of the run's members from C, then draws on. |
+| Present | A final triangle copies C into the normal drawable or capture texture. Screenshot copying, queue guard, texture frees and presentation stay after that. `submitted` records the evidence the quality guard reads. |
 
-`CallbackTrait::paint` receives an already active pass, not its encoder or target;
-it cannot redirect the UI or start blur passes. Callback command buffers execute
-before the main encoder. The pass owner ends each UI segment before encoding its dependent blur pyramid
-and starts the next segment on the same encoder. No additional callback command
-buffers are returned.
+`CallbackTrait::paint` receives an already active pass, not its encoder or target; it cannot start blur
+passes. The pass owner therefore ends each UI segment before encoding the blur that depends on it
+and starts the next segment on the same encoder. No callback command buffers are returned.
+
+There is no separate background source: the 3D view, Home, a Render result and every egui-painted
+background are simply earlier primitives of the stream, so a panel over any of them blurs what is
+under it. The viewport and Render preview paint an ordinary egui paint callback.
 
 ## Ordered backdrop and color contract
 
-S, B and C retain separate resources and jobs. S is the independent cached
-viewport/background source used for initialization, availability and evidence.
-It includes prepared model/sketch/highlight/preview geometry, section caps,
-reference images and point clouds. Source construction uses the actual prepared
-renderer, background colors, placement and inherited clip.
+C is the current ordered UI composition of one window. Before an actual translucent backing marker,
+the down/up pyramid filters current C into B, and the marker samples B before its ordinary fill,
+border and contents are painted. Menus, dialogs and nested cards therefore include everything
+painted before them: a card over a card blurs the card below. The final presentation samples C.
+Read and write targets stay separate throughout the pyramid.
 
-C is the current ordered UI composition. It starts from the source, then receives
-ordinary egui shapes in their original order. Before each actual translucent
-backing marker, the existing down/up pyramid filters current C into B. The marker
-samples that result before its ordinary surface fill and contents are painted.
-Thus menus, dialogs and nested cards include preceding UI in their backdrop;
-they do not replace underlying panels with the model scene. B is refreshed at
-each boundary rather than shared unchanged by all panels. The final presentation
-samples C. Read and write targets remain separate throughout the pyramid.
+Runs. `blur_plan` (pure, unit tested) walks the markers in paint order. A run is one snapshot of C plus
+one blur of every member's padded region. A marker joins the current run only when nothing painted
+since the snapshot (including the run's earlier members and their shadow, fill and content) touches
+its padded region; otherwise it starts a new run whose snapshot includes what was painted in between.
+Cards side by side cost one pyramid; stacked cards cost one each. The padded region is the marker's
+pixel rectangle grown by the pyramid's reach (`blur_plan::reach`: every tap's offset and bilinear
+footprint, summed over all levels), clamped to the window. Each level of the pyramid is one pass in
+which each member gets a scissored draw of its region at that level, so the drawn pixels follow the
+summed member areas (`Counters::blur_pixels`) and the pass count follows the number of runs
+(`blur_passes = 2 * steps * blur_runs`). Output inside a marker equals the whole-frame blur within
+1/255 (the `blur_region_matches_whole_frame_blur` fixture compares them).
 
-This uses the existing effect resources and adds **2 × steps GPU passes per
-actual backing boundary**. Source-cache hits still save source construction;
-they do not eliminate the per-boundary backdrop filtering. No extra resources
-or disabled-path GPU passes are introduced. Outside the model rectangle the
-source remains the deterministic background; geometry is not invented under docks.
-
-Render preview uses its original product `Frame`, lighting, resolution reduction
-and effective preview background, including authored-scene precedence and the
-animated tab gradient. It does not call a model snapshot renderer or
-replace the Render scene settings. Home/result-image contexts are unavailable;
-a missing source callback in a painted frame drops target storage and reports
-unavailable instead of sampling a previous workspace's pixels.
-
-Source color is opaque viewport/background color. Translucent custom viewport
-or outside backgrounds report unavailable before effect GPU allocation; their
-composition with a transparent native window is not silently approximated.
-For an unorm UI target, the
-first down pass decodes each composition texel before bilinear interpolation; for an
-sRGB target, texture sampling performs the decode. All subsequent filtering is
-linear. Marker output follows egui's gamma-premultiplied convention: convert B
-to gamma, multiply RGB/alpha by rounded coverage and host opacity, and for an
-sRGB attachment decode that premultiplied RGB before framebuffer conversion.
-This matches egui's existing shader ordering rather than treating its output as
-straight-alpha linear color. Presentation samples C in its own format; it does
-not apply a second manual gamma transform. The harness exercises both unorm and
-sRGB formats. The worker has not yet verified those images on hardware.
+Source color is the window's own composition: opaque or translucent viewport and outside colours are
+no longer a special case. For an unorm UI target, the first down pass decodes each composition texel
+before bilinear interpolation; for an sRGB target, texture sampling performs the decode. All
+subsequent filtering is linear. Marker output follows egui's gamma-premultiplied convention: convert B
+to gamma, multiply RGB/alpha by rounded coverage and host opacity, and for an sRGB attachment decode
+that premultiplied RGB before framebuffer conversion. Presentation samples C in its own format; it
+does not apply a second manual gamma transform. The fixtures exercise both unorm and sRGB formats.
 
 ## Semantic hosts, clipping and rounding
 
@@ -229,10 +210,10 @@ popup above a panel blurs the panel beneath it rather than cutting through to th
 model. No private storage access, global matching-color search or arbitrary
 rectangle heuristic selects backing surfaces.
 
-## Radius, cache, allocation and recovery
+## Radius, allocation and recovery
 
-Radius is finite physical pixels in 0..60; invalid requests are refused before
-mutation. Zero selects plain rendering. Positive tiers have N down and N up passes:
+Radius is finite physical pixels in 0..60; invalid requests are refused before mutation. Zero selects
+plain rendering. Positive tiers have N down and N up passes:
 
 | Radius | N | First down target |
 | --- | --- | --- |
@@ -241,79 +222,54 @@ mutation. Zero selects plain rendering. Positive tiers have N down and N up pass
 | >18..30 | 4 | ceil-half resolution |
 | >30..60 | 5 | ceil-half resolution |
 
-Radii above 40 retain the existing five-step tier and increase only its normalized
-offset. Existing 0..40 values keep their original schedule and cost indication.
+Every subsequent dimension is ceil-halved with a minimum of one pixel. Upsampling ends at full
+resolution B. The kernel has a center-plus-four-corners down filter (weights 4,1,1,1,1) and an
+eight-tap up filter (axis weight 1, diagonal weight 2). The offset, in input texels, is
+`radius / (2 * sqrt((35/18) * (4^N - 1)))`. This is a documented radius mapping, not a measured
+Gaussian-radius equivalence.
 
-Every subsequent dimension is ceil-halved with a minimum of one pixel. Upsampling
-ends at full resolution B. The original kernel has a center-plus-four-corners
-down filter (weights 4,1,1,1,1) and an eight-tap up filter (axis weight 1,
-diagonal weight 2). The offset, in input texels, is
-`radius / (2 * sqrt((35/18) * (4^N - 1)))`. This normalizes the filters' tap sigma
-across tier changes; resampling contributes an additional footprint. This is a
-documented radius mapping, not a measured Gaussian-radius equivalence. Physical
-spread and tier-boundary appearance still require the manager's impulse/golden review.
+There is no cache: the blur depends on everything painted before each marker, and egui repaints only
+when something changed. A still scene with an animating card re-blurs that frame's regions only.
 
-`view::frame_key` is exposed without changing its existing behavior. The blur
-signature includes that exact scene signature (including camera, lighting,
-selection/hover, preview, images/clouds, analysis, section, AO and supersampling),
-source/background rectangles and clip after the source layer's final global
-transform, background colors, physical target extent,
-effective scale, target encoding and radius. It is per device/host; installation
-on a replacement device retires the old state. A pending key becomes valid only
-after submission. A resting repaint can reuse the source, while each painted backing boundary
-still filters the current UI composition. Panel-only tint/layout changes reuse
-the full-target source unless they change projection, source placement or extent.
-No repaint timer is added to keep blur alive.
+Degradation is per marker. A window may spend eight screens of summed region area, 64 runs and 256
+markers with their own bindings per frame (`blur_plan::Budget`); the markers beyond it, in paint
+order, keep their plain translucent fill while the earlier ones keep blurring. A window emits at most
+4096 markers a frame, a bound on memory for hostile input.
 
-The source captures its Context/layer only in the enabled branch. `finish_prepare`
-queries `layer_transform_to_global` after UI emission, including a transform set
-after the callback shape was emitted. One validated snapshot transforms viewport,
-background and inherited clip for both the cache key and source painting. The
-callback shape stays local so egui applies its own transformation exactly once.
+Each window has its own state, keyed by its viewport id: a composition target C and a pyramid sized to
+its surface, its markers and its failure. Windows share one memory budget of 256 MiB, computed with
+checked arithmetic before allocation (four bytes per pixel for C, eight for each pyramid level). A
+window that needs room releases the least recently painted other window's targets first; a window that
+has not begun a frame for 600 `begin` calls is forgotten. Actual device limits and format capabilities
+are queried. Resource creation and binding growth use error scopes: a refusal turns the effect off for
+that window only, with `Capability::Unavailable(reason)`, and its panels keep their plain translucent
+fill. The failure stays until the window's size or the radius changes, so there is no retry storm.
 
-All effect GPU allocation is lazy and bounded. The target budget is 256 MiB,
-computed with checked arithmetic before allocation, using four-byte S/C and
-eight-byte down/up targets. Uniform bytes are also reported. The budget does not
-claim to account for opaque driver pipeline/binding memory. Actual device limits
-and format capabilities are queried. Resource creation/marker growth use error
-scopes and return unavailable on refusal; failures latch until radius/host/size
-changes, avoiding an allocation retry storm. Positive radius changes currently
-retire/recreate effect storage, including pipelines; this is deliberately simple
-but cold activation cost must be measured before PR 6 adds an interactive slider.
-
-Native zero physical window size suspends the effect before callback preparation,
-including when the surface was clamped to 1x1. Geometry/scale is checked before
-casts or allocation. Device loss suspends storage before further effect work;
-existing device probing and acquired-frame lifetime handling are retained.
-Replacement size/device rebuilds from a fresh signature. No explicit destruction
-of in-flight textures, new unsafe block, unwrap/expect/panic path, synchronous
-readback, or GPU completion wait was added to production painting.
+Native zero physical window size suspends the window's targets before callback preparation. Device
+loss releases every window's storage; a replacement device rebuilds from scratch. No new unsafe
+block, unwrap/expect/panic path, synchronous readback or GPU completion wait was added to production
+painting.
 
 ## Capability and other integrations
 
-`blur::Capability` is `Available` or `Unavailable(reason)`. `State::capability`
-distinguishes missing GPU/native split integration, software adapter, unsupported
-filterable/renderable formats, unsupported source context, missing source frame,
-resource/size refusal and lost device. The actual window adapter is classified
-from its actual cached `DeviceType` (`Cpu` is software); no renderer-name guessing.
-Software adapters and web paths allocate no effect resources or markers.
+`blur::Capability` is `Available` or `Unavailable(reason)`. `State::capability_for(viewport)`
+distinguishes a missing GPU/native split scene, a software adapter, unsupported filterable/renderable
+formats, resource refusal and a lost device, per window. The actual adapter is classified from its
+cached `DeviceType` (`Cpu` is software); no renderer-name guessing. Software adapters and web paths
+allocate no effect resources or markers. What a workspace view shows is no longer a reason.
 
-Web still uses eframe's unvendored `src/web/web_painter_wgpu.rs`, not the native
-pass owner. Both WebGPU and WebGL2 report unavailable until that owner is wired
-with equivalent acquire/zero-size/error ordering. This is an integration limit,
-not a claim that WebGPU fragment blur is impossible. No eframe/epaint patch is used.
+Web still uses eframe's unvendored `src/web/web_painter_wgpu.rs`, not the native pass owner. Both
+WebGPU and WebGL2 report unavailable (`prefs.blur_web`) until that owner has an equivalent hook. The
+wasm build keeps the same API as stubs (`blur::Backdrop` returns `Shape::Noop`).
 
-`ui.render`, CLI snapshots and scenario `shot` remain model-only captures, through
-`engine::capture`/`gpu::capture::Capturer` or the existing CPU fallback. They do not
-paint egui panels and cannot prove blur correctness. Their code paths are unchanged.
-The full GPU fixture in existing `gpu.rs::tests` renders actual app egui output,
-font textures, viewport callbacks and compositor into a readback target. Tests
-remain in the existing area modules; no per-issue test module was added.
+`ui.render`, CLI snapshots and scenario `shot` remain model-only captures. They do not paint egui
+panels and cannot prove blur correctness. The GPU fixtures in `gpu.rs::tests` render actual app egui
+output, font textures, viewport callbacks and the compositor into a readback target.
 
-The PR6 controls consume this capability/reason and finite 0..60 contract, leave
-saved intent intact on fallback, and request a frame on changes. They do not create
-resources merely by opening Preferences. Blur remains a theme option, with no
-independent global switch or quality preference.
+Surfaces that are not `Container` hosts ask for a backdrop with `blur::Backdrop::new(rect)
+.corners(..).opacity(..).shape(&painter)`: it returns `Shape::Noop` when blur is off, so it can be
+added unconditionally. `Container` stays the one place that decides which default surfaces blur
+(Panel, Feature, Palette and Chrome; HUDs, toasts, input shields and the application bar stay out).
 
 ## Internal activation and manager-only validation
 
@@ -327,8 +283,8 @@ is zero and performs no environment lookup or GPU capability probe.
 The adapter capability probe is cached lazily on activation or an explicit query.
 
 Counters increment at actual `create_texture`, buffer/bind-group/pipeline creation,
-source/chain/UI/present encoding and marker emission/drawing. They include cache
-hits and live texture/buffer/group/pipeline counts and texture/uniform bytes.
+chain/UI/present encoding and marker emission/drawing. They include
+live texture/buffer/group/pipeline counts and texture/uniform bytes.
 They are effect counters, not a fabricated whole-frame allocator or driver trace.
 At zero, test deltas must remain zero and all live effect counts must be zero.
 CPU allocations must additionally be measured with an external allocator/profiler;
@@ -387,12 +343,9 @@ cargo test --locked --profile ci -p solidcraft-ui-egui --lib blur_ -- --nocaptur
 
 `SOLIDCRAFT_BLUR_GOLDENS` can name a separate reviewed PNG directory for decoded
 RGBA equality. No expected pixels were invented or automatically blessed here.
-The fixed fixture tests both target encodings, source independence from panel
-tint, rest/cache hits, camera invalidation, exact tier pass counts, on/off pixel
+The fixed fixture tests both target encodings, exact tier pass counts per run, on/off pixel
 restoration, hostile sizes/radii, suspension/resource release, host-slot ordering,
-and late layer translation/scaling. The latter checks transformed viewport,
-background/clip placement, cache invalidation/reuse, and pixels outside the moved
-clip even on a forced miss. Further device-loss, resize/DPI, clipping/overlap and
+and late layer translation/scaling. Further device-loss, resize/DPI, clipping/overlap and
 calibrated radius review remain manager validation work, not claimed test results.
 
 For actual window evidence after the manager builds, start the branch app with

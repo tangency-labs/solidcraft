@@ -580,6 +580,11 @@ pub struct DrawingInserted {
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<Created>,
+    /// What the reading kept as drawn but warns about: each SVG curve SolidCraft's curve check
+    /// refuses, by its number in the drawing and its ends, so a body made from it would fail.
+    /// Left out when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

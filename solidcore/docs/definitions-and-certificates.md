@@ -90,8 +90,7 @@ only definitions is `blend::definition_check::is_definition`, which is
 own surface kind (a torus stays a torus, so every match on the kind still sees it) and carries its
 definition beside it.
 
-The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` builds and
-reads them, and every `UpstreamFixes` flag is off by default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
+The blend definitions are always built and read.
 
 ### 3.2 Exact nets: lines, arcs and quadrics
 
@@ -115,7 +114,8 @@ vanishes, and each coefficient is checked against the rounding of computing it (
 Fixed-radius rolling-ball rounds of the configurations Dahl and Krasauskas classify are rational
 [2, 12]. `ExactClass` (`surface/procedural_blend/exact.rs`) names them: `Line` (the cylinder about
 a straight spine), `Circle` (the section turned about a common axis), `Point` (a piece of the
-ball), `Chord` (a chamfer between planes: the plane through the feet), `Conic`, `ConicPair` and
+ball), `Chord` (a chamfer between planes: the plane through the feet; with a sagitta, a weld bead's
+arc: the circular cylinder through the feet's lines, `fillet_exact::arc_section_implicit`), `Conic`, `ConicPair` and
 `NodalQuartic` (canal surfaces on those spines). `ExactClass::of_spine` maps the classifier's
 `BlendSpine`; `BlendSpine::Traced` has no exact class and is built as a procedural blend.
 
@@ -272,15 +272,17 @@ written as the operations it counts:
 | where | count | what it bounds |
 |---|---|---|
 | `eval::collapse` (private `de_boor`) | γ_(12p+4) of the largest coordinate | de Boor's p levels, three operations for each coefficient and four for each convex combination |
+| `eval::collapse` (private `bezier_piece`, `rational_partial_bound`) | G γ_(12p+4) of the largest coordinate, G the levels' growth (\|1 − α\| + \|α\| past a span); γ_6, γ_3 and γ_2 on lengths, weight products and weights; the bound × (1 + γ_32); the moved net's gap √3 γ_2 (\|c₀\| w + \|h\|) / w | a rational net's rows in Bézier form over a piece, blossomed past their span, and its partial bound, taken on the net moved by minus its box's middle c₀ |
 | `eval::sphere` (`Coefficient::finish`) | γ_(8 + 8·degree + terms) | a Bernstein coefficient of \|H − CW\|² − R²W² |
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
 | `surface::implicit::lies_on` | γ_K, K = 4d(p + 1)(q + 1) + 16 | an implicit equation's Bernstein coefficient |
-| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
+| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`, `acute_piece_bound`, `obtuse_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/atan2/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
 | `sweep::stations` (`rail_crossing`) | γ_5 S_i, S_i = Σ_j (\|x_ij\| + \|p_j\| w_i) \|t_j\| | a rail's Bernstein distance coefficient from a station's plane; within it, taken as 0 |
 | `surface::extend::analytic` (private `certify_iso`) | γ_(12L+6) A_j, plus the plane's own (a parallel's height γ_(12L+7), a meridian's normal γ_(12L+8) + γ_12), × (1 + γ_16) | an extended analytic's iso control point off its plane; L de Boor levels, A_j its stencil's size (#15039) |
 | `surface::sphere::meridian_rounding` | S · 1.75 (γ_K + γ_33) \|P\| + 3.5 γ_4 \|P\| + γ_31 π r, K = 16(p + q + 2) | a half meridian's end angle as `IsArc` fits it; S its first-order conditioning, read off the fit (`end_angle_conditioning`) (#15039) |
 | `primitive::primitive_creation::p2::taper_walls` (`touch_bound`, `circles_may_meet`) | γ_16 (\|w\| + \|q\| + r); γ_12 (D² + (r_a ∓ r_b)²) | a draft's line's foot q off its circle (\|q\| − r) and circle/circle reach at a section crossing; within it, taken as touching |
+| `surface::implicit::off_surface_bound` | γ_(8L+16) A, A = max \|H\|∞ + \|O\|∞ W_max of the source net (the net the patch was cut from), slack 2γA (1/W₀ + (1 + γ) W_max / (W₀ (W₀ − γ W_max))) | a Bézier patch's points after extraction and decomposition: L ≤ L_u + L_v knot-insertion levels, L_u = 2p + p(p − 1)/2 (the extraction's p − mul and p − mur, and the decomposition's chain through the points saved at up to p − 1 earlier knots, Σ_{i=1}^{p−1} i; derived loop by loop in the fn's docs and checked against the loops for degrees 1 to 10 by `the_rounding_count_covers_the_insertion_chains`), L_v alike in q; γ_8 a level (the ratio's two subtractions and division, its complement, `CPoint::combine2`'s two products and sum), 1 for the size's feedback, 8 more for the coefficients' scale |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the
@@ -308,7 +310,11 @@ definition, rebuilds the span's Hermite rows H, bounds |B − H| on the net's pi
 and |H − S| by `gn_certify_span`, and refuses the net where the sum with one floor passes ε, where
 a piece runs across a station, or where a foot crosses a support's knot line between two stations.
 `recertify_faces` does this for every blend face of a body, as a body rebuilt from a record must be
-before its faces are operands.
+before its faces are operands. A kernel remembers each re-certification it finished
+(`Kernel::recertify_memo`, on with `memoize_curve_caches`), keyed on every bit of the blend's
+record and on the kernel's tolerances and fixes: a record read again on that kernel, its blend
+unchanged, gets the answer the proof gave, which is the answer running it again gives. Only a
+finished proof is kept, never a refusal or a cancel.
 
 ### 4.6 Worked example: a patch on a sphere
 
@@ -348,7 +354,7 @@ Every face is in one of three classes:
 
 | class | meaning | ε | kinds |
 |---|---|---|---|
-| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds and chamfers between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
+| **exact** | B is S; proved by an identity on control points | 0 | analytic forms; `ExactClass` rounds, and chamfers and weld beads (the chord with a sagitta) between planes; `BallPatch`; Swept, End and Setback corners; Natural extensions of analytic kinds and ball patches |
 | **certified** | B is within a proved ε of S | > 0, stored | `ProceduralBlend` (traced spines, Gⁿ sections, radius laws, rounds on rounds); `ProceduralSweep`; Mixed corners (the construction's tolerance); B-spline extensions past a side (§6) |
 | **refused** | no B is proved within the bound | none | the construction returns a typed error naming the cause and, where one exists, the size that builds |
 
@@ -510,8 +516,11 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored. `convert::rebuild`, `exact_rebuild` and
-   `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   `convert::rebuild`, `exact_rebuild` and
+   `corner_rebuild` make the definition exactly and certify the net again before it is an operand
+(or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.
@@ -522,7 +531,18 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
     the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
-    on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
+    on cells and mirror steps) with no recursion, and poll the kernel's cancel token. The Gⁿ
+    section's certificate (`fillet_section::section`) halves at most 3 spans per first span (two
+    full levels of halving; first spans are the solver's stations and the knot-line crossings)
+    plus 128 (`GN_HALVINGS_PER_SPAN`, `GN_HALVING_BUDGET`). A round of halvings that would pass
+    that budget, or a certificate past the fork's 4096 stations, is refused as not certified
+    (`BlendFailure::NotCertified`). It names no size: invariant 3 names one only where the
+    cause's geometry gives it. The budget counts spans, so a model scaled with its tolerance,
+    which makes the same spans, gets the same budget. With the tolerance held, the solver placed
+    more first spans on larger copies of the tightest measured rounds, and the budget grew with
+    them. A budget predicted from each span's own bound is not enough: a round whose ball's
+    offset tube nearly collapses converges at its bounds' h⁴ rate once its spans are proved, so a
+    convergence budget allows its whole cost.
 
 ## 8. If you're stuck
 

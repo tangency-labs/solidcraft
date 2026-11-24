@@ -9,6 +9,7 @@
 pub mod a_object;
 pub mod assert_array;
 pub mod attribute;
+pub mod axial_section;
 pub mod axis2_placement;
 pub mod certified;
 pub mod context;
@@ -16,6 +17,7 @@ pub(crate) mod expansion;
 pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;
+pub mod facing_trough;
 pub mod geom_utility;
 pub mod global_solver;
 pub mod grid;

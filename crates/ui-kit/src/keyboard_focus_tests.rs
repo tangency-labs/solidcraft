@@ -115,3 +115,54 @@ fn a_cell_reads_enter_down_shift_enter_up_and_tab_along() {
     }
     assert_eq!(seen, [Some(CellKey::Down), Some(CellKey::Up), Some(CellKey::Next), Some(CellKey::Previous), None, None, None]);
 }
+
+/// File cards must reveal keyboard focus while their enclosing scroll area is still open.
+#[test]
+fn file_cards_scroll_into_view_with_tab_and_shift_tab() {
+    let ctx = context();
+    let mut time = 0.0;
+    let mut draw = |events| {
+        let mut cards = Vec::new();
+        let mut viewport = egui::Rect::NOTHING;
+        time += 1.0;
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                events,
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 260.0))),
+                ..Default::default()
+            },
+            |ui| {
+                let scroll = egui::ScrollArea::vertical().animated(false).show(ui, |ui| {
+                    for index in 0..8 {
+                        cards.push(FileView::action_tile(
+                            ui,
+                            &format!("file-card-{index}"),
+                            ui.available_width(),
+                            "",
+                            &format!("Design {index}"),
+                            "Sample design",
+                            false,
+                        ));
+                    }
+                });
+                viewport = scroll.inner_rect;
+            },
+        );
+        (cards, viewport)
+    };
+    draw(Vec::new());
+    draw(Vec::new());
+    for shift in [false, true] {
+        let order: Vec<usize> = if shift { (0..7).rev().collect() } else { (0..8).collect() };
+        for index in order {
+            draw(key(egui::Key::Tab, shift));
+            draw(Vec::new());
+            let (cards, viewport) = draw(Vec::new());
+            let card = &cards[index];
+            assert!(card.has_focus(), "card {index}, reverse={shift} must have focus");
+            assert!(viewport.contains_rect(card.rect), "card {index}, reverse={shift}: {:?} outside {viewport:?}", card.rect);
+        }
+    }
+}

@@ -236,7 +236,7 @@ enum Verdict {
 fn is_solidcraft_cli(command: &str) -> bool {
     let name = command.rsplit(['/', '\\']).next().unwrap_or(command).to_ascii_lowercase();
     let stem = name.strip_suffix(".exe").unwrap_or(&name);
-    stem == "solidcraft-cli" || stem == "solvecraft-cli"
+    stem == "solidcraft-cli"
 }
 
 /// The command and arguments of an entry, whether it spells them as `command` + `args` or as

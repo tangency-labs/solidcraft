@@ -246,27 +246,33 @@ impl Convex {
     }
 }
 
-/// Points where the circle (`c`, `r`) meets the closed segment `ab`, up to two.
+/// Points where the circle (`c`, `r`) meets the closed segment `ab`, up to two, in order along
+/// the segment from `a`.
+///
+/// Steady for long segments and big radii: the foot of the centre on the line and its distance
+/// `h` come first, and the half chord is `sqrt((r - h) (r + h))`, so no term the size of `r^2`
+/// is added to one the size of the segment squared.
 pub(crate) fn circle_segment_points(c: Vec2, r: f64, a: Vec2, b: Vec2) -> ([Vec2; 2], usize) {
     let mut out = [Vec2::ZERO; 2];
     let mut n = 0;
-    let d = b - a;
-    let f = a - c;
-    let qa = d.dot(d);
-    if qa == 0.0 {
+    let len = a.distance(b);
+    let Some(u) = (b - a).normalized() else {
+        return (out, 0);
+    };
+    let normal = Vec2::new(-u.y, u.x);
+    let off = normal.dot(a - c);
+    let (rim, far) = (r - off.abs(), r + off.abs());
+    if !(rim >= 0.0) {
         return (out, 0);
     }
-    let qb = 2.0 * f.dot(d);
-    let qc = f.dot(f) - r * r;
-    let disc = qb * qb - 4.0 * qa * qc;
-    if !(disc >= 0.0) {
-        return (out, 0);
-    }
-    let sq = disc.sqrt();
-    for t in [(-qb - sq) / (2.0 * qa), (-qb + sq) / (2.0 * qa)] {
-        if (-1e-12..=1.0 + 1e-12).contains(&t) {
+    let half = (rim * far).sqrt();
+    let foot = c + normal * off;
+    let slack = 1e-12 * len;
+    for along in [-half, half] {
+        let p = foot + u * along;
+        if (-slack..=len + slack).contains(&(p - a).dot(u)) {
             if let Some(slot) = out.get_mut(n) {
-                *slot = Vec2::new(a.x + t * d.x, a.y + t * d.y);
+                *slot = p;
                 n += 1;
             }
         }
@@ -687,18 +693,18 @@ impl Prim {
 
 /// A closed loop of pieces, chained end to start, with its joints welded.
 ///
-/// `curved` marks a loop that is not made of straight segments (arcs, or curves that were
-/// flattened before they got here): such a loop never snaps.
+/// `flattened` marks a loop with a curve that was flattened into short straight pieces before it
+/// got here (a curve other than a line or an arc): such a loop is followed, never snapped.
 #[derive(Clone, Debug)]
 pub(crate) struct Loop {
     pub prims: Vec<Prim>,
-    pub curved: bool,
+    pub flattened: bool,
     bounds: Bounds,
 }
 
 impl Loop {
     /// `None` for no pieces or one with a coordinate that is not finite.
-    pub fn new(mut prims: Vec<Prim>, curved: Option<bool>) -> Option<Loop> {
+    pub fn new(mut prims: Vec<Prim>, flattened: Option<bool>) -> Option<Loop> {
         let n = prims.len();
         if n == 0 {
             return None;
@@ -711,8 +717,7 @@ impl Loop {
                 *cur = cur.with_start(end);
             }
         }
-        let curved =
-            curved.unwrap_or_else(|| prims.iter().any(|p| !matches!(p, Prim::Line { .. })));
+        let flattened = flattened.unwrap_or(false);
         let mut bounds = prims.first()?.bounds();
         for p in prims.iter().skip(1) {
             bounds = bounds.union(p.bounds());
@@ -725,7 +730,7 @@ impl Loop {
         }
         Some(Loop {
             prims,
-            curved,
+            flattened,
             bounds,
         })
     }
@@ -739,7 +744,7 @@ impl Loop {
         let prims = self.prims.iter().rev().map(Prim::reversed).collect();
         Loop {
             prims,
-            curved: self.curved,
+            flattened: self.flattened,
             bounds: self.bounds,
         }
     }
@@ -802,6 +807,8 @@ impl Loop {
 pub(crate) struct Region {
     pub parts: Vec<(Loop, Vec<Loop>)>,
     pub prims: Vec<Prim>,
+    /// For each piece of `prims`: whether it belongs to a keep-out loop.
+    pub keepout: Vec<bool>,
     boxes: Vec<Bounds>,
     /// Pieces by horizontal band, so a cell only meets the pieces near it.
     rows: Vec<Vec<u32>>,
@@ -869,6 +876,15 @@ impl Region {
                     .flat_map(|l| l.prims.iter().copied())
             })
             .collect();
+        let keepout: Vec<bool> = parts
+            .iter()
+            .flat_map(|(o, hs)| {
+                std::iter::repeat_n(false, o.prims.len()).chain(
+                    hs.iter()
+                        .flat_map(|h| std::iter::repeat_n(true, h.prims.len())),
+                )
+            })
+            .collect();
         let boxes: Vec<Bounds> = prims.iter().map(Prim::bounds).collect();
         let all = boxes.iter().copied().reduce(Bounds::union);
         let (mut rows, mut row_y0, mut row_h) = (vec![Vec::new()], 0.0, 1.0);
@@ -892,6 +908,7 @@ impl Region {
         Region {
             parts,
             prims,
+            keepout,
             boxes,
             rows,
             row_y0,

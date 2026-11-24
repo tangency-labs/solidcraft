@@ -92,9 +92,6 @@ impl TextureResource {
     pub fn retained_bytes(&self) -> usize {
         self.bytes.capacity()
     }
-    pub fn base64(&self) -> Result<String> {
-        crate::render_resources::encode_hdr_base64(&self.bytes)
-    }
 }
 fn reject_animation(bytes: &[u8]) -> Result<()> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -123,7 +120,8 @@ impl Serialize for TextureResource {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         let mut value = serializer.serialize_struct("TextureResource", 3)?;
         value.serialize_field("kind", "opaque_texture")?;
-        value.serialize_field("data", &self.base64().map_err(serde::ser::Error::custom)?)?;
+        // Never the file as text, as an HDR resource's (`render_resources`).
+        value.serialize_field("data", "")?;
         value.serialize_field("provenance", &self.provenance)?;
         value.end()
     }
@@ -186,7 +184,7 @@ impl<'de> Deserialize<'de> for TextureResources {
                         return Err(serde::de::Error::custom("too many or duplicate embedded texture resources"));
                     }
                     let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(result.total_bytes()).min(MAX_TEXTURE_BYTES);
-                    let resource = map.next_value_seed(ResourceSeed(remaining))?;
+                    let resource = map.next_value_seed(ResourceSeed(remaining, id))?;
                     if resource.id() != id {
                         return Err(serde::de::Error::custom("embedded texture hash mismatch"));
                     }
@@ -198,18 +196,18 @@ impl<'de> Deserialize<'de> for TextureResources {
         deserializer.deserialize_map(Resources)
     }
 }
-struct ResourceSeed(usize);
+struct ResourceSeed(usize, HdrId);
 impl<'de> DeserializeSeed<'de> for ResourceSeed {
     type Value = TextureResource;
     fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error> {
-        struct ResourceVisitor(usize);
+        struct ResourceVisitor(usize, HdrId);
         impl<'de> serde::de::Visitor<'de> for ResourceVisitor {
             type Value = TextureResource;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("opaque_texture kind, bounded base64 data and inert provenance")
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
-                let (mut kind, mut data, mut provenance) = (false, None, None);
+                let (mut kind, mut data, mut provenance, mut blob) = (false, None, None, false);
                 while let Some(field) = map.next_key::<Field>()? {
                     match field {
                         Field::Kind if !kind => {
@@ -218,20 +216,30 @@ impl<'de> DeserializeSeed<'de> for ResourceSeed {
                         }
                         Field::Data if data.is_none() => data = Some(map.next_value_seed(PayloadSeed(self.0))?),
                         Field::Provenance if provenance.is_none() => provenance = Some(map.next_value_seed(ProvenanceSeed)?),
+                        // The container's part: its bytes come with the read, by id.
+                        Field::TextureBlob if !blob => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                            blob = true;
+                        }
                         _ => return Err(serde::de::Error::custom("duplicate embedded texture field")),
                     }
                 }
                 if !kind {
                     return Err(serde::de::Error::missing_field("kind"));
                 }
-                TextureResource::new(
-                    data.ok_or_else(|| serde::de::Error::missing_field("data"))?,
-                    provenance.ok_or_else(|| serde::de::Error::missing_field("provenance"))?,
-                )
-                .map_err(serde::de::Error::custom)
+                let mut data = data.ok_or_else(|| serde::de::Error::missing_field("data"))?;
+                if blob && !data.is_empty() {
+                    return Err(serde::de::Error::custom("a texture's inline data beside its blob is ambiguous"));
+                }
+                // An empty `data`: the file is the container's part.
+                if data.is_empty() {
+                    data = crate::render_resources::container_part(&self.1, true)
+                        .ok_or_else(|| serde::de::Error::custom(format!("embedded texture {} has no data", self.1)))?;
+                }
+                TextureResource::new(data, provenance.ok_or_else(|| serde::de::Error::missing_field("provenance"))?).map_err(serde::de::Error::custom)
             }
         }
-        deserializer.deserialize_map(ResourceVisitor(self.0))
+        deserializer.deserialize_map(ResourceVisitor(self.0, self.1))
     }
 }
 #[derive(Deserialize)]
@@ -240,6 +248,7 @@ enum Field {
     Kind,
     Data,
     Provenance,
+    TextureBlob,
 }
 struct KindSeed;
 impl<'de> DeserializeSeed<'de> for KindSeed {
@@ -278,6 +287,10 @@ impl<'de> DeserializeSeed<'de> for PayloadSeed {
                 f.write_str("bounded canonical texture base64")
             }
             fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<Self::Value, E> {
+                // Empty: the file is a container's part. Otherwise an older design's base64.
+                if value.is_empty() {
+                    return Ok(Vec::new());
+                }
                 crate::render_resources::decode_base64(value, self.0).map_err(E::custom)
             }
         }
@@ -350,7 +363,7 @@ impl<'de> DeserializeSeed<'de> for ResourceBudget {
                 f.write_str("bounded texture metadata and base64")
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
-                let (mut kind, mut size, mut provenance) = (false, None, false);
+                let (mut kind, mut size, mut provenance, mut blob) = (false, None, false, false);
                 while let Some(field) = map.next_key::<Field>()? {
                     match field {
                         Field::Kind if !kind => {
@@ -367,6 +380,13 @@ impl<'de> DeserializeSeed<'de> for ResourceBudget {
                         Field::Data if size.is_none() => {
                             let raw = map.next_value::<&serde_json::value::RawValue>()?;
                             size = Some(crate::render_resources::json_base64_length(raw.get(), self.0).map_err(serde::de::Error::custom)?);
+                        }
+                        Field::TextureBlob if !blob => {
+                            let raw = map.next_value::<&serde_json::value::RawValue>()?;
+                            if raw.get().len() > 128 {
+                                return Err(serde::de::Error::custom("invalid texture blob reference"));
+                            }
+                            blob = true;
                         }
                         Field::Provenance if !provenance => {
                             let raw = map.next_value::<&serde_json::value::RawValue>()?;
@@ -420,7 +440,10 @@ mod tests {
         assert_eq!(bank.len(), 1);
         assert_eq!(bank.total_bytes(), copy.retained_bytes());
         assert_eq!(bank.required(&id).unwrap().provenance(), &provenance());
-        let wire = serde_json::to_value(&bank).unwrap();
+        // Never the file as text; an older design's base64 still reads to the same bank.
+        let mut wire = serde_json::to_value(&bank).unwrap();
+        assert_eq!(wire[id.to_string()]["data"], "");
+        wire[id.to_string()]["data"] = crate::canvas::base64_encode(bank.required(&id).unwrap().bytes()).into();
         let from_value: TextureResources = serde_json::from_value(wire.clone()).unwrap();
         let from_json: TextureResources = serde_json::from_str(&wire.to_string()).unwrap();
         assert_eq!(from_value, bank);
@@ -463,7 +486,11 @@ mod tests {
         settings.texture_resources.insert(resource).unwrap();
         settings.validate().unwrap();
         let doc = crate::Document { render: Arc::new(settings.clone()), ..Default::default() };
-        let wire = doc.to_json();
+        // An older plain JSON design held the bytes as base64 under the resource's own key.
+        let mut older: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+        older["render"]["texture_resources"][id.to_string()]["data"] =
+            crate::canvas::base64_encode(settings.texture_resources.required(&id).unwrap().bytes()).into();
+        let wire = older.to_string();
         assert_eq!(crate::Document::from_json(&wire).unwrap(), doc);
         // The saved design holds the texture's bytes under the resource's own key.
         fn resource_saved(v: &serde_json::Value, key: &str) -> bool {
@@ -487,7 +514,8 @@ mod tests {
     fn corrupt_changed_digest_animated_or_malformed_texture_records_refuse() {
         let good = resource();
         let id = good.id().to_string();
-        let entry = serde_json::to_value(&good).unwrap();
+        let mut entry = serde_json::to_value(&good).unwrap();
+        entry["data"] = crate::canvas::base64_encode(good.bytes()).into();
         let wire = json!({id.clone():entry.clone()});
         for (field, value) in [
             ("kind", json!("exr")),

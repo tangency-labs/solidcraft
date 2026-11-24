@@ -12,6 +12,7 @@ pub mod p3;
 pub mod p4;
 pub mod p5;
 pub(crate) mod singular_splits;
+pub mod sphere_span;
 pub(crate) mod tangent_curves;
 pub(crate) mod tangent_tracer;
 

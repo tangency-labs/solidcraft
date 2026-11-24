@@ -71,7 +71,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     let c = Capturer::new(&adapter, device, queue).unwrap();
     let s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
     let cam = view::home_camera(&s).unwrap();
-    let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }).unwrap(), &cam, 160, 100).unwrap();
+    let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }).unwrap(), &cam, 160, 100).unwrap();
     let empty = c.rgba(&Default::default(), &cam, 160, 100).unwrap();
     let changed = pixels(&img).zip(pixels(&empty)).filter(|(a, b)| a != b).count();
     assert!(changed > 500, "the model covers only {changed} pixels");
@@ -103,7 +103,7 @@ fn the_renderer_counts_what_it_draws() {
     let Some(c) = capturer() else { return };
     let drawn = |s: &Session| {
         let cam = view::home_camera(s).unwrap();
-        let scene = view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap();
+        let scene = view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false }).unwrap();
         let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
         let (_, stats) = c.rgba_with_stats(&scene, &cam, 160, 100).unwrap();
         (stats, triangles as u64)
@@ -130,7 +130,7 @@ fn pictures_drawn_at_once_each_count_their_own() {
     let Some(c) = capturer() else { return };
     let scene = |s: &Session| {
         let cam = view::home_camera(s).unwrap();
-        (view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap(), cam)
+        (view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false }).unwrap(), cam)
     };
     let empty = scene(&Session::default());
     let solid = scene(&session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]));
@@ -147,13 +147,35 @@ fn pictures_drawn_at_once_each_count_their_own() {
     });
 }
 
+/// A section draws each face four times (the count of crossings behind the cut, the cap's
+/// colour, its depth, the faces elsewhere), however many planes it has: a second plane adds no
+/// pass.
+#[test]
+fn one_section_plane_draws_no_hole() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
+    let drawn = |s: &Session| {
+        let cam = view::home_camera(s).unwrap();
+        let scene = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+        let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
+        let (_, stats) = c.rgba_with_stats(&scene, &cam, 160, 100).unwrap();
+        (stats.triangles, triangles as u64)
+    };
+    let (none, n) = drawn(&s);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    let (one, _) = drawn(&s);
+    s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+    let (two, _) = drawn(&s);
+    assert_eq!((one - none, two - one), (3 * n, 0), "{none}, {one} and {two} triangles drawn for {n}");
+}
+
 /// The ground grid and the origin's axes each change the picture.
 #[test]
 fn guides_change_the_picture() {
     let Some(c) = capturer() else { return };
     let s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [10, -15, -10]}))]);
     let cam = view::home_camera(&s).unwrap();
-    let picture = |grid, axes| c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid, axes }).unwrap(), &cam, 160, 100).unwrap();
+    let picture = |grid, axes| c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid, axes }).unwrap(), &cam, 160, 100).unwrap();
     let (all, no_grid, no_axes, bare) = (picture(true, true), picture(false, true), picture(true, false), picture(false, false));
     assert!(all != no_grid && all != no_axes && no_grid != bare && no_axes != bare);
 }
@@ -164,7 +186,7 @@ fn pictures_draw_silhouettes_on_curved_surfaces() {
     let Some(c) = capturer() else { return };
     let s = session(&[("solid.sphere", json!({"diameter": 20}))]);
     let cam = view::home_camera(&s).unwrap();
-    let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }).unwrap(), &cam, 400, 400).unwrap();
+    let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }).unwrap(), &cam, 400, 400).unwrap();
     let dark = pixels(&img).filter(|p| p[0] < 90 && p[1] < 90 && p[2] < 95).count();
     assert!(dark > 40, "silhouette pixels: {dark}");
 }
@@ -203,6 +225,230 @@ fn pictures_show_the_section_and_its_cap() {
         // The cap: warm (red over blue), unlike the grey-blue body and background.
         let cap = pixels(&img).filter(|p| i32::from(p[0]) - i32::from(p[2]) > 20).count();
         assert!(cap > 500, "fov {fov}: cap pixels {cap}");
+    }
+}
+
+/// The screen angle (degrees from +x, counterclockwise, 0..180) the stripes of the
+/// `half`-pixel square about (`cx`, `cy`) of a `w`-wide picture run at: the direction along
+/// which the pixels keep their shade, at every step up to half the square.
+fn hatch_angle(rgba: &[u8], w: usize, (cx, cy): (usize, usize), half: usize) -> f64 {
+    let lum = |x: usize, y: usize| rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3).map_or(0, |p| p.iter().map(|c| u32::from(*c)).sum::<u32>());
+    let window = || (cy - half..cy + half).flat_map(move |y| (cx - half..cx + half).map(move |x| (x, y)));
+    let (lo, hi) = window().map(|(x, y)| lum(x, y)).fold((u32::MAX, 0), |(a, b), l| (a.min(l), b.max(l)));
+    let dark = |x: usize, y: usize| lum(x, y) * 2 < lo + hi;
+    let mismatches = |deg: f64| {
+        let (c, s) = (deg.to_radians().cos(), -deg.to_radians().sin());
+        (1..=half / 2)
+            .map(|r| {
+                let (dx, dy) = (c * r as f64, s * r as f64);
+                window().filter(|&(x, y)| dark(x, y) != dark((x as f64 + dx).round() as usize, (y as f64 + dy).round() as usize)).count()
+            })
+            .sum::<usize>()
+    };
+    (0..180).map(f64::from).min_by_key(|d| mismatches(*d)).unwrap_or(f64::NAN)
+}
+
+/// How far apart lines at `a` and `b` degrees run (0..90).
+fn angle_between(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(180.0);
+    d.min(180.0 - d)
+}
+
+/// Two planes each cut their own side of the box away (y < 15, x > 20), keeping a quarter: the
+/// cut faces in the cap colour hide what lies inside it, and the picture is the CPU rasterizer's,
+/// near enough. Each plane's cut is hatched its own way, the same on the GPU as on the CPU.
+#[test]
+fn pictures_cut_with_two_planes() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    let cam = view::home_camera(&s).unwrap();
+    let one = c.rgba(&view::scene(&s, &cam).unwrap(), &cam, 200, 140).unwrap();
+    s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+    let two = c.rgba(&view::scene(&s, &cam).unwrap(), &cam, 200, 140).unwrap();
+    let changed = pixels(&one).zip(pixels(&two)).filter(|(a, b)| a != b).count();
+    assert!(changed > 300, "the second plane changes the cut: {changed} pixels changed");
+    let warm = |img: &[u8]| pixels(img).filter(|p| i32::from(p[0]) - i32::from(p[2]) > 20).count();
+    for fov in [0.0, 0.6] {
+        let mut cam = view::home_camera(&s).unwrap();
+        cam.fov = fov;
+        let mut sc = view::scene(&s, &cam).unwrap();
+        // The cap in the cap colour: a part's hatch colour is the one its name picks (#8529).
+        sc.part_hatch = None;
+        // A marker inside the quarter kept, behind both cut faces.
+        sc.lines.push(SceneLine {
+            points: vec![Vec3::new(5.0, 25.0, 10.0), Vec3::new(15.0, 25.0, 10.0)],
+            color: Rgb(255, 0, 0),
+            alpha: 1.0,
+            width: 3.0,
+            on_top: false,
+        });
+        let img = c.rgba(&sc, &cam, 300, 220).unwrap();
+        let marker = pixels(&img).filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
+        assert_eq!(marker, 0, "fov {fov}: the inside shows through a cut face");
+        let cpu = solidcraft_viewport::render(&sc, &cam, 300, 220).rgba;
+        let (gpu_cap, cpu_cap) = (warm(&img), warm(&cpu));
+        assert!(gpu_cap > 500, "fov {fov}: cap pixels {gpu_cap}");
+        assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
+        // The middle of each plane's cut face: the first plane's (y = 15), the second's (x = 20).
+        let angles = [Vec3::new(10.0, 15.0, 10.0), Vec3::new(20.0, 22.5, 10.0)].map(|p| {
+            let (x, y, _) = cam.to_screen(p, 300.0, 220.0, sc.radius).unwrap();
+            let at = (x as usize, y as usize);
+            (hatch_angle(&img, 300, at, 10), hatch_angle(&cpu, 300, at, 10))
+        });
+        for (k, (gpu, cpu)) in angles.iter().enumerate() {
+            assert!(angle_between(*gpu, *cpu) <= 3.0, "fov {fov}, plane {k}: GPU hatch at {gpu} degrees, CPU at {cpu}");
+        }
+        let ((first, _), (second, _)) = (angles[0], angles[1]);
+        assert!(angle_between(first, second) >= 30.0, "fov {fov}: both cuts hatched alike, at {first} and {second} degrees");
+    }
+}
+
+/// Whether a picture's pixel is the cap's warm tint (red over blue), in its light and dark
+/// stripes alike, unlike the grey-blue body and background.
+fn warm(p: [u8; 4]) -> bool {
+    f64::from(p[0]) > f64::from(p[2]) * 1.1
+}
+
+/// The pixel of a `w` × `h` picture by `cam` showing the world point `p`.
+fn pixel_at(img: &[u8], cam: &Camera, (w, h): (usize, usize), radius: f64, p: Vec3) -> [u8; 4] {
+    let Some((x, y, _)) = cam.to_screen(p, w as f64, h as f64, radius) else { return [0; 4] };
+    let i = (y as usize * w + x as usize) * 4;
+    img.get(i..i + 4).and_then(|p| p.try_into().ok()).unwrap_or([0; 4])
+}
+
+/// A cut face is whole where the material behind it reaches past another plane before its far
+/// wall: the view ray comes in through the first plane (x = 0) and leaves through the second
+/// (y = 0) inside the block, so no kept back face lies behind the cap. Every point of the first
+/// plane's cut shows it, with two planes and with a third (z = 14) keeping an eighth, whose cut
+/// meets the first's along their line, each hatched its own way, as the CPU rasterizer draws it.
+#[test]
+fn pictures_cap_a_cut_that_reaches_past_another_plane() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, 0]}))]);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+    let size = (300, 240);
+    for top in [20.0, 14.0] {
+        if top < 20.0 {
+            s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, top], "normal": [0, 0, 1]}, "add": true})).unwrap();
+        }
+        for fov in [0.0, 0.5] {
+            let mut cam = view::home_camera(&s).unwrap().looking_from(Vec3::new(1.0, 0.5, 0.7));
+            cam.fov = fov;
+            let mut sc = view::scene_with_guides(&s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+            sc.part_hatch = None;
+            let img = c.rgba(&sc, &cam, size.0 as u32, size.1 as u32).unwrap();
+            let cpu = solidcraft_viewport::render(&sc, &cam, size.0, size.1).rgba;
+            for y in (2..19).step_by(2) {
+                for z in (2..top as i32 - 1).step_by(2) {
+                    let p = Vec3::new(0.0, f64::from(y), f64::from(z));
+                    let (gpu, on_cpu) = (pixel_at(&img, &cam, size, sc.radius, p), pixel_at(&cpu, &cam, size, sc.radius, p));
+                    assert!(warm(gpu) && warm(on_cpu), "top {top}, fov {fov}: no cap at {p:?}: GPU {gpu:?}, CPU {on_cpu:?}");
+                }
+            }
+            let count = |img: &[u8]| pixels(img).filter(|p| warm(*p)).count();
+            let (gpu_cap, cpu_cap) = (count(&img), count(&cpu));
+            assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "top {top}, fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
+            if top < 20.0 {
+                // Either side of the line where the two cuts meet: the side cut's, the top cut's.
+                let side = Vec3::new(0.0, 10.0, 11.0);
+                let roof = Vec3::new(-6.0, 10.0, 14.0);
+                for p in [side, roof] {
+                    assert!(warm(pixel_at(&img, &cam, size, sc.radius, p)), "top {top}, fov {fov}: no cap at {p:?}");
+                }
+                let at = |p: Vec3| {
+                    let (x, y, _) = cam.to_screen(p, size.0 as f64, size.1 as f64, sc.radius).unwrap();
+                    (x as usize, y as usize)
+                };
+                let side_at = at(Vec3::new(0.0, 10.0, 6.0));
+                let roof_at = at(Vec3::new(-10.0, 10.0, 14.0));
+                let (side_gpu, side_cpu) = (hatch_angle(&img, size.0, side_at, 8), hatch_angle(&cpu, size.0, side_at, 8));
+                let (roof_gpu, roof_cpu) = (hatch_angle(&img, size.0, roof_at, 8), hatch_angle(&cpu, size.0, roof_at, 8));
+                assert!(
+                    angle_between(side_gpu, side_cpu) <= 3.0 && angle_between(roof_gpu, roof_cpu) <= 3.0,
+                    "fov {fov}: GPU {side_gpu} {roof_gpu}, CPU {side_cpu} {roof_cpu}"
+                );
+                assert!(angle_between(side_gpu, roof_gpu) >= 20.0, "fov {fov}: the two cuts hatched alike, {side_gpu} and {roof_gpu} degrees");
+            }
+        }
+    }
+}
+
+/// A surface body the section hides shows no cap: an open sheet has no inside, so it takes no
+/// part in the count of bodies behind the cut, nor paints a hidden block's far wall. With two
+/// planes hiding a sheet and a block, the picture is the block's alone, on the GPU and the CPU.
+#[test]
+fn a_hidden_surface_body_shows_no_cap() {
+    let Some(c) = capturer() else { return };
+    let block = ("solid.box", json!({"length": 15, "width": 10, "height": 20, "corner": [-45, -35, 0], "operation": "new_body"}));
+    let mut s = session(&[
+        ("sketch.create", json!({"plane": "XY", "name": "L"})),
+        ("sketch.line", json!({"points": [[-30, -5], [-12, -5]], "ids": ["w"]})),
+        ("sketch.finish", json!({})),
+        ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+        block.clone(),
+    ]);
+    assert!(s.world_state().unwrap().body("Sheet").is_some_and(|b| b.is_surface()));
+    let mut alone = session(&[block]);
+    for s in [&mut s, &mut alone] {
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+    }
+    let size = (300, 240);
+    for from in [Vec3::new(1.0, 0.5, 0.7), Vec3::new(1.0, 0.6, -0.5)] {
+        for fov in [0.0, 0.5] {
+            let mut cam = view::home_camera(&s).unwrap().looking_from(from);
+            cam.fov = fov;
+            let picture = |s: &Session| {
+                let sc = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+                (c.rgba(&sc, &cam, size.0 as u32, size.1 as u32).unwrap(), solidcraft_viewport::render(&sc, &cam, size.0, size.1).rgba)
+            };
+            let ((gpu, cpu), (want_gpu, want_cpu)) = (picture(&s), picture(&alone));
+            let differ = |a: &[u8], b: &[u8]| pixels(a).zip(pixels(b)).filter(|(a, b)| a != b).count();
+            let count = |img: &[u8]| pixels(img).filter(|p| warm(*p)).count();
+            assert_eq!((count(&gpu), count(&cpu)), (0, 0), "from {from:?}, fov {fov}: cap pixels on the GPU and the CPU");
+            assert_eq!((differ(&gpu, &want_gpu), differ(&cpu, &want_cpu)), (0, 0), "from {from:?}, fov {fov}: the hidden sheet shows");
+        }
+    }
+}
+
+/// The parts of a section hides cast no occlusion: with ambient occlusion on, the top of a plate
+/// cut short by a plane (and a block standing on its hidden end) is lit beside the cut as the
+/// top of a plate made that short is. The cap's depth on the far walls behind the kept top face
+/// used to stand in the occlusion's depth like a wall in mid-air, darkening the top along the cut.
+#[test]
+fn hidden_material_casts_no_occlusion() {
+    let Some(c) = capturer() else { return };
+    let mut cut = session(&[
+        ("solid.box", json!({"length": 60, "width": 40, "height": 10})),
+        ("solid.box", json!({"length": 8, "width": 20, "height": 20, "corner": [36, 10, 10], "operation": "new_body"})),
+    ]);
+    cut.execute("inspect.section", &json!({"plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    let short = session(&[("solid.box", json!({"length": 30, "width": 40, "height": 10}))]);
+    let size = (320, 240);
+    for fov in [0.0, 0.5] {
+        let mut cam = view::home_camera(&cut).unwrap().looking_from(Vec3::new(1.0, -0.4, 0.9));
+        cam.fov = fov;
+        let guides = Guides { grid: false, axes: false };
+        let a = view::scene_with_guides(&cut, &cam, &cut.section, guides).unwrap();
+        let b = view::scene_with_guides(&short, &cam, &[], guides).unwrap();
+        // The viewport's radius for the cut design.
+        let radius = 0.04 * f64::hypot(60.0f64.hypot(40.0), 30.0) as f32;
+        let (img_a, img_b) = (
+            c.rgba_occluded(&a, &cam, size.0 as u32, size.1 as u32, radius).unwrap(),
+            c.rgba_occluded(&b, &cam, size.0 as u32, size.1 as u32, radius).unwrap(),
+        );
+        let lum = |img: &[u8], p: Vec3| pixel_at(img, &cam, size, a.radius, p)[..3].iter().map(|c| f64::from(*c)).sum::<f64>() / 3.0;
+        let (mut worst, mut n) = (0.0f64, 0);
+        for x in [20.0, 23.0, 25.0, 27.0, 28.5] {
+            for y in (4..37).step_by(4) {
+                let p = Vec3::new(x, f64::from(y), 10.0);
+                worst = worst.max(lum(&img_b, p) - lum(&img_a, p));
+                n += 1;
+            }
+        }
+        assert!(n > 0 && worst < 4.0, "fov {fov}: the top beside the cut is up to {worst:.1} levels darker than the short plate's");
     }
 }
 
@@ -260,6 +506,71 @@ fn a_body_behind_the_cut_does_not_colour_the_cap() {
     }
 }
 
+/// #4258: a surface body inside a cut solid hides under the cap from every side, as the cap is
+/// opaque. Its back face used to paint the cap in its own colour where it faced the eye, so the
+/// sheet showed through from one side and not the other. Seen from either side of the sheet,
+/// hatched and plain, orthographic and in perspective, on the GPU and the CPU, the picture is the
+/// solid's alone but for the sheet's cut outline, the line where the section plane meets it.
+#[test]
+fn a_surface_inside_a_cut_solid_hides_under_the_cap() {
+    let Some(c) = capturer() else { return };
+    let solid = [
+        ("solid.box", json!({"length": 40, "width": 40, "height": 30, "body_name": "Block"})),
+        ("appearance.assign", json!({"bodies": ["Block"], "color": [40, 160, 90]})),
+    ];
+    let sheet = [
+        ("sketch.create", json!({"plane": "XY", "name": "L"})),
+        ("sketch.line", json!({"points": [[5, 20], [35, 20]], "ids": ["w"]})),
+        ("sketch.finish", json!({})),
+        ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+        ("appearance.assign", json!({"bodies": ["Sheet"], "color": [220, 30, 30]})),
+    ];
+    let mut alone = session(&solid);
+    let mut with = session(&solid.iter().chain(&sheet).cloned().collect::<Vec<_>>());
+    assert!(with.world_state().unwrap().body("Sheet").is_some_and(|b| b.is_surface()));
+    for hatch in [true, false] {
+        // Cut away x > 20: the sheet runs from the cut face 15 mm into the kept half.
+        for s in [&mut alone, &mut with] {
+            s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "hatch": hatch})).unwrap();
+        }
+        // From the sheet's two sides, looking at the cut face.
+        for from in [Vec3::new(1.0, 0.5, 0.6), Vec3::new(1.0, -0.5, 0.6)] {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&alone).unwrap().looking_from(from);
+                cam.fov = fov;
+                let picture = |s: &Session| {
+                    let sc = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+                    (c.rgba(&sc, &cam, 300, 220).unwrap(), solidcraft_viewport::render(&sc, &cam, 300, 220).rgba, sc.radius)
+                };
+                let ((gpu, cpu, radius), (want_gpu, want_cpu, _)) = (picture(&with), picture(&alone));
+                // The sheet stands at y = 20 from z = 0 to 20, so the plane x = 20 cuts it in this
+                // segment, drawn 1.6 px wide: its antialiased pixels lie within 3 px of it. The
+                // sheet's kept 15 mm reach some 20 px or more to its side.
+                let end = |z: f64| cam.to_screen(Vec3::new(20.0, 20.0, z), 300.0, 220.0, radius).unwrap();
+                let ((ax, ay, _), (bx, by, _)) = (end(0.0), end(20.0));
+                let on_outline = |i: usize| {
+                    let (px, py) = ((i % 300) as f64 + 0.5, (i / 300) as f64 + 0.5);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                    (px - ax - t * dx).hypot(py - ay - t * dy) <= 3.0
+                };
+                let differ = |a: &[u8], b: &[u8]| {
+                    pixels(a)
+                        .zip(pixels(b))
+                        .enumerate()
+                        .filter(|(i, (p, q))| !on_outline(*i) && p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8))
+                        .count()
+                };
+                assert_eq!(
+                    (differ(&gpu, &want_gpu), differ(&cpu, &want_cpu)),
+                    (0, 0),
+                    "hatch {hatch}, from {from:?}, fov {fov}: pixels where the sheet shows through the cap on the GPU and the CPU"
+                );
+            }
+        }
+    }
+}
+
 /// #4214: a line that is not opaque is blended with what is under it, so the grid's fade reaches
 /// the picture.
 #[test]
@@ -295,8 +606,7 @@ fn pictures_show_the_surface_analysis() {
         ("solid.hole", json!({"position": [30, 20, 20], "diameter": 10, "depth": 20})),
     ]);
     let cam = view::home_camera(&s).unwrap();
-    let picture =
-        |s: &Session| c.rgba(&view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap(), &cam, 320, 200).unwrap();
+    let picture = |s: &Session| c.rgba(&view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false }).unwrap(), &cam, 320, 200).unwrap();
     let plain = picture(&s);
     s.execute("inspect.curvature_map", &json!({})).unwrap();
     let curvature = picture(&s);
@@ -335,7 +645,7 @@ fn zebra_on_flat_faces_holds_still_while_the_view_turns() {
         .map(|step| {
             let mut cam = home;
             cam.yaw += f64::from(step) * 0.11_f64.to_radians();
-            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }).unwrap(), &cam, 320, 200).unwrap();
+            let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }).unwrap(), &cam, 320, 200).unwrap();
             pixels(&img).filter(|p| p[0] > 225 && p[1] > 225 && p[2] > 225).count()
         })
         .collect();

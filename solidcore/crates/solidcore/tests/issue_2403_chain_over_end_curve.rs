@@ -63,14 +63,12 @@ const RAD: f64 = 2.0;
 /// 5e-3 (the fork's capi `scenario_three_edges_at_the_knife_edge_arc_corner`).
 const SOLIDCRAFT_VOLUME: f64 = 9524.342896;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

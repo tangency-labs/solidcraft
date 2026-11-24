@@ -77,8 +77,8 @@
 //!   which calls `MergeCurveClasses`; none calls back.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::boolean::BooleanStage;
-use crate::error::{Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage, ClassificationStep};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
@@ -98,7 +98,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::SurfaceKind;
 
 use super::p1::{
-    add_unique, contains, dangling, ignore_soft, set_edge_class, IntersectorBrep,
+    add_unique, contains, dangling, ignore_soft, set_edge_class, split_soft, IntersectorBrep,
     TopologyIntersector,
 };
 use super::p2::{IntersectorBrepP2, SqueezeVertices};
@@ -235,16 +235,15 @@ fn succeeded(r: Result<()>) -> Result<bool> {
     Ok(ignore_soft(r)?.is_some())
 }
 
-/// `if (call != SM_SUCCESS) { return SM_ERR; }`.
-fn or_sm_err(r: Result<()>, op: &'static str) -> Result<()> {
-    if succeeded(r)? {
-        Ok(())
-    } else {
-        Err(SolidError::stage_failed(
-            op,
-            "the curve classifications could not be made consistent",
-        ))
-    }
+/// `if (call != SM_SUCCESS) { return SM_ERR; }`: the failed `step` names the cause and
+/// keeps the step's error under it.
+#[track_caller]
+fn or_sm_err(r: Result<()>, op: &'static str, step: ClassificationStep) -> Result<()> {
+    split_soft(r)?.map_err(|cause| {
+        Failure::new(op, BooleanFailure::ClassificationStepFailed { step })
+            .caused_by(cause)
+            .into_error()
+    })
 }
 
 /// The topology tolerance of a handle (`GetTolerance`).
@@ -528,6 +527,33 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         Ok(out)
     }
 
+    /// [`TopologyIntersector::merge_curve_classes`] that keeps its outputs when it fails:
+    /// upstream writes `rbTopologyWasDeleted`, `*paDeletedEdges` and `*paDeletedVertices`
+    /// through its out-params before a later step fails, so a squeeze that deleted
+    /// vertices or edges is reported with the failing status (#17200).
+    pub(crate) fn merge_curve_classes_attempt(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP3<O>,
+        crv_class1: &mut CurveClassification<O>,
+        crv_class2: &mut CurveClassification<O>,
+        merge_singularities: bool,
+    ) -> (CurveClassesMerge<O>, Result<()>) {
+        let mut out = CurveClassesMerge::untouched();
+        let status = self.merge_curve_classes_into_using(
+            k,
+            brep,
+            ClassificationPair {
+                first: crv_class1,
+                second: crv_class2,
+                link: PairLink::Metadata,
+            },
+            merge_singularities,
+            &mut out,
+        );
+        (out, status)
+    }
+
     fn merge_curve_classes_into_using(
         &mut self,
         k: &mut Kernel,
@@ -547,17 +573,30 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         //   1. if endPoint close to edge's vertex change classification from EDGE to VERTEX
         //   2. if endPoint separates a short interval from a long - remove the endPoint,
         //      merge the intervals
-        or_sm_err(crv_class1.fixup_classification(k, &*brep), OP_CLASSES)?;
-        or_sm_err(crv_class2.fixup_classification(k, &*brep), OP_CLASSES)?;
+        or_sm_err(
+            crv_class1.fixup_classification(k, &*brep),
+            OP_CLASSES,
+            ClassificationStep::FixupFirst,
+        )?;
+        or_sm_err(
+            crv_class2.fixup_classification(k, &*brep),
+            OP_CLASSES,
+            ClassificationStep::FixupSecond,
+        )?;
 
         // Syncronize the two curve classifications
-        or_sm_err(crv_class1.homogenize(k, &*brep, crv_class2), OP_CLASSES)?;
+        or_sm_err(
+            crv_class1.homogenize(k, &*brep, crv_class2),
+            OP_CLASSES,
+            ClassificationStep::Homogenize,
+        )?;
 
         // Remove all intervals that pass the AreCoincidentMaybe() test -
         //   Short intervals whose mid and end-pt both classify to an edge.
         or_sm_err(
             crv_class1.cleanup_and_validate(k, &*brep, crv_class2),
             OP_CLASSES,
+            ClassificationStep::Cleanup,
         )?;
 
         // For every classification PointPair: when one Point classifies to a mated
@@ -565,6 +604,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         or_sm_err(
             self.fixup_class_mates(k, &*brep, crv_class1, crv_class2),
             OP_CLASSES,
+            ClassificationStep::FixupMates,
         )?;
 
         // special case crvClass1 has 1 interval and m_vMid:[EDGE] and either m_vStart or
@@ -667,12 +707,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let (new_e, other_new_e) =
                 self.new_edge_pair(ii, &new_edges, &new_edges_other, true)?;
 
-            // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked)
+            // when old pNewE<->pOtherNewE mapping exists remove it (status unchecked
+            // upstream; passed on here, WR-658)
             if new_e.is_some() && other_new_e.is_some() {
-                ignore_soft(crate::error::passed_on(
-                    self.remove_relationship(new_e, other_new_e),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                self.remove_relationship(new_e, other_new_e)?;
             }
         }
 
@@ -787,8 +825,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         && !contains(&squeezed.deleted_edges, &e2)
                     {
                         // create the Edge/Edge mate relationship
-                        if !succeeded(self.relate(k, brep, Some(e1), Some(e2)))? {
-                            self.repair_edge_relation(k, brep, e1, e2, &mut squeezed, out)?;
+                        if let Err(relate_error) =
+                            split_soft(self.relate(k, brep, Some(e1), Some(e2)))?
+                        {
+                            self.repair_edge_relation(
+                                k,
+                                brep,
+                                (e1, e2),
+                                relate_error,
+                                &mut squeezed,
+                                out,
+                            )?;
                         }
                     }
                 }
@@ -1028,7 +1075,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let pairs = self
             .edge_vertices(k, brep, primary, other)?
             .ok_or_else(|| {
-                SolidError::stage_failed(OP_CLASSES, "coincident edge endpoints do not correspond")
+                SolidError::boolean(OP_CLASSES, BooleanFailure::CoincidentEdgeEndsDiffer)
             })?;
         let first = pairs.first().copied();
         for (i, (v, w)) in pairs.into_iter().enumerate() {
@@ -1043,9 +1090,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 (None, Some(survivor)) => Some((survivor, v, false)),
                 (None, None) => None,
                 _ => {
-                    return Err(SolidError::stage_failed(
+                    return Err(SolidError::boolean(
                         OP_CLASSES,
-                        "conflicting coincident edge endpoint mates",
+                        BooleanFailure::CoincidentEdgeEndMatesConflict,
                     ));
                 }
             };
@@ -1074,9 +1121,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
         if squeezed.deleted_edges.contains(&primary) || squeezed.deleted_edges.contains(&other) {
-            return Err(SolidError::stage_failed(
+            return Err(SolidError::boolean(
                 OP_CLASSES,
-                "coincident edge collapsed during gluing",
+                BooleanFailure::CoincidentEdgeCollapsed,
             ));
         }
         self.relate(k, brep, Some(primary), Some(other))
@@ -1106,13 +1153,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// The repair of a failed `Relate(pE1, pE2)` in `MergeCurveClasses`: when exactly
     /// one of the two edges is mated, an unneeded manifold edge between two faces of
     /// one surface (the unmated edge, else the mated edge's mate) is deleted, after
-    /// which the mated edge's mate is replaced by the new pair.
+    /// which the mated edge's mate is replaced by the new pair. When neither repair
+    /// applies, the relation's refusal `relate_error` is the cause of the failure.
     fn repair_edge_relation(
         &mut self,
         k: &mut Kernel,
         brep: &mut impl IntersectorBrepP3<O>,
-        e1: O,
-        e2: O,
+        (e1, e2): (O, O),
+        relate_error: SolidError,
         squeezed: &mut SqueezeVertices<O>,
         out: &mut CurveClassesMerge<O>,
     ) -> Result<()> {
@@ -1141,10 +1189,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     if brep.edge_is_manifold(e1o)? && faces_share_surface(brep, e1o)? {
                         // remove the unneeded edge
                         fixed = true;
-                        ignore_soft(crate::error::passed_on(
-                            self.remove_relationship(Some(e1o), Some(e2)),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        self.remove_relationship(Some(e1o), Some(e2))?;
                         squeezed.deleted_edges.push(e1o);
                         brep.brep_delete_edge(k, brep_h, e1o)?;
                         out.topology_was_deleted = true;
@@ -1155,10 +1200,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             // if there is still a problem - signal an error
             if !fixed {
-                return Err(SolidError::stage_failed(
-                    OP_CLASSES,
-                    "the curve classifications could not be fixed",
-                ));
+                return Err(
+                    Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
+                        .caused_by(relate_error)
+                        .into_error(),
+                );
             }
         }
         // when pE1 has a mate but pE2 does not - try to fix things by deleting unneeded
@@ -1180,10 +1226,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if let Some(e2o) = e2_other {
                     if brep.edge_is_manifold(e2o)? && faces_share_surface(brep, e2o)? {
                         fixed = true;
-                        ignore_soft(crate::error::passed_on(
-                            self.remove_relationship(Some(e1), Some(e2o)),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        self.remove_relationship(Some(e1), Some(e2o))?;
                         squeezed.deleted_edges.push(e2o);
                         brep.brep_delete_edge(k, brep_h, e2o)?;
                         out.topology_was_deleted = true;
@@ -1192,10 +1235,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
             }
             if !fixed {
-                return Err(SolidError::stage_failed(
-                    OP_CLASSES,
-                    "the curve classifications could not be fixed",
-                ));
+                return Err(
+                    Failure::new(OP_CLASSES, BooleanFailure::EdgeRelationNotRepaired)
+                        .caused_by(relate_error)
+                        .into_error(),
+                );
             }
         }
         Ok(())
@@ -1290,13 +1334,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Get the face or composite face from the surface.
         let this_face = match input.surface {
             Some(s) => Some(brep.surface_face(s)?.ok_or_else(|| {
-                SolidError::entity_missing(OP_ON_SURFACES, "a face for the surface")
+                SolidError::boolean_null_defect(
+                    OP_ON_SURFACES,
+                    BooleanStage::Intersect,
+                    "the surface the intersection curve lies on has no face, though the \
+                     intersector intersects only the surfaces of faces",
+                )
             })?),
             None => None,
         };
         let other_face = match input.other_surface {
             Some(s) => Some(brep.surface_face(s)?.ok_or_else(|| {
-                SolidError::entity_missing(OP_ON_SURFACES, "a face for the other surface")
+                SolidError::boolean_null_defect(
+                    OP_ON_SURFACES,
+                    BooleanStage::Intersect,
+                    "the other surface the intersection curve lies on has no face, though the \
+                     intersector intersects only the surfaces of faces",
+                )
             })?),
             None => None,
         };
@@ -1306,9 +1360,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         if curve_of(brep, Some(input.curve))?.is_degenerate(k, input.curve_tolerance, None)? {
             // Don't allow degenerate cases when using edges
             if input.surface.is_none() || input.other_surface.is_none() {
-                return Err(SolidError::stage_failed(
+                return Err(SolidError::boolean(
                     OP_ON_SURFACES,
-                    "a degenerate curve lies on no pair of surfaces",
+                    BooleanFailure::DegenerateCurveOnEdges,
                 ));
             }
 
@@ -1449,9 +1503,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let partial = crv_class1.test_for_partial_coincident_edges(k, &*brep, &crv_class2)?;
         let new_tol = partial.max_partial_coin_gap;
         if new_tol < 0.0 {
-            return Err(SolidError::stage_failed(
+            return Err(SolidError::boolean(
                 OP_ON_SURFACES,
-                "the partly coincident edges have no common sub-interval",
+                BooleanFailure::NoCommonSubinterval,
             ));
         }
 
@@ -1704,10 +1758,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         while topology_changed {
             passes += 1;
             if passes > MAX_COINCIDENT_SURFACE_PASSES {
-                return Err(SolidError::boolean_stage_failed(
+                return Err(SolidError::boolean(
                     OP_COINCIDENT,
-                    BooleanStage::Coincidence,
-                    "the coincident faces do not settle within the pass limit",
+                    BooleanFailure::CoincidentFacesNotSettled {
+                        passes: MAX_COINCIDENT_SURFACE_PASSES,
+                    },
                 ));
             }
             // step 1 project and merge BFace->edges into OFace (bTopologyChanged is
@@ -1781,17 +1836,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if let Some(fu) = found_fu {
                     // get the coincident matching faces
                     let o_face_match = brep.faceuse_face(fu)?.ok_or_else(|| {
-                        SolidError::boolean_entity_missing(
+                        SolidError::boolean_null_defect(
                             OP_COINCIDENT,
                             BooleanStage::Coincidence,
-                            "a face for the coincident edge use",
+                            "the coincident face use the radial sector found has no face, \
+                             though the kernel links every face use to its face",
                         )
                     })?;
                     let b_face_match = brep.edgeuse_face(eu)?.ok_or_else(|| {
-                        SolidError::boolean_entity_missing(
+                        SolidError::boolean_null_defect(
                             OP_COINCIDENT,
                             BooleanStage::Coincidence,
-                            "a face for the edge use",
+                            "an edge use of the face's loops has no face, though it was \
+                             reached through that face's own loops",
                         )
                     })?;
 

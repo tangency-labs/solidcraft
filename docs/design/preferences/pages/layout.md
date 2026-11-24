@@ -33,6 +33,8 @@ Source today: Interface page (`prefs/interface.rs`, `prefs/navbar.rs`).
 | Bodies folders | Segmented: Always / Several / Never | `Prefs.browser_bodies_folders` (`BodiesFolders`) | Several | none | none | |
 | Play History button | Checkbox | `Prefs.history_play_button` | `true` | none | none | |
 | Folder icon from its features | Checkbox | `Prefs.history_folder_kind_icon` | `false` | "A folder whose features are all of one kind shows their icon." | none | |
+| Go to end stops at the component's end | Checkbox | `Prefs.history_last_stops_at_component` | `false` | "With History steps by component on, Go to end and Go forward stop after the active component's last feature…" | none | #15974 |
+| Feature menus act on the whole selection | Checkbox | `Prefs.feature_menus_act_on_selection` | `true` | "With several features selected, an entry in a feature's menu acts on all of them, or is greyed out when it takes only one feature." | none | Off: the menus as they were before #18626. |
 | Origin and bodies on top | Checkbox | `Prefs.timeline_origin_bodies` | `false` | "Vertical history only." | none | |
 | Eye beside the fold arrow | Checkbox | `Prefs.browser_eye_left` | `false` | none | none | |
 
@@ -53,6 +55,19 @@ Source today: Interface page (`prefs/interface.rs`, `prefs/navbar.rs`).
 | Highlight active commands | Checkbox | `Prefs.persistent_ribbon_pressed` | `true` | none | none | |
 | Show search results in the ribbon | Checkbox | `Prefs.ribbon_reveal` | `false` | none | none | Verify the field: `ribbon_reveal` is the only ribbon search field in the table. |
 | Pinned commands out of menus | Checkbox | `Prefs.ribbon_menus_skip_pinned` | `false` | none | none | |
+
+## Design tabs
+
+Board: `Tabs_Menus`, "Preferences · Layout · Design tabs". Source: `prefs/interface.rs`, read through `design_tab_prefs::DesignTabPrefs`.
+
+| Label | Control | Edits | Default | Hover | Figure | Notes |
+|---|---|---|---|---|---|---|
+| Views of a design | Segmented: Show views as tabs / Show one tab with a view switcher | `Prefs.design_views_as_tabs` | `true` (tabs) | "Each view is a tab inside its design's tab, falling back to the switcher when the bar is too narrow." | none | |
+| Open drawing sheets in a sub-tab | Checkbox | `Prefs.design_sub_tab_sheets` | `true` | none | none | |
+| Open sketches in a sub-tab | Checkbox | `Prefs.design_sub_tab_sketches` | `true` | "Editing a sketch opens it as its own view; Finish Sketch returns to the previous one." | none | |
+| Open Render and Animate in a sub-tab | Checkbox | `Prefs.design_sub_tab_render` | `true` | none | none | One setting for both workspaces. |
+| Reuse a view of the same sheet, sketch or workspace | Checkbox | `Prefs.design_reuse_views` | `true` | "Opening it again shows the view you already have." | none | |
+| Reopen a design's views next time it opens | Checkbox | `Prefs.design_reopen_views` | `false` | none | none | |
 
 ## Navigation bar
 

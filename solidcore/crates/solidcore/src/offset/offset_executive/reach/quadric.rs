@@ -26,10 +26,10 @@ fn enclosed(x: I3) -> Dv {
     Dv { x, y, z }
 }
 
-/// `1 - axis.axis`, without losing its small value to the rounding of a unit norm.
+/// `1 - axis.axis` (that is, `−δ` for `|axis|² = 1 + δ`), without losing its small value to the rounding of a unit norm.
 /// Exact products are accumulated as an expansion; out-of-range products retain their
 /// rounded enclosure. Zero is kept exact, including cardinal axes.
-fn norm_defect(axis: Vec3) -> Option<Ivl> {
+pub(super) fn norm_defect(axis: Vec3) -> Option<Ivl> {
     let mut expansion = vec![1.0];
     let mut remainder = None;
     for a in [axis.x, axis.y, axis.z] {
@@ -97,6 +97,163 @@ fn evaluate(q: &Implicit, x: Dv) -> Option<(Di, Dv, Di)> {
 /// The shared interval value and gradient of a cone, cylinder or sphere.
 pub(super) fn value_and_gradient(q: &Implicit, x: I3) -> Option<(Ivl, I3)> {
     evaluate(q, enclosed(x)).map(|(f, g, _)| (f.v, values(g)))
+}
+
+/// The radical plane of two cylinders on one axis direction: where their implicit
+/// functions are equal. For the axis `a` (the second's the same, or its exact negation)
+/// and `P v = v − a (a·v)`, each cylinder is `|P (x − o)|² − r² = 0`, and `|P v|² =
+/// v·v − (2 − a·a)(a·v)²` has the same quadratic part for both, so their difference is
+/// affine: `2 (x − o₁)·n − (r₁² − r₂² + |P w|²)` with `w = o₂ − o₁` and
+/// `n = w − (2 − a·a) a (a·w)`. The cylinders meet exactly where the first meets this plane,
+/// so their meeting with a third plane, or in an edge's normal section, is a plane's with a
+/// quadric ([`super::line_with_quadric`], [`super::trace_quadric_piece`]): in closed form, a
+/// tangent meeting (a round tangent to a bore) included, which Krawczyk's operator cannot
+/// prove (the two gradients are parallel there). The normal and the height are enclosed
+/// in rounded interval arithmetic, so the plane is the exact one.
+///
+/// A cone and a cylinder on one axis line (a countersink's cone and the hole or the well
+/// beside it) meet on a plane too, square to the axis. With `v = x − o₁` from the cone's
+/// origin and `z = a·v`, both functions are `v·v − z² − ρ(z)²` (the cone's `ρ = r₁ + t z`,
+/// the cylinder's `ρ = r₂` about `o₂`), and their difference is
+/// `−(r₁ + t z)² + r₂² + 2 v·n − w·n` with `w = o₂ − o₁` and `n = w − a (a·w)`. Where `n` is
+/// zero exactly (the cylinder's origin on the cone's axis line, shown in error-free
+/// arithmetic, [`on_one_line`]), it is
+/// `r₂² − (r₁ + t z)²`, zero on the two planes `r₁ + t z = ±r₂`; the cone's own nappe
+/// (`r₁ + t z ≥ 0`) is on `t a·(x − o₁) = r₂ − r₁` alone, a circle of radius `r₂` on the
+/// cylinder, wherever the cone's apex lies. So the meeting is the cylinder's with that plane
+/// ([`Radical::quadric`]), in closed form; Newton started at the old edge would converge on
+/// the other nappe once the moved cone's apex passed the edge.
+///
+/// Not for two cones, a cone and a cylinder whose axis lines are not certified one, a
+/// cylinder's radius below zero (or a cone's cylinder at radius zero), or axes that differ
+/// in any bit: [`meet`] decides those.
+#[derive(Clone, Copy)]
+pub(super) struct Radical {
+    origin: Vec3,
+    normal: Dv,
+    height: Di,
+    /// The quadric the plane meets where the two do: the first of two cylinders, the
+    /// cylinder of a cone and a cylinder.
+    on: Implicit,
+}
+
+impl Radical {
+    /// The radical plane of `a` and `b` (`None` for any other pair, above).
+    pub fn of(a: &Implicit, b: &Implicit) -> Option<Self> {
+        let (
+            Implicit::Cone {
+                origin: oa,
+                axis: aa,
+                radius: ra,
+                tan_angle: ta,
+            },
+            Implicit::Cone {
+                origin: ob,
+                axis: ab,
+                radius: rb,
+                tan_angle: tb,
+            },
+        ) = (*a, *b)
+        else {
+            return None;
+        };
+        // the same stored axis line direction, exactly
+        if !(ab == aa || ab == -aa) {
+            return None;
+        }
+        let axis = Dv::constant(aa);
+        let w = Dv::constant(ob).sub(Dv::constant(oa));
+        let z = w.dot(axis);
+        let pw = w.sub(axis.scale(z));
+        match (ta == 0.0, tb == 0.0) {
+            // two cylinders
+            (true, true) => {
+                if !(ra >= 0.0 && rb >= 0.0) {
+                    return None;
+                }
+                let k = Di::constant(2.0) - axis.dot(axis);
+                let (ra, rb) = (Di::constant(ra), Di::constant(rb));
+                Some(Self {
+                    origin: oa,
+                    normal: w.sub(axis.scale(k * z)),
+                    height: (ra * ra - rb * rb + pw.dot(pw)) * Di::constant(0.5),
+                    on: *a,
+                })
+            }
+            // a cone and a cylinder, the cone's origin `o₁` (`n` from the other origin is
+            // its negation: zero the same)
+            (false, true) => {
+                Self::cone_and_cylinder(oa, axis, ra, ta, on_one_line(oa, ob, aa), rb, *b)
+            }
+            // the cone's own axis: the cylinder's may be the opposite sense
+            (true, false) => Self::cone_and_cylinder(
+                ob,
+                Dv::constant(ab),
+                rb,
+                tb,
+                on_one_line(oa, ob, aa),
+                ra,
+                *a,
+            ),
+            (false, false) => None,
+        }
+    }
+
+    /// [`Radical::of`] a cone `(o, a, r1, t)` and the cylinder `cylinder` of radius `r2`,
+    /// `one_line` whether their axis lines are shown one ([`on_one_line`]).
+    fn cone_and_cylinder(
+        o: Vec3,
+        axis: Dv,
+        r1: f64,
+        t: f64,
+        one_line: bool,
+        r2: f64,
+        cylinder: Implicit,
+    ) -> Option<Self> {
+        if !(r2 > 0.0 && one_line) {
+            return None;
+        }
+        Some(Self {
+            origin: o,
+            normal: axis.scale(Di::constant(t)),
+            height: Di::constant(r2) - Di::constant(r1),
+            on: cylinder,
+        })
+    }
+
+    /// The plane's normal and its height `n·(x − p)` over `p`.
+    pub fn over(&self, p: Dv) -> (Dv, Di) {
+        let height = self.height - p.sub(Dv::constant(self.origin)).dot(self.normal);
+        (self.normal, height)
+    }
+
+    /// The quadric whose meeting with the plane is the two quadrics' meeting.
+    pub fn quadric(&self) -> &Implicit {
+        &self.on
+    }
+}
+
+/// Whether `n = w − a (a·w)`, `w = ob − oa`, is zero exactly: computed in error-free
+/// arithmetic, so `false` where it is not, or where a product is out of the range that
+/// arithmetic holds exactly (not shown zero). In rounded intervals the two terms of a
+/// component along the axis are each enclosed apart and their difference never encloses
+/// zero alone, even for origins on one line.
+fn on_one_line(oa: Vec3, ob: Vec3, a: Vec3) -> bool {
+    let w = [
+        exact::sub(&[ob.x], &[oa.x]),
+        exact::sub(&[ob.y], &[oa.y]),
+        exact::sub(&[ob.z], &[oa.z]),
+    ];
+    let axis = [a.x, a.y, a.z];
+    let along = w.iter().zip(axis).try_fold(Vec::new(), |sum, (wi, ai)| {
+        Some(exact::add(&sum, &exact::scale(wi, ai)?))
+    });
+    let Some(along) = along else {
+        return false;
+    };
+    w.iter().zip(axis).all(|(wi, ai)| {
+        exact::scale(&along, ai).is_some_and(|part| exact::is_zero(&exact::sub(wi, &part)))
+    })
 }
 
 /// A plane through a displacement `d`, `normal.d = height`, based at `point`.

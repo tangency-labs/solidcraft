@@ -3,6 +3,38 @@ use crate::scenario::Harness;
 use egui::Color32;
 use solidcraft_engine::Session;
 
+#[test]
+fn scoped_render_projection_uses_pending_view_options_before_paint() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.ui.perspective = false;
+    app.ui.auto_ortho_faces = false;
+    let ground = app.docs.views.active().id;
+    let render = app.docs.views.open(solidcraft_views::ViewKind::Render, None, false);
+    app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(Camera::default()));
+    app.docs.views.activate(ground);
+    crate::documents::with_view_look(&mut app, render, |app| app.ui.perspective = true);
+    for perspective in [true, false] {
+        crate::documents::with_view_look(&mut app, render, |app| {
+            app.ui.perspective = perspective;
+            app.ui.up_axis = solidcraft_viewport::UpAxis::Y;
+            with_tile_camera(app, |app| {
+                assert_eq!(app.ui.perspective, perspective);
+                assert_eq!(app.cam.fov > 0.0, perspective);
+                assert_eq!(app.cam.up, solidcraft_viewport::UpAxis::Y);
+                let frame_projection = crate::viewport::projection(app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0)));
+                assert_eq!(frame_projection.cam.fov > 0.0, perspective);
+            });
+        });
+        assert!(!app.ui.perspective, "Render navigation leaves the ground unchanged");
+    }
+    let authored = Camera { fov: 0.42, ..Camera::default() };
+    app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(authored));
+    crate::documents::with_view_look(&mut app, render, |app| {
+        app.ui.perspective = true;
+        with_tile_camera(app, |app| assert_eq!(app.cam.fov, authored.fov));
+    });
+}
+
 fn click_render_check(h: &mut Harness) {
     h.app.run("view.render_select", json!({"kind":"check"})).unwrap();
     h.frames(3);
@@ -1963,7 +1995,7 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
-    s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
+    s.section = vec![solidcraft_engine::SectionPlane { id: 1, origin: solidcore_record::Vec3::ZERO, normal: solidcore_record::Vec3::X }];
     let after = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(gpu_scene(&after).unwrap().0, key);
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.0})).unwrap();
@@ -3442,11 +3474,11 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
     }
 }
 
-/// #1454: Fit (F6), a middle double-click, and the axis view's and navigation cube's Home and
+/// #1454: Fit (F6), a middle double-click, and the axis view's and navigator's Home and
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3489,9 +3521,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
-            crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            // Custom draws the cube until a body is chosen.
-            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
+            // Custom draws the signed axes until a body is chosen.
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
@@ -3647,6 +3678,24 @@ fn gpu_material_recipes_use_exact_linear_absorption_without_changing_saved_appea
 }
 
 #[test]
+fn render_only_revisions_preserve_model_source_bindings() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":"Target"})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    setups::save(&mut h.app).unwrap();
+    let source = h.app.session.doc.clone();
+    let token = h.app.session.design_token();
+    let before = setups::draft(&h.app).unwrap();
+    h.app.render_workspace.view.draft.exposure_ev += 0.25;
+    setups::persist_editor(&mut h.app, &before).unwrap();
+    assert_ne!(h.app.session.design_token(), token, "saved Render settings are a committed edit");
+    assert!(setups::same_model_source(&h.app, &Arc::downgrade(&source)), "history tracking does not change derived geometry");
+    h.app.run("appearance.assign", json!({"bodies":["Target"],"color":"#123456"})).unwrap();
+    assert!(!setups::same_model_source(&h.app, &Arc::downgrade(&source)), "material changes still invalidate the source");
+}
+
+#[test]
 fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
     use solidcraft_engine::render::job::ReflectionMode;
     for (method, change_geometry) in
@@ -3706,6 +3755,21 @@ fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
         setups::persist_editor(&mut h.app, &before).unwrap();
         assert!(image_request(&h.app).is_err(), "hidden or moved targets must remain stale");
     }
+}
+
+/// The CPU render's body picker takes any body name a rename takes: a hundred CJK characters
+/// are 300 bytes, which the picker greyed out when it counted 128 bytes.
+#[test]
+fn a_body_with_a_long_multibyte_name_can_be_a_reflection_target() {
+    use solidcraft_engine::render::job::ReflectionMode;
+    let mut h = Harness::new();
+    let long = "中".repeat(100);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":long})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    cpu::set_reflection(&mut h.app, &long, Some(ReflectionMode::Mirror)).unwrap();
+    let bodies = h.app.render_workspace.view.raytrace.reflections.as_ref().map(|r| r.bodies.iter().map(|b| b.body.clone()).collect::<Vec<_>>());
+    assert_eq!(bodies, Some(vec![long]));
 }
 
 #[test]
@@ -4550,12 +4614,12 @@ fn hdr_ui_save_embeds_once_without_a_host_and_reload_never_reopens_the_source_pa
     let cpu = h.app.session.doc.render.setups.get("HDR CPU").unwrap().clone();
     assert!(matches!(&cpu.job, Some(RenderJob::CpuRaytrace { options, .. })
         if options.hdr.unwrap().samples == 64 && options.progressive.unwrap().samples_per_pixel == 7 && options.progressive.unwrap().seed == 84));
-    let encoded = h.app.session.doc.to_json();
-    assert!(!encoded.contains("original-embedded.hdr"), "the document never stores the source path");
+    assert!(!h.app.session.doc.to_json().contains("original-embedded.hdr"), "the document never stores the source path");
+    let encoded = solidcraft_engine::io::write_design_container(&h.app.session.doc).unwrap();
     std::fs::remove_file(&path).unwrap();
 
     for (name, expected, target) in [("HDR GPU", gpu, hdr::Target::Gpu), ("HDR CPU", cpu, hdr::Target::Cpu)] {
-        let loaded = solidcraft_engine::doc::Document::from_json(&encoded).unwrap();
+        let loaded = solidcraft_engine::io::read_design(&encoded).unwrap();
         h.app.session = Session::new(loaded);
         h.app.render_workspace.view.name = name.into();
         setups::load(&mut h.app);
@@ -5881,32 +5945,106 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
     assert!(h.app.tool.is_none() && h.app.dialog.is_none());
 }
 
+/// Whatever Modelling's selection mode, even one Render's filter has no button for (Features,
+/// Sketch geometry, Components), a click in Render picks what Render's own filter shows (#17512).
+/// Leaving Render, the mode is what it was.
 #[test]
-fn modelling_select_panel_shows_and_clears_renders_component_pick() {
+fn render_picks_as_its_filter_shows_and_keeps_the_mode() {
+    use solidcraft_engine::{PickMode, Sel};
+    let (mut h, occurrence) = render_pick_sample();
+    for (mode, filter) in [(PickMode::Features, "face"), (PickMode::Sketch, "component"), (PickMode::Components, "body")] {
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        crate::selection_mode::set(&mut h.app, mode);
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":format!("render:pick:{filter}")}})).unwrap();
+        assert_eq!(h.app.pick_mode(), filter);
+        let at = product_pick_point(&h);
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        match (filter, h.app.session.selection.as_slice()) {
+            ("body", [Sel::Body { name }]) => assert_eq!(name, "Plate"),
+            ("face", [Sel::Face { body, .. }]) => assert_eq!(body, "Plate"),
+            ("component", [Sel::Occurrence { path }]) => assert_eq!(path, &[occurrence]),
+            (_, other) => panic!("{mode:?}: the filter shows {filter}, a click picked {other:?}"),
+        }
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.pick_mode, mode, "Render leaves the setting as it was");
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+    }
+}
+
+#[test]
+fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
+    // Render's Body / Face / Component switches used to write Modelling's pick mode: a Body or
+    // Component chosen in Render left Modelling lighting and picking whole bodies, and the
+    // preferences file kept it. Render's choice is its own; only Click selects and the
+    // Modelling SELECT panel set Modelling's.
     use egui::accesskit::{Role, Toggled};
+    use solidcraft_engine::Sel;
     const BODY: &str = "Select bodies (a face picks its body)";
     const COMPONENT: &str = "Select components (a face picks its component)";
-    let (mut h, _) = render_pick_sample();
-    h.step(&json!({"click":{"handle":"render:pick:component"}})).unwrap();
-    enter(&mut h.app, false).unwrap();
-    h.settle();
-    h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
-    h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
+    for render_choice in ["body", "component"] {
+        let (mut h, _) = render_pick_sample();
+        h.step(&json!({"click":{"handle":format!("render:pick:{render_choice}")}})).unwrap();
+        assert_eq!(h.app.pick_mode(), render_choice, "Render takes its own choice");
+        enter(&mut h.app, false).unwrap();
+        h.settle();
+        assert_eq!(h.app.pick_mode(), "face", "Modelling keeps picking faces after Render {render_choice}");
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
+        let prefs: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+        assert_eq!(prefs["pick_mode"], "faces", "Render's choice must not reach the preferences file");
 
-    let check = |h: &Harness, body: bool, component: bool| {
-        assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
-        let tree = h.output.accesskit_update.as_ref().unwrap();
-        for (label, on) in [(BODY, body), (COMPONENT, component)] {
-            let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
-            assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
+        // With no command running, hovering a face lights that face and a click picks it.
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let rect = h.app.viewport.rect.unwrap();
+        let at = (2..18)
+            .flat_map(|y| (2..18).map(move |x| (x, y)))
+            .map(|(x, y)| rect.min + egui::vec2(rect.width() * x as f32 / 20.0, rect.height() * y as f32 / 20.0))
+            .find(|&p| {
+                !crate::shell::covered(&h.app, p)
+                    && crate::viewport::pick(&h.app, &proj, p).first().is_some_and(|hit| matches!(hit, crate::viewport::Hit::Face { .. }))
+            })
+            .expect("a face of the sample in view");
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "hover is the face: {:?}", h.app.viewport.hover);
+        let hover = h.app.viewport.hover.clone().unwrap();
+        assert!(crate::viewport::candidate(&h.app, std::slice::from_ref(&hover)).is_some_and(|(_, sel)| matches!(sel, Sel::Face { .. })));
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        assert!(
+            matches!(h.app.session.selection.as_slice(), [Sel::Face { .. }]),
+            "a click picks the face, not the body: {:?}",
+            h.app.session.selection
+        );
+
+        // The Modelling SELECT panel shows faces and still sets Modelling's mode, keeping its Faces filter.
+        h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
+        h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
+        let check = |h: &Harness, body: bool, component: bool| {
+            assert_eq!(
+                (h.app.ui.pick_mode == solidcraft_engine::PickMode::Bodies, h.app.ui.pick_mode == solidcraft_engine::PickMode::Parts),
+                (body, component)
+            );
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            for (label, on) in [(BODY, body), (COMPONENT, component)] {
+                let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
+                assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
+            }
+        };
+        check(&h, false, false);
+        h.step(&json!({"widget":"Faces"})).unwrap();
+        for (label, body, component) in [(COMPONENT, false, true), (BODY, true, false), (BODY, false, false)] {
+            h.step(&json!({"widget":label})).unwrap();
+            check(&h, body, component);
+            assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
         }
-    };
-    check(&h, false, true);
-    h.step(&json!({"widget":"Faces"})).unwrap();
-    for (label, body, component) in [(COMPONENT, false, false), (BODY, true, false), (COMPONENT, false, true), (BODY, true, false)] {
-        h.step(&json!({"widget":label})).unwrap();
-        check(&h, body, component);
-        assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
+        // Back in Render, Render's own choice is still there.
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+        assert_eq!(h.app.pick_mode(), render_choice);
     }
 }
 
@@ -5971,7 +6109,7 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
     h.frames(3);
     h.app.run("select.filter", json!({"mode":"face"})).unwrap();
     h.step(&json!({"click":{"handle":"render:pick:body"}})).unwrap();
-    assert!(!h.app.ui.pick_bodies && !h.app.ui.pick_components, "result canvas must disable the stage's Pick control");
+    assert!(!h.app.picks_bodies() && !h.app.picks_components(), "result canvas must disable the stage's Pick control");
     let path = h.dir.join("overlay-free.png");
     h.app.run("render.export", json!({"job":second,"path":path})).unwrap();
     assert_eq!(std::fs::read(path).unwrap(), clean.png());
@@ -5982,14 +6120,22 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
 fn render_workspace_pick_filter_rejects_invalid_requests_atomically() {
     let mut h = Harness::new();
     let doc = h.app.session.doc.clone();
-    for mode in ["body", "face", "component"] {
+    // The filter sets the one selection mode (#4255): a component is the innermost placement,
+    // the Parts mode, as Render picked before; and the mode reads back as the same filter.
+    for (mode, pick) in [
+        ("body", solidcraft_engine::PickMode::Bodies),
+        ("face", solidcraft_engine::PickMode::Faces),
+        ("component", solidcraft_engine::PickMode::Parts),
+    ] {
+        h.app.ui.pick_off = vec!["faces".into()];
         assert_eq!(h.app.run("select.filter", json!({"mode":mode})).unwrap()["mode"], mode);
-        assert_eq!(h.app.ui.pick_bodies, mode == "body");
-        assert_eq!(h.app.ui.pick_components, mode == "component");
+        assert_eq!(h.app.ui.pick_mode, pick);
+        assert!(h.app.ui.pick_off.is_empty(), "every filter picks through faces");
+        assert_eq!(crate::selection_mode::render_filter(h.app.ui.pick_mode), mode);
     }
     for request in [json!({}), json!({"mode":"edge"}), json!({"mode":"body","extra":true})] {
         assert!(h.app.run("select.filter", request).is_err());
-        assert!(!h.app.ui.pick_bodies && h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Parts);
     }
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert!(h.app.session.undo.is_empty());
@@ -7244,6 +7390,7 @@ fn output_viewer_r_starts_active_setup_and_escape_returns_to_model_without_cance
     h.frames(2);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(!h.app.render_workspace.view.result);
+    assert!(h.app.render_workspace.view.live_paused, "Escape must return to the fast model preview");
     assert!(ribbon::busy(&h.app), "closing the image never cancels the job");
     h.app.run("render.result.view", json!({"view":"image"})).unwrap();
     h.app.viewport.nav = Some(crate::viewport::NavMode::Pan);
@@ -7746,6 +7893,8 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), doc.to_json());
     assign::tile(&mut h.app, json!({"appearance":"ABS - Red"}), true).unwrap();
+    // The undo left no walk of the placements; the drag's start makes the one a Ctrl-drop needs.
+    assert_eq!(crate::selection_mode::part_of(&h.app, "Plate"), solidcraft_engine::Sel::Occurrence { path: vec![occurrence] });
     h.step(&json!({"move":[at.x,at.y]})).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(assign::preview(&h.app).is_none());
@@ -8731,6 +8880,94 @@ fn automatic_live_cpu_pixels_refresh_without_replacing_final_export_or_saved_set
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn returning_to_model_preview_clears_live_pixels_and_resumes_only_on_request() {
+    use solidcraft_engine::render::job::{JobId, Phase};
+    for (command, params) in [("render.result.close", json!({})), ("render.result.view", json!({"view":"model"}))] {
+        let Some(mut h) = live_cpu_fixture() else { return };
+        let reply = h
+            .app
+            .session
+            .execute(
+                "render.start",
+                &json!({"settings":{"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":82}}}}}),
+            )
+            .unwrap();
+        let final_job: JobId = serde_json::from_value(reply["job"].clone()).unwrap();
+        let handle = h.app.session.render_job_handle(final_job).unwrap();
+        assert_eq!(handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap().progress.phase, Phase::Completed);
+        let final_png = handle.frame().unwrap().unwrap().png().to_vec();
+        live::advance(&mut h.app, &h.ctx, 1.0);
+        wait_live_complete(&mut h, 1.3);
+        assert!(live::has_picture(&h.app));
+        // Ordinary Pause keeps the last image; returning to Model Preview must remove it.
+        h.app.run("view.render_live", json!({"paused":true})).unwrap();
+        assert!(live::has_picture(&h.app));
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
+        h.app.run("render.result.select", json!({"index":0})).unwrap();
+        assert!(result_active(&h.app));
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let settings = image_request(&h.app).unwrap();
+        let camera = h.app.cam;
+
+        h.app.run(command, params).unwrap();
+        assert!(!live::has_picture(&h.app), "{command} must show the fast model preview, not retained Live pixels");
+        assert!(!result_active(&h.app));
+        assert_eq!(live::inspect(&h.app)["paused"], true);
+        assert!(live::picking_current(&h.app), "the model preview remains pickable");
+        h.frames(2);
+        assert!(inspect_state(&h.app)["displayed_receipt"].is_null(), "the model preview must not paint a Live image");
+        assert_eq!(h.app.render_workspace.view.completed, Some(final_job));
+        assert_eq!(handle.frame().unwrap().unwrap().png(), final_png);
+        assert_eq!(h.app.session.render_retained_results().unwrap().len(), 1);
+        assert_eq!(image_request(&h.app).unwrap(), settings);
+        assert_eq!(h.app.cam, camera);
+        assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), history);
+
+        h.app.cam.yaw += 0.3;
+        live::advance(&mut h.app, &h.ctx, 2.0);
+        live::advance(&mut h.app, &h.ctx, 2.3);
+        let state = live::inspect(&h.app);
+        assert_eq!(state["pending"], false);
+        assert_eq!(state["running"], false);
+        assert!(!live::has_picture(&h.app), "navigation must not restart Live");
+        h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(8.0, 8.0)));
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
+        live::advance(&mut h.app, &h.ctx, 3.0);
+        wait_live_complete(&mut h, 3.3);
+        assert!(live::has_picture(&h.app));
+        assert_eq!(handle.frame().unwrap().unwrap().png(), final_png);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn returning_to_model_preview_drains_a_pending_live_capture_without_displaying_it() {
+    let Some(mut h) = live_cpu_fixture() else { return };
+    live::advance(&mut h.app, &h.ctx, 1.0);
+    live::advance(&mut h.app, &h.ctx, 1.3);
+    assert_eq!(live::inspect(&h.app)["pending"], true);
+    h.app.run("render.result.close", json!({})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        live::advance(&mut h.app, &h.ctx, 2.0);
+        let state = live::inspect(&h.app);
+        assert!(!live::has_picture(&h.app));
+        assert_eq!(state["running"], false);
+        assert_eq!(state["paused"], true);
+        if state["pending"] == false && state["draining"] == 0 {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "late Live capture did not drain: {state}");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn cancelled_first_manual_cpu_checkpoint_resumes_live_without_retaining_or_exporting_it() {
     use solidcraft_engine::render::job::Phase;
     let Some(mut h) = live_cpu_fixture() else { return };
@@ -8822,6 +9059,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
         samples: 1,
         tess: false,
         oit: false,
+        edges: false,
     });
     h.app.render_workspace.host = Some(host_executor(4096, true, 1).unwrap());
     sync_backend(&mut h.app);
@@ -9013,15 +9251,21 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         255,
     ];
 
-    // Expand actual highlighted placements too: an empty CPU triangle list alone
-    // does not mean that a whole-body GPU highlight is missing.
+    // Count the triangles and check the palette colour of both copied and shared feedback.
     let filled_vertices = |app: &SolveApp, expected_color: [u8; 4]| {
         let feedback = crate::viewport::build_highlight(app).merged();
         assert!(feedback.overlay.is_empty() && feedback.xray.is_empty(), "feedback must remain depth-tested");
         assert!(feedback.selected_planned.is_empty() && feedback.hover_planned.is_empty());
         assert!(feedback.selected_blocks.is_empty() && feedback.hover_blocks.is_empty() && feedback.recoloured.is_empty());
+        if active(app) {
+            assert!(feedback.selected_face_instanced.is_empty(), "Render keeps the selected face in its own feedback geometry");
+        } else if app.viewport.gpu.is_some() {
+            let [face] = feedback.selected_face_instanced.as_slice() else { panic!("Design draws one selected reference mesh") };
+            assert!(Arc::ptr_eq(&face.tris, &reference_shared), "Design shares the model's reference triangles");
+            assert_eq!(face.count(), 1, "Design tints the reference at one placement");
+        }
         let mut tris = feedback.tris.clone();
-        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced) {
+        for mesh in feedback.selected_instanced.iter().chain(&feedback.hover_instanced).chain(&feedback.selected_face_instanced) {
             mesh.expand_into(&mut tris);
         }
         let vertices = tris.as_chunks::<{ crate::gpu::TRI_SIZE }>().0;
@@ -9035,7 +9279,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         app.session.selection.clear();
         app.viewport.hover = None;
         app.viewport.hover_bodies.clear();
-        app.ui.pick_bodies = case == 3;
+        app.ui.render_pick = if case == 3 { "body" } else { "face" }.into();
         let point = Vec3::ZERO;
         match case {
             0 => app.session.selection = vec![Sel::Face { body: body.into(), index: face, point }],
@@ -15032,10 +15276,13 @@ fn host_bounded_results_and_comparison_actions_are_visible_and_clickable() {
         assert!(h.dir.join("render.png").is_file(), "Export must receive the click and use the harness picker");
         click(&mut h, "render:result-model");
         assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.live_paused, "Return to Model Preview must pause Live");
         assert!(h.app.render_workspace.view.compare.is_none());
         select(&mut h);
+        h.app.run("view.render_live", json!({"paused":false})).unwrap();
         click(&mut h, "render:result-close");
         assert!(!result_active(&h.app));
+        assert!(h.app.render_workspace.view.live_paused, "Close Render Image must pause Live");
         assert!(h.app.render_workspace.view.compare.is_none());
         assert_eq!(h.app.render_workspace.view.completed, Some(selected));
         assert_eq!(h.app.viewport.rect, Some(canvas));
@@ -16215,6 +16462,10 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("render quality denoise mask test requires raytrace-cpu");
+        return;
+    }
     h.app.run("solid.box", json!({"length":5,"width":4,"height":3,"body_name":"Mask subject"})).unwrap();
     let request = json!({"settings":{"width":16,"height":8,"camera":h.app.cam,"job":{"method":"cpu_raytrace",
         "options":{"threads":1,"progressive":{"samples_per_pixel":2,"seed":81},
@@ -16369,4 +16620,191 @@ fn render_backend_save_failure_does_not_schedule_a_restart() {
     assert_eq!(h.app.preferences.graphics_backend, "auto");
     assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
     assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn render_canvas_tab_can_reach_the_finished_sketch_notice_without_toggling_focus_mode() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let owner = h.app.docs.views.active().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(h.app.run("solid.extrude", json!({"distance":0})).is_err());
+    let event = h.app.sketch_notices.latest_for(h.app.session.uid, 0).unwrap().clone();
+    enter(&mut h.app, true).unwrap();
+    h.app.sketch_notices.enqueue(h.app.session.uid, 0, event);
+    h.frames(3);
+    let link = h
+        .output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::Link && node.label() == Some(h.app.tr("sketch_finish.edit")))
+        .map(|(id, _)| *id)
+        .expect("visible notice exposes a link");
+    h.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let buttons = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button).count();
+    assert!(buttons > 120, "the real appearance catalogue makes sequential traversal too long for a six-second notice");
+    let tap = |h: &mut Harness, modifiers| {
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers },
+        ]);
+    };
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(!h.app.shell.render_focus, "Tab enters the notice while it is visible");
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "the first Tab from the canvas reaches the actual notice link"
+    );
+    // Once a widget owns focus, normal traversal resumes: go to the preceding
+    // control and back to the exact same accessible notice link.
+    tap(&mut h, egui::Modifiers::SHIFT);
+    h.frame();
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() != link)),
+        "Shift+Tab leaves the notice through ordinary widget order"
+    );
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "ordinary Tab returns from the preceding control to the notice"
+    );
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert_eq!(h.app.session.sketching_view, Some(owner));
+}
+
+#[test]
+fn render_views_keep_product_and_completed_image_framing_through_focus_changes() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let first = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let second = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert_ne!(first, second);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let model_camera = h.app.cam;
+    let first_camera = Camera { yaw: 0.4, fov: 0.0, ..model_camera };
+    let second_camera = Camera { yaw: 1.2, fov: 0.6, ..model_camera };
+    // Setup only: each Render view is left with its own lens and the projection option that goes
+    // with it (as a user leaves it), so a hidden card paints the lens it was left with.
+    for (id, camera) in [(first, first_camera), (second, second_camera)] {
+        assert!(crate::documents::view_activate(&mut h.app, id));
+        h.app.cam = camera;
+        h.app.ui.perspective = camera.fov > 0.0;
+        assert!(crate::documents::view_activate(&mut h.app, model));
+    }
+    assert_eq!(h.app.cam, model_camera);
+    h.app.docs.views.set_spec(first, solidcraft_viewport::ViewSpec::new(first_camera));
+    h.app.docs.views.set_spec(second, solidcraft_viewport::ViewSpec::new(second_camera));
+
+    crate::documents::with_view_look(&mut h.app, first, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam, first_camera);
+            app.cam.yaw = 0.7;
+            app.render_workspace.view.result_camera.distance = 42.0;
+            app.render_workspace.view.result_scale = ResultScale::Free;
+        })
+    });
+    assert_eq!(h.app.cam, model_camera, "painting a Render card leaves Model framing alone");
+    assert_eq!(h.app.docs.views.get(first).unwrap().spec.unwrap().camera.yaw, 0.7, "the outer look scope must retain card navigation");
+    crate::documents::with_view_look(&mut h.app, second, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam, second_camera);
+            assert_ne!(app.render_workspace.view.result_camera.distance, 42.0);
+            app.cam.yaw = 1.6;
+            app.render_workspace.view.result_camera.distance = 87.0;
+            app.render_workspace.view.result_scale = ResultScale::Free;
+        })
+    });
+    crate::documents::with_view_look(&mut h.app, first, |app| {
+        with_tile_camera(app, |app| {
+            assert_eq!(app.cam.yaw, 0.7);
+            assert_eq!(app.render_workspace.view.result_camera.distance, 42.0);
+        })
+    });
+    assert_eq!(h.app.cam, model_camera);
+    assert!(crate::documents::view_activate(&mut h.app, first));
+    assert_eq!(h.app.cam.yaw, 0.7);
+    assert_eq!(h.app.cam.fov, 0.0);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 42.0);
+    assert!(crate::documents::view_activate(&mut h.app, second));
+    assert_eq!(h.app.cam.yaw, 1.6);
+    assert_eq!(h.app.cam.fov, 0.6);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 87.0);
+}
+
+#[test]
+fn render_card_scopes_preserve_the_ground_image_navigation_response() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let ground = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let card = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, ground));
+    let rect = egui::Rect::from_min_size(egui::pos2(40.0, 70.0), egui::vec2(300.0, 200.0));
+    let response_id = egui::Id::unique("ground_render_result_navigation");
+    let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        let response = ui.interact(rect, response_id, egui::Sense::drag());
+        h.app.render_workspace.result_navigation = Some((rect, response, true));
+        crate::documents::with_view_look(&mut h.app, card, |app| {
+            with_tile_camera(app, |app| {
+                assert!(app.render_workspace.result_navigation.is_none());
+            })
+        });
+        let (kept_rect, kept_response, captured) = h.app.render_workspace.result_navigation.as_ref().unwrap();
+        assert_eq!(*kept_rect, rect);
+        assert_eq!(kept_response.id, response_id);
+        assert!(*captured);
+    });
+}
+
+#[test]
+fn an_inline_legacy_render_does_not_reset_its_image_framing() {
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    h.app.render_workspace.view.result_camera.distance = 123.0;
+    focus_view_framing(&mut h.app, model);
+    assert_eq!(h.app.render_workspace.view.result_camera.distance, 123.0);
+    assert!(h.app.render_workspace.view.framing_view.is_none());
+    assert!(h.app.render_workspace.view.framings.is_empty());
+}
+
+#[test]
+fn a_closed_render_canvas_cannot_borrow_the_model_camera_for_another_render_view() {
+    use solidcraft_views::ViewKind;
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let closed = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    let surviving = crate::documents::view_open(&mut h.app, ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let expected = Camera { yaw: 1.3, ..h.app.cam };
+    h.app.docs.views.set_spec(surviving, solidcraft_viewport::ViewSpec::new(expected));
+    h.app.render_workspace.tile_canvas = Some((h.app.session.uid, closed, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0))));
+    assert!(h.app.docs.views.close(closed));
+    let model_camera = h.app.cam;
+    with_tile_camera(&mut h.app, |app| assert_eq!(app.cam, expected));
+    assert_eq!(h.app.cam, model_camera);
+    assert!(!h.app.render_workspace.view.framings.contains_key(&closed));
+}
+
+#[test]
+fn a_restored_render_projection_is_selected_before_its_first_card_paint() {
+    let mut h = Harness::new();
+    let model = h.app.docs.views.active().id;
+    let render = crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Render, None, false);
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    let camera = Camera { fov: 0.0, yaw: 0.8, ..h.app.cam };
+    h.app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(camera));
+    h.app.ui.perspective = true;
+    assert!(crate::documents::view_activate(&mut h.app, render));
+    assert_eq!(h.app.cam, camera);
+    assert!(!h.app.ui.perspective, "the navigation toggle must reflect the restored Render lens immediately");
+    assert_eq!(h.app.ui.up_axis, camera.up);
 }

@@ -16,8 +16,7 @@
 //! their full caller tails.
 //! Not upstream (WR-409, tangency-labs/solidcore#1113): a profile that bounds no planar
 //! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
-//! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
-//! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
+//! Not upstream (WR-442, tangency-labs/solidcore#478): after a full turn's
 //! stitch, a closed shell inside another becomes that solid's cavity.
 //! Not upstream (WR-448, tangency-labs/solidcore#545, opt-in
 //! `Kernel::fixes.revolve_analytic_profile_faces`; SolidCraft change, tangency-labs/smlib
@@ -29,14 +28,13 @@
 //! (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes it: a one-curve profile
 //! goes through the same per-curve rule, so a whole circle's torus has its seam at the
 //! profile (#1491).
-//! Not upstream (WR-590, opt-in `Kernel::fixes.revolve_splits_curves_on_axis`;
-//! SolidCraft change, tangency-labs/smlib e4f1377): a partial turn first splits each
+//! Not upstream (WR-590; SolidCraft change, tangency-labs/smlib e4f1377): a partial
+//! turn first splits each
 //! curve where it meets the axis inside itself ([`split_curves_on_axis`], the fork's
 //! `sm_SplitCurvesOnAxis`), which `CheckCurveSweep` otherwise refuses
 //! (`SM_SC_ROT_ON_CURVE`); a closed curve's last piece is joined back onto its first.
-//! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
-//! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
-//! are returned instead (`SER`).
+//! **Statuses pass on** (WR-662; SolidCraft change, tangency-labs/smlib c8f6a31): the
+//! statuses upstream drops here are returned (`SER`).
 
 use super::{construct::target, geometry::bspline_with_nurb, PrimitiveAccess};
 use crate::curve::curve::Curve;
@@ -44,7 +42,7 @@ use crate::curve::curve::CurveKind;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{ignore_status, ignored, passed_on, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::geom_utility::{
     p1::{line_closest_point, line_point_distance},
@@ -102,11 +100,7 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         let curve = bspline_with_nurb(k, curve)?
             .ok_or_else(|| SolidError::invalid_input(OP, "non B-spline continuity input"))?;
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = ignored(passed_on(
-            curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5),
-            k.fixes.sweep_statuses_pass_on,
-        )?)?
-        .unwrap_or_default();
+        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
         if pieces.len() > 1 {
             let count = pieces.len();
             curves.splice(
@@ -402,8 +396,7 @@ impl PrimitiveCreation {
                     for _ in 0..options.repetitions {
                         // fork c8f6a31 (WR-662): SER_DELETE(pEndCurve->Transform(sStep)).
                         let k = a.kernel(brep)?;
-                        let p = k.fixes.sweep_statuses_pass_on;
-                        ignore_status(passed_on(end_curve.transform(k, &step, None), p)?)?;
+                        end_curve.transform(k, &step, None)?;
                     }
                     end_curves.push(Some(end_curve));
                 }
@@ -421,9 +414,8 @@ impl PrimitiveCreation {
             } else {
                 // unrelated clean up - we didn't use the tmp faces (if any - delete them)
                 // fork c8f6a31 (WR-662): SER(pBrep->DeleteFace(..)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
                 for face in faces {
-                    ignore_status(passed_on(a.delete_primitive_face((brep, face)), p)?)?;
+                    a.delete_primitive_face((brep, face))?;
                 }
             }
             copy_maps(self, brep, &mut sweep)?;
@@ -470,12 +462,7 @@ impl PrimitiveCreation {
                 .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?;
             // fork c8f6a31 (WR-662): SER(Length(..)), SER(SetCanonical(..)).
             let k = a.kernel(brep)?;
-            let p = k.fixes.sweep_statuses_pass_on;
-            let length = ignored(passed_on(
-                curve.length(k, &curve.natural_interval(), 0.001),
-                p,
-            )?)?
-            .unwrap_or(0.0);
+            let length = curve.length(k, &curve.natural_interval(), 0.001)?;
             if length < EFF_ZERO {
                 return Err(SolidError::invalid_input(OP, "degenerate revolved curve"));
             }
@@ -496,10 +483,7 @@ impl PrimitiveCreation {
                         tangent *= -1.0;
                     }
                     let mut frame = Axis2Placement::IDENTITY;
-                    ignore_status(passed_on(
-                        frame.set_canonical(origin, tangent, axis.cross(tangent)),
-                        p,
-                    )?)?;
+                    frame.set_canonical(origin, tangent, axis.cross(tangent))?;
                     let mut circles = Vec::new();
                     if start_dist > zero {
                         circles.push(Curve::from(Ellipse::create_canonical_circle(
@@ -545,16 +529,36 @@ impl PrimitiveCreation {
                     } else {
                         None
                     };
-                    let rev = match analytic {
-                        Some(surface) => Some(surface),
-                        None => ignored(SurfOfRevolution::create_canonical(
+                    // Not upstream (#17204): the frame comes from a point of the curve
+                    // off the axis by more than the B-rep's tolerance, within which a
+                    // profile vertex is on the axis
+                    let tolerance = a.brep(brep)?.tolerance();
+                    let rev = if let Some(surface) = analytic {
+                        Some(surface)
+                    } else {
+                        // Not upstream (#17204): a B-spline end within the B-rep's
+                        // tolerance of the axis is on it for the body, so the surface
+                        // of revolution turns the curve with that end's control point
+                        // on the axis. A curve the analytic rule above recognised (a
+                        // circular arc's sphere) keeps its own ends: its surface puts
+                        // its poles on the axis itself
+                        let profile = spline_ends_on_axis(
                             a.kernel(brep)?,
-                            curve.clone(),
+                            curve,
+                            axis_base,
+                            axis,
+                            tolerance,
+                        )?
+                        .unwrap_or_else(|| curve.clone());
+                        ignored(SurfOfRevolution::create_canonical_off_axis(
+                            a.kernel(brep)?,
+                            profile,
                             axis_base,
                             axis,
                             false,
+                            tolerance,
                         ))?
-                        .map(Surface::from),
+                        .map(Surface::from)
                     };
                     let mut success = false;
                     if let Some(surface) = rev {
@@ -569,14 +573,11 @@ impl PrimitiveCreation {
             }
         }
         // fork c8f6a31 (WR-662): SER(pBrep->StitchAndOrient()).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-        ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
-        // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
-        if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
-            a.with_brep_mut(brep, |k, b, _, env| {
-                crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
-            })?;
-        }
+        a.stitch_and_orient(brep)?;
+        // not upstream (WR-442, #478): a closed shell inside another is its cavity
+        a.with_brep_mut(brep, |k, b, _, env| {
+            crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
+        })?;
         a.set_editing(brep, false)?;
         Ok(())
     }
@@ -611,11 +612,9 @@ impl PrimitiveCreation {
                 ));
             }
             let tolerance = a.brep(brep)?.tolerance();
-            // Not upstream (WR-590, opt-in): no curve meets the axis inside itself
+            // Not upstream (WR-590): no curve meets the axis inside itself
             // (CheckCurveSweep's SM_SC_ROT_ON_CURVE)
-            if a.kernel(brep)?.fixes.revolve_splits_curves_on_axis {
-                split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
-            }
+            split_curves_on_axis(a.kernel(brep)?, curves, axis_base, axis, tolerance)?;
             a.set_editing(brep, true)?;
             let mut faces = Vec::new();
             let mut edges = Vec::new();
@@ -671,8 +670,7 @@ impl PrimitiveCreation {
                 sweep.do_stitching = false;
                 sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
                 // fork c8f6a31 (WR-662): SER(sTI.DeleteFaces(aFaces)).
-                let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-                ignore_status(passed_on(a.delete_primitive_faces(brep, &faces), p)?)?;
+                a.delete_primitive_faces(brep, &faces)?;
                 a.stitch(brep, &mut sweep, tolerance, false)?;
             }
             copy_maps(self, brep, &mut sweep)?;
@@ -682,6 +680,61 @@ impl PrimitiveCreation {
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
     }
+}
+
+/// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
+/// of the axis through `axis_base` along `axis` but off it put exactly on it (the end's
+/// control point, which is the end of a curve clamped there, moved to its foot on the axis,
+/// its weight kept). Within the B-rep's tolerance the end is on the axis for the body; left
+/// a hair off it (a sketch solver's 3e-11 mm), its surface of revolution's last row of
+/// control points is a circle of that radius, no pole, and the face's degenerate edge there
+/// is a gap in its loop. `None` for another curve, or when no end moves.
+///
+/// # Errors
+///
+/// Those of the curve's ends and control points.
+fn spline_ends_on_axis(
+    k: &Kernel,
+    curve: &Curve,
+    axis_base: Point3,
+    axis: Vec3,
+    tolerance: f64,
+) -> Result<Option<Curve>> {
+    use crate::nurbs::b_spline_curve::p2::ControlPointForm;
+    let CurveKind::BSpline(spline) = curve.kind() else {
+        return Ok(None);
+    };
+    let ends = curve.ends(k)?;
+    let count = spline.nurb_ref()?.cpts().len();
+    let rational = spline
+        .nurb_ref()?
+        .cpts()
+        .first()
+        .is_some_and(|c| c.w != crate::nurbs::math::NOW);
+    let form = if rational {
+        ControlPointForm::EuclideanRational
+    } else {
+        ControlPointForm::NonRational
+    };
+    let mut moved: Option<BSplineCurve> = None;
+    for (end, index) in [(ends.start, Some(0)), (ends.end, count.checked_sub(1))] {
+        let Some(index) = index else {
+            continue;
+        };
+        let (dist, _) = line_point_distance(axis_base, axis, end);
+        if !(dist > 0.0 && dist <= tolerance) {
+            continue;
+        }
+        let (point, weight) = spline.control_point(form, index)?;
+        // the end is that control point only where the curve is clamped
+        if point.distance(end) > EFF_ZERO * (1.0 + end.max_dimension()) {
+            continue;
+        }
+        let foot = axis_base + line_closest_point(axis_base, axis, end) * axis;
+        let target = moved.get_or_insert_with(|| spline.clone());
+        target.set_control_point(form, index, foot, weight)?;
+    }
+    Ok(moved.map(Curve::from))
 }
 
 #[cfg(test)]
@@ -764,8 +817,8 @@ mod tests {
         }
     }
 
-    /// A full turn of a half annulus about its diameter is a hollow ball with the
-    /// opt-in; upstream makes the inner ball a second solid.
+    /// A full turn of a half annulus about its diameter is a hollow ball; upstream
+    /// makes the inner ball a second solid.
     #[test]
     fn issue_478_full_turn_nested_shell_is_a_cavity() {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -782,7 +835,6 @@ mod tests {
         let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
         let mut ball = create_rotational_sweep(&mut k, &curves, o, x, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);
@@ -829,6 +881,98 @@ mod tests {
         }
     }
 
+    /// A dome turned a whole turn about z: a cubic Bezier from the pole on the axis down
+    /// to the rim at r 10, a line across the base and one up the axis. With the spline's
+    /// pole a hair past the axis (3.4e-11 mm on the far side, as a sketch solver leaves
+    /// it; SolidCraft puts the lines' ends on the axis, not a spline's, #17204), well
+    /// within the B-rep's tolerance, the body is the one built with the pole on the axis:
+    /// the surface of revolution's frame faces the profile.
+    /// Before, the frame faced the pole's side, half a turn from the profile, and the
+    /// check found the face's edges 10.7 mm off its surface.
+    #[test]
+    fn issue_17204_dome_pole_a_hair_past_the_axis() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let dome = |x: f64| {
+            let pts = [
+                [x, 0.0, 5.0],
+                [5.0, 0.0, 5.0],
+                [10.0, 0.0, 3.0],
+                [10.0, 0.0, 0.0],
+            ];
+            let pw = pts
+                .iter()
+                .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                .collect();
+            let nurb = NurbCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+            let profile = [
+                Curve::from(BSplineCurve::from_nurb(nurb, 3, false)),
+                segment([10.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+                segment([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]),
+            ];
+            let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+            let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+            // with the fixes SolidCraft runs
+            let mut k = Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..Kernel::default()
+            };
+            let mut b = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
+            let check = crate::topology::brep::validation::check_brep(
+                &mut k,
+                &mut b,
+                crate::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            assert_eq!(
+                check.failure_count(),
+                0,
+                "pole at x {x}: {:?}",
+                check.lines()
+            );
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            brep_volume(&k, &mut b, 1e-8, &attributes).unwrap()
+        };
+        let on = dome(0.0);
+        let past = dome(-3.4e-11);
+        assert!(on > 0.0, "volume {on}");
+        assert!(
+            (past - on).abs() <= 1e-6 * on,
+            "volume {past}, on the axis {on}"
+        );
+    }
+
+    /// The on-axis tolerance of a surface of revolution is a finite, non-negative
+    /// distance: NaN, infinity and a negative one are refused, not read as the default
+    /// or as putting every point on the axis (#17204).
+    #[test]
+    fn issue_17204_on_axis_tolerance_must_be_finite() {
+        use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
+
+        for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let k = Kernel::default();
+            let line = segment([5.0, 0.0, 0.0], [5.0, 0.0, 5.0]);
+            let r = SurfOfRevolution::create_canonical_off_axis(
+                &k,
+                line,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                false,
+                tol,
+            );
+            assert!(r.is_err(), "tolerance {tol} accepted");
+        }
+    }
+
     /// A square with a square hole (20 x 20 at r 10 to 30, the hole 8 x 8 centred in it)
     /// turned a whole turn about z is a ring with a ring-shaped void: with the opt-ins
     /// (WR-529, the fork's tangency-labs/smlib@38b4212) the void is not counted as
@@ -853,8 +997,6 @@ mod tests {
         let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
 
         let mut k = Kernel::default();
-        k.fixes.revolve_nested_shells_as_cavities = true;
-        k.fixes.revolve_holed_profile_void = true;
         let mut ring = create_rotational_sweep(&mut k, &curves, o, z, 360.0, true).unwrap();
         let store = AttributeStore::default();
         let key_of = |_| ObjectKey(0);
