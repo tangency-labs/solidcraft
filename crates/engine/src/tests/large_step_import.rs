@@ -116,7 +116,8 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
 /// The largest files read (#4086). Over the default limits a STEP file, a design file and a glTF
 /// file (#17446) are refused before anything is read, saying how to raise the limit; with the
 /// limits raised (the preference, or `--max-file-size` for one run, which wins) the same reads go
-/// ahead.
+/// ahead. A mesh file and a point cloud file follow the limit for STEP and import files
+/// (#14548).
 #[test]
 fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     use solidcraft_io::limits::{self, FileLimits, GB, Kind, MB};
@@ -140,12 +141,24 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     let step = sparse("big.step", 512 * MB + 1);
     let design = sparse("big.solidcraft", 256 * MB + 1);
     let glb = sparse("big.glb", 512 * MB + 1);
+    // A mesh file and a point cloud file are read up to the same limit (#14548). The mesh file
+    // that is read is an OBJ: an STL reader takes a sparse file for the ten million triangles
+    // its length promises.
+    let stl = sparse("big.stl", 512 * MB + 1);
+    let obj = sparse("big.obj", 512 * MB + 1);
+    let cloud = sparse("big.ply", 1024 * MB + 1);
     let mut s = Session::default();
     assert_eq!(limits::effective(), FileLimits::DEFAULT);
     for path in [&step, &design, &glb] {
         let error = s.execute("doc.open", &json!({"path": path})).unwrap_err().to_string();
         assert!(error.contains("too large") && error.contains("Largest file to open") && error.contains("--max-file-size"), "{error}");
     }
+    // The mesh file and the point cloud file are refused the same way: before they are read, and
+    // with the message that says how to raise the limit.
+    let error = s.execute("file.insert_mesh", &json!({"path": stl})).unwrap_err().to_string();
+    assert!(error.contains("too large") && error.contains("Largest file to open") && error.contains("--max-file-size"), "{error}");
+    let error = s.execute("pointcloud.insert", &json!({"path": cloud})).unwrap_err().to_string();
+    assert!(error.contains("too large") && error.contains("Largest file to open") && error.contains("--max-file-size"), "{error}");
     // The preference raises both limits; the design is now read (and refused only for not being one).
     limits::set_preferred(FileLimits { step: GB, design: GB }).unwrap();
     assert_eq!((limits::max_step_bytes(), limits::max_design_bytes()), (1 << 30, 1 << 30));
@@ -158,9 +171,16 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     // being a glTF file.
     let error = s.execute("doc.open", &json!({"path": glb})).unwrap_err().to_string();
     assert!(!error.contains("too large"), "{error}");
+    // A mesh file follows the same limit: read, and refused only for not holding a mesh.
+    let error = s.execute("file.insert_mesh", &json!({"path": obj})).unwrap_err().to_string();
+    assert!(!error.contains("too large"), "{error}");
+    // A point cloud file follows the limit for import files too, and is never read under the
+    // 1 GB it has always had (#14548).
+    assert_eq!(limits::Kind::PointCloud.limit(), GB);
     // The flag overrides the preference for the run, and the ceiling holds for both.
     limits::set_override(Some(2 * GB)).unwrap();
     assert_eq!(limits::effective(), FileLimits { step: 2 * GB, design: 2 * GB });
+    assert_eq!(limits::Kind::PointCloud.limit(), 2 * GB, "the flag raises the point cloud limit too");
     assert_eq!(solidcraft_kernel::step_max_bytes(), 2 << 30);
     assert!(limits::set_override(Some(16 * GB + 1)).is_err());
     assert!(limits::set_preferred(FileLimits { step: 17 * GB, design: GB }).is_err());
@@ -169,4 +189,33 @@ fn raised_file_limits_let_larger_step_and_design_files_be_read() {
     let _ = limits::set_preferred(FileLimits::DEFAULT);
     assert_eq!(solidcraft_kernel::step_max_bytes(), 512 << 20, "the defaults put the parser's cap back");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #15588: a STEP file that may need more memory than the machine can spare opens all the same,
+/// with a warning naming that memory; a valid file is never refused. Later rebuilds read its text
+/// again without asking.
+#[test]
+fn a_step_file_too_large_for_the_memory_opens_with_a_warning() {
+    let path = step_file("memory", 4);
+    let size = std::fs::metadata(&path).unwrap().len() as usize;
+    solidcraft_kernel::step_with_memory_to_spare(size, || {
+        // `doc.open` without the import cache, so the file itself is read.
+        for (cmd, params) in [("doc.open", json!({"path": path, "reuse_import": false})), ("file.insert_step", json!({"path": path}))] {
+            let mut s = Session::default();
+            let reply = s.execute(cmd, &params).unwrap();
+            let warning = reply["warnings"][0].as_str().unwrap_or_default();
+            assert!(warning.contains("STEP file needs about") && warning.contains("opening it anyway"), "{cmd}: {reply}");
+            assert_eq!(s.model.state().bodies.len(), 4, "{cmd}");
+            // A rebuild reads the Import feature's text again, and is not refused.
+            assert!(solidcraft_kernel::step_import(&step_text(&s)).is_ok(), "{cmd}");
+        }
+    });
+    // With the memory there, no warning.
+    let mut s = Session::default();
+    let reply = s.execute("file.insert_step", &json!({"path": path})).unwrap();
+    assert!(
+        !reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().is_some_and(|w| w.contains("STEP file needs about")))),
+        "{reply}"
+    );
+    let _ = std::fs::remove_file(path);
 }

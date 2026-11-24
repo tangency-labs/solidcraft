@@ -92,7 +92,8 @@
 
 use std::cell::Cell;
 
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::scaled_zero2;
 use crate::geom::vector2d::Point2;
@@ -318,9 +319,12 @@ impl Surface {
                 reason: "the surface has no exact B-spline form",
             },
         )?;
-        let net = form
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        // the caller's surface's own NURB (a B-spline whose data was never read or set has none)
+        let net = form.gw_nurb().ok_or_else(|| {
+            Failure::new(OP, SurfaceFailure::NoNurb)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
         let degree = if side.is_u() { net.p() } else { net.q() };
         let local = Local::of(net, side);
         let fixed = side.at(dom);
@@ -432,9 +436,14 @@ impl Surface {
                 "the extension is not a B-spline",
             ));
         };
-        let out = b
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+        let out = b.gw_nurb().ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the extension has no NURB, though the continuation built it from a NURB",
+                },
+            )
+        })?;
         let regraded = if side.is_u() {
             out.q() != net.q()
         } else {

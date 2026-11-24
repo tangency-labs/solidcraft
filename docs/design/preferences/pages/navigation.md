@@ -10,6 +10,7 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 | Mouse mapping | Dropdown (220 wide, "Fusion style") | `Prefs.nav` (preset id) with `Prefs.mouse_gestures` | `"fusion"` | none | `mouse-mapping` | The mouse figure (96x120) sits at the left of the list. Presets set `right_drag_orbits` and friends (`prefs.rs` preset block). |
 | Middle drag: Pan; Shift + Middle drag: Orbit; Right drag: Orbit; Wheel: Zoom; Left click: Select; Right click: Menu | Key-cap table (gesture, then action) | the mapping's gestures (`Prefs.mouse_gestures`) | the mapping | none | `mouse-mapping` | Rows follow the chosen mapping; the board shows the Fusion style as the example. |
 | Right drag orbits | Checkbox | `Prefs.right_drag_orbits` | `true` | "Shown where the mapping orbits on a right drag." | none | |
+| Mouse button drags | One row per button (Left, Middle, Right, Side back, Side forward): action dropdown (Preset, Orbit, Pan, Zoom, Nothing) and a key dropdown (No key, Shift, Ctrl/Cmd, Alt/Option), then "Reset to the preset" | `Prefs.nav_button_map` | `{}` (follow the mouse mapping; side buttons do nothing but go Back on a click) | "What dragging each mouse button does, with an optional key held. A side button still goes Back when you click it." | none | Shown after the Middle double-click row. |
 | Radial context menu | Checkbox | `Prefs.radial_context_menu` | `false` | "Hold or flick the right button for a ring of tools." | none | |
 | Middle double-click | Dropdown (220 wide, "Home view") | `Prefs.middle_double_click` | `"home"` | none | none | |
 
@@ -39,6 +40,7 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 | Reverse trackpad orbit | Checkbox | `Prefs.orbit_reverse` | `false` | none | none | |
 | Stop zoom at the model | Checkbox | `Prefs.zoom_stop_at_model` | `false` | none | none | |
 | Wheel zoom speed | Slider, "1.00x" readout (44 px) | `Prefs.wheel_zoom_speed` (0.25 to 4.0) | `1.0` | none | none | aria-label "Wheel zoom speed". |
+| Scroll wheel in the browser | Dropdown: Automatic / Always zoom / Always pan | `Prefs.browser_scroll_wheel` (`BrowserScrollWheel`) | Automatic | Explains the automatic choice, which asks once about a smooth mouse wheel, and modifier-assisted two-finger pan | none | Browser only; desktop scroll phases remain authoritative. `browser_wheel_hint_dismissed` (the notice's "Don't ask again") has no control. |
 | Two-finger zoom while holding | Dropdown (180 wide, "Ctrl / Cmd") | `Prefs.trackpad_zoom_modifier` (`TrackpadZoomModifier`: Cmd, Alt, Ctrl, Off) | Off | none | none | |
 
 ## View

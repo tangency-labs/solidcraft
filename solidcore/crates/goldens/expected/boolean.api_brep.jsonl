@@ -383,7 +383,7 @@
 {"case":"census_difference_cavity","deferred":null,"error":null,"ints":{"record":{"blocks":[[93,912]],"n":25},"status":[0]},"topology":null,"values":{}}
 {"case":"census_union_disjoint","deferred":null,"error":null,"ints":{"record":{"blocks":[[91,835]],"n":25},"status":[0]},"topology":null,"values":{}}
 {"case":"crossing_creases_union_d0.0001","deferred":null,"error":null,"ints":{"record":{"blocks":[[96,750]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,3000.0,12.0,99.99999998585784,99.99999998585785,99.99999999999999,99.99999999999999,100.0,100.0,100.0,100.00000000000001,199.99999998585787,199.99999998585793,200.0,200.00000000000003]}}
-{"case":"crossing_creases_union_d1e-05","deferred":null,"error":null,"ints":{"record":{"blocks":[[92,783]],"n":23},"status":[0]},"topology":null,"values":{"measures":[1001.0,0.0,12.0,-1001.0,99.99999999999999,99.99999999999999,100.0,100.0,100.0,100.0,100.00000000000001,100.00000000000001,199.99985857864374,199.99999999999997,200.0]}}
+{"case":"crossing_creases_union_d1e-05","deferred":null,"error":null,"ints":{"record":{"blocks":[[92,783]],"n":23},"status":[0]},"topology":null,"values":{"measures":[0.0,2999.9999999999995,12.0,0.00014142149768695933,100.0,100.0,100.0,100.0,100.0,100.0,100.00000000000001,100.00000000000001,199.9998585786438,200.0,200.00000000000003]}}
 {"case":"crossing_creases_union_d3e-05","deferred":null,"error":null,"ints":{"record":{"blocks":[[96,750]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,3000.0000000000005,12.0,99.9999999987272,99.99999999872722,99.99999999999999,99.99999999999999,100.0,100.0,100.00000000000001,100.00000000000006,199.99999999872722,199.99999999872722,200.0,200.00000000000003]}}
 {"case":"crossing_creases_union_d3e-06","deferred":null,"error":null,"ints":{"record":{"blocks":[[93,789]],"n":23},"status":[0]},"topology":null,"values":{"measures":[0.0,3000.0000000000005,12.0,99.99999999999999,99.99999999999999,99.99999999999999,99.99999999999999,100.0,100.0,100.00000000000001,100.00000000000001,200.0,200.0,200.0,200.00000000000006]}}
 {"case":"curves_box_sphere_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[244,4490]],"n":27},"status":[0]},"topology":null,"values":{}}
@@ -828,7 +828,7 @@
 {"case":"more0135","deferred":null,"error":null,"ints":{"record":{"blocks":[[42,710]],"n":41},"status":[0]},"topology":null,"values":{}}
 {"case":"more0136","deferred":null,"error":null,"ints":{"record":{"blocks":[[218,3839]],"n":26},"status":[0]},"topology":null,"values":{}}
 {"case":"more0137","deferred":null,"error":null,"ints":{"record":[1,6,6,1,0,1,1,1,2,0],"status":[0]},"topology":null,"values":{"areas":[1.0,468.9717547241358]}}
-{"case":"more0138","deferred":null,"error":null,"ints":{"record":{"blocks":[[105,609]],"n":25},"status":[0]},"topology":null,"values":{"areas":[11.0,588587.8689102937,588587.8689102939,588587.8689102939,961956.9935623552,961956.9935623553,1227329.6764587066,1227329.676458707,14442218.099411257,15278936.192539664,18407205.024171986,21187127.327081792]}}
+{"case":"more0138","deferred":null,"error":null,"ints":{"record":{"blocks":[[105,609]],"n":25},"status":[0]},"topology":null,"values":{"areas":[11.0,588587.8689102937,588587.8689102938,588587.8689102939,961956.9935623552,961956.9935623552,1227329.6764587066,1227329.6764587068,14442218.099411257,15278936.192539664,18407205.02417199,21187127.327081796]}}
 {"case":"more0139","deferred":null,"error":null,"ints":{"record":{"blocks":[[127,675]],"n":24},"status":[0]},"topology":null,"values":{"areas":[12.0,294167.419389184,294167.4193891841,337039.87340628565,337039.87340628577,369730.41880364646,369730.41880364646,1147367.4398338897,1147367.4398338897,1392924.2598580462,1392924.2598580467,1495517.6540254676,1495517.6540254678]}}
 {"case":"more0140","deferred":null,"error":null,"ints":{"record":{"blocks":[[193,3218]],"n":42},"status":[0]},"topology":null,"values":{}}
 {"case":"more0141","deferred":null,"error":null,"ints":{"record":{"blocks":[[200,3458]],"n":42},"status":[0]},"topology":null,"values":{}}
@@ -1085,7 +1085,7 @@
 {"case":"torus_guard_horn_box_intersection","deferred":null,"error":null,"ints":{"record":{"blocks":[[70,559]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,33.85730136634499,9.0,2.453822826591404,2.4538228265914053,2.4538228265914848,2.453822826591485,8.999999999999996,10.24565844712486,10.245658447124935,10.806300274853784,10.806300274853788]}}
 {"case":"torus_guard_huge_scale_box_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[72,553]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,1.7025167815728364e+18,8.0,995770855530.365,995770855530.3749,999999999999.9999,1000000000000.0,1668521304856.8179,1668521304856.8198,1998248966849.2056,2000000000000.0]}}
 {"case":"torus_guard_huge_scale_box_intersection","deferred":null,"error":null,"ints":{"record":{"blocks":[[46,379]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,2.9748321842716346e+17,6.0,875516575.3973191,875516575.3973856,331478695143.182,331478695143.18414,995770855530.365,995770855530.3749]}}
-{"case":"torus_guard_major_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[],"status":[1007]},"topology":null,"values":{}}
+{"case":"torus_guard_major_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1007]},"topology":null,"values":{}}
 {"case":"torus_guard_major_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_major_negative","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
 {"case":"torus_guard_minor_2x_eff_zero","deferred":null,"error":null,"ints":{"record":[2],"status":[1001]},"topology":null,"values":{}}
@@ -1096,6 +1096,7 @@
 {"case":"trees_not_binary","deferred":null,"error":null,"ints":{"record":[],"status":[1001]},"topology":null,"values":{}}
 {"case":"trees_two_trees","deferred":null,"error":null,"ints":{"record":{"blocks":[[168,2292]],"n":33},"status":[0]},"topology":null,"values":{}}
 {"case":"trees_union","deferred":null,"error":null,"ints":{"record":{"blocks":[[96,656]],"n":17},"status":[0]},"topology":null,"values":{}}
+{"case":"ub175_after_editing_imprint_failure","deferred":null,"error":null,"ints":{"record":{"blocks":[[66,505]],"n":18},"status":[0]},"topology":null,"values":{}}
 {"case":"with_options_cookie_cutter","deferred":null,"error":null,"ints":{"record":{"blocks":[[48,390]],"n":18},"status":[0]},"topology":null,"values":{}}
 {"case":"with_options_difference","deferred":null,"error":null,"ints":{"record":{"blocks":[[63,549]],"n":23},"status":[0]},"topology":null,"values":{}}
 {"case":"with_options_extract_separate_rejected","deferred":null,"error":null,"ints":{"record":[],"status":[1007]},"topology":null,"values":{}}

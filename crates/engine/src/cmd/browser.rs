@@ -15,14 +15,15 @@ use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING, PlaneRef};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern};
 use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FlipAxis, Isolated, PlaneFrame, RedefineAttachment,
-    RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn,
-    ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved,
-    VisibilityState,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
+    PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams,
+    RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
+    ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -30,6 +31,7 @@ use crate::{Result, Session};
 
 const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 const UNITS_CONTRACT: TypedContract<DocumentUnitsParams> = TypedContract::new();
+const FIND_CONTRACT: TypedContract<FindParams> = TypedContract::new();
 const RENAME_BODY_CONTRACT: TypedContract<BodyRenameParams> = TypedContract::new();
 const GROUP_CONTRACT: TypedContract<BrowserGroupParams> = TypedContract::new();
 const UNGROUP_CONTRACT: TypedContract<BrowserUngroupParams> = TypedContract::new();
@@ -60,6 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .begins_edit()
         .icon("body")
         .contract(&REPAIR_CONTRACT)
         .output(output_schema_for::<RepairResult>)
@@ -100,7 +103,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("camera")
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
-        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (replaces a view of the same name)"),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -174,6 +177,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "path?: [occurrence ids] (that placement's branch); component?: id; omit both for the whole tree: every placement, folder and group at every level. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
+    ),
+    CommandSpec::new("browser.find", "Search the Browser", crate::checked!("browser.find", find))
+        .icon("filter")
+        .noundo()
+        .contract(&FIND_CONTRACT)
+        .output(output_schema_for::<FindResult>)
+        .params(
+        "text?: what the names hold, ignoring case (with * for any text or ? for any one character it must match the whole name: *:1 ends in :1; at most 256 characters); \
+         kinds?: [component|body|sketch|construction|joint] (default every kind; give text, kinds or both) \
+         → {found: [{kind, name, key, path, item?}], total, incomplete}: every placement of a component is its own match, path is the placement it is in, \
+         item is what select.set takes (a joint has none; its key is its id); at most 10000 listed, total counts them all",
     ),
 ];
 
@@ -524,6 +538,39 @@ fn shown_feature(world: &solidcraft_doc::ModelState, f: &solidcraft_doc::Feature
         return Some(Shown::Origin(f.name.clone()));
     }
     None
+}
+
+fn find(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "browser.find";
+    let pattern = find_text(p.get("text")).map_err(|e| bad(cmd, e))?;
+    let kinds = find_kinds(p.get("kinds")).map_err(|e| bad(cmd, e))?;
+    if pattern.is_none() && kinds.is_empty() {
+        return Err(bad(cmd, "give `text` (not blank), `kinds` or both"));
+    }
+    reply(cmd, FindResult { search: crate::browser_find::find(s, pattern.as_ref(), &kinds), param_warnings: Vec::new() })
+}
+
+/// `browser.find`'s `text`: none when absent, `null` or blank; the handler's message otherwise.
+pub(crate) fn find_text(v: Option<&Value>) -> std::result::Result<Option<Pattern>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text.chars().count() > MAX_PATTERN_CHARS => Err(format!("`text` is longer than {MAX_PATTERN_CHARS} characters")),
+        Some(Value::String(text)) => Ok(Pattern::new(text)),
+        Some(_) => Err("`text` must be a string".into()),
+    }
+}
+
+/// `browser.find`'s `kinds`: none when absent or `null`; the handler's message otherwise.
+pub(crate) fn find_kinds(v: Option<&Value>) -> std::result::Result<Vec<Kind>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= Kind::ALL.len() => a
+            .iter()
+            .map(|k| k.as_str().and_then(Kind::from_id))
+            .collect::<Option<Vec<Kind>>>()
+            .ok_or_else(|| "`kinds` takes component, body, sketch, construction and joint".into()),
+        Some(_) => Err("`kinds` must list at most 5 of component, body, sketch, construction and joint".into()),
+    }
 }
 
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
@@ -1236,7 +1283,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
 /// handler refuses it with.
 pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
     let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
+    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll].iter().all(|x| x.is_finite()) && v.distance > 0.0;
     if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
 }
 
@@ -1312,9 +1359,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, CameraReply { camera: cam, param_warnings: Vec::new() })
 }
 
-/// The orbit camera of a named view (Z up, no roll).
+/// The full orbit camera of a named view, including its saved roll and up direction.
 fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
-    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
+    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, roll: v.roll, up: v.up }
 }
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -1371,14 +1418,51 @@ fn replace_body_name(v: &mut Value, old: &str, new: &str, names_body: bool, dept
     }
 }
 
-/// A frame member feature's bodies by line id, as its own result made them: what pins each
-/// member's name to its line. `None` for any other feature, or when they don't pair up.
+/// A frame member feature's bodies by member id (line, pair or piece), as its own result made
+/// them: what pins each member's name to its member. `None` for any other feature, or when they
+/// don't pair up: not one body per member, or a body named what another member is pinned to.
+/// Under Auto a piece left wholly inside the tubes it crosses has no body (ruling C4): then each
+/// member keeps its pinned name, which every body must have.
 pub(super) fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
     let f = s.doc.feature(fid)?;
+    let FeatureKind::FrameMember { names, .. } = &f.kind else { return None };
     let result = s.model.result(fid)?;
     let lines = solidcraft_doc::frame::member_line_ids(&result.state, &f.kind).ok()?;
     let made: Vec<String> = result.state.bodies.iter().filter(|b| b.feature == fid).map(|b| b.name.clone()).collect();
-    (lines.len() == made.len()).then(|| lines.into_iter().zip(made).collect())
+    // A piece split off where another tube overlaps it (`L>X`) is no member listed: it is found by its name
+    // ([`solidcraft_doc::frame::members_of_bodies`]), and a frame that has one pairs every body by name, never by
+    // position, even when the counts happen to agree.
+    let found = if f.body_names.is_empty() {
+        let refs: Vec<&str> = made.iter().map(String::as_str).collect();
+        solidcraft_doc::frame::members_of_bodies(&s.doc, &result.state, f, &refs).ok()?
+    } else {
+        Vec::new()
+    };
+    let overlap = found.iter().flatten().any(|id| solidcraft_doc::frame::overlap_parent(&lines, id).is_some());
+    if lines.len() != made.len() || overlap {
+        if !f.body_names.is_empty() {
+            return None;
+        }
+        let mut pinned: BTreeMap<String, String> = lines.iter().filter_map(|l| Some((l.clone(), names.get(l)?.clone()))).collect();
+        for (n, id) in made.iter().zip(found) {
+            // A body no member is found for, or found for a member already pinned (one tube cut in three or more
+            // pieces by a single other gives its later pieces one id), keeps its name unpinned, rather than unpinning
+            // the frame.
+            let Some(id) = id.filter(|id| !pinned.contains_key(id) && !pinned.values().any(|v| v == n)) else { continue };
+            pinned.insert(id, n.clone());
+        }
+        let once = made.iter().all(|n| pinned.values().filter(|v| *v == n).count() <= 1);
+        return once.then_some(pinned);
+    }
+    // A feature that names its own members gives each its pinned name when it can, and that name
+    // to no other: a body with another member's pinned name was made for that member.
+    if f.body_names.is_empty() {
+        let pinned: std::collections::HashSet<&str> = lines.iter().filter_map(|l| names.get(l)).map(String::as_str).collect();
+        if lines.iter().zip(&made).any(|(l, n)| names.get(l) != Some(n) && pinned.contains(n.as_str())) {
+            return None;
+        }
+    }
+    Some(lines.into_iter().zip(made).collect())
 }
 
 /// Whether the `i`-th new body of `f` is numbered by the body counter (`BodyN`): it has no stored
@@ -1442,6 +1526,8 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
         closed: report.closed,
         modelling: report.modelling,
         volume,
+        healed: report.healed.as_ref().map(solidcraft_kernel::ToleranceHeal::summary),
+        heal_failed: report.heal_failed.clone(),
     };
     let list =
         |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
@@ -1463,6 +1549,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1669,9 +1756,6 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
         // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
         // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
         f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
-        if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
-            solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
-        }
         if let FeatureKind::Sketch { plane, sketch } = &mut f.kind
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
             && anchor.target.body == old
@@ -1685,9 +1769,27 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
+        }
         if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
             for end in ends {
                 if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
                     && anchor.target.body == old
                 {
                     let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
@@ -1768,7 +1870,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -1836,13 +1938,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     s.pending_moves = trial.pending_moves;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
-        FeatureKind::Sketch { plane, .. } => Some(if super::sketch::face::anchor(plane).is_some() {
-            RedefineAttachment::ExactFace
-        } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            RedefineAttachment::SheetFace
-        } else {
-            RedefineAttachment::Fixed
-        }),
+        FeatureKind::Sketch { plane, .. } => {
+            Some(if super::sketch::face::anchor(plane).is_some() { RedefineAttachment::ExactFace } else { RedefineAttachment::Fixed })
+        }
         _ => None,
     });
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
@@ -2213,7 +2311,7 @@ mod tests {
         run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
         // The user hides the body while the rename is being evaluated.
         run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
-        s.accept_computed(computed);
+        s.accept_computed(computed).unwrap();
         assert!(!s.body_visible("Stud"));
         assert_eq!(s.visibility.hidden_bodies, ["Stud"]);
         run(&mut s, "edit.undo", json!({}));
@@ -2243,7 +2341,7 @@ mod tests {
                 if computed {
                     let mut scratch = s.scratch();
                     run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
-                    s.accept_computed(scratch);
+                    s.accept_computed(scratch).unwrap();
                 } else {
                     run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
                 }
@@ -2875,6 +2973,39 @@ mod tests {
         assert!((placed.origin.z + 5.0).abs() < 1e-6, "{placed:?}");
     }
 
+    /// #18260: a sketch redefined onto a plane parallel to the one it is on moves straight along
+    /// the normal: the midplane between the box's two XY-parallel faces takes the world XY frame,
+    /// so the sketch keeps its world XY and only its Z moves to the midplane.
+    #[test]
+    fn redefining_onto_a_parallel_midplane_keeps_the_world_xy() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Box"}));
+        run(&mut s, "construct.plane.midplane", json!({"a": {"face": [20, 15, 20]}, "b": {"face": [20, 15, 0]}, "name": "Mid"}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 7], "p1": [12, 13]}));
+        run(&mut s, "sketch.spline.fit_point", json!({"points": [[5, 7], [8, 11], [12, 13]]}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let world_points = |s: &Session| -> Vec<(String, Vec3)> {
+            let state = s.model.state();
+            let resolved = state.sketch(sk).unwrap();
+            resolved.sketch.points.iter().map(|point| (point.id.clone(), resolved.plane.to_world(point.pos))).collect()
+        };
+
+        let before = world_points(&s);
+        assert!(before.len() > 4, "the sketch has its four lines and its spline: {before:?}");
+        run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Mid"}));
+        let after = world_points(&s);
+        assert_eq!(before.len(), after.len(), "the redefine keeps the sketch's points: {before:?} {after:?}");
+        for ((id, before), (_, after)) in before.iter().zip(after.iter()) {
+            assert!((after.x - before.x).abs() < 1e-9 && (after.y - before.y).abs() < 1e-9, "{id} keeps its world XY: {before:?} -> {after:?}");
+            assert!((after.z - 10.0).abs() < 1e-9, "{id} moves up to the midplane: {before:?} -> {after:?}");
+        }
+    }
+
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
@@ -3032,6 +3163,35 @@ mod tests {
         }
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
+    }
+
+    /// A saved view keeps the roll and up axis through serialisation and restores them,
+    /// while a design from before #18713 still reads as Z-up with no roll.
+    #[test]
+    fn named_view_restores_roll_and_up_after_reopening() {
+        use solidcraft_viewport::UpAxis;
+
+        let mut s = Session::default();
+        let camera = json!({
+            "target": [1, 2, 3], "yaw": 0.25, "pitch": -0.3,
+            "distance": 150, "fov": 0.1, "roll": 0.6, "up": "y"
+        });
+        run(&mut s, "view.save", json!({"name": "Detail", "camera": camera}));
+        let reopened = serde_json::from_str::<solidcraft_doc::Document>(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        assert_eq!(reopened.named_views[0].roll, 0.6);
+        assert_eq!(reopened.named_views[0].up, UpAxis::Y);
+        let mut restored = Session::new(reopened);
+        run(&mut restored, "view.apply", json!({"view": "Detail"}));
+        let applied = restored.camera.unwrap();
+        assert_eq!((applied.yaw, applied.pitch, applied.roll, applied.up), (0.25, -0.3, 0.6, UpAxis::Y));
+
+        let old = json!({"name":"Old","target":[0,0,0],"yaw":0,"pitch":0,"distance":100});
+        let previous: solidcraft_doc::NamedView = serde_json::from_value(old).unwrap();
+        assert_eq!((previous.roll, previous.up), (0.0, UpAxis::Z));
+        for roll in [json!(null), json!("NaN")] {
+            let invalid = json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"roll":roll}});
+            assert!(s.execute("view.save", &invalid).is_err());
+        }
     }
 
     #[test]

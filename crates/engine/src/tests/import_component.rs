@@ -215,10 +215,10 @@ fn a_flattened_step_assembly_is_one_component_of_bodies_where_the_file_places_th
     let path = rig_file(&dir);
     let mut s = Session::default();
     let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "folder": true}));
-    assert!(r.get("subcomponents").is_none() && r.get("rigid_joints").is_none() && r.get("group").is_none(), "{r}");
+    assert!(r.get("subcomponents").is_none() && r.get("rigid_members").is_none() && r.get("group").is_none(), "{r}");
     assert_eq!(s.doc.components.len(), 1, "only the import's own component");
     assert_eq!(s.doc.occurrences.len(), 1, "and its one occurrence");
-    assert!(s.doc.assembly.joints.is_empty());
+    assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.rigid_groups.is_empty(), "no joints and no rigid group");
     let list = components(&mut s);
     assert_eq!(component(&list, "rig")["bodies"].as_array().unwrap().len(), 6, "{list:?}");
     // Every placement is a body, where the file puts it.
@@ -294,6 +294,29 @@ fn a_flattened_step_assembly_is_one_component_of_bodies_where_the_file_places_th
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `flatten` with `reader: "cadmpeg"`: the records route's product tree is flattened the same
+/// way, every placement a body of the import's one component where the file places it, named
+/// after its part as with SolidCraft's reader, and it rebuilds to the same bodies.
+#[test]
+fn a_flattened_step_assembly_read_by_cadmpeg_is_the_same_bodies() {
+    let dir = temp_dir("flatten-cadmpeg");
+    let path = rig_file(&dir);
+    let mut ours = Session::default();
+    run(&mut ours, "file.insert_step", json!({"path": path, "flatten": true}));
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "reader": "cadmpeg"}));
+    assert!(r.get("subcomponents").is_none() && r.get("rigid_joints").is_none(), "{r}");
+    assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (1, 1), "only the import's own component");
+    assert!(s.doc.assembly.joints.is_empty());
+    assert!(matches!(&s.doc.features[0].kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()), "a flat import skips nothing");
+    assert_eq!(shown_boxes(&s), file_boxes(&path));
+    assert_eq!(body_names(&s), body_names(&ours));
+    let before = (body_names(&s), shown_boxes(&s));
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!((body_names(&s), shown_boxes(&s)), before, "rebuilt");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Each occurrence's degrees of freedom, as `joint.list` gives them.
 fn dofs(s: &mut Session) -> (std::collections::BTreeMap<u64, u64>, Value) {
     let r = run(s, "joint.list", json!({}));
@@ -313,9 +336,16 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let pin = corner_of(&s, "Pin:2");
     let arm = corner_of(&s, "Arm:1");
 
-    // The whole import is one rigid body: no part of it moves against the others.
+    // The whole import is one rigid body: no part of it moves against the others. One rigid
+    // group holds it, not a joint per placement.
     let (dof, r) = dofs(&mut s);
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
+    assert!(s.doc.assembly.joints.is_empty(), "{r}");
+    assert_eq!(
+        r["rigid_groups"],
+        json!([{"id": s.doc.assembly.rigid_groups[0].id, "name": "rig", "component": s.doc.components.iter().find(|c| c.name == "rig").unwrap().id, "members": 6}]),
+        "{r}"
+    );
     for o in &inside {
         assert_eq!(dof.get(o), dof.get(&rig), "occurrence {o} moves only with the import: {r}");
     }
@@ -344,18 +374,169 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     }
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
 
+    // A joint from my part to a part inside the import moves the whole import there.
+    let arm_now = corner_of(&s, "Arm:1");
+    let pin_now = corner_of(&s, "Pin:2");
+    let mine = occurrence_named(&s, "Mine:1");
+    let pin1 = occurrence_named(&s, "Pin:1");
+    let slider = run(&mut s, "joint.as_built", json!({"type": "slider", "a": mine, "b": pin1, "name": "Slide"}));
+    run(&mut s, "joint.drive", json!({"joint": slider["joint"], "value": 7}));
+    let shift = corner_of(&s, "Pin:2") - pin_now;
+    assert!(shift.dist(Vec3::ZERO) > 1e-6, "the import moved");
+    assert!(close(corner_of(&s, "Arm:1"), arm_now + shift), "the arm moved with the pin: {:?} {:?}", corner_of(&s, "Arm:1"), arm_now + shift);
+    run(&mut s, "joint.delete", json!({"joint": slider["joint"]}));
+    let pin = corner_of(&s, "Pin:2") - Vec3::new(0.0, 0.0, 50.0);
+    let arm = corner_of(&s, "Arm:1") - Vec3::new(0.0, 0.0, 50.0);
+
+    // A component inside the import is held by the import's group: unlocking it says so.
+    let e = s.execute("component.unlock", &json!({"component": "Pin"})).unwrap_err().to_string();
+    assert!(e.contains("`rig`"), "{e}");
+
     // Unlocked (one undo step), the parts move one by one.
     let undo = s.undo.len();
     let r = run(&mut s, "component.unlock", json!({"component": "rig"}));
-    assert_eq!(r["joints"].as_array().unwrap().len(), 6, "{r}");
+    assert!(r["rigid_group"].is_u64() && s.doc.assembly.rigid_groups.is_empty(), "{r}");
     assert_eq!(s.undo.len(), undo + 1);
     run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [30, 0, 0]}));
     assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(30.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin:2"));
     assert!(close(corner_of(&s, "Arm:1"), arm + Vec3::new(0.0, 0.0, 50.0)), "the others stay");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(s.doc.assembly.joints.len(), 6, "undo locks it again");
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1, "undo locks it again");
     assert!(s.execute("component.unlock", &json!({"component": "Mine"})).is_err(), "nothing holds my own component");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The box around boxes.
+fn union(boxes: &[[i64; 6]]) -> [i64; 6] {
+    let mut u = [i64::MAX, i64::MAX, i64::MAX, i64::MIN, i64::MIN, i64::MIN];
+    for b in boxes {
+        for i in 0..3 {
+            u[i] = u[i].min(b[i]);
+            u[i + 3] = u[i + 3].max(b[i + 3]);
+        }
+    }
+    u
+}
+
+/// The world box of the body `name`, and that of every other body.
+fn envelope_and_parts(s: &Session, name: &str) -> ([i64; 6], [i64; 6]) {
+    let world = s.world_state().unwrap();
+    let boxed = |b: &solidcraft_doc::ModelBody| key(solidcraft_kernel::measure(&b.body).unwrap().bbox);
+    let parts: Vec<[i64; 6]> = world.bodies.iter().filter(|b| b.name != name).map(boxed).collect();
+    (boxed(world.body(name).unwrap()), union(&parts))
+}
+
+/// `envelope: "box"` keeps a hidden box around every body the import placed, the turned arm and
+/// each repeated part included, in the import's component: it moves with the import, and is
+/// built again around a part moved once the import is unlocked.
+#[test]
+fn an_import_with_an_envelope_keeps_a_hidden_box_around_its_parts() {
+    let dir = temp_dir("envelope");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "envelope": "box"}));
+    assert_eq!(r["envelope"], "rig Envelope", "{r}");
+    assert!(s.visibility.hidden_bodies.iter().any(|b| b == "rig Envelope"), "{:?}", s.visibility.hidden_bodies);
+    let rig = s.doc.find_component("rig").unwrap();
+    assert_eq!(s.doc.features.last().map(|f| f.component), Some(rig));
+    let (envelope, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(envelope, union(&file_boxes(&path)));
+    assert_eq!(envelope, parts);
+
+    run(&mut s, "occurrence.ground", json!({"occurrence": "rig:1", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "rig:1", "translate": [0, 0, 50]}));
+    let (moved, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(moved, parts);
+    assert_eq!(moved[2], envelope[2] + 50_000, "{moved:?}");
+
+    run(&mut s, "component.unlock", json!({"component": "rig"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [0, 0, 30]}));
+    let (grown, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(grown, parts);
+    assert_ne!(grown, moved, "the pin left the old box");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With `flatten`, the envelope is a box around the bodies of the import's one component, every
+/// placement included, and it is that component's only addition: no subcomponent holds it.
+#[test]
+fn a_flattened_import_with_an_envelope_keeps_a_box_around_its_bodies() {
+    let dir = temp_dir("flat-envelope");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "envelope": "box"}));
+    assert_eq!(r["envelope"], "rig Envelope", "{r}");
+    assert!(r.get("subcomponents").is_none(), "{r}");
+    assert!(s.visibility.hidden_bodies.iter().any(|b| b == "rig Envelope"), "{:?}", s.visibility.hidden_bodies);
+    assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (1, 1), "still one component");
+    let rig = s.doc.find_component("rig").unwrap();
+    assert_eq!(s.doc.features.last().map(|f| f.component), Some(rig));
+    let (envelope, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(envelope, union(&file_boxes(&path)));
+    assert_eq!(envelope, parts);
+
+    run(&mut s, "occurrence.ground", json!({"occurrence": "rig:1", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "rig:1", "translate": [0, 0, 50]}));
+    let (moved, parts) = envelope_and_parts(&s, "rig Envelope");
+    assert_eq!(moved, parts);
+    assert_eq!(moved[2], envelope[2] + 50_000, "{moved:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An import's rigid group holds the parts the import placed, and only those: it survives save
+/// and reopen when it is the design's only assembly record, a part placed inside the import later
+/// moves on its own, and an assembly imported inside another is released by its own unlock.
+#[test]
+fn an_imports_rigid_group_holds_the_parts_it_placed() {
+    let dir = temp_dir("rigid-members");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!(group.members.len(), 6);
+    assert!(s.doc.assembly.joints.is_empty(), "the group is the only assembly record");
+
+    // Saved and opened again, the group is there.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.assembly.rigid_groups, s.doc.assembly.rigid_groups);
+
+    // A part placed inside the import afterwards is not held.
+    run(&mut s, "component.activate", json!({"component": "rig"}));
+    run(&mut s, "component.create", json!({"name": "Mine"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]}));
+    let mine = occurrence_named(&s, "Mine:1");
+    assert!(s.held_by_rigid_group(mine).is_none(), "my own part moves on its own");
+    assert!(s.held_by_rigid_group(occurrence_named(&s, "Pin:2")).is_some(), "the import's parts are still held");
+
+    // A second assembly imported inside the first: unlocking it releases its parts, not the first's.
+    run(&mut s, "component.activate", json!({"component": "rig"}));
+    let inner = run(&mut s, "file.insert_step", json!({"path": path, "name": "Inner"}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 2);
+    run(&mut s, "component.unlock", json!({"component": inner}));
+    let [left] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!(left.name, "rig");
+    let inner_part = s.doc.occurrences.iter().find(|o| o.parent != 0 && s.doc.component_within(o.parent, inner)).unwrap().id;
+    assert!(s.held_by_rigid_group(inner_part).is_none(), "the inner import's parts are free");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Paste New of a later placement of an imported assembly copies its rigid group too: the
+/// copy's parts are held, as a copy of the first placement's would be.
+#[test]
+fn paste_new_of_a_later_placement_of_an_import_copies_its_rigid_group() {
+    let dir = temp_dir("rigid-paste");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let rig = run(&mut s, "file.insert_step", json!({"path": path}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"component": rig, "translate": [200, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let copied = run(&mut s, "component.paste_new", json!({"component": rig, "occurrence": second, "translate": [0, 200, 0]}));
+    let copy = copied["component"].as_u64().unwrap();
+    assert_ne!(copy, rig);
+    let group = s.doc.rigid_group_of(copy).unwrap_or_else(|| panic!("no group for the copy: {:?}", s.doc.assembly.rigid_groups));
+    assert_eq!(s.doc.rigid_group_members(group).len(), 6, "{group:?}");
+    let original = s.doc.rigid_group_of(rig).unwrap();
+    assert!(group.members.iter().all(|m| !original.members.contains(m)), "the copy holds its own parts");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -564,9 +745,8 @@ fn corpus(name: &str) -> String {
     format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"))
 }
 
-/// With `folder: true`, a file that brings more than one item into the history (its Import
-/// feature and the rigid joints holding its parts: one cylinder placed twice, an assembly) gets a
-/// history folder of its own, `Group #N` with the first free number, holding its Import feature and those joints,
+/// With `folder: true`, an assembly's file (one cylinder placed twice, an assembly) gets a
+/// history folder of its own, `Group #N` with the first free number, holding its Import feature,
 /// made by the same command and undone with it; a file with one object gets none. Inserted
 /// between the features of a folder, the import's folder nests in it.
 #[test]
@@ -586,11 +766,7 @@ fn a_multi_object_step_insert_is_one_history_folder() {
         (r["group"].clone(), "Group #1", &[feature][..], None),
         "{r}"
     );
-    let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
-    rigid.sort_unstable();
-    let mut held = folder.joints.clone();
-    held.sort_unstable();
-    assert!(!rigid.is_empty() && held == rigid, "the folder holds the import's joints: {held:?} of {rigid:?}");
+    assert!(folder.joints.is_empty() && s.doc.assembly.rigid_groups.len() == 1, "a rigid group holds the parts: {folder:?}");
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.timeline_groups.is_empty() && s.doc.feature(feature).is_none(), "undo takes the folder with the import");
 
@@ -624,7 +800,7 @@ fn a_step_import_told_no_folder_makes_none() {
     let mut s = Session::default();
     let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": false}));
     assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "no folder: {r}");
-    assert_eq!(s.doc.assembly.joints.len(), 2, "its rigid joints are there all the same");
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 1, "its rigid group is there all the same");
     let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": false}));
     assert!(s.doc.timeline_groups.is_empty(), "opened as a design, no folder either: {r}");
     let e = s.execute("file.insert_step", &json!({"path": corpus("cylinder_twice"), "folder": "no"})).unwrap_err();
@@ -780,6 +956,165 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
     rename(&mut s, "Knob", "Handle");
     assert_eq!(names(&s), ["Bracket", "Peg", "Base plate", "Handle"]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
+    let dir = temp_dir("source-link");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
+    let inserted = run(&mut s, "file.insert_step", json!({"path": path, "up": "y"}));
+    let comp = inserted["component"].as_u64().unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let placement = s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+    assert_eq!(s.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    assert!(std::path::Path::new(&s.doc.links[&comp].path).is_absolute());
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    let saved = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let (doc, _) = solidcraft_io::read_design_file(&saved.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
+    assert_eq!(doc.links[&comp].path, "bracket.step");
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert_eq!(opened.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], true);
+    let old = shown_boxes(&s);
+    let undo = s.undo.len();
+    let reply = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(reply["updated"], json!(["bracket"]));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.doc.links[&comp].feature, feature);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform, placement);
+    let volume: f64 = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 8000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(shown_boxes(&s), old);
+    run(&mut s, "component.update_links", json!({}));
+    let before = shown_boxes(&s);
+    run(&mut s, "component.break_link", json!({"component": comp}));
+    assert!(s.doc.links.is_empty());
+    assert_eq!(shown_boxes(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.links.contains_key(&comp));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_failures_keep_bodies_and_do_not_hold_up_other_links() {
+    let dir = temp_dir("link-failures");
+    let missing = part_file(&dir, "missing");
+    let corrupt = part_file(&dir, "corrupt");
+    let good = part_file(&dir, "good");
+    let mut s = Session::default();
+    let a = run(&mut s, "file.insert_step", json!({"path": missing}))["component"].as_u64().unwrap();
+    let b = run(&mut s, "file.insert_step", json!({"path": corrupt}))["component"].as_u64().unwrap();
+    let c = run(&mut s, "file.insert_step", json!({"path": good}))["component"].as_u64().unwrap();
+    let original = s.doc.links.clone();
+    std::fs::remove_file(&missing).unwrap();
+    std::fs::write(&corrupt, b"ISO-10303-21; hostile incomplete file").unwrap();
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut source, "file.export", json!({"path": good}));
+    let before = s.undo.len();
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!(["good"]));
+    assert_eq!(r["failed"].as_array().unwrap().len(), 2);
+    assert_eq!(s.doc.links[&a], original[&a]);
+    assert_eq!(s.doc.links[&b], original[&b]);
+    assert_eq!(s.undo.len(), before + 1);
+    let volume: f64 = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 13000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], true);
+    // A repaired source is retried, even after the other source already updated.
+    part_file(&dir, "corrupt");
+    run(&mut s, "component.update_links", json!({"components": [b, c]}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], false);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_opt_out_and_old_designs_stay_independent() {
+    let dir = temp_dir("link-old");
+    let path = part_file(&dir, "part");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path, "link": false}));
+    assert!(s.doc.links.is_empty());
+    let mut old: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    old.as_object_mut().unwrap().remove("links");
+    let doc = solidcraft_doc::Document::from_json(&old.to_string()).unwrap();
+    let mut opened = Session::opened(doc, None);
+    assert!(opened.doc.links.is_empty());
+    let before = shown_boxes(&opened);
+    std::fs::remove_file(&path).unwrap();
+    let r = run(&mut opened, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!([]));
+    assert_eq!(shown_boxes(&opened), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_assembly_update_keeps_repeated_bodies_and_components() {
+    let dir = temp_dir("link-assembly");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let before = shown_boxes(&s);
+    let comps = s.doc.components.clone();
+    // A harmless header change still exercises reading and replacing an assembly source.
+    let text = std::fs::read_to_string(&path).unwrap().replace("ISO-10303-21;", "ISO-10303-21;\n/* changed source */");
+    std::fs::write(&path, text).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(shown_boxes(&s), before);
+    assert_eq!(s.doc.components, comps);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_update_rebuilds_downstream_features() {
+    let dir = temp_dir("link-downstream");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}}))["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [7, 7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let cut = run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": -20, "operation": "cut"}))["feature"].as_u64().unwrap();
+    let volume = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert!(s.model.result(cut).unwrap().error.is_none(), "{updated}: {:?}", s.model.result(cut).unwrap().error);
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5, "volume after the update: {} {updated} {}", volume(&s), s.doc.to_json());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let mut sphere = Session::default();
+    run(&mut sphere, "solid.sphere", json!({"radius": 5}));
+    run(&mut sphere, "file.export", json!({"path": path}));
+    let lost = run(&mut s, "component.update_links", json!({}));
+    assert!(lost["warnings"].to_string().contains("no longer exists"), "{lost}");
+    assert!(s.model.result(cut).unwrap().error.is_some());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let component = *s.doc.links.keys().next().unwrap();
+    run(&mut s, "component.break_link", json!({"component": component}));
+    assert!(s.model.result(cut).unwrap().error.is_none());
+    let saved = dir.join("attached.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert!(opened.doc.links.is_empty());
+    assert!(opened.model.result(cut).unwrap().error.is_none());
+    assert!((volume(&opened) - (8000.0 - 160.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Deleting a component of an imported assembly deletes its bodies too (#17578). The Import

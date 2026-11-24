@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser_links::LinkState;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
 use crate::ui_kit::{LayoutMode, SHELL_GAP};
@@ -42,6 +43,21 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
             h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
         }
     }
+}
+
+/// #14554: V on the Origin row of the Browser shows or hides the whole Origin, as it does for a folder.
+#[test]
+fn v_on_the_clicked_origin_row_hides_the_origin() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    assert!(h.app.origin_shown());
+    h.step(&json!({"click":{"handle":"row:Origin"}})).unwrap();
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.origin_shown(), "V hides the Origin picked in the Browser");
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(h.app.origin_shown(), "V shows it again");
 }
 
 /// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
@@ -465,6 +481,39 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
     h.app.tree.collapsed.insert("c0".into());
     h.settle();
     assert!(rect_of("browser:card").unwrap().height() < short.height());
+}
+
+/// In the compact layout, a Browser holding the History fills the window's height; the floating layout,
+/// a folded Browser and a Browser beside a bottom History still hug their rows (#14566).
+#[test]
+fn compact_browser_holding_the_history_fills_the_window_height() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+    h.settle();
+    assert!(h.app.preferences.history_in_browser);
+    let floating = rect_of("browser:card").unwrap();
+    let viewport = h.app.viewport.rect.unwrap();
+    assert!(floating.bottom() < viewport.bottom() - 100.0, "the floating card still hugs its rows: {floating:?} in {viewport:?}");
+
+    h.call("ui.set", json!({"layout":"docked"}));
+    h.settle();
+    let compact = rect_of("browser:card").unwrap();
+    assert!(compact.height() > floating.height() + 100.0, "{compact:?} {floating:?}");
+    let foot = viewport.bottom() - compact.bottom();
+    assert!((-0.5..=SHELL_GAP + 0.5).contains(&foot), "{compact:?} reaches the window's foot {viewport:?}");
+
+    set_browser_collapsed(&mut h, true);
+    h.settle();
+    let folded = rect_of("browser:card").unwrap();
+    assert!(folded.height() < floating.height(), "a folded Browser keeps only its header: {folded:?}");
+    set_browser_collapsed(&mut h, false);
+    h.settle();
+    assert_eq!(rect_of("browser:card").unwrap(), compact, "unfolded, it fills the column again");
+
+    h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+    h.settle();
+    assert!(rect_of("browser:card").unwrap().height() < compact.height() - 100.0, "History at the bottom: the Browser hugs its rows again");
 }
 
 #[test]
@@ -2237,4 +2286,73 @@ fn the_browser_lists_one_body_per_placement() {
     let rows = drawn_rows();
     let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
     assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+}
+
+/// #14024: a linked component's row says which file it comes from and how that file is, asked
+/// beside the window: once for a design, and again when the window comes back to the front.
+#[test]
+fn a_linked_components_row_shows_the_state_of_its_file() {
+    fn answer(h: &mut Harness) {
+        h.frames(1);
+        for _ in 0..2000 {
+            if !h.app.tree.links.busy() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.frames(1);
+        }
+        h.frames(1);
+        assert!(!h.app.tree.links.busy(), "the answer never came");
+    }
+    fn back_to_the_front(h: &mut Harness) {
+        h.app.synthetic.push(egui::Event::WindowFocused(true));
+        answer(h);
+    }
+    let mut h = Harness::new();
+    h.frames(2);
+    assert!(!h.app.tree.links.busy(), "nothing is asked without a link");
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let component = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    // The frame asks, whichever layout paints the Browser, or none.
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    assert!(h.app.tree.links.busy(), "asked without painting the Browser");
+    answer(&mut h);
+
+    let link = h.app.tree.links.get(component).expect("the link's badge").clone();
+    assert_eq!((link.state, link.note), (LinkState::Linked, None));
+    assert!(link.tooltip().contains("part.solidcraft"), "{}", link.tooltip());
+    assert_eq!(link.icon_badge().glyph, "link");
+    h.frames(5);
+    assert!(!h.app.tree.links.busy(), "the files are not read again every frame");
+
+    source.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    back_to_the_front(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
+
+    std::fs::remove_file(&part).unwrap();
+    back_to_the_front(&mut h);
+    let missing = h.app.tree.links.get(component).unwrap();
+    assert_eq!((missing.state, missing.note), (LinkState::Missing, Some("ui.link_missing")));
+    assert_eq!(missing.icon_badge().glyph, "link_broken", "a file that is not there breaks the chain");
+
+    // A file that was not looked at may be fine: an outlined badge, and the note says why.
+    let not_allowed = json!({"component": 7, "file": "//server/share/a.solidcraft", "found": null, "host": "server", "reason": "not allowed"});
+    let (id, network) = crate::browser_links::badge_of(&not_allowed).unwrap();
+    assert_eq!((id, network.state, network.note), (7, LinkState::Unchecked, Some("ui.link_not_checked_network")));
+    let device = json!({"component": 8, "file": "CON", "found": null, "reason": "names a device, not a file"});
+    let (_, device) = crate::browser_links::badge_of(&device).unwrap();
+    assert_eq!((device.state, device.note), (LinkState::Unchecked, Some("ui.link_not_checked")));
+    assert!(device.icon_badge().outlined, "an unchecked state says nothing, so it is only outlined");
+
+    h.app.run("component.break_link", json!({"component": component})).unwrap();
+    h.frames(2);
+    assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
 }

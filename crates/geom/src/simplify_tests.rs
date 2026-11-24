@@ -1,4 +1,7 @@
 use super::*;
+use solidcore_record::Vec3;
+
+use crate::vec::Vec3Geom;
 
 /// A sphere of radius `r` as a scan reads it: `n` × 2`n` quads, each triangle's corners its own
 /// points (the same position repeated where triangles meet).

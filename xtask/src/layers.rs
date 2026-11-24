@@ -50,7 +50,11 @@ pub const TABLE: &[(&str, Class)] = &[
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
+    // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
+    ("design-preview", Class::Standalone),
     ("sketch", Class::Layer(1)),
+    // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
+    ("develop", Class::Layer(1)),
     // the B-rep kernel, solidcore (the Rust port of NVIDIA's SMLib, ADR 0002); only the kernel uses it
     ("smlib", Class::Layer(1)),
     // STEP (ISO 10303) exchange structure and geometry, no modelling backend
@@ -85,6 +89,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("theme", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
     ("ui-kit", Class::Shared),
+    // the app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values (#17363)
+    ("panel-layout", Class::Shared),
     // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
     ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
@@ -97,10 +103,15 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
+    ("views", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
+    // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
+    ("ui-kit-gallery", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

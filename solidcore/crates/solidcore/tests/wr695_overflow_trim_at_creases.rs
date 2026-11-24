@@ -22,7 +22,7 @@ use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
-use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
@@ -371,5 +371,185 @@ fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form(
                 "{r0} -> {r1}: an edge's curve {gap} off its vertices"
             );
         }
+    }
+}
+
+/// Blends (`chamfer` false: circular section; true: linear) the edges between each pair of
+/// points of `edges` of the body `make` builds, by `r`, in one fillet.
+fn blend_edges(
+    make: fn(&mut Kernel) -> Brep,
+    edges: &[(Point3, Point3)],
+    r: f64,
+    chamfer: bool,
+) -> Outcome {
+    let mut k = kernel();
+    let mut b = make(&mut k);
+    let es: Vec<EdgeId> = edges
+        .iter()
+        .map(|&(p, q)| edge_between(&k, &b, p, q))
+        .collect();
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &es, r, u32::from(!chamfer), 1, 1.0)
+        .unwrap();
+    let result = session.do_fillet(&mut k);
+    let info = session.error_info().clone();
+    drop(session);
+    match result {
+        Ok(()) => {
+            assert!(
+                is_manifold_solid(&b).unwrap(),
+                "r {r}: not a manifold solid"
+            );
+            let built = Outcome::Built {
+                volume: volume(&k, &mut b),
+                faces: b.faces().ids().count(),
+            };
+            b.use_arena_naming().unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "r {r}: check_brep: {lines:?}");
+            built
+        }
+        Err(_) => Outcome::Refused(info.code, info.comment),
+    }
+}
+
+/// The volume and face count of a build (panics on a refusal).
+fn built(outcome: &Outcome) -> (f64, usize) {
+    match outcome {
+        Outcome::Built { volume, faces } => (*volume, *faces),
+        Outcome::Refused(code, comment) => panic!("refused (code {code}): {comment}"),
+    }
+}
+
+/// The stepped bar swept 30 along z and slotted between z = 10 and 20 through its step
+/// (x 4 to 11, y -1 to 6): the step's 3 wide top (y = 5) is two faces of one plane, its
+/// outer edge at x = 10 two edges, z 0 to 10 and 20 to 30.
+fn slotted_stepped_bar(k: &mut Kernel) -> Brep {
+    const PROFILE: [[f64; 2]; 6] = [
+        [0.0, 0.0],
+        [10.0, 0.0],
+        [10.0, 5.0],
+        [7.0, 5.0],
+        [7.0, 10.0],
+        [0.0, 10.0],
+    ];
+    let cs: Vec<Curve> = PROFILE
+        .iter()
+        .zip(PROFILE.iter().cycle().skip(1))
+        .map(|(a, b)| {
+            Curve::from(
+                create_line_segment(Vec3::new(a[0], a[1], 0.0), Vec3::new(b[0], b[1], 0.0))
+                    .unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let bar = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 30.0, true).unwrap();
+    let slot = create_box(k, p(4.0, -1.0, 10.0), 7.0, 7.0, 10.0).unwrap();
+    boolean_difference(k, bar, slot).unwrap()
+}
+
+/// #18646: the slotted stepped bar's outer step edges chamfered 4, one and both. Each
+/// chamfer's leg runs past the step's foot under the wall, and each lies on the plane of
+/// both step tops; the other top, apart, is not the face it runs past, so it is not
+/// carried on to it (it was, and even one chamfer was refused: "ends off the lines of the
+/// face's side edges"). The bar is 85 x 30 = 2550 less the slot's 33 x 10, and each
+/// chamfer takes 4 x 4 / 2 over its 10: 2140 for one, 2060 for both, each its own new
+/// faces.
+#[test]
+fn two_chamfers_past_the_feet_of_two_step_tops_of_one_plane_build() {
+    let low = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 10.0));
+    let high = (p(10.0, 5.0, 20.0), p(10.0, 5.0, 30.0));
+    let mut k = kernel();
+    let mut bar = slotted_stepped_bar(&mut k);
+    let bar_faces = bar.faces().ids().count();
+    assert!((volume(&k, &mut bar) - 2220.0).abs() <= CLOSED_REL * 2220.0);
+    let (v_low, n_low) = built(&blend_edges(slotted_stepped_bar, &[low], 4.0, true));
+    assert!(
+        (v_low - 2140.0).abs() <= CLOSED_REL * 2140.0,
+        "volume {v_low}"
+    );
+    let (_, n_high) = built(&blend_edges(slotted_stepped_bar, &[high], 4.0, true));
+    for edges in [[low, high], [high, low]] {
+        assert_builds(
+            &blend_edges(slotted_stepped_bar, &edges, 4.0, true),
+            2060.0,
+            CLOSED_REL,
+            n_low + n_high - bar_faces,
+        );
+    }
+}
+
+/// The issue's hooked bar: its profile (0, 5), an R3 arc about (3/√2, 5 + 3/√2) to its far
+/// point, a 3 long flat on to the tip, an 8.3 long flat up at 45° to (8, ...), down x = 8,
+/// back along y = 0, swept 30 along z; slotted between z = 10 and 20 for x below 7. The
+/// tip's 90° edge is two edges, z 0 to 10 and 20 to 30, and the 3 long flat that runs on
+/// tangentially into the arc two faces of one plane.
+fn slotted_hook(k: &mut Kernel) -> Brep {
+    let s = 3.0 / 2.0_f64.sqrt();
+    let centre = (s, 5.0 + s);
+    let near = (2.0 * s, 5.0 + 2.0 * s);
+    let tip = (s, 5.0 + 3.0 * s);
+    let top = (8.0, 5.0 + 3.0 * s + (8.0 - s));
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            create_line_segment(Vec3::new(a.0, a.1, 0.0), Vec3::new(b.0, b.1, 0.0)).unwrap(),
+        )
+    };
+    let cs = [
+        Curve::from(create_arc(p(centre.0, centre.1, 0.0), 3.0, -135.0, 45.0).unwrap()),
+        line(near, tip),
+        line(tip, top),
+        line(top, (8.0, 0.0)),
+        line((8.0, 0.0), (0.0, 0.0)),
+        line((0.0, 0.0), (0.0, 5.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let hook = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 30.0, true).unwrap();
+    let slot = create_box(k, p(-1.0, -1.0, 10.0), 8.0, 20.0, 10.0).unwrap();
+    boolean_difference(k, hook, slot).unwrap()
+}
+
+/// #18646: the slotted hook's two tip edges rounded R5 together, as each alone. Each round
+/// runs past the 3 wide flat into the material behind the arc, on the plane of both
+/// flats; it was refused for the pair ("the largest radius that fits is 3 mm") while each
+/// built alone. The two rounds lie 10 apart, so the pair takes off what each takes alone:
+/// its volume is the two singles' less the bar's, and its faces the bar's and each
+/// round's new ones.
+#[test]
+fn two_rounds_past_two_flats_of_one_plane_build_as_each_alone() {
+    let s = 3.0 / 2.0_f64.sqrt();
+    let tip = |z: f64| p(s, 5.0 + 3.0 * s, z);
+    let low = (tip(0.0), tip(10.0));
+    let high = (tip(20.0), tip(30.0));
+    let mut k = kernel();
+    let mut bar = slotted_hook(&mut k);
+    let (bar_volume, bar_faces) = (volume(&k, &mut bar), bar.faces().ids().count());
+    let (v_low, n_low) = built(&blend_edges(slotted_hook, &[low], 5.0, false));
+    let (v_high, n_high) = built(&blend_edges(slotted_hook, &[high], 5.0, false));
+    // In the orthonormal frame along the tip's flats, the old R3 arc has centre
+    // (3, -3). The R5 centre is (5, sqrt(60) - 3), eight from that centre;
+    // their contact angle is acos(1/4). Integrating the two circular arcs around
+    // the removed section gives 8 sqrt(15) - 9 - 8 acos(1/4) - 9 pi/4.
+    let removed = 8.0 * 15.0_f64.sqrt() - 9.0 - 8.0 * 0.25_f64.acos() - 2.25 * std::f64::consts::PI;
+    let exact_bar = 1295.0 + 510.0 * 2.0_f64.sqrt() - 90.0 * std::f64::consts::PI;
+    assert!((bar_volume - exact_bar).abs() <= CLOSED_REL * exact_bar);
+    for single in [v_low, v_high] {
+        let exact_single = exact_bar - 10.0 * removed;
+        assert!((single - exact_single).abs() <= CLOSED_REL * exact_single);
+    }
+    let expected = v_low + v_high - bar_volume;
+    let exact_pair = exact_bar - 20.0 * removed;
+    assert!((expected - exact_pair).abs() <= CLOSED_REL * exact_pair);
+    for edges in [[low, high], [high, low]] {
+        assert_builds(
+            &blend_edges(slotted_hook, &edges, 5.0, false),
+            expected,
+            CLOSED_REL,
+            n_low + n_high - bar_faces,
+        );
     }
 }

@@ -11,7 +11,7 @@ cov-fillet-g2-corner-beside-a-cylinder [fail] step 6 (solid.fillet): the open se
 cov-fillet-g2-five-edge-apex-corner [fail] step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3
 cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.
 cov-fillet-g2-mixed-corner [unsupported] refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave
-cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too
+cov-fillet-g2-oblique-three-edge-corner [fail] continuity_order: builds; the corner patch meets top, side l1, side l4 and the l4/top round g1 (curvature jumps 0.0105-0.0225/mm, tolerance 0.01); every round meets its own faces g2 want >= g2 at every blend seam
 cov-fillet-g2-pocket-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0
 cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
 cov-junction-y-junction-120-round [unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)
