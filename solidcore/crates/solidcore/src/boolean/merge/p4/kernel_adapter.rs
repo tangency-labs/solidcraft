@@ -102,9 +102,6 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         // (the caller's WR-57 replay seam, test only: the copy calls through it)
         #[cfg(feature = "wr57-replay")]
         replay: k.replay.clone(),
-        // (the caller's WR-469 replay seam, test only)
-        #[cfg(feature = "wr469-replay")]
-        wr469_replay: k.wr469_replay.clone(),
     }
 }
 

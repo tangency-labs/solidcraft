@@ -14,6 +14,7 @@ pub mod arc_conversion;
 pub mod bounds;
 pub mod extrude;
 pub mod fit;
+pub mod gusset;
 pub mod measure;
 pub mod placement;
 pub mod profile;

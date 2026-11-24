@@ -1725,7 +1725,9 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
 /// expected one. The ledger restores the original lines of [`FILLET_UV_CHANGES`] and
-/// [`GAP_CHANGES`] before it reverses the tolerance changes.
+/// [`GAP_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
+/// loop normal, [`crate::wr587_replay::put_back_main_lines`]), before it reverses the
+/// tolerance changes.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1776,6 +1778,10 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             _ => Ok(text),
         }
         .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // and WR-587's loop normal rows (#21291), each replayed to main's line
+        let keep: Vec<&str> = rows.iter().map(|r| r.case.as_str()).collect();
+        let text = crate::wr587_replay::put_back_main_lines(unit, &text, &keep)
+            .unwrap_or_else(|e| panic!("{unit}: {e}"));
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));

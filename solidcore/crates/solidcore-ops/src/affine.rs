@@ -7,8 +7,9 @@
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
 //! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
-//! ([`apply_point`]), and the quads a pinned picture is drawn on ([`picture_frame`],
-//! [`lifted_quad`], [`parallelogram_point`]).
+//! ([`apply_point`]), the quads a pinned picture is drawn on ([`picture_frame`],
+//! [`lifted_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
+//! ([`same_sense`]).
 
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::extent3d::Extent3d;
@@ -281,6 +282,15 @@ pub fn pivot_displacement(matrix: &Matrix, pivot: [f64; 3]) -> Result<[f64; 3]> 
     Ok(d)
 }
 
+/// `direction`, reversed when it points more than a right angle away from `like`, through
+/// [`Vec3::with_sense_of`]: a line's direction given the sense of another (a turn about an edge
+/// found again keeps the sense it was picked with). `None` when either has no length or a
+/// number not finite.
+pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
+    let d = vec3(direction).with_sense_of(vec3(like))?;
+    Some([d.x, d.y, d.z])
+}
+
 /// Express a planar point in units of an axis-aligned chord, with its nose at x = 0, through the
 /// kernel's [`solidcore::prism::transform::chord_coordinates`].
 ///
@@ -303,6 +313,26 @@ pub fn chord_coordinates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_direction_takes_the_sense_of_another_and_none_without_length() {
+        assert_eq!(
+            same_sense([0.0, -2.0, 0.0], [0.1, 1.0, 0.0]),
+            Some([0.0, 2.0, 0.0])
+        );
+        assert_eq!(
+            same_sense([0.0, 2.0, 0.0], [0.1, 1.0, 0.0]),
+            Some([0.0, 2.0, 0.0])
+        );
+        // Not parallel at all: still the sense of the nearer half.
+        assert_eq!(
+            same_sense([1.0, -1.0, 0.0], [0.0, 1.0, 0.0]),
+            Some([-1.0, 1.0, 0.0])
+        );
+        assert_eq!(same_sense([0.0; 3], [0.0, 1.0, 0.0]), None);
+        assert_eq!(same_sense([0.0, 1.0, 0.0], [0.0; 3]), None);
+        assert_eq!(same_sense([f64::NAN, 1.0, 0.0], [0.0, 1.0, 0.0]), None);
+    }
 
     /// The mirror in the plane y = 0.
     const MIRROR_Y: Matrix = [
