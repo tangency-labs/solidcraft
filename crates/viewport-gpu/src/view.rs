@@ -5665,7 +5665,10 @@ mod tests {
     #[test]
     fn refused_scene_upload_keeps_the_previous_picture_and_retries() {
         use super::*;
-        let Ok((adapter, _, _)) = crate::open_headless(crate::test_env::policy()) else { return };
+        // An adapter of its own, not the shared device's: on OpenGL the devices of one adapter share
+        // its EGL context, and this one beside the shared device left the other tests' pictures
+        // blank (#10232).
+        let Some((adapter, _)) = crate::select::pick(crate::test_env::policy()) else { return };
         // Above the renderer's own buffers (its viewport uniform is 2080 bytes), below the index buffer refused.
         let limits = wgpu::Limits { max_buffer_size: 3072, ..wgpu::Limits::downlevel_defaults() };
         let Ok((device, queue)) =
