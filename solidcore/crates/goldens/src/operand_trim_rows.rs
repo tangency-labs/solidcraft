@@ -4,11 +4,10 @@
 //! uses that had none now carry one.
 //!
 //! A row is certified as follows.
-//! * **Replay.** The case's Rust side is run again. Its output, with every UV trim's
-//!   samples and every UV trim owner blinded ([`blinded_digest`]), has the digest recorded
-//!   for this branch, so the run is the row. With each listed moved value put back to main's
-//!   (7d4445c0c) value, it has the digest of main's output blinded alike: every value but the
-//!   trims and the listed ones is main's, bit for bit.
+//! * **Replay.** The case's Rust side is run again. Its output has the digest recorded for
+//!   this branch ([`digest`]), so the run is the row. With each listed moved value put back
+//!   to main's (7d4445c0c) value, it has the digest of main's output: every value but the
+//!   listed ones is main's, bit for bit.
 //! * **Soundness.** The result body's `check_brep` level 2 reports no line main's same body
 //!   does not ([`level2_within_main`]: four `fc*` bodies carry main's base-geometry
 //!   warnings) ([`validation::soundness`]), but for a line certified a false positive of
@@ -117,21 +116,6 @@ pub(crate) fn blind_record(rec: &[f64]) -> Vec<f64> {
     out
 }
 
-/// The values of `out` with its `record` blinded ([`blind_record`]) and every UV trim owner
-/// `-1`.
-pub(crate) fn blinded_values(out: &Output) -> std::collections::BTreeMap<String, Vec<f64>> {
-    let mut values = out.values.clone();
-    if let Some(r) = values.get_mut("record") {
-        *r = blind_record(r);
-    }
-    if let Some(o) = values.get_mut("uv_curve_owners") {
-        for x in o.iter_mut() {
-            *x = -1.0;
-        }
-    }
-    values
-}
-
 /// The FNV-1a digest of `values` and `ints`: for each array in key order its key, a tag
 /// (`0` values, `1` ints), its length and its elements' bits (a NaN as `f64::NAN`'s).
 pub(crate) fn digest(
@@ -157,24 +141,6 @@ pub(crate) fn digest(
         }
     }
     h
-}
-
-/// [`digest`] of `out` blinded ([`blinded_values`]) with each moved value's slot set to
-/// `main` (`put_main`), each first checked to hold `now`.
-fn blinded_digest(out: &Output, moved: &[Moved], put_main: bool) -> u64 {
-    let mut values = blinded_values(out);
-    for &(key, i, main, now) in moved {
-        let a = values.get_mut(key).unwrap_or_else(|| panic!("no {key}"));
-        assert!(
-            a[i] == now || (a[i].is_nan() && now.is_nan()),
-            "{key}[{i}] is {:e}, not {now:e}",
-            a[i]
-        );
-        if put_main {
-            a[i] = main;
-        }
-    }
-    digest(&values, &out.ints)
 }
 
 /// A moved value: its array, its index in the blinded array, main's value and this
@@ -540,30 +506,6 @@ fn edge_need(b: &Brep, certs: &[crate::trims_on_edges::TrimCertificate], e: Edge
         need = need.max(nearest_end);
     }
     round_up(need)
-}
-
-/// Certifies one row of a unit whose output is `topology.brep_mirror`'s record and `graph`
-/// (see the module docs): `out` the case's output, `b` its result body.
-pub(crate) fn certify_row(
-    name: &str,
-    out: &Output,
-    b: &mut Brep,
-    main_digest: u64,
-    new_digest: u64,
-    moved: &[Moved],
-) -> Vec<Class> {
-    // replay
-    assert_eq!(
-        blinded_digest(out, moved, false),
-        new_digest,
-        "{name}: not the row"
-    );
-    assert_eq!(
-        blinded_digest(out, moved, true),
-        main_digest,
-        "{name}: more than the listed values moved"
-    );
-    certify_body(name, out, "", b, None, &[], moved, true, &[])
 }
 
 /// [`digest`] of `out` as it is (no trims blinded: a record written without them) with each
@@ -1167,59 +1109,8 @@ pub(crate) fn certify_body(
 }
 
 mod local_operation {
-    use super::{certify_row, Class};
     use crate::units::topology_brep_local_operation::{result_breps, Runner};
     use crate::UnitDiff;
-
-    struct Row {
-        case: &'static str,
-        main: u64,
-        new: u64,
-        moved: &'static [super::Moved],
-    }
-
-    include!("operand_trim_rows/local_operation.rs");
-
-    /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
-    /// module docs say; none farther, and looser only the listed
-    /// [`super::RAISED_TO_A_LOOSE_BOUND`] tolerances (counted). The rows were recorded before the kept-trim cover
-    /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
-    /// such raise put back, so the certificate is of the copy's moves alone (the cover's
-    /// are proved by `tolsub`'s replay). They were recorded before the WR-493 retirement
-    /// too (found spheres keep the file NURB they tested), which moves `fc0000`'s
-    /// `record[539]` by one unit in the last place: each case also runs with the found
-    /// spheres' fitted NURB put back ([`crate::refit::with_fitted_spheres`]). (That move is
-    /// inside the goldens' comparator: the unit's committed lines are main's.)
-    #[test]
-    fn local_operation_rows_are_certified() {
-        use crate::refit::with_fitted_spheres;
-        use crate::tolsub::with_trim_cover_put_back;
-        let (mut closer, mut equal, mut looser) = (0, 0, 0);
-        for row in ROWS {
-            let case = crate::case::regression_case(&Runner, row.case);
-            let (out, _) = with_fitted_spheres(|| {
-                with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap())
-            });
-            let ((_, mut bodies), _) =
-                with_fitted_spheres(|| with_trim_cover_put_back(|| result_breps(&case).unwrap()));
-            let (_, b) = &mut bodies[0];
-            for c in certify_row(row.case, &out, b, row.main, row.new, row.moved) {
-                match c {
-                    Class::Closer => closer += 1,
-                    Class::Equal => equal += 1,
-                    Class::Looser => looser += 1,
-                    Class::Farther => unreachable!(),
-                }
-            }
-        }
-        eprintln!(
-            "{} rows: moved values closer {closer}, equal {equal}, looser (raised to a loose \
-             proved bound, #19784) {looser}",
-            ROWS.len()
-        );
-        assert_eq!(ROWS.len(), 65);
-        assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
-    }
 
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
     /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of

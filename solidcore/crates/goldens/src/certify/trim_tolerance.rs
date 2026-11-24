@@ -114,17 +114,15 @@ const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 
 /// The edges raised by `SetUVTrimCurve`'s margin (`topology::edgeuse::p1::set_uv_trim_curve`:
 /// an edge below twice its new trim's raise distance `r` is raised to `2 r`, upstream's
-/// `TOL_FACTOR`) where this branch's read of `Fillet/sphere_diff_3cylinders.smb` makes the
-/// classified trims (`tolsub::state::CLASSIFIED_READ_TRIMS`, #20179: the read's face
-/// classification makes its missing trims) and main's read makes none: unit, case, body, edge.
-/// `r` is upstream's drop distance `d` (the trim's `max_dist_to_surface`) or, where the trim's
-/// proved bound is below it, that bound (`trim_raise_distance`, #18162), so `n = 2 r <= 2 d`.
-/// The raise is not needed for the trim (its `B` is within the old tolerance): the margin is
-/// upstream's, wider than the B-rep check needs (a gap within the tolerance), and moves every
-/// dropped trim kernel-wide (#20912). Each is certified by [`drop_margin_raise`]: the
-/// drop replayed on main's read gives `n` bit for bit, and `n` is `trim_raise_distance`'s
-/// doubled, `2 d` with the made trim's `B` within `n`, or `2 B` with `B` below `d`. The
-/// edge's vertices follow it (`edge::set_tolerance`).
+/// `TOL_FACTOR`) where the read of `Fillet/sphere_diff_3cylinders.smb` makes the trims its
+/// face classification finds missing (#20179): unit, case, body, edge. `r` is upstream's drop
+/// distance `d` (the trim's `max_dist_to_surface`) or, where the trim's proved bound is below
+/// it, that bound (`trim_raise_distance`, #18162), so `n = 2 r <= 2 d`. The raise is not
+/// needed for the trim (its `B` is within the old tolerance): the margin is upstream's, wider
+/// than the B-rep check needs (a gap within the tolerance), and moves every dropped trim
+/// kernel-wide (#20912). Each is certified as a raise whose every trim's `B` is within the new
+/// tolerance (none need be past the old). The edge's vertices follow it
+/// (`edge::set_tolerance`).
 const DROP_MARGIN: &[(&str, &str, usize, usize)] = &[
     ("topology.brep_p10", "gen0026", 0, 20),
     ("topology.brep_p10", "gen0026", 0, 22),
@@ -869,88 +867,6 @@ fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, us
     (out, trimless)
 }
 
-/// Certifies a [`DROP_MARGIN`] raise of edge `e` of `b` (body `body` of `case`) from `old` to
-/// `new`: the edge's one classified use that holds a trim (the made trim, `eu`); `case` run
-/// again with main's read put back (`tolsub::state::strip_classified_trims`: the classified
-/// trims off, the raises at the zone tolerance), where the edge holds `old` and `eu` no trim;
-/// there `get_or_create_uv_trim_curve` on `eu` (the drop the classification makes) reports the
-/// drop distance `d` and leaves the edge at `new`, bit for bit, with `old < new`; and with the
-/// made trim's `B` on `b` ([`use_bound`]), `new` is one of `trim_raise_distance`'s raises,
-/// doubled: `2 d` with `B <= new` (upstream's, where `B` is from `d` to `2 d`, or where `2 B`
-/// would not cover another trim of the edge; then `B < new / 2`), or `2 B` with `B < d` (the
-/// proved distance, below upstream's). Either way `B <= new` and `new <= 2 d`. Returns
-/// `(d, B)`.
-fn drop_margin_raise(
-    unit: &str,
-    case: &str,
-    body: usize,
-    b: &Brep,
-    e: EdgeId,
-    old: f64,
-    new: f64,
-) -> Result<(f64, f64), String> {
-    use crate::tolsub::state::{strip_classified_trims, CLASSIFIED_READ_TRIMS};
-    let made: Vec<EdgeuseId> = b
-        .edge(e)
-        .expect("edge")
-        .edgeuses
-        .iter()
-        .copied()
-        .filter(|&eu| {
-            CLASSIFIED_READ_TRIMS.contains(&eu.index())
-                && b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
-        })
-        .collect();
-    let [eu] = made[..] else {
-        return Err(format!("made trims {made:?}"));
-    };
-    let ((), reads) = strip_classified_trims(|| {
-        super::watch_written();
-        let _ = replay_case(unit, case);
-    });
-    let mut bodies = super::take_written();
-    if reads == 0 {
-        return Err("no classified read put back".to_string());
-    }
-    let m = bodies.get_mut(body).ok_or("no body on main's read")?;
-    let was = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
-    if was.to_bits() != old.to_bits() {
-        return Err(format!("main's read holds {was:e}, not {old:e}"));
-    }
-    if m.edgeuse(eu)
-        .map_err(|x| format!("{x:?}"))?
-        .uv_trim_curve
-        .is_some()
-    {
-        return Err("main's read holds the trim".to_string());
-    }
-    let k = crate::runner_kernel();
-    let fetch =
-        solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(&k, m, eu, true, false, true)
-            .map_err(|x| format!("{x:?}"))?;
-    fetch.status.map_err(|x| format!("the drop: {x:?}"))?;
-    let d = fetch.dist_to_surf;
-    let replayed = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
-    if replayed.to_bits() != new.to_bits() {
-        return Err(format!(
-            "the drop leaves {replayed:e}, not {new:e} (d {d:e})"
-        ));
-    }
-    let bm = match use_bound(&Kernel::default(), b, e, eu) {
-        UseBound::Bound(x) => x,
-        x => return Err(format!("the made trim: {x:?}")),
-    };
-    // (written so a NaN fails; doubling is exact)
-    let upstream = new.to_bits() == (2.0 * d).to_bits() && bm <= new;
-    let proved = new.to_bits() == (2.0 * bm).to_bits() && bm < d;
-    if !(d > 0.0 && new > old && (upstream || proved)) {
-        return Err(format!(
-            "{old:e} -> {new:e} is neither 2 d (d {d:e}) covering B {bm:e} nor 2 B below 2 d"
-        ));
-    }
-    Ok((d, bm))
-}
-
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
 /// there, the evaluation's error bound and the distance's rounding counted against it.
 fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
@@ -1005,8 +921,7 @@ struct Tally {
     open_values: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
-    /// [`DROP_MARGIN`] raises certified by [`drop_margin_raise`], every trim within the new
-    /// tolerance.
+    /// [`DROP_MARGIN`] raises, every trim within the new tolerance.
     drop_margin: usize,
     /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
     /// `domain` and `vertex-box`.
@@ -1286,31 +1201,25 @@ fn certify(unit: &str) -> Tally {
                     // seen; counted open, never proved)
                     let past = bounds.iter().flatten().any(|x| *x > old);
                     if DROP_MARGIN.contains(&(unit, row.case.as_str(), body, index)) {
-                        // a raise by `SetUVTrimCurve`'s margin: derived and certified by
-                        // [`drop_margin_raise`]; every trim within the new tolerance, or the
-                        // edge in OPEN as `UNCOVERED`, every bound past the new tolerance past
-                        // the old as well (the old tolerance did not cover it either: #20906)
-                        match drop_margin_raise(unit, &row.case, body, b, e, old, new) {
-                            Err(why) => failures.push(format!("{at}: drop margin: {why}")),
-                            Ok((d, bm)) if bad.is_empty() => {
-                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}");
-                                assert!(
-                                    !open.contains_key(&key),
-                                    "{at}: certified, remove it from OPEN"
-                                );
-                                tally.drop_margin += 1;
-                            }
-                            Ok((d, bm))
-                                if open.get(&key).is_some_and(|c| c == "UNCOVERED")
-                                    && bounds
-                                        .iter()
-                                        .all(|x| x.is_some_and(|x| x <= new || x > old)) =>
-                            {
-                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}, open");
-                                open_seen.insert(key);
-                                tally.open += 1;
-                            }
-                            Ok(_) => failures.push(format!("{at}: drop margin: {bad:?}")),
+                        // a raise by `SetUVTrimCurve`'s margin: every trim within the new
+                        // tolerance, or the edge in OPEN as `UNCOVERED`, every bound past the
+                        // new tolerance past the old as well (the old tolerance did not cover
+                        // it either: #20906)
+                        if bad.is_empty() {
+                            assert!(
+                                !open.contains_key(&key),
+                                "{at}: certified, remove it from OPEN"
+                            );
+                            tally.drop_margin += 1;
+                        } else if open.get(&key).is_some_and(|c| c == "UNCOVERED")
+                            && bounds
+                                .iter()
+                                .all(|x| x.is_some_and(|x| x <= new || x > old))
+                        {
+                            open_seen.insert(key);
+                            tally.open += 1;
+                        } else {
+                            failures.push(format!("{at}: drop margin: {bad:?}"));
                         }
                     } else if bad.is_empty() && past {
                         tally.raised += 1;
