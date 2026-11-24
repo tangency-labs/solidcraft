@@ -58,6 +58,7 @@ mod corner;
 mod crease_trim;
 mod crossing;
 mod ease;
+mod input;
 mod keep;
 mod law_corner;
 mod no_room;
@@ -82,6 +83,7 @@ pub use crossing::CrossingInput;
 pub use ease::EaseGeometry;
 pub use ease::EaseInput;
 pub use ease::EaseStop;
+pub use input::BlendInput;
 pub use keep::KeepStop;
 pub use law_corner::LawCornerSearch;
 pub use no_room::no_room_class;
@@ -549,6 +551,10 @@ pub enum BlendFailure {
     /// (upstream `AERN`, `SM_ERR_ASSERT_FAILURE`). A phrase cause
     /// ([`BlendFailure::is_phrase`]).
     Inconsistent(&'static str),
+    /// An input supplied by the blend routine's caller (a solver slot or the body's
+    /// topology or geometry) is not there: invalid input ([`ErrorKind::InvalidInput`]),
+    /// not a defect or refusal. Status `SM_ERR_NULL_POINTER`; not a phrase cause.
+    InputMissing(BlendInput),
     /// The 3D curve built between two rails' ends drops onto the surface of the face `face`
     /// as `curves` UV curves, not one: a curve that crosses a closed surface's seam or
     /// leaves the surface's domain has no one UV curve on it. Unsupported
@@ -837,6 +843,19 @@ pub enum BlendFailure {
         u: f64,
         /// The station's surface parameter v.
         v: f64,
+    },
+    /// The natural quadric read off a support surface is not that surface at the point:
+    /// its distance exceeds the tolerance or its normal turns from the surface's.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    QuadricReadbackMismatch {
+        /// The point's distance from the quadric.
+        distance: f64,
+        /// The largest distance allowed.
+        tolerance: f64,
+        /// The quadric normal dotted with the surface normal.
+        normal_dot: f64,
+        /// The smallest normal dot product allowed.
+        minimum_normal_dot: f64,
     },
     /// The radius law of a round is not positive at `s`, where the section is built on it:
     /// a check on the caller's law ([`ErrorKind::InvalidInput`]), status `SM_ERR`.
@@ -1334,6 +1353,7 @@ impl BlendFailure {
             Self::FilletsNotIntersected => SM_ERR,
             Self::GnSectionInvalid { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
+            Self::InputMissing(_) => SM_ERR_NULL_POINTER,
             Self::InterpolantDropsToCurves { .. } => SM_ERR,
             Self::IntersectionCurveHasNoUvCurve { .. } => SM_ERR,
             Self::IntersectionCurveNotBSpline { .. } => SM_ERR,
@@ -1374,6 +1394,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => SM_ERR,
             Self::PlaneCurveStepVanished { .. } => SM_ERR,
             Self::PlaneCurveTouches { .. } => SM_ERR,
+            Self::QuadricReadbackMismatch { .. } => SM_ERR,
             Self::RadiusLawNotPositive { .. } => SM_ERR,
             Self::RadiusTypeNotForEdges { .. } => SM_ERR_INVALID_INPUT,
             Self::RailCrossingNotConverged { .. } => SM_ERR,
@@ -1498,6 +1519,7 @@ impl BlendFailure {
             Self::FilletsNotIntersected => ErrorKind::Failed,
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
             Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::InputMissing(_) => ErrorKind::InvalidInput,
             Self::InterpolantDropsToCurves { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveHasNoUvCurve { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveNotBSpline { .. } => ErrorKind::Unsupported,
@@ -1538,6 +1560,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::PlaneCurveStepVanished { .. } => ErrorKind::StageFailed,
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
+            Self::QuadricReadbackMismatch { .. } => ErrorKind::NotWithinTolerance,
             Self::RadiusLawNotPositive { .. } => ErrorKind::InvalidInput,
             Self::RadiusTypeNotForEdges { .. } => ErrorKind::InvalidInput,
             Self::RailCrossingNotConverged { .. } => ErrorKind::NotConverged,
@@ -1675,6 +1698,7 @@ impl BlendFailure {
             Self::FilletsNotIntersected => true,
             Self::GnSectionInvalid { .. } => true,
             Self::Inconsistent(_) => true,
+            Self::InputMissing(_) => true,
             Self::InterpolantDropsToCurves { .. } => true,
             Self::IntersectionCurveHasNoUvCurve { .. } => true,
             Self::IntersectionCurveNotBSpline { .. } => true,
@@ -1715,6 +1739,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => true,
             Self::PlaneCurveStepVanished { .. } => true,
             Self::PlaneCurveTouches { .. } => true,
+            Self::QuadricReadbackMismatch { .. } => true,
             Self::RadiusLawNotPositive { .. } => true,
             Self::RadiusTypeNotForEdges { .. } => true,
             Self::RailCrossingNotConverged { .. } => true,
@@ -2031,6 +2056,7 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::InputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::InterpolantDropsToCurves { face, curves } => write!(
                 f,
                 "{}: the curve between the rails' ends drops onto face {face:?} as {curves} UV curves, not one",
@@ -2207,6 +2233,15 @@ impl core::fmt::Display for BlendFailure {
                 f,
                 "{}: the surface touches the plane at (u, v) = ({u}, {v}): the crossing has no direction",
                 self.class()
+            ),
+            Self::QuadricReadbackMismatch {
+                distance,
+                tolerance,
+                normal_dot,
+                minimum_normal_dot,
+            } => write!(
+                f,
+                "the quadric read off the support surface does not match it: distance {distance} (tolerance {tolerance}), normal dot {normal_dot} (minimum {minimum_normal_dot})"
             ),
             Self::RadiusLawNotPositive { s, radius } => write!(
                 f,
@@ -2941,6 +2976,71 @@ mod tests {
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
             assert!(!e.is_port_failure(), "{cause:?}");
         }
+    }
+
+    #[test]
+    fn missing_blend_inputs_are_invalid_inputs_with_the_null_pointer_status() {
+        use crate::topology::{EdgeId, EdgeuseId};
+        let cases = [
+            (
+                BlendInput::SolverEdgeuse { rail: 0 },
+                "the solver's edge use on rail 0 is missing",
+            ),
+            (
+                BlendInput::EdgeuseEdge {
+                    edgeuse: EdgeuseId::from_index(4),
+                },
+                "the edge use's edge (edge use 4) is missing",
+            ),
+            (
+                BlendInput::EdgeCurve {
+                    edge: EdgeId::from_index(7),
+                },
+                "the edge's evaluation curve (edge 7) is missing",
+            ),
+            (
+                BlendInput::SupportSurface { rail: 1 },
+                "the solver's support surface on rail 1 is missing",
+            ),
+            (
+                BlendInput::SurfaceGenerator,
+                "the solver's surface generator is missing",
+            ),
+        ];
+        for (input, message) in cases {
+            let cause = BlendFailure::InputMissing(input);
+            assert_eq!(cause.class(), ErrorKind::InvalidInput);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::op", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+            assert_eq!(e.blend_failure(), Some(&cause));
+            assert_eq!(e.to_string(), format!("blend::op: {message}"));
+        }
+    }
+
+    #[test]
+    fn a_quadric_readback_mismatch_names_its_measurements_and_keeps_sm_err() {
+        let cause = BlendFailure::QuadricReadbackMismatch {
+            distance: 0.25,
+            tolerance: 0.01,
+            normal_dot: 0.9,
+            minimum_normal_dot: 0.99,
+        };
+        assert_eq!(cause.class(), ErrorKind::NotWithinTolerance);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: the quadric read off the support surface does not match it: distance 0.25 (tolerance 0.01), normal dot 0.9 (minimum 0.99)"
+        );
     }
 
     #[test]
@@ -3988,6 +4088,29 @@ mod tests {
                 CornerStep::CommonFaceNotPlanar,
                 ErrorKind::NotWithinTolerance,
             ),
+            (CornerStep::OpenSetbackRailsParallel, ErrorKind::Degenerate),
+            (CornerStep::RailSquareToEdge, ErrorKind::Degenerate),
+            (CornerStep::RoundEndSpanNotBezier, ErrorKind::Unsupported),
+            (CornerStep::RoundSurfaceNotBSpline, ErrorKind::Unsupported),
+            (CornerStep::SetbackFillMayFold, ErrorKind::Unsupported),
+            (CornerStep::SetbackG2NetTurnsBack, ErrorKind::Unsupported),
+            (
+                CornerStep::SetbackGrowthUnplaced,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (CornerStep::SetbackNoInteriorMap, ErrorKind::NotFound),
+            (
+                CornerStep::SetbackPatchMissesInterior,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CornerStep::SetbackPatchWeightNotPositive,
+                ErrorKind::Degenerate,
+            ),
+            (
+                CornerStep::SetbackSpringSideOffRailEnd,
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             let e = SolidError::blend("blend::op", BlendFailure::CornerUnbuildable(step));
             assert_eq!(e.kind(), class, "{e}");
@@ -4011,6 +4134,12 @@ mod tests {
             (CornerInput::TopologyMismatch, SM_ERR),
             (CornerInput::VertexNotProcessed, SM_ERR),
             (CornerInput::EventMalformed, SM_ERR),
+            (CornerInput::FaceNotAsClassified, SM_ERR),
+            (CornerInput::FacesNotBuilt, SM_ERR_NULL_POINTER),
+            (CornerInput::EdgeWithoutVertex, SM_ERR_NULL_POINTER),
+            (CornerInput::RingEdgeUseWithoutSolver, SM_ERR_NULL_POINTER),
+            (CornerInput::FillNotFromSetbackSplit, SM_ERR),
+            (CornerInput::RoundOfDegreeZeroAcross, SM_ERR),
         ] {
             let e = SolidError::blend(
                 "blend::op",
@@ -4463,6 +4592,15 @@ mod tests {
             (EaseStop::RailNotOneUvCurve, ErrorKind::Unsupported),
             (EaseStop::UvCurveOffRailInterval, ErrorKind::Unsupported),
             (EaseStop::NoDirectionAlongRails, ErrorKind::Unsupported),
+            (EaseStop::EasedWeightNotPositive, ErrorKind::Degenerate),
+            (EaseStop::NetsNotOneStructure, ErrorKind::NotWithinTolerance),
+            (EaseStop::RailIntervalsDiffer, ErrorKind::Unsupported),
+            (EaseStop::RampPastSurface, ErrorKind::OutsideDomain),
+            (EaseStop::RampsOverlap, ErrorKind::Unsupported),
+            (
+                EaseStop::TurnedSurfaceNotTurned,
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             rows.push((BlendFailure::EaseNotBuilt(stop), class, SM_ERR));
         }
@@ -4864,6 +5002,35 @@ mod tests {
         assert!(e.is_defect() && inner.is_defect());
     }
 
+    /// #19824: an edge curve's cache that is not built keeps the `SM_ERR_NULL_POINTER` of the
+    /// phrase it replaces, stays a blend failure (so solidcore-ops still types it as one),
+    /// and its cause, the cache's error, decides whether it is a defect.
+    #[test]
+    fn edge_curve_cache_not_built_passes_its_cause_on() {
+        let failure = SolverFailure::EdgeCurveCacheNotBuilt {
+            edge: crate::topology::EdgeId::from_index(4),
+        };
+        let wrap = |inner: SolidError| {
+            Failure::new("blend::op", BlendFailure::Solver(failure))
+                .caused_by(inner)
+                .into_error()
+        };
+        let inner = SolidError::blend_null_defect("blend::inner", "why");
+        let e = wrap(inner.clone());
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert_eq!(e.blend_failure(), Some(&BlendFailure::Solver(failure)));
+        assert!(BlendFailure::Solver(failure).replaces_upstream_status());
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(e.is_defect());
+        let inner = SolidError::blend_solver("blend::inner", SolverFailure::EdgeUseWithoutMate);
+        assert!(!wrap(inner).is_defect());
+        assert_eq!(
+            failure.to_string(),
+            "the cache of the curve of edge 4 could not be built"
+        );
+    }
+
     /// The causes (every enum of this module and of `error/blend/`) and every match on their
     /// variants (but for one with a `_` arm) are kept in name order, one arm per pattern, so changes that each add a cause or its arms touch
     /// different lines. Names compare as bytes.
@@ -4908,6 +5075,7 @@ mod tests {
             ("blend/crease_trim.rs", include_str!("blend/crease_trim.rs")),
             ("blend/crossing.rs", include_str!("blend/crossing.rs")),
             ("blend/ease.rs", include_str!("blend/ease.rs")),
+            ("blend/input.rs", include_str!("blend/input.rs")),
             ("blend/keep.rs", include_str!("blend/keep.rs")),
             ("blend/law_corner.rs", include_str!("blend/law_corner.rs")),
             ("blend/no_room.rs", include_str!("blend/no_room.rs")),
