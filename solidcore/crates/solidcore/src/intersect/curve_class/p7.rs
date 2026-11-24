@@ -2569,8 +2569,9 @@ trait FaceQueries<O: ClassObject> {
 
 /// Not upstream (#21421): `point`, the fillet's vertex position that
 /// [`set_do_filleting_geometry_with`] gives the body's vertex `v`, put on a seam of a face of
-/// `v` when its point on that seam lies within the vertex's tolerance of `point`; otherwise
-/// `point` as it is.
+/// `v` when its point on that seam lies within the vertex's tolerance of `point` and
+/// `1000 * EFF_ZERO` or more from it; otherwise `point` as it is. A `point` nearer the seam
+/// than that is on it as the seam check sees it, and keeps upstream's bits.
 ///
 /// The seams are those `v` is on now (its point within `1000 * EFF_ZERO` of the face's seam,
 /// `IsOnSeam`), so that taking the fillet's position never moves the vertex off a seam it is
@@ -2590,7 +2591,10 @@ trait FaceQueries<O: ClassObject> {
 /// the vertex's tolerance of it, as they do of any vertex the stitch glues. Two faces' seams
 /// through one vertex can disagree by more than that (#21421's input: an exact sphere's seam,
 /// and B-spline seams 2^-20 off it); the seam the vertex is on is kept, and the nearest one is
-/// picked otherwise, so the vertex is never moved further than the nearest seam.
+/// picked otherwise, so the vertex is never moved further than the nearest seam. Keeping the
+/// seam the vertex is on keeps such a disagreement on the face the input has it on: #21421's
+/// input vertex lies on the sphere's seam and its B-spline face already reports the near miss,
+/// and upstream's position (on the B-spline's seam) would hand that near miss to the sphere.
 ///
 /// # Errors
 ///
@@ -2667,7 +2671,12 @@ fn onto_seam(k: &Kernel, b: &Brep, v: VertexId, point: Point3) -> Result<Point3>
             best = Some((d, on));
         }
     }
-    Ok(best.map_or(point, |(_, on)| on))
+    // A point already within the near miss of the seam is on it as the seam check sees it,
+    // and stays as it is: its vertex is then the fillet's exactly, as upstream's.
+    Ok(match best {
+        Some((d, on)) if d >= near_miss => on,
+        _ => point,
+    })
 }
 
 /// The mutable and read-only topology operations of [`set_do_filleting_geometry_with`].

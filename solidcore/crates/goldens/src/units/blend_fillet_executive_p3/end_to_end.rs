@@ -3760,17 +3760,40 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
     ];
 
+    /// The number of faces of `body` whose seam check reports a near miss.
+    fn near_missed_faces(k: &Kernel, body: &mut Brep) -> usize {
+        let mut n = 0;
+        for f in p1::faces(body, None).unwrap() {
+            let check =
+                has_seam_problem_in_brep_mut::<HealLoopHandle>(k, body, f, Default::default())
+                    .unwrap();
+            if check.problem.near_miss != SurfParamType::Neither {
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// `name` builds with the golden's counts; every vertex of a sphere face that lies within
     /// its own tolerance of the sphere's seam lies closer to it than `1000 * EFF_ZERO`, the
-    /// near-miss distance of the seam check; and no sphere face has a near-missed seam.
+    /// near-miss distance of the seam check; no sphere face has a near-missed seam; and no
+    /// more faces near-miss a seam than in the input.
     fn check(name: &str) {
         let input = inputs(name).real_solid.expect("a real solid");
         let mut k = Kernel::default();
         let mut body = build(&mut k, &input).unwrap().unwrap();
         let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let near_missed_before = near_missed_faces(&k, &mut body);
         let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
         assert!(result.is_ok(), "{name}: {result:?}");
         assert_eq!(counts(&body, 0), [0, 27, 42, 10], "{name}");
+        // The input's near misses (its B-spline faces' seams lie 2^-20 off the sphere's) stay
+        // where they are: the round adds none.
+        let near_missed_after = near_missed_faces(&k, &mut body);
+        assert!(
+            near_missed_after <= near_missed_before,
+            "{name}: {near_missed_after} faces near-miss a seam, {near_missed_before} before"
+        );
         let near_miss = 1000.0 * EFF_ZERO;
         let mut on_seam = Vec::new();
         let mut spheres = 0;
@@ -3828,6 +3851,63 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         }
     }
 
+    /// The certificate of `name`'s blessed row, whose only moved values are mass properties
+    /// (centroid `x`, products `zx` and `xy`: values the integrator estimates at `1e-4` of
+    /// their scale, which the vertex now on the seam moves, as any change of a face's trims
+    /// does): the golden's line holds this body's estimates bit for bit, and each of the
+    /// body's 12 mass values (density 1, about the origin) lies within the golden's
+    /// accuracy of its certified band (`round_definition_proof`'s `volume_band` and
+    /// `mass_bands`: certified enclosures of the body as stored, widened by its blend faces'
+    /// proved distance from their definitions), so of the exact value.
+    fn mass_certified(name: &str) {
+        use super::round_definition_proof::{certified_blends, mass_bands, volume_band};
+        let golden = crate::golden::read(
+            &crate::golden::default_dir(),
+            "blend.fillet_executive_p3",
+        )
+        .unwrap();
+        let row: Vec<f64> = golden[name]["values"]["mass_properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        let mut k = Kernel::default();
+        let mut body = result_body_of(&mut k, name);
+        let blends = certified_blends(&k, &mut body, name);
+        // (the volume did not move: the row's is the one before)
+        let estimates = volume_band(&k, &mut body, &blends, row[1], name);
+        let m = &estimates.golden;
+        let at = |p: solidcore::math::Vec3| [p.x, p.y, p.z];
+        let mut ours = vec![m.properties.area, m.properties.volume, m.properties.mass];
+        ours.extend(at(m.centroid));
+        ours.extend(at(m.inertia));
+        ours.extend(at(m.products));
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&ours), bits(&row), "{name}: not the golden's estimates");
+        mass_bands(&k, &mut body, &estimates, name);
+    }
+
+    #[test]
+    fn e1_r0_1_mass() {
+        mass_certified(ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5_mass() {
+        mass_certified(ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1_mass() {
+        mass_certified(ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5_mass() {
+        mass_certified(ROWS[3]);
+    }
+
     #[test]
     fn e1_r0_1() {
         check(ROWS[0]);
@@ -3848,3 +3928,4 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         check(ROWS[3]);
     }
 }
+
