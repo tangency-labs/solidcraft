@@ -495,6 +495,12 @@ fn host_limits_have_typed_failures() {
     assert!(limits.check(&Limits::default()).is_ok());
     let fuel = limits.check(&Limits { fuel: limits.max_fuel + 1, ..Limits::default() }).unwrap_err();
     assert_eq!(fuel, HostError::OverCeiling { limit: "fuel".into(), requested: limits.max_fuel + 1, allowed: limits.max_fuel });
+    assert!(fuel.to_string().contains("allow its fuel request when you install it"));
+    // Approved per-package fuel reaches HostLimits::check just as approved memory does.
+    let approved = HostLimits { max_fuel: MAX_APPROVED_FUEL, ..limits };
+    assert!(approved.check(&Limits { fuel: MAX_APPROVED_FUEL, ..Limits::default() }).is_ok());
+    let hard = HostError::OverCeiling { limit: "fuel".into(), requested: MAX_APPROVED_FUEL + 1, allowed: MAX_APPROVED_FUEL };
+    assert!(hard.to_string().contains("hard host ceiling of 10000000000000"));
     // A refusal gives both numbers and what to change.
     let memory = limits.check(&Limits { memory_mib: 2048, ..Limits::default() }).unwrap_err();
     assert_eq!(memory, HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 });
@@ -897,6 +903,17 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     newer["capabilities"] = json!(["formats@0.3"]);
     newer["runtime"]["entries"][0]["kind"] = json!("printer");
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
+}
+
+#[test]
+fn a_command_may_be_a_long_job_and_an_importer_may_not() {
+    let mut long = manifest();
+    long["runtime"]["entries"] = json!([{"name":"make","job":true}, "other"]);
+    let entries = parse(&long).unwrap().runtime.unwrap().entries;
+    assert_eq!((entries[0].job, entries[1].job), (true, false));
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["job"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
 }
 
 #[test]

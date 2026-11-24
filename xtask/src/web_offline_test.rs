@@ -128,7 +128,8 @@ pub fn run_api(site: &str) -> Result<(), String> {
 /// The drawing milestone's plate (#4894 W23, acceptance case 84) made and checked by commands
 /// alone in a tab of its own, so the steps before leave nothing in it. Kept as a host keeps a
 /// design (`document.export`), the app started again in that tab and the design put back
-/// (`document.import`), its drawing reads and exports the same, byte for byte.
+/// (`document.import`), its drawing reads the same, its SVG is the same byte for byte, and its PNG
+/// (written to a file, #19897) has the same size in bytes and pixels.
 fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
     let mut tab = browser.new_tab()?;
     tab.call("Page.bringToFront", json!({}))?;
@@ -139,7 +140,7 @@ fn drawing_test(browser: &Chrome, port: u16) -> Result<String, String> {
     if let Some(key) = ["read", "svg", "png"].into_iter().find(|&key| opened[key] != made[key]) {
         return Err(format!("web-api-test: the plate's drawing changed once the app started again: its {key}"));
     }
-    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG and dimensions after the app started again".into())
+    Ok("the M2 plate's drawing made by commands, and the same SVG, PNG size and dimensions after the app started again".into())
 }
 
 /// The app started afresh at `?drawing={step}`, then [`DRAWING_TEST`] run in it with `kept`.
@@ -210,15 +211,18 @@ const DRAWING_TEST: &str = r#"(async (plate, kept) => {
     const shown = groups.map(g => g.items.filter(item => item.kind === 'text').map(item => item.text).join(''));
     check(same([...shown].sort(), [...read].sort()), 'the sheet shows ' + JSON.stringify(shown));
     const svg = await run('drawing.export', {sheet: 'Sheet 1'});
-    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150});
+    // A PNG is written to a file (#19897), here in the browser's file storage.
+    const pngPath = '/upload/plate-sheet-1.png';
+    const png = await run('drawing.export', {sheet: 'Sheet 1', format: 'png', dpi: 150, path: pngPath});
     check(svg.svg.includes('width="420mm" height="297mm"'), 'the SVG is A3');
+    check(png.path === pngPath && png.bytes > 0, 'the PNG is written to ' + pngPath + ', not ' + JSON.stringify(png.path));
     check(same(png.report.pixels, [2481, 1754]), 'the PNG is ' + JSON.stringify(png.report.pixels) + ' pixels');
     // An export leaves out_of_date out of its reply when nothing is out of date.
     check([svg, png].every(e => (e.out_of_date || []).length === 0 && e.views.length === 3 && e.views.every(v => v.status === 'drawn')),
         'every view is drawn and nothing is out of date');
     const exported = await app.request('document.export');
     await app.request('document.saved', {revision: exported.revision});
-    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: png.data};
+    return {drawing, dimensions, text: exported.text, read, svg: svg.svg, png: {bytes: png.bytes, pixels: png.report.pixels}};
 })"#;
 
 /// The app's mouse buttons follow the browser's: a chord leaves none held (a second button

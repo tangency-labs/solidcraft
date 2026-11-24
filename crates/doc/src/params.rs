@@ -831,8 +831,18 @@ impl Document {
                     }
                 }
             }
-            if f.kind.placement_exprs().iter().any(|e| expr::references(e).iter().any(|r| r == name)) {
-                out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
+            // A placement expression is a point that places the feature (a length), or a
+            // primitive's axis (unitless, #18822).
+            let (mut position, mut axis) = (false, false);
+            f.kind.walk_exprs(&mut |(_, e, kind, role)| {
+                if role == ExprRole::Placement && expr::references(e).iter().any(|r| r == name) {
+                    if kind == Kind::Unitless { axis = true } else { position = true }
+                }
+            });
+            for (used, input) in [(position, "Position"), (axis, "Axis")] {
+                if used {
+                    out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: input.into() });
+                }
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
                 for (id, param) in sketch.dimension_param_ids() {

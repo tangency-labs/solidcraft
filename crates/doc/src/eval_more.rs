@@ -1373,9 +1373,11 @@ pub(super) fn sheet_eval(
             // the later one's is cut.
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
+            let mut square = Vec::with_capacity(picks.len());
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
                 // One bend for each run: a split edge's butt where its runs meet.
-                let joints = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
@@ -1386,6 +1388,11 @@ pub(super) fn sheet_eval(
             let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
                 open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // A side laid on square no other bend met carries on the edge beside it again, now
+            // that every corner of the feature is closed (#19833).
+            for (k, sides) in square.iter().enumerate() {
+                sk.slant_open_sides(sides).map_err(named(k))?;
             }
             // The corners on the outside of a bend that stay open (#20720): each pair of bends is
             // met once, so each corner once.
