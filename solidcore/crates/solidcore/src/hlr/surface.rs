@@ -144,11 +144,14 @@ impl S3 {
     /// The chart of a face: its surface, in its own parameters where it is a plane or a spline
     /// and in angle and height (angle and angle) where it is a cylinder, cone, sphere or torus,
     /// over the part its NURBS form spans ([`Face::domain`]). A ball corner has no (u, v) of its
-    /// own: its chart is its NURBS form, the patch, recognised like any spline patch (as the
-    /// sphere it lies on).
+    /// own: its chart is its NURBS form, the patch, on the sphere [`ball_sphere`] reads from its
+    /// label.
     pub fn of_face(face: &Face) -> Result<S3, HlrError> {
         let surface = match (&face.surface, &face.nurbs) {
             (Surface::BallPatch { .. }, Some(patch)) => patch,
+            (Surface::BallPatch { .. }, None) => {
+                return Err(HlrError::Invalid("ball patch without its form"))
+            }
             (label, _) => label,
         };
         Ok(match surface {
@@ -741,6 +744,20 @@ pub(crate) fn torus_roots(
     out.sort_by(|x, y| x.0.total_cmp(&y.0));
     out.dedup_by(|x, y| (x.0 - y.0).abs() <= fine && x.1 == y.1);
     out
+}
+
+/// The sphere a ball corner lies on, as its label gives it: its definition, never recognised from
+/// samples of its patch (a sampled fit loses the sphere of a small round on a large body). `None`
+/// for every other face.
+pub(crate) fn ball_sphere(face: &Face) -> Result<Option<Analytic>, HlrError> {
+    let Surface::BallPatch { center, radius } = &face.surface else {
+        return Ok(None);
+    };
+    let c = v3(*center);
+    if !([c.x, c.y, c.z, *radius].iter().all(|x| x.is_finite()) && *radius > 0.) {
+        return Err(HlrError::Invalid("ball patch sphere"));
+    }
+    Ok(Some(Analytic::Sphere { c, r: *radius }))
 }
 
 /// Steps per direction when a face's NURBS form is read back onto its label: along a direction
