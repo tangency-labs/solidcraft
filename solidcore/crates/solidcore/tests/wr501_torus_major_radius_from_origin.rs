@@ -1,11 +1,11 @@
 //! WR-501 (tangency-labs/solidcore#1470, #1954): the public torus recogniser
-//! `Torus::is_nurb_surface_torus` reports a torus's major radius from the NURB's first
-//! sweep circle (upstream) or from the torus origin (`fixes.torus_major_radius_from_origin`).
+//! `Torus::is_nurb_surface_torus` reports a torus's major radius from the torus origin,
+//! not from the NURB's first sweep circle (upstream).
 //!
 //! A whole-turn revolve of two half circles is a public torus construction whose torus
 //! NURB runs its tube from -90 to 90 degrees, so the first sweep circle sits at the bottom
 //! of the tube, off the equator. Upstream's radius then comes out sqrt(R^2 + r^2); the
-//! opt-in measures R. Both readings are the public reader's own reported values on the
+//! reader measures R. The reading is the public reader's own reported value on the
 //! NURB of the face the revolve built (R 5, r 1).
 //!
 //! The recognition is at the direct level: the only library caller of the reader is the
@@ -78,10 +78,7 @@ fn wr501_revolved_torus_reports_its_major_radius_from_the_torus_origin() {
     let tori = revolved_tori(&mut build);
     assert_eq!(tori.len(), 2, "both half circles give a torus");
 
-    // the reader kernels differ only in the WR-501 guard
-    let off = Kernel::default();
-    let mut on = Kernel::default();
-    on.fixes.torus_major_radius_from_origin = true;
+    let on = Kernel::default();
 
     let upstream_major = (MAJOR * MAJOR + MINOR * MINOR).sqrt();
     for (i, t) in tori.iter().enumerate() {
@@ -97,38 +94,19 @@ fn wr501_revolved_torus_reports_its_major_radius_from_the_torus_origin() {
             t.minor_radius()
         );
 
-        // upstream: from the first sweep circle at the bottom of the tube, sqrt(R^2 + r^2)
-        let read_off = Torus::is_nurb_surface_torus(&off, t.base().base(), 1.0)
-            .unwrap()
-            .expect("a torus");
-        assert!(
-            (read_off.major_radius() - upstream_major).abs() <= 1e-9 * upstream_major,
-            "face {i}: upstream major {}",
-            read_off.major_radius()
-        );
-        assert!(
-            read_off.major_radius() - MAJOR > 0.05,
-            "face {i}: the two readings differ materially"
-        );
-        assert!(
-            (read_off.minor_radius() - MINOR).abs() <= 1e-9 * MINOR,
-            "face {i}: minor {}",
-            read_off.minor_radius()
-        );
-        assert!(!read_off.inside_out(), "face {i}");
-
-        // with only the guard on: from the torus origin, R
+        // from the torus origin, R (upstream: from the first sweep circle at the bottom of
+        // the tube, sqrt(R^2 + r^2))
         let read_on = Torus::is_nurb_surface_torus(&on, t.base().base(), 1.0)
             .unwrap()
             .expect("a torus");
         assert!(
             (read_on.major_radius() - MAJOR).abs() <= 1e-9 * MAJOR,
-            "face {i}: opt-in major {}",
+            "face {i}: major {}",
             read_on.major_radius()
         );
         assert!(
             upstream_major - read_on.major_radius() > 0.05,
-            "face {i}: the two readings differ materially"
+            "face {i}: the reading differs materially from upstream's"
         );
         assert!(
             (read_on.minor_radius() - MINOR).abs() <= 1e-9 * MINOR,
@@ -136,12 +114,5 @@ fn wr501_revolved_torus_reports_its_major_radius_from_the_torus_origin() {
             read_on.minor_radius()
         );
         assert!(!read_on.inside_out(), "face {i}");
-
-        // the same torus, axis and tube; only the major radius changes
-        assert_eq!(
-            read_off.base().position().z_axis(),
-            read_on.base().position().z_axis(),
-            "face {i}: same axis"
-        );
     }
 }

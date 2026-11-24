@@ -125,6 +125,44 @@ fn an_explicit_reverse_keeps_the_operation() {
     assert_eq!(state(&h), (1, JOIN, false));
 }
 
+/// Choose Operation › Cut in the open window, as a person does.
+fn choose_cut(h: &mut Harness) {
+    h.step(&json!({"click": {"handle": "dialog:Operation"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Operation:Cut"}})).unwrap();
+    h.frames(3);
+}
+
+/// #18243: choosing Cut by hand on a profile that sits on a body points the extrude into the body;
+/// a direction set by hand stays, and Extrude opens with its usual operation (no remembered one).
+#[test]
+fn choosing_cut_points_the_extrude_into_the_body() {
+    let mut h = box_with_top_extrude(false);
+    assert_eq!(state(&h), (0, JOIN, true), "it opens pointing away, with its usual operation");
+    choose_cut(&mut h);
+    assert_eq!(state(&h), (1, CUT, false), "Cut turns the direction into the box");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let (lo, hi) = bounds_z(&h);
+    assert!((lo - 0.0).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6, "the cut stays inside the box: z {lo}..{hi}");
+
+    // A direction chosen first is kept.
+    let mut h = box_with_top_extrude(false);
+    h.step(&json!({"widget":"Reverse Direction"})).unwrap();
+    h.step(&json!({"widget":"Reverse Direction"})).unwrap();
+    h.frames(2);
+    assert_eq!(state(&h).0, 0);
+    choose_cut(&mut h);
+    assert_eq!(state(&h), (0, CUT, false), "a direction set by hand stays");
+
+    // The next Extrude does not remember Cut.
+    let mut h = box_with_top_extrude(false);
+    choose_cut(&mut h);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.frames(2);
+    assert_ne!(state(&h).1, CUT, "Extrude keeps its normal default operation");
+}
+
 /// A Cut latched for a drag into the box gives way once the extrude starts from the bottom
 /// face: from there the same distance goes out of the box, so it joins (#467).
 #[test]
@@ -144,7 +182,8 @@ fn a_new_start_object_decides_the_operation_again() {
         d.inputs.push(from);
     }
     h.frames(2);
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs.last().unwrap().items.len(), 1, "the bottom face is the start");
+    let from = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "From Object").unwrap();
+    assert_eq!(from.items.len(), 1, "the bottom face is the start");
     assert_eq!(state(&h), (0, JOIN, true), "from the bottom face, 5 mm down: Join");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none());

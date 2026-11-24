@@ -108,7 +108,7 @@
 //! - Cancellation: `approximate_offset_surface_cancellable` (crate-private) passes a cancel token (#2136, #2372) to `N_SrfOffset`; the public wrappers pass none.
 
 use crate::error::nurbs::BSplineFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1116,7 +1116,11 @@ impl BSplineSurface {
         cancel: Option<&crate::kernel::CancelToken>,
     ) -> Result<BSplineSurface> {
         let nl_surf_p = self.nurb.as_ref().ok_or_else(|| {
-            SolidError::b_spline(OP_OFFSET, BSplineFailure::Missing("the NURBS form"))
+            SolidError::b_spline_with_status(
+                OP_OFFSET,
+                BSplineFailure::NoNurbsForm,
+                SM_ERR_NULL_POINTER,
+            )
         })?;
 
         // cubic degree
@@ -1217,23 +1221,6 @@ impl BSplineSurface {
         let b = curve_nurb(cur_b, OP)?.clone();
         let t = curve_nurb(cur_t, OP)?.clone();
 
-        // when given crossTangent functions (the bilinear patch does not use them)
-        let ders = if create_bilinear_patch {
-            None
-        } else if let [der_l, der_r, der_b, der_t] = deriv_crvs {
-            Some([
-                curve_nurb(der_l, OP)?.clone(),
-                curve_nurb(der_r, OP)?.clone(),
-                curve_nurb(der_b, OP)?.clone(),
-                curve_nurb(der_t, OP)?.clone(),
-            ])
-        } else {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the derivative curves are missing"),
-            )); // Missing derivative curves
-        };
-
         // create patch branching on bCreateBilinearPatch flag
         let sur = if create_bilinear_patch {
             // DOES NOT USE DERIVS
@@ -1248,12 +1235,20 @@ impl BSplineSurface {
             cur_t.nurb = Some(t);
             res.map_err(SolidError::nurbs_routine(OP))?
         } else {
-            let [der_l, der_r, der_b, der_t] = ders.ok_or_else(|| {
-                SolidError::b_spline(
+            // the crossTangent functions (the bilinear patch does not use them)
+            let [der_l, der_r, der_b, der_t] = if let [der_l, der_r, der_b, der_t] = &*deriv_crvs {
+                [
+                    curve_nurb(der_l, OP)?.clone(),
+                    curve_nurb(der_r, OP)?.clone(),
+                    curve_nurb(der_b, OP)?.clone(),
+                    curve_nurb(der_t, OP)?.clone(),
+                ]
+            } else {
+                return Err(SolidError::b_spline(
                     OP,
-                    BSplineFailure::Failed("the derivative curves are missing"),
-                )
-            })?;
+                    BSplineFailure::DerivativeCurvesMissing,
+                )); // Missing derivative curves
+            };
             let mut lr = [l, r, der_l, der_r];
             let mut bt = [b, t, der_b, der_t];
             // bits 1 left, 2 right, 4 bottom, 8 top: bdry_crvs' order
@@ -1447,18 +1442,25 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             None,
+            None,
         )
         .map(|(surface, _)| surface)
     }
 
     /// [`create_sweep_surface`](Self::create_sweep_surface) that also reports where the sweep
-    /// put its sections ([`SweepTrace`]; `None` for a translational sweep) and, when asked, the
-    /// placements of [`create_sweep_surface_with_placements`](Self::create_sweep_surface_with_placements)
-    /// (not upstream: the fork's #2572 definition of a general-path sweep reads them).
+    /// put its sections ([`SweepTrace`]; `None` for a translational sweep or one kept upright)
+    /// and, when asked, the placements of
+    /// [`create_sweep_surface_with_placements`](Self::create_sweep_surface_with_placements)
+    /// (not upstream: the fork's #2572 definition of a general-path sweep reads them). With
+    /// `up` (not upstream, the fork's upright sweep) the sections are kept upright: at each,
+    /// z is `up` made square to the trajectory's tangent ([`SweepScaleOptions::up`]), the
+    /// section as drawn at the start; a trajectory running along `up` is refused
+    /// (`Unsupported`). `up` is ignored by a translational sweep.
     ///
     /// # Errors
     ///
-    /// Those of [`create_sweep_surface`](Self::create_sweep_surface).
+    /// Those of [`create_sweep_surface`](Self::create_sweep_surface); `Unsupported` for a
+    /// trajectory kept upright that runs along `up`.
     pub fn create_sweep_surface_traced(
         section_curve: &BSplineCurve,
         trajectory_curve: &BSplineCurve,
@@ -1466,6 +1468,7 @@ impl BSplineSurface {
         do_translational_sweep: bool,
         approx_tol_3d: f64,
         placements: Option<&mut [Axis2Placement; 3]>,
+        up: Option<Vec3>,
     ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
         Self::sweep_surface(
             section_curve,
@@ -1474,6 +1477,7 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             placements,
+            up,
         )
     }
 
@@ -1505,6 +1509,7 @@ impl BSplineSurface {
             do_translational_sweep,
             approx_tol_3d,
             Some(&mut placements),
+            None,
         )?;
         Ok((surface, placements))
     }
@@ -1517,8 +1522,14 @@ impl BSplineSurface {
         do_translational_sweep: bool,
         approx_tol_3d: f64,
         opt_placements: Option<&mut [Axis2Placement; 3]>,
+        up: Option<Vec3>,
     ) -> Result<(BSplineSurface, Option<SweepTrace>)> {
         const OP: &str = OP_SWEEP;
+        // (not upstream) an upright sweep's refusal is its own, not a failed routine
+        let failed = |e: SolidError| match e {
+            SolidError::Unsupported { .. } if up.is_some() => e,
+            e => SolidError::nurbs_routine(OP)(e),
+        };
 
         // get NurbCurve pointers for Section and trajectory curves
         let nl_curv_s = curve_nurb(section_curve, OP)?;
@@ -1560,7 +1571,10 @@ impl BSplineSurface {
             let tangent = pv.get(1).copied().ok_or_else(|| {
                 SolidError::b_spline(
                     OP,
-                    BSplineFailure::Failed("the trajectory has no tangent at its start"),
+                    BSplineFailure::Defect {
+                        why: "the trajectory's evaluation with one derivative returned no \
+                              derivative, and it returns one row per order asked",
+                    },
                 )
             })?;
             let [_x_axis, _y_axis, z_axis] = tangent.make_unit_ortho_vectors(None)?;
@@ -1583,13 +1597,16 @@ impl BSplineSurface {
                 deg: nl_deg,
                 dir: Direction::U,
                 e: approx_tol_3d,
+                up,
             };
+            // an upright sweep's sections are not the projection normal frame's: no trace
+            let traced = |t: SweepTrace| up.is_none().then_some(t);
             match opt_placements {
                 None => {
                     let (surf, t) =
                         create_sweep_scale_traced(nl_curv_t, nl_curv_s, z_axis, &opt, None)
-                            .map_err(SolidError::nurbs_routine(OP))?;
-                    trace = Some(t);
+                            .map_err(failed)?;
+                    trace = traced(t);
                     surf
                 }
                 Some(placements) => {
@@ -1601,8 +1618,8 @@ impl BSplineSurface {
                         &opt,
                         Some(&mut placed),
                     )
-                    .map_err(SolidError::nurbs_routine(OP))?;
-                    trace = Some(t);
+                    .map_err(failed)?;
+                    trace = traced(t);
                     // SolidCraft fork (5d3939e): each instance is the section carried from
                     // the global system onto the local one (OL, XL, YL, ZL) it was placed on
                     for (placement, frame) in placements.iter_mut().zip(placed) {
@@ -1662,7 +1679,10 @@ impl BSplineSurface {
             .ok_or_else(|| {
                 SolidError::b_spline(
                     OP,
-                    BSplineFailure::Failed("the evaluation returned no point"),
+                    BSplineFailure::Defect {
+                        why: "the surface evaluation of order 0 returned no point, and it \
+                              returns one row per order asked",
+                    },
                 )
             })
     }
@@ -1680,7 +1700,11 @@ impl BSplineSurface {
         let r = Rectangle::new(min.x, max.x, min.y, max.y);
 
         let sur_p = self.nurb.as_mut().ok_or_else(|| {
-            SolidError::b_spline(OP_REPARAM, BSplineFailure::Missing("the NURBS form"))
+            SolidError::b_spline_with_status(
+                OP_REPARAM,
+                BSplineFailure::NoNurbsForm,
+                SM_ERR_NULL_POINTER,
+            )
         })?;
         sur_p.reparam_to_interval(r, Direction::UV)?;
         Ok(())
@@ -1765,7 +1789,7 @@ impl BSplineSurface {
             // something went wrong - leave surP unmodified
             Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the boundary span cannot be expanded"),
+                BSplineFailure::ExpansionChangesCounts,
             ))
         };
 
@@ -1872,9 +1896,13 @@ impl BSplineSurface {
             return Ok(());
         }
 
+        // clamped to the natural domain as `evaluate_simple` clamps it (upstream's
+        // `EvaluateSimple`, whatever the out-of-bounds flag); not within the mass
+        // integration's scope where a face's continuation is certified (#16735, adapted
+        // from #15946)
         let mut s_uv = uv;
         let natural_uv_domain = self.natural_uv_domain();
-        if !natural_uv_domain.contains_point(s_uv, 0.0) {
+        if !natural_uv_domain.contains_point(s_uv, 0.0) && !self.continues_past_domain() {
             s_uv = natural_uv_domain.clamp_point(s_uv);
         }
 
@@ -1929,6 +1957,33 @@ mod tests {
         )
         .unwrap();
         BSplineSurface::from_nurb(sur, false)
+    }
+
+    /// A bicubic Coons patch given no derivative curves names them as missing: the
+    /// caller's input, status `SM_ERR`. The bilinear patch of the same sides needs none.
+    #[test]
+    fn a_bicubic_coons_patch_without_derivative_curves_names_them() {
+        let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+        let line = |a, b| BSplineCurve::create_line_segment(3, a, b).unwrap();
+        let sides = || {
+            [
+                line(p(0.0, 0.0), p(0.0, 1.0)),
+                line(p(1.0, 0.0), p(1.0, 1.0)),
+                line(p(0.0, 0.0), p(1.0, 0.0)),
+                line(p(0.0, 1.0), p(1.0, 1.0)),
+            ]
+        };
+        let e = BSplineSurface::create_coons_patch(1e-6, false, &mut sides(), &mut []).unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::DerivativeCurvesMissing
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(BSplineSurface::create_coons_patch(1e-6, true, &mut sides(), &mut []).is_ok());
     }
 
     /// A cubic Bezier curve on [0, 1] through the four control points.
@@ -2073,7 +2128,7 @@ mod tests {
             s.approximate_offset_surface(0.1, 0.01, OffsetParamType::Inherited),
             Err(e) if e.sm_status() == Some(SM_ERR_NULL_POINTER)
                 && e.nurbs_failure()
-                    == Some(&NurbsFailure::BSpline(BSplineFailure::Missing("the NURBS form")))
+                    == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
     }
 

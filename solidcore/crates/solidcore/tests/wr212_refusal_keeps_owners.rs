@@ -1,11 +1,11 @@
-//! `fixes.fillet_refuse_non_manifold_result` (WR-212) on a round it does not refuse: the
-//! result is the flag-off result, curve owners included. The refusal's rollback copy
-//! (`Brep::clone_for_rollback`) used to share the edge arenas copy-on-write, so the
-//! round's first edge edit copied them for the caller's body with the copy
+//! `fillet_edges`' check that a closed manifold solid stays one (WR-212) on a round it does
+//! not refuse: the kept result has its curve owners and checks clean. The refusal's
+//! rollback copy (`Brep::clone_for_rollback`) used to share the edge arenas copy-on-write,
+//! so the round's first edge edit copied them for the caller's body with the copy
 //! constructor, which resets every curve's owner. The first round of the WR-592 bar
 //! (`wr592_torus_rail_on_axis.rs`) then failed `check_brep` with eight
 //! `SmBrep::Test #61 ... Bad Edge fails pE->ValidateGeometry(FALSE) check [owner SmEdge]`
-//! lines, while the flag-off round (and the pinned C++) checks clean.
+//! lines, while the round without the copy (and the pinned C++) checks clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -15,8 +15,6 @@
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::curve::curve::Curve;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -65,23 +63,13 @@ fn bar(k: &mut Kernel) -> Brep {
     create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, true).unwrap()
 }
 
-/// The WR-592 bar's first round (its front top edge, r 2) with the flag as `fix` says.
-fn first_round(fix: bool) -> (Kernel, Brep) {
+/// The WR-592 bar's first round (its front top edge, r 2).
+fn first_round() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = fix;
     let mut b = bar(&mut k);
     let front_top = nearest_edge(&k, &b, Point3::new(20.0, 0.0579, 10.0));
     fillet_edges(&mut k, &mut b, &[front_top], 2.0, 1, 1, 1.0).unwrap();
     (k, b)
-}
-
-fn volume(k: &Kernel, b: &mut Brep) -> f64 {
-    let store = AttributeStore::default();
-    let attrs = PropertyAttributes {
-        store: &store,
-        key_of: &|_| ObjectKey(0),
-    };
-    brep_volume(k, b, 1e-8, &attrs).unwrap()
 }
 
 /// Per edge: whether its curve's owner is the edge's owner identity.
@@ -99,17 +87,11 @@ fn edge_owners(b: &Brep) -> Vec<(EdgeId, bool)> {
 }
 
 #[test]
-fn wr212_flag_keeps_a_kept_round_as_without_it() {
-    let (mut k_off, mut off) = first_round(false);
-    let (mut k_on, mut on) = first_round(true);
-    assert!(edge_owners(&off).iter().all(|&(_, owned)| owned));
-    assert_eq!(edge_owners(&on), edge_owners(&off));
-    assert_eq!(
-        volume(&k_on, &mut on).to_bits(),
-        volume(&k_off, &mut off).to_bits()
-    );
-    for (k, b) in [(&mut k_off, &mut off), (&mut k_on, &mut on)] {
-        let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
-        assert!(lines.is_empty(), "{lines:?}");
-    }
+fn wr212_check_keeps_a_kept_round_with_its_owners() {
+    let (mut k, mut b) = first_round();
+    assert!(edge_owners(&b).iter().all(|&(_, owned)| owned));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
 }

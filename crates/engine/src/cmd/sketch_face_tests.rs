@@ -414,7 +414,7 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind else { panic!("not sketch") };
     *plane = solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(plane.clone()),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
@@ -728,15 +728,16 @@ fn a_face_next_to_plane_is_refused_not_ignored() {
     assert_eq!(r["attachment"], "exact_face", "{r}");
 }
 
-/// #3248: a custom plane's `origin` that is present but not three numbers (an expression such as
-/// "w/2", a number with a unit, too few values) became [0, 0, 0] without a word. It is refused,
-/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin.
+/// #3248: a custom plane's `origin` that is present but not three numbers or length expressions
+/// (too few values, a bare name, a null entry) became [0, 0, 0] without a word. It is refused,
+/// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin. (Length
+/// expressions are accepted since #8192.)
 #[test]
 fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "40 mm"}));
     let features = s.doc.features.len();
-    for origin in [json!(["w/2", 0, 0]), json!(["20 mm", 0, 0]), json!([20, 0]), json!("w"), json!([20, 0, null])] {
+    for origin in [json!([20, 0]), json!("w"), json!([20, 0, null]), json!(["w/2", "nope", 0])] {
         let p = json!({"plane": {"origin": origin, "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}});
         let e = s.execute("sketch.create", &p).unwrap_err().to_string();
         assert!(e.contains("origin"), "{p}: {e}");
@@ -751,11 +752,18 @@ fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
     };
     assert_eq!(origin_of(&mut s, json!({"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([20.0, 0.0, 0.0]));
     assert_eq!(origin_of(&mut s, json!({"x_dir": [0, 1, 0], "y_dir": [0, 0, 1]})), json!([0.0, 0.0, 0.0]));
+    // Since #8192 the inputs this test once refused are evaluated: `w` is 40 mm, so "w/2" is 20 mm
+    // and "20 mm" is 20 mm, and the sketch's plane sits there, not at the origin.
+    for x in ["w/2", "20 mm"] {
+        let o = origin_of(&mut s, json!({"origin": [x, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}));
+        assert_eq!(o, json!([20.0, 0.0, 0.0]), "origin [{x}, 0, 0]");
+    }
 }
-/// A sketch on a body's face projects that face's edges from the body's display mesh. The body
-/// it projects from is the model's own, not a copy that meshes it again: on a body whose curved
-/// edges are slow to mesh, the copy's mesh was thrown away and the next feature meshed the body
-/// a second time, which made a sketch on a face as slow as a cut.
+/// Capturing a sketch's face reads the body's exact faces and meshes nothing; the projection of the
+/// face's edges then reads the model's own display mesh of the body. The body it projects from is
+/// the model's own, not a copy that meshes it again: on a body whose curved edges are slow to
+/// mesh, the copy's mesh was thrown away and the next feature meshed the body a second time, which
+/// made a sketch on a face as slow as a cut.
 #[test]
 fn a_sketch_on_a_face_meshes_its_body_once() {
     let mut s = Session::default();
@@ -768,10 +776,9 @@ fn a_sketch_on_a_face_meshes_its_body_once() {
 }
 /// Issue 6720: a face picked by its point alone was refused on a body with many faces. The
 /// search charged the whole mesh once per face, and the 5 000 facets a modelled thread left put a
-/// plain block past the limit. The search reads each face's own triangles now. A modelled thread
-/// is a few exact helical faces on SMLib, so the many faces are a block drilled with 256 holes:
-/// the old charge (every face times the whole mesh) is past the 2 000 000 budget, the new one
-/// (the mesh once, plus a test per face) well inside it.
+/// plain block past the limit. The faces holding the point are asked of the exact body now, and
+/// nothing is meshed. A modelled thread is a few exact helical faces on SMLib, so the many faces
+/// are a block drilled with 256 holes.
 #[test]
 fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     let mut s = Session::default();
@@ -785,10 +792,7 @@ fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.hole", json!({"sketch":"Drills","diameter":0.8}));
     let body = s.model.state().body("Block").unwrap().body.clone();
-    // The search's own mesh (sketch_face: the tolerance it meshes the body at).
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord((body.size() * 1e-4).max(1e-5))).unwrap();
-    let (faces, triangles) = (body.face_count(), mesh.triangles.len());
-    assert!(faces > 256 && faces * triangles > 2_000_000 && faces + triangles < 2_000_000, "{faces} faces, {triangles} triangles");
+    assert!(body.face_count() > 256, "{} faces", body.face_count());
     run(&mut s, "sketch.create", json!({"plane":{"face":[19,19,20],"fixed":true}}));
     let plane = run(&mut s, "sketch.inspect", json!({}))["plane"].clone();
     assert!((plane["origin"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{plane}");
@@ -981,4 +985,127 @@ fn a_sketch_on_a_face_of_an_imported_spline_body_meshes_nothing_more() {
     // A point on the cap's plane but off the cap is on no face.
     let off = s.execute("sketch.create", &json!({"plane": {"body": name, "index": bottom.index, "face": [100, 0, 0]}}));
     assert!(off.is_err(), "{off:?}");
+}
+
+#[test]
+fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment() {
+    // A modeled thread cuts thousands of facets into the bore. Its splitting planes must not
+    // leave the block's walls and corner edges in pieces: a corner round of such an edge loses
+    // the history that names the faces after it, and the top face can't be attached.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block","name":"BlockFeature"}));
+    run(&mut s, "solid.hole", json!({"position":[10,10,20],"diameter":5,"depth":20}));
+    run(&mut s, "solid.thread", json!({"face":[12.5,10,10],"designation":"M6","modeled":true}));
+    run(&mut s, "solid.fillet", json!({"edges":[[0,0,10],[20,0,10],[0,20,10],[20,20,10]],"radius":2,"name":"Corners"}));
+    let index = top_pick(&s, "Block")["index"].clone();
+    let id =
+        run(&mut s, "sketch.create", json!({"name":"Top","plane":{"face":[5,5,20],"body":"Block","index":index},"project_edges":false}))["sketch"]
+            .as_u64()
+            .unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not a sketch") };
+    let anchor = super::anchor(plane).expect("a durable attachment");
+    assert_eq!(anchor.target.name, "F1:+z");
+    draw(&mut s);
+    let radius = s.doc.find_feature("Corners").unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":radius,"expression":"3 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{plane:?}");
+}
+
+#[test]
+fn redefining_onto_a_face_picked_in_the_finished_design_reads_it_before_the_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    // The sketch to redefine comes before the boss, so it sees the plain box.
+    let id = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let top = top_pick(&s, "Base");
+    let boss = run(&mut s, "sketch.create", json!({"plane":top,"project_edges":false}))["sketch"].as_u64().unwrap();
+    draw(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch":boss,"distance":2,"operation":"join","targets":["Base"]}));
+    // The picker numbers the faces of the finished body: the box's top is now a face with the boss's footprint cut out.
+    let finished = s.world_state().unwrap();
+    let face = finished
+        .body("Base")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| face.plane_normal.is_some_and(|normal| normal.dot(Vec3::Z) > 0.999) && (face.centroid.z - 10.).abs() < 1e-6)
+        .unwrap();
+    let picked = json!({"body":"Base","index":face.index,"face":[7.0,7.0,10.0]});
+    // A stale index, as when the faces were numbered differently, names the same face by its point.
+    let stale = json!({"body":"Base","index":face.index + 50,"face":[7.0,7.0,10.0]});
+    for pick in [picked, stale] {
+        run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":pick}));
+        let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not sketch") };
+        assert!(super::anchor(plane).is_some());
+        assert!((s.model.state().sketch(id).unwrap().plane.origin.z - 10.).abs() < 1e-6);
+        run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":"XY"}));
+    }
+}
+
+/// The faces holding a picked point are the body's exact faces within the tolerance of it: a point
+/// in the middle of the top is the top alone, a point on the edge it shares with a side is both,
+/// and a point off every face is none.
+#[test]
+fn a_picked_point_names_the_exact_faces_that_hold_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    let body = s.model.state().body("Base").unwrap().body.clone();
+    assert_eq!(body.faces_within(Vec3::new(5.0, 5.0, 10.0), 1e-3).unwrap().len(), 1);
+    assert_eq!(body.faces_within(Vec3::new(10.0, 5.0, 10.0), 1e-3).unwrap().len(), 2);
+    assert!(body.faces_within(Vec3::new(5.0, 5.0, 12.0), 1e-3).unwrap().is_empty());
+    let edge = s.execute("sketch.create", &json!({"plane": {"face": [10, 5, 10], "fixed": true}}));
+    assert!(edge.is_err_and(|error| error.to_string().contains("ambiguous")));
+}
+
+/// A face index names a face of the body where the sketch attaches: the index of another face of
+/// that body, with the point on this one, is refused, not followed to the point. Only Redefine
+/// Sketch Plane, which reads its pick off the finished design, retries by the point.
+#[test]
+fn a_valid_index_of_another_face_is_refused_not_followed_to_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    let top = top_pick(&s, "Base");
+    let other =
+        s.world_state().unwrap().body("Base").unwrap().body.faces(0.01).unwrap().into_iter().find(|face| json!(face.index) != top["index"]).unwrap();
+    let wrong = json!({"body":"Base","index":other.index,"face":top["face"]});
+    let error = s.execute("sketch.create", &json!({"plane":wrong})).unwrap_err();
+    assert!(error.to_string().contains("no longer exists"), "{error}");
+}
+
+/// A point 0.3 mm from the edge two faces share, on a 100 mm block, is on its own face: the
+/// faces holding a point are those within the model tolerance (0.01 mm here), not within a
+/// hundredth of the body's size.
+#[test]
+fn a_point_near_an_edge_resolves_to_its_own_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":100,"height":100,"body_name":"Block","name":"BlockFeature"}));
+    for (point, normal) in [([99.7, 50.0, 100.0], Vec3::Z), ([100.0, 50.0, 99.7], Vec3::X)] {
+        let id = run(&mut s, "sketch.create", json!({"plane":{"face":point,"fixed":true}}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        let plane = s.model.state().sketch(id).unwrap().plane;
+        assert!(plane.normal().dot(normal) > 1.0 - 1e-9, "{point:?}: {plane:?}");
+    }
+}
+
+/// A body in a component that is moved and turned is picked by a point in world coordinates.
+#[test]
+fn a_face_of_a_moved_and_turned_component_is_picked_by_its_world_point() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[100,20,30],"axis":[0,0,1],"angle":"90 deg"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let pick = top_pick(&s, "Base");
+    assert!(pick["face"][2].as_f64().unwrap() > 39.0, "the pick is in world coordinates: {pick}");
+    for plane in [json!({"face":pick["face"]}), pick] {
+        let id = run(&mut s, "sketch.create", json!({"plane":plane,"project_edges":false}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        let plane = s.model.state().sketch(id).unwrap().plane;
+        assert!((plane.origin.z - 40.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
+    }
 }

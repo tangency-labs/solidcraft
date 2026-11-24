@@ -1,6 +1,7 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// Renders the Appearance preferences page, configuring theme, viewport background, and visual styling.
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
@@ -212,6 +213,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
+/// Renders the Layout & Panels preferences page, configuring interface density, window layout, dock placement, and timeline display style.
 pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_page(ui, |ui| {
@@ -250,6 +252,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_labels = selected == 0;
                             }
                         });
+                        let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
+                        crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
                         ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
                             let mut selected = usize::from(app.preferences.ribbon_icon_grid);
                             if ui_kit::segmented(
@@ -317,15 +321,149 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("prefs.remember_toolbar_tab"),
+                app.tr("prefs.remember_toolbar_tab_note"),
+                &mut app.preferences.remember_toolbar_tab,
+                "remember_toolbar_tab",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.tab_double_click_renames"),
                 app.tr("prefs.tab_double_click_renames_note"),
                 &mut app.preferences.tab_double_click_renames,
                 "tab_double_click_renames",
             );
+            windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
+            layout_check(
+                ui,
+                app.tr("window_ribbon.ribbon"),
+                app.tr("window_ribbon.preference_help"),
+                &mut app.preferences.pop_out_window_defaults.ribbon,
+                "pop_out_ribbon",
+            );
+            ui.add_enabled_ui(app.preferences.pop_out_window_defaults.ribbon, |ui| {
+                layout_check(
+                    ui,
+                    app.tr("window_ribbon.auto_hide"),
+                    app.tr("window_ribbon.auto_hide_help"),
+                    &mut app.preferences.pop_out_window_defaults.ribbon_auto_hide,
+                    "pop_out_ribbon_auto_hide",
+                );
+            });
+            layout_check(
+                ui,
+                app.tr("window_panels.other_panels"),
+                app.tr("window_panels.workspace_panels"),
+                &mut app.preferences.pop_out_window_defaults.panels,
+                "pop_out_other_panels",
+            );
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                use solidcraft_views::{CardHeaders, TopBar};
+                let labels = [app.tr("window_options.always"), app.tr("window_topbar.edge")];
+                ui_kit::settings_row_help(ui, app.tr("window_topbar.top_bar"), app.tr("window_topbar.preference_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = usize::from(options.top_bar == TopBar::Edge);
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = TopBar::ALL.get(selection)
+                    {
+                        options.top_bar = *state;
+                    }
+                });
+                let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];
+                ui_kit::settings_row_help(ui, app.tr("window_options.card_headers"), app.tr("window_options.card_headers_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = CardHeaders::ALL.iter().position(|state| *state == options.card_headers).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = CardHeaders::ALL.get(selection)
+                    {
+                        options.card_headers = *state;
+                    }
+                });
+            });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("window_size.interface_size"), app.tr("window_size.default_help"), |ui| {
+                    use solidcraft_views::InterfaceSize;
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let labels = InterfaceSize::ALL.map(|size| format!("{}%", u16::from(size)));
+                    let labels = labels.each_ref().map(String::as_str);
+                    let mut selection = InterfaceSize::ALL.iter().position(|size| *size == options.interface_size).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(size) = InterfaceSize::ALL.get(selection)
+                    {
+                        options.interface_size = *size;
+                    }
+                });
+            });
+            layout_check(
+                ui,
+                app.tr("window_options.keep_on_top"),
+                app.tr("window_options.keep_on_top_help"),
+                &mut app.preferences.pop_out_window_defaults.keep_on_top,
+                "pop_out_keep_on_top",
+            );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
         }
+        ui_kit::settings_section(ui, "design_tabs", app.tr("prefs.layout_page.design_tabs"), |ui| {
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("prefs.design_views_as_tabs"), app.tr("prefs.design_views_as_tabs_note"), |ui| {
+                    let mut selected = usize::from(!app.preferences.design_views_as_tabs);
+                    if ui_kit::segmented(
+                        ui,
+                        &mut selected,
+                        &[app.tr("prefs.design_views_tabs"), app.tr("prefs.design_views_switcher")],
+                        ui_kit::Segments { intrinsic: true, ..Default::default() },
+                    ) {
+                        app.preferences.design_views_as_tabs = selected == 0;
+                    }
+                });
+            });
+            layout_check(
+                ui,
+                app.tr("prefs.show_design_view_switcher"),
+                app.tr("prefs.show_design_view_switcher_note"),
+                &mut app.preferences.show_design_view_switcher,
+                "show_design_view_switcher",
+            );
+            let response = setting::workspace_follows_view(app, ui);
+            crate::scenario::publish_target("prefs:workspace_follows_view", response.rect);
+            layout_check(
+                ui,
+                app.tr("prefs.clear_view_tabs"),
+                app.tr("prefs.clear_view_tabs.help"),
+                &mut app.preferences.clear_view_tabs,
+                "clear_view_tabs",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_sub_tab_sheets"),
+                app.tr("prefs.design_sub_tab_sheets_note"),
+                &mut app.preferences.design_sub_tab_sheets,
+                "design_sub_tab_sheets",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_sub_tab_render"),
+                app.tr("prefs.design_sub_tab_render_note"),
+                &mut app.preferences.design_sub_tab_render,
+                "design_sub_tab_render",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_reuse_views"),
+                app.tr("prefs.design_reuse_views_note"),
+                &mut app.preferences.design_reuse_views,
+                "design_reuse_views",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.design_reopen_views"),
+                app.tr("prefs.design_reopen_views_note"),
+                &mut app.preferences.design_reopen_views,
+                "design_reopen_views",
+            );
+        });
         ui_kit::settings_section(ui, "panels", app.tr("prefs.layout_page.panels"), |ui| {
             layout_check(
                 ui,
@@ -341,6 +479,32 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.history_in_browser,
                 "history_in_browser",
             );
+            layout_check(
+                ui,
+                app.tr("library.show"),
+                app.tr("library.show_help"),
+                &mut app.preferences.show_document_browser,
+                "show_document_browser",
+            );
+            let sizes = crate::library::ThumbnailSize::ALL;
+            let options = [
+                ui_kit::PictureChoice { key: "small", label: app.tr(sizes[0].label()), figure: |p, rect| document_browser_preview(p, rect, 0.2) },
+                ui_kit::PictureChoice { key: "medium", label: app.tr(sizes[1].label()), figure: |p, rect| document_browser_preview(p, rect, 0.25) },
+                ui_kit::PictureChoice { key: "large", label: app.tr(sizes[2].label()), figure: |p, rect| document_browser_preview(p, rect, 0.3) },
+            ];
+            let selected = sizes.iter().position(|size| *size == app.preferences.library_thumbnail_size).unwrap_or(2);
+            if let Some(selected) =
+                ui_kit::settings_picture_choices(ui, "document_browser", app.tr("library.thumbnail_section"), &options, selected, true)
+                && let Some(size) = sizes.get(selected)
+            {
+                app.preferences.library_thumbnail_size = *size;
+            }
+            ui_kit::text(ui, app.tr("library.thumbnail_help"), ui_kit::Text::Note("document_browser_size"));
+            // The Browser tree panel can be closed from its own host menu; this control brings it
+            // back (#16058).
+            let browser_label = app.tr("prefs.layout_page.browser_tree");
+            let browser_help = app.tr("prefs.layout_page.browser_tree_note");
+            browser_tree_check(ui, app, browser_label, browser_help);
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
                     let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
@@ -456,6 +620,25 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_steps_component,
                     "history_steps_component",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_last_stops_at_component"),
+                    app.tr("prefs.history_last_stops_at_component_note"),
+                    &mut app.preferences.history_last_stops_at_component,
+                    "history_last_stops_at_component",
+                );
+            });
+            // What a feature's menu does with several selected features, in a row of its own for
+            // the same reason.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.feature_menus_act_on_selection"),
+                    app.tr("prefs.feature_menus_act_on_selection_note"),
+                    &mut app.preferences.feature_menus_act_on_selection,
+                    "feature_menus_act_on_selection",
+                );
             });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
@@ -507,6 +690,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.ribbon_tabs_only"),
                 app.tr("prefs.layout_page.pinned_menus"),
                 app.tr("prefs.layout_page.hover_panel_menus"),
+                app.tr("prefs.pinned_constraints_in_grid"),
             ];
             let widest =
                 labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
@@ -576,6 +760,16 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                             "ribbon_menus_follow_hover",
                                         );
                                     }
+                                    // Pinned constraints as small cells in the Constrain grid.
+                                    6 => {
+                                        layout_check(
+                                            ui,
+                                            app.tr("prefs.pinned_constraints_in_grid"),
+                                            app.tr("prefs.pinned_constraints_in_grid_note"),
+                                            &mut app.preferences.pinned_constraints_in_grid,
+                                            "pinned_constraints_in_grid",
+                                        );
+                                    }
                                     _ => {}
                                 },
                             );
@@ -585,6 +779,45 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         super::navbar::show(app, ui);
+    });
+}
+
+/// Windows: nothing is drawn while the window is dragged by its title bar, so it moves smoothly
+/// (`windows_smooth_window_drag`); drawn only where the choice exists (`available`:
+/// [`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]). It applies at once: no restart badge.
+pub(super) fn windows_smooth_window_drag_row(app: &mut SolveApp, ui: &mut egui::Ui, available: bool) {
+    if !available {
+        return;
+    }
+    layout_check(
+        ui,
+        app.tr("prefs.windows_smooth_window_drag"),
+        app.tr("prefs.windows_smooth_window_drag_help"),
+        &mut app.preferences.windows_smooth_window_drag,
+        "windows_smooth_window_drag",
+    );
+}
+
+/// Keep the Browser tree panel reachable from Layout settings. The panel closes from its own host
+/// menu, and the window has no other way back (#16058).
+fn browser_tree_check(ui: &mut egui::Ui, app: &mut SolveApp, label: &str, help: &str) {
+    let t = Tokens::get();
+    let mut visible = crate::browser::panel_open(app);
+    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
+    ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui_kit::settings_form(ui, 0.0, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_6;
+                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+                let response =
+                    ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, &mut visible).backing_on_hover_text(help));
+                crate::scenario::publish_target("prefs:browser_tree", response.rect);
+                ui_kit::help_icon(ui, help);
+                if response.changed() {
+                    let _ = app.run("view.browser", json!({"visible": visible}));
+                }
+            })
+        });
     });
 }
 
@@ -603,4 +836,36 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
             })
         });
     });
+}
+
+/// A small window specimen using the same themed card as History and Browser.
+fn document_browser_preview(p: &egui::Painter, rect: egui::Rect, panel_fraction: f32) {
+    let t = Tokens::get();
+    let area = rect.shrink(3.0);
+    let at = |x: f32, y: f32| egui::pos2(area.left() + area.width() * x, area.top() + area.height() * y);
+    let block = |x: f32, y: f32, w: f32, h: f32| egui::Rect::from_min_max(at(x, y), at(x + w, y + h));
+    let stroke = egui::Stroke::new(1.0, t.border);
+    p.rect(area, 2.0, t.field, stroke, egui::StrokeKind::Inside);
+    p.line_segment([at(0.0, 0.14), at(1.0, 0.14)], stroke);
+    for x in [0.04, 0.16, 0.28] {
+        p.line_segment([at(x, 0.07), at(x + 0.08, 0.07)], egui::Stroke::new(1.5, t.text_dim));
+    }
+    let panel = block(0.02, 0.18, panel_fraction, 0.78);
+    p.rect(panel, 2.0, t.panel, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    let tile = (panel_fraction - 0.06) / 2.0;
+    for row in 0..3 {
+        for column in 0..2 {
+            let card = block(0.04 + column as f32 * (tile + 0.02), 0.23 + row as f32 * (tile + 0.1), tile, tile + 0.04);
+            p.rect(card, 1.0, t.field, stroke, egui::StrokeKind::Inside);
+            p.line_segment([card.left_bottom() + egui::vec2(2.0, -3.0), card.right_bottom() + egui::vec2(-2.0, -3.0)], stroke);
+        }
+    }
+    let view = block(panel_fraction + 0.05, 0.18, 0.93 - panel_fraction, 0.78);
+    p.rect(view, 2.0, t.panel, stroke, egui::StrokeKind::Inside);
+    crate::icons::paint_ink(
+        p,
+        egui::Rect::from_center_size(view.center(), egui::vec2(area.height() * 0.22, area.height() * 0.22)),
+        "box",
+        t.text_dim,
+    );
 }

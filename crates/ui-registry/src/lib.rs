@@ -7,11 +7,12 @@
 //! search from the end: when a name is published more than once in a frame, the latest wins.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 
 thread_local! {
     /// Drag handles drawn this frame (name, screen point): manipulators publish theirs so
     /// scenarios (and the control channel's `ui.at {handle}`) can grab them.
-    static HANDLES: RefCell<Vec<(String, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
+    static HANDLES: RefCell<Vec<(Arc<str>, egui::Pos2)>> = const { RefCell::new(Vec::new()) };
     /// Painted parts with no widget of their own (the toolbar, the workspace switcher…): rects
     /// and counts by name, for checks.
     static RECTS: RefCell<Vec<(String, egui::Rect)>> = const { RefCell::new(Vec::new()) };
@@ -22,7 +23,13 @@ thread_local! {
 /// arrow), "triad_x"… Call it from the code that draws the handle, every frame it shows.
 pub fn publish_handle(name: &str, at: egui::Pos2) {
     // The latest wins (lookups search from the end), so publishing is cheap for browser rows.
-    HANDLES.with(|h| h.borrow_mut().push((name.to_string(), at)));
+    HANDLES.with(|h| h.borrow_mut().push((Arc::from(name), at)));
+}
+
+/// A handle as [`publish_handle`] publishes it, for a caller that keeps its name between frames
+/// (the History bar's long rows of steps): publishing then copies no text.
+pub fn publish_shared_handle(name: &Arc<str>, at: egui::Pos2) {
+    HANDLES.with(|h| h.borrow_mut().push((Arc::clone(name), at)));
 }
 
 /// Publish a rectangle and its centered interaction handle with the same explicit identity.
@@ -38,12 +45,12 @@ pub fn publish_target_as(handle: &str, rect_name: &str, rect: egui::Rect) {
 
 /// Where a handle was drawn last frame.
 pub fn handle_at(name: &str) -> Option<egui::Pos2> {
-    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| n == name).map(|x| x.1))
+    HANDLES.with(|h| h.borrow().iter().rfind(|(n, _)| &**n == name).map(|x| x.1))
 }
 
 /// Every handle drawn last frame whose name starts with `prefix`.
 pub fn handles(prefix: &str) -> Vec<(String, egui::Pos2)> {
-    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).cloned().collect())
+    HANDLES.with(|h| h.borrow().iter().filter(|(n, _)| n.starts_with(prefix)).map(|(n, at)| (n.to_string(), *at)).collect())
 }
 
 /// A painted part's rect this frame, by name ("toolbar", "workspace_switcher").
@@ -140,6 +147,23 @@ mod tests {
         assert_eq!(handle_at("row"), Some(pos2(2.0, 2.0)));
         assert_eq!(rect_of("panel"), Some(square(5.0)));
         assert_eq!(count_of("n"), Some(2.0));
+    }
+
+    #[test]
+    fn a_shared_handle_is_found_like_a_plain_one_and_the_latest_wins_across_both() {
+        clear_handles();
+        let row: Arc<str> = Arc::from("row:Bodies");
+        publish_shared_handle(&row, pos2(1.0, 1.0));
+        publish_handle("row:Sketches", pos2(2.0, 2.0));
+        assert_eq!(handle_at("row:Bodies"), Some(pos2(1.0, 1.0)));
+        assert_eq!(handles("row:"), [("row:Bodies".to_string(), pos2(1.0, 1.0)), ("row:Sketches".to_string(), pos2(2.0, 2.0))]);
+        publish_handle("row:Bodies", pos2(3.0, 3.0));
+        assert_eq!(handle_at("row:Bodies"), Some(pos2(3.0, 3.0)), "a plain publish after a shared one wins");
+        publish_shared_handle(&row, pos2(4.0, 4.0));
+        assert_eq!(handle_at("row:Bodies"), Some(pos2(4.0, 4.0)), "a shared publish after a plain one wins");
+        assert_eq!(&*row, "row:Bodies", "publishing leaves the kept name as it was");
+        clear_handles();
+        assert_eq!(handle_at("row:Bodies"), None);
     }
 
     #[test]

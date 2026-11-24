@@ -59,9 +59,8 @@
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
 [downloads page](docs/downloads.md). The macOS app is signed with a Developer ID and notarized by
-Apple. Windows signing: free code signing provided by SignPath.io, certificate by SignPath
-Foundation ([code signing policy](https://docs.solidcraft.io/code-signing-policy.html)). Until the
-production certificate is in place, SmartScreen may warn: choose **More info**, then **Run anyway**. On SolidCraft 0.11 to 0.14, download once by hand; see
+Apple. The Windows files are unsigned for now ([code signing and privacy](https://docs.solidcraft.io/code-signing-policy.html)),
+so SmartScreen may warn: choose **More info**, then **Run anyway**. On SolidCraft 0.11 to 0.14, download once by hand; see
 [updating](https://docs.solidcraft.io/guide/updates.html#updating-from-011-to-014).
 
 ## What works
@@ -113,7 +112,7 @@ Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven
 Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
 The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
 installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
-The interface is experimental: WIT package `craft:plugin@0.1.0`, capability `commands@0.1`. While
+The interface is experimental: WIT package `craft:plugin@0.2.0`, capability `commands@0.2` (plugins built for 0.1 still run). While
 it is 0.x a minor version may break the one before it; the host refuses a plugin that needs a
 capability it does not have, in plain words. Review a plugin again after an update. The desktop app and headless CLI use the same commands. Browser
 execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature
@@ -218,6 +217,14 @@ Review its manifest and component, obtain the content approval hash, and explici
 A changed manifest budget requires a fresh approval hash. Keep the selected ceilings within your
 machine's available resources; they are limits on guest execution, not total SolidCraft memory
 or native CAD work. The independent maximum execution deadline stays 30 seconds.
+
+Standalone CLI runs and headless MCP use the plugins installed for the desktop app; approvals
+given there last for the run. Add `--keep-plugin-approvals` to keep them between runs, shared
+with the desktop app, so a plugin is installed and approved once, and `--plugins-dir DIR` to use
+a separate set of plugins and approvals, for example in CI. List kept approvals with
+`solidcraft-cli --keep-plugin-approvals exec plugin.grants` and take one back with
+`solidcraft-cli --keep-plugin-approvals exec plugin.revoke '{"id":"PLUGIN_ID"}'`
+([Headless use](docs/plugins.md#headless-use)).
 
 ### Permissions, results and saved designs
 

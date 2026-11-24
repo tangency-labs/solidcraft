@@ -10,17 +10,32 @@ use std::collections::HashSet;
 use solidcore_ops::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
-/// [`Trims`] by SMLib.
+/// [`Trims`] by SMLib, with #18166's proved raise: every caller, the repair of a face included.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SmlibTrims;
 
 impl Trims for SmlibTrims {
     fn trims(&self, face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
-        trims(face).map_err(|e| format!("SMLib pcurves: {e}"))
+        trims(face, false).map_err(|e| format!("SMLib pcurves: {e}"))
     }
 }
 
-fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
+/// [`SmlibTrims`] of a file's translation: a file builds every trim of every face it reads,
+/// so its trims raise their edges by upstream's sampled distance, not a proved one, which
+/// cost many times the translation. A repair keeps [`SmlibTrims`]'s proved raise: it rebuilds
+/// one face, and #18166 fixed the tolerance growth of repeated refits.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SmlibImportTrims;
+
+impl Trims for SmlibImportTrims {
+    fn trims(&self, face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
+        trims(face, true).map_err(|e| format!("SMLib pcurves: {e}"))
+    }
+}
+
+/// `sampled`: raise the trims' edges by upstream's sampled distance, as a file import asks
+/// ([`SmlibImportTrims`]); else by #18166's proved one ([`SmlibTrims`]).
+fn trims(face: &TrimFace<'_>, sampled: bool) -> Result<Vec<Vec<Curve2>>, String> {
     let (record, bare) = sheet(face)?;
     let mut arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
     let import = |a: &crate::import::Arrays| crate::Brep::from_arrays(a).map_err(|e| e.to_string());
@@ -28,7 +43,18 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;
     }
-    let (out, order) = body.to_native_ordered().map_err(|e| e.to_string())?;
+    // SMLib's trims are made by dropping each edge onto the surface, and an edge that lies farther
+    // off it than its tolerance never drops well enough: each span fails its test again at every
+    // halving, over every edge and retry, without end. The work is limited, by its own count.
+    let limit = work_limit(face);
+    let (made, spent) = crate::stop::within_polls(limit, || if sampled { body.to_native_ordered_sampled_trims() } else { body.to_native_ordered() });
+    let (out, order) = made.map_err(|e| {
+        if spent {
+            "the face's edges lie too far off its surface for SMLib to make their trims within the work allowed".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
     let made_uses: Vec<&OrientedEdge> = made
         .loops
@@ -59,11 +85,35 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
             let found = made_uses.iter().find(|m| m.edge as usize == e && m.forward == (u.forward != reversed));
             let pc = found.ok_or("a use SMLib did not keep")?.pcurve.clone();
             let tolerance = held.get(u.edge as usize).copied().unwrap_or(ours.tolerance).max(ours.tolerance);
-            pcs.push(on_our_interval(pc, ours, edge.interval, tolerance)?);
+            // How far each end may move: within its vertex's tolerance where the caller covers the
+            // gap ([`TrimFace::vertex_tolerances`]), else within the edge's.
+            let reach = ours.vertices.map(|v| face.vertex_tolerances.get(v as usize).copied().unwrap_or(0.0));
+            pcs.push(on_our_interval(pc, ours, edge.interval, tolerance, reach)?);
         }
         result.push(pcs);
     }
     Ok(result)
+}
+
+/// The work SMLib may do making a face's trims, in the kernel's checks for a stop. A drop that
+/// succeeds takes a few checks a span of its edge's curve; the limit is far above that, and
+/// grows with the knots the edges' curves have.
+// Measured on GitHub's runners on the five spring-wire files of #20575 (one face of about 115 edge
+// knots, so 8000 + 100 per knot was ~19500 checks): faces that trim in a second used 8698, 15742,
+// 20116 and 44828 checks, so that limit refused two good faces. Ten times it leaves more than four
+// times the largest good count, and the face that never finishes is still refused in about 13 s.
+fn work_limit(face: &TrimFace<'_>) -> u64 {
+    const BASE: u64 = 80_000;
+    const PER_KNOT: u64 = 1_000;
+    let knots = face.edges.iter().fold(0u64, |sum, e| {
+        let count = match e.nurbs.unwrap_or(e.curve) {
+            b::Curve::Spline { knots, .. } | b::Curve::RationalSpline { knots, .. } => knots.len(),
+            b::Curve::Polyline { points } => points.len(),
+            _ => 8,
+        };
+        sum.saturating_add(u64::try_from(count).unwrap_or(u64::MAX))
+    });
+    BASE.saturating_add(PER_KNOT.saturating_mul(knots))
 }
 
 /// Each bare use's edge measured against the face's surface as SMLib measures it (over the
@@ -103,12 +153,21 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
 /// A pcurve SMLib made on its edge's interval `theirs`, on ours. SMLib may set an edge's end to
 /// a parameter of its own (a knot its vertex lies at, the end of the part on the face: where an
 /// edge runs past its face's patch, SMLib ends it where its drop onto the patch ends, when that
-/// is within the edge's cross-section tolerance of its vertex): where each end it chose is
-/// within `tolerance` of ours on the edge's curve (the edge's tolerance as SMLib held it,
-/// [`cover_gaps`]), the pcurve is mapped onto our interval by the affine change of parameter
-/// (exact for a B-spline: its knots move), and the record's check measures it against the edge
-/// as any pcurve. Farther is SMLib trimming the edge, refused with how far.
-pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcore_ops::pcurve::TrimEdge<'_>, theirs: [f64; 2], tolerance: f64) -> Result<Curve2, String> {
+/// is within the edge's cross-section tolerance of its vertex; where an edge's first few um lie
+/// across a closed patch's seam, SMLib drops that piece and starts the edge on the seam): where
+/// each end it chose is within `tolerance` of ours on the edge's curve (the edge's tolerance as
+/// SMLib held it, [`cover_gaps`]), or within `reach` of it (that end's vertex's tolerance, where
+/// the caller covers the gap the move makes, [`TrimFace::vertex_tolerances`]), the pcurve is
+/// mapped onto our interval by the affine change of parameter (exact for a B-spline: its knots
+/// move), and the record's check measures it against the edge as any pcurve. Farther is SMLib
+/// trimming the edge, refused with how far.
+pub(crate) fn on_our_interval(
+    pc: Curve2,
+    ours: &solidcore_ops::pcurve::TrimEdge<'_>,
+    theirs: [f64; 2],
+    tolerance: f64,
+    reach: [f64; 2],
+) -> Result<Curve2, String> {
     let [a, b] = ours.interval;
     let [c, d] = theirs;
     if a == c && b == d {
@@ -116,10 +175,12 @@ pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcore_ops::pcurve::TrimEdge
     }
     let curve = solidcraft_geom::brep::eval::CurveEval::new(ours.nurbs.unwrap_or(ours.curve)).map_err(|e| e.to_string())?;
     let at = |t: f64| curve.point(t).ok_or_else(|| format!("the edge's curve has no point at {t}"));
-    let shift = at(a)?.dist(at(c)?).max(at(b)?.dist(at(d)?));
-    if !(shift <= tolerance) || !(d > c) {
+    let moved = [at(a)?.dist(at(c)?), at(b)?.dist(at(d)?)];
+    let within = moved.iter().zip(reach).all(|(m, r)| *m <= tolerance.max(r));
+    if !within || !(d > c) {
+        let shift = moved[0].max(moved[1]);
         return Err(format!(
-            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {tolerance} mm)",
+            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {tolerance} mm, its vertices' {reach:?} mm)",
             ours.interval, theirs
         ));
     }

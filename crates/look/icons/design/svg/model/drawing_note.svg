@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Drawing note</title>
+  <path d="M13 10L51 10Q54 10 54 13L54 51Q54 54 51 54L13 54Q10 54 10 51L10 13Q10 10 13 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M19 22L45 22M19 32L45 32M19 42L36 42" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -35,7 +35,9 @@ pub struct HostPage<S> {
     pub defaults: fn(&mut S),
 }
 
-/// The window's words, already in the user's language.
+/// The window's words the host gives, already in the user's language. The search field, its
+/// empty result and Restore Defaults are the kit's own (`prefs.search`, `prefs.search_empty`,
+/// `prefs.restore_page_defaults`).
 pub struct Labels<'a> {
     pub title: &'a str,
     /// The kit icon in the title bar.
@@ -43,9 +45,6 @@ pub struct Labels<'a> {
     pub ok: &'a str,
     pub cancel: &'a str,
     pub apply: &'a str,
-    pub search: &'a str,
-    pub no_results: &'a str,
-    pub restore_defaults: &'a str,
     pub restore_defaults_hint: &'a str,
 }
 
@@ -254,8 +253,19 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
-        host.window().reveal = None;
+    // The window's copy carries the outline's time: it is set into the context every frame. The
+    // time starts when the row first draws ([`settings_search::follow`]), so it is taken from the
+    // context's copy then and kept until the next reveal.
+    let now = ctx.input(|i| i.time) * 1000.0;
+    if let Some(reveal) = host.window().reveal.as_mut() {
+        if reveal.until.is_nan()
+            && let Some(drawn) = settings_search::current_reveal(ctx).filter(|d| d.page == reveal.page && d.label == reveal.label)
+        {
+            reveal.until = drawn.until;
+        }
+        if reveal.expired(now) {
+            host.window().reveal = None;
+        }
     }
     let sink = settings_search::shift_key_sink(ctx);
     settings_search::set_key_sink_prev(ctx, sink);
@@ -300,7 +310,8 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     let mut selected = host.window_ref().section;
     let mut defaults = false;
     let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &list, host, &hooks, |ui| {
-        let button = crate::button(ui, labels.restore_defaults, crate::Button::Ghost).backing_on_hover_text(labels.restore_defaults_hint);
+        let button = crate::button(ui, solidcraft_ui_text::tr("prefs.restore_page_defaults"), crate::Button::Normal)
+            .backing_on_hover_text(labels.restore_defaults_hint);
         solidcraft_ui_registry::publish_target(&format!("{}:defaults", options.prefix), button.rect);
         defaults = button.clicked();
     });
@@ -352,7 +363,7 @@ fn page_path<S>(pages: &[Page<S>], index: usize) -> String {
 fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
     let id = search_id(options.id);
     let typed = drive_search(ui, host, id, options.prefix);
-    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, options.labels.search, options.prefix);
+    let field = crate::preferences_search_field(ui, id, &mut host.window().filter, solidcraft_ui_text::tr("prefs.search"), options.prefix);
     if typed {
         place_search_cursor(ui.ctx(), id, host.window_ref().filter.chars().count());
     }
@@ -488,7 +499,7 @@ fn page_body<S: Host>(ui: &mut Ui, host: &mut S, pages: &[Page<S>], options: &Op
         }
         if settings_search::hits(ui) == 0 {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(options.labels.no_results).size(t.font_body).color(t.form_dim));
+            ui.label(egui::RichText::new(solidcraft_ui_text::tr("prefs.search_empty")).size(t.font_body).color(t.form_dim));
         }
     } else {
         let section = host.window_ref().section;

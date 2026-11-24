@@ -1,4 +1,0 @@
-| File | Author | Source | Licence |
-|---|---|---|---|
-| crates/doc/src/frame_sizes.rs | SolidCraft contributors | Standard steel section dimensions and areas (facts from published standards: BS 4-1:1993 taper flange channels, BS 4-1:2005 parallel flange channels, BS EN 10056-1 equal angles, BS EN 10210-2 hot-finished SHS, RHS and CHS), typed from the openly published tables at https://www.roymech.org/Useful_Tables/Sections/chan_dim.html and https://www.roymech.org/Useful_Tables/Sections/chanA_dimprop.html (taper flange channels) and https://www.steelforlifebluebook.co.uk (the other families); no CAD product's library used | MIT OR Apache-2.0 |
-| assets/locales/pending/frame-standard-sizes.json | SolidCraft contributors | Original frame standard-size labels and translations | MIT OR Apache-2.0 |

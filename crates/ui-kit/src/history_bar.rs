@@ -56,8 +56,12 @@ pub struct Step<'a> {
     pub warning: bool,
     /// Draw the icon in this one colour instead of its artwork.
     pub ink: Option<egui::Color32>,
-    /// The hover text, written only while it shows.
-    pub tip: &'a dyn Fn() -> String,
+    /// The hover text, written only while it shows: its name and type, its error and warning,
+    /// then the rest (#8834).
+    pub tip: &'a dyn Fn() -> crate::StatusTip,
+    /// Its handle's name ([`Handles::step`] followed by the label) when the app keeps it ready,
+    /// so a long bar publishes its steps without building their names every frame; `None` builds it.
+    pub handle: Option<&'a std::sync::Arc<str>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,6 +116,12 @@ enum Drag {
     Step(u64),
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times steps out of view read the focus and the open popups.
+    static QUIET_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The strip being laid out, left to right.
 pub struct Strip<'u, 'b> {
     ui: &'u mut egui::Ui,
@@ -120,8 +130,12 @@ pub struct Strip<'u, 'b> {
     /// The whole bar's rect: chips sit at its top.
     rect: Rect,
     x: f32,
-    /// Each slot's left edge, one per step (a folded chip repeats its own for the steps it holds).
+    /// Each slot's marker centre (a folded chip repeats its first slot for the steps it holds).
     xs: Vec<f32>,
+    /// Drops on a folded chip land before the run it holds.
+    folded: Vec<(Rect, usize)>,
+    /// The last slot's marker position; open groups share their first step's slot.
+    slot_space: Option<(usize, Rect)>,
     marker_rect: Option<Rect>,
     /// Each open tray: where it starts, its place under the chips, its depth.
     trays: Vec<(f32, egui::layers::ShapeIdx, usize)>,
@@ -129,6 +143,10 @@ pub struct Strip<'u, 'b> {
     hovered: Option<u64>,
     edit: Option<u64>,
     actions: Vec<Action>,
+    /// The focused widget and whether a popup is open, as last read for steps out of view: a run
+    /// of them reads both once, not twice per step. Forgotten by whatever adds or interacts with a
+    /// widget (a step in view, the app's chips, its `ui`), which can move the focus or open one.
+    quiet: Option<(Option<egui::Id>, bool)>,
 }
 
 /// Draws the steps in `rect`, scrolled sideways (`scroll` keeps its own scroll offset), the bar's
@@ -164,25 +182,42 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         painter,
         bar,
         rect,
-        x,
-        xs: Vec::new(),
+        // A single leading gutter keeps the first marker visible without widening each step.
+        x: x + if bar.steps > 0 { t.space_16 } else { 0.0 },
+        xs: Vec::with_capacity(bar.steps),
+        folded: Vec::new(),
+        slot_space: None,
         marker_rect: None,
         trays: Vec::new(),
         drag,
         hovered: None,
         edit: None,
         actions: Vec::new(),
+        quiet: None,
     };
     contents.entries(&mut strip);
-    let Strip { ui, painter: p, x: end, xs, mut marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
-    let marker = bar.marker;
-    if marker >= bar.steps && marker_rect.is_none() {
-        marker_rect = Some(marker_at(rect, end));
+    // Keep room at the end even when the marker is elsewhere, so scrolling stays put.
+    let end_marker = strip.slot_here(bar.steps);
+    strip.x += t.space_16;
+    if bar.marker >= bar.steps && strip.marker_rect.is_none() {
+        strip.marker_rect = Some(end_marker);
     }
-    // The history marker: drag it to roll the model back or forward.
-    if let Some(mr) = marker_rect {
+    let Strip { ui, painter: p, x: end, xs, folded, marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
+    let marker = bar.marker;
+    let drop_end = end_marker.center().x;
+    // Between chips, only the four-point gap grabs the marker. The painted circle may
+    // overlap their corners, but clicking or dragging a chip still belongs to that chip.
+    // The end gutters have room for the original wider target.
+    let grab = marker_rect.map(|mr| {
+        if mr.left() == origin || mr == end_marker {
+            mr.expand2(vec2(3.0, 0.0))
+        } else {
+            Rect::from_center_size(mr.center(), vec2(t.space_4, mr.height()))
+        }
+    });
+    if let (Some(mr), Some(grab)) = (marker_rect, grab) {
         solidcraft_ui_registry::publish_rect(bar.handles.marker, mr);
-        let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
+        let resp = ui.interact(grab, ui.scope_id().with("tl_marker"), Sense::drag());
         if resp.drag_started() {
             drag = Some(Drag::Marker);
         }
@@ -192,7 +227,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         crate::history_marker(&p, mr, false, bar.accent);
         resp.backing_on_hover_text(bar.marker_tip);
     }
-    let content_end = contents.trailing(ui, &p, end, rect);
+    let content_end = contents.trailing(ui, &p, end, rect).max(end);
     // The scroll range follows the drawn content (the chips don't take layout space themselves).
     ui.allocate_exact_size(vec2((content_end - origin).max(0.0), rect.height()), Sense::hover());
     // Drag feedback, and the drop.
@@ -204,7 +239,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
     let before_marker = |slot: usize, x: f32| slot < marker || (slot == marker && marker_rect.is_none_or(|mr| x < mr.center().x));
     // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
-        && let local = slot_at(&xs, end, pp.x)
+        && let local = slot_at(&xs, &folded, drop_end, pp.x)
         && !(matches!(dg, Drag::Marker) && local == marker)
     {
         // Centred in the gap between two chips, or beside the marker at its slot.
@@ -216,7 +251,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
                     mr.right() + 2.0
                 }
             }
-            _ => xs.get(local).copied().unwrap_or(end) - 2.0,
+            _ => xs.get(local).copied().unwrap_or(drop_end),
         };
         // Kept inside the strip so the slot before the first step stays visible.
         let sx = sx.max(origin + t.space_2);
@@ -233,7 +268,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         && let Some(dg) = drag.take()
         && let Some(pp) = pointer
     {
-        let slot = slot_at(&xs, end, pp.x);
+        let slot = slot_at(&xs, &folded, drop_end, pp.x);
         let before = before_marker(slot, pp.x);
         actions.push(match dg {
             Drag::Marker => Action::Seek { slot, before },
@@ -256,11 +291,14 @@ fn marker_at(rect: Rect, x: f32) -> Rect {
     Rect::from_min_size(pos2(x, rect.top() + 5.0), vec2(t.space_12, rect.height() - 10.0))
 }
 
-/// Slot index (0..=n) nearest to screen x, given the left edges of the chips.
-fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
+/// Slot index (0..=n) nearest to screen x, using the positions where the marker is drawn.
+fn slot_at(xs: &[f32], folded: &[(Rect, usize)], end: f32, x: f32) -> usize {
+    if let Some((_, slot)) = folded.iter().find(|(rect, _)| (rect.left()..=rect.right()).contains(&x)) {
+        return *slot;
+    }
     let mut best = (0usize, f32::INFINITY);
     for (i, sx) in xs.iter().chain(std::iter::once(&end)).enumerate() {
-        let d = (sx - 2.0 - x).abs();
+        let d = (sx - x).abs();
         if d < best.1 {
             best = (i, d);
         }
@@ -271,6 +309,7 @@ fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
 impl Strip<'_, '_> {
     /// The strip's ui, for what the app draws itself.
     pub fn ui(&mut self) -> &mut egui::Ui {
+        self.quiet = None;
         self.ui
     }
 
@@ -283,32 +322,60 @@ impl Strip<'_, '_> {
         self.rect
     }
 
-    /// Puts the marker here once.
-    fn marker_here(&mut self) {
-        if self.marker_rect.is_none() {
-            self.marker_rect = Some(marker_at(self.rect, self.x));
-            self.x += Tokens::get().space_16;
+    /// Places the marker over the existing gap, without moving the following chip. A group
+    /// and its first step share a position, keeping the marker before the group.
+    fn slot_here(&mut self, slot: usize) -> Rect {
+        if let Some((previous, rect)) = self.slot_space
+            && previous == slot
+        {
+            return rect;
         }
+        let t = Tokens::get();
+        let x = if slot >= self.bar.steps {
+            self.x
+        } else if self.x == self.ui.max_rect().left() + t.space_16 {
+            self.x - t.space_16
+        } else {
+            // The 12-point paint rect is centred in the four-point gap before the chip.
+            self.x - t.space_2 - t.space_12 / 2.0
+        };
+        let rect = marker_at(self.rect, x);
+        self.slot_space = Some((slot, rect));
+        rect
     }
 
     /// Draws a step's chip and returns its rect. A chip scrolled out of the strip is neither
     /// drawn nor interactive; its slot still places the marker and drops. One being dragged or
     /// focused, or under an open menu, stays alive until that ends.
     pub fn step(&mut self, step: &Step) -> Rect {
-        let t = Tokens::get();
-        if step.slot == self.bar.marker {
-            self.marker_here();
+        let space = self.slot_here(step.slot);
+        if step.slot == self.bar.marker && self.marker_rect.is_none() {
+            self.marker_rect = Some(space);
         }
-        self.xs.push(self.x);
+        self.xs.push(space.center().x);
         let br = Rect::from_min_size(pos2(self.x, self.rect.top() + 6.0), vec2(28.0, 28.0));
         self.x += 32.0;
-        solidcraft_ui_registry::publish_handle(&format!("{}{}", self.bar.handles.step, step.label), br.center());
+        match step.handle {
+            Some(name) => solidcraft_ui_registry::publish_shared_handle(name, br.center()),
+            None => solidcraft_ui_registry::publish_handle(&format!("{}{}", self.bar.handles.step, step.label), br.center()),
+        }
+        let dragged = self.drag == Some(Drag::Step(step.id));
+        // Out of view and not dragged, the chip is left out unless it has the focus or a popup is
+        // open; its id is worked out only to compare with a focused one.
+        if !self.ui.clip_rect().intersects(br) && !dragged {
+            let ui = &*self.ui;
+            let (focused, popup) = *self.quiet.get_or_insert_with(|| {
+                #[cfg(test)]
+                QUIET_READS.with(|reads| reads.set(reads.get() + 1));
+                (ui.memory(|m| m.focused()), egui::Popup::is_any_open(ui.ctx()))
+            });
+            if !popup && focused.is_none_or(|focused| focused != ui.scope_id().with(("feat", step.id))) {
+                return br;
+            }
+        }
+        self.quiet = None;
         let ui = &mut *self.ui;
         let chip_id = ui.scope_id().with(("feat", step.id));
-        let dragged = self.drag == Some(Drag::Step(step.id));
-        if !ui.clip_rect().intersects(br) && !dragged && !ui.memory(|m| m.has_focus(chip_id)) && !egui::Popup::is_any_open(ui.ctx()) {
-            return br;
-        }
         let sense = if self.bar.reorder { Sense::click_and_drag() } else { Sense::click() };
         let resp = ui.interact(br, chip_id, sense);
         if resp.hovered() {
@@ -330,15 +397,13 @@ impl Strip<'_, '_> {
         }
         .paint(&self.painter, br, HistoryStyle::Bottom);
         if self.bar.floating && step.state.last_done {
+            let t = Tokens::get();
             self.painter.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, self.bar.accent.color);
         }
         if self.bar.reorder && resp.drag_started() {
             self.drag = Some(Drag::Step(step.id));
         }
-        let resp = resp.backing_on_hover_ui(|ui| {
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui.add(egui::Label::new((step.tip)()));
-        });
+        let resp = resp.backing_on_hover_ui(|ui| (step.tip)().show(ui));
         if resp.clicked() {
             self.actions.push(Action::Select { step: step.id, modifiers: ui.input(|i| i.modifiers) });
         }
@@ -357,9 +422,16 @@ impl Strip<'_, '_> {
     /// before it. An `open` one starts a tray `depth` deep, ended by [`Strip::end_tray`].
     /// Returns its rect.
     pub fn chip(&mut self, start: usize, end: usize, open: bool, depth: usize, draw: impl FnOnce(&mut egui::Ui, &Painter, Pos2) -> f32) -> Rect {
+        self.quiet = None;
         let marker = self.bar.marker;
-        if start < end && start == marker {
-            self.marker_here();
+        if start < end {
+            let space = self.slot_here(start);
+            if start == marker && self.marker_rect.is_none() {
+                self.marker_rect = Some(space);
+            }
+            if !open {
+                self.xs.extend(std::iter::repeat_n(space.center().x, end.saturating_sub(start)));
+            }
         }
         if open {
             self.trays.push((self.x, self.painter.add(egui::Shape::Noop), depth));
@@ -367,14 +439,21 @@ impl Strip<'_, '_> {
         }
         let at = pos2(self.x, self.rect.top() + 6.0);
         let width = draw(self.ui, &self.painter, at);
-        if !open {
-            self.xs.extend(std::iter::repeat_n(self.x, end.saturating_sub(start)));
-        }
         self.x += width + 4.0;
-        if !open && start < marker && marker < end {
-            self.marker_here();
+        if !open && start < end {
+            let after = self.slot_here(end);
+            if start < marker && marker < end && self.marker_rect.is_none() {
+                self.marker_rect = Some(after);
+            }
+        } else if start == end {
+            // An empty chip separates the folded group's end from the next real step.
+            self.slot_space = None;
         }
-        Rect::from_min_size(at, vec2(width, 28.0))
+        let rect = Rect::from_min_size(at, vec2(width, 28.0));
+        if !open && start < end {
+            self.folded.push((rect, start));
+        }
+        rect
     }
 
     /// Ends the innermost open tray here.
@@ -389,7 +468,12 @@ impl Strip<'_, '_> {
     /// Something of the app's own that takes no slot, drawn by `draw` from x in the bar's rect,
     /// returning where it ends.
     pub fn inline(&mut self, draw: impl FnOnce(&mut egui::Ui, &Painter, f32, Rect) -> f32) {
-        self.x = draw(self.ui, &self.painter, self.x, self.rect);
+        self.quiet = None;
+        let end = draw(self.ui, &self.painter, self.x, self.rect);
+        if end != self.x {
+            self.slot_space = None;
+        }
+        self.x = end;
     }
 }
 

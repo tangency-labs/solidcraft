@@ -171,33 +171,30 @@ fn a_chord_past_a_wall_fits_at_the_chord_of_the_ball_reaching_the_top() {
     );
 }
 
-/// A can (r10, h20) whose top rim is chamfered 10: the cone takes the whole top. The band
-/// reaches the top's centre at the ball touching it there and the side, 10 (open). The
-/// fork's build: 9.9899999999999967.
+/// A can (r10, h20) whose top rim is chamfered 10: the cone takes the whole top, its apex on
+/// the axis at the top's centre (#17198; the fork refused it, `FacesOutlastTheirBlends`,
+/// naming 9.9899999999999967). It builds: the can (pi 100 20) less the ring between the
+/// r 10, h 10 cylinder and the cone in it (2/3 pi 1000), pi 2000 (2/3), one solid of 3
+/// faces (the cone, the wall and the bottom).
 #[test]
 fn a_chamfer_taking_a_can_top_fits_where_its_band_reaches_the_centre() {
     let mut k = kernel();
     let mut b = create_cylinder(&mut k, Point3::ZERO, 10.0, 20.0).unwrap();
-    let refusal = blend(
-        &mut k,
-        &mut b,
-        &[Point3::new(
+    let rim = pick(
+        &k,
+        &b,
+        Point3::new(
             10.0 * 100.0_f64.to_radians().cos(),
             10.0 * 100.0_f64.to_radians().sin(),
             20.0,
-        )],
-        10.0,
-        0,
-        false,
-    )
-    .expect_err("refused");
-    check(
-        &refusal,
-        NoRoomReason::FaceConsumed,
-        FitKind::Radius,
-        10.0 - 0.01,
-        9.9899999999999967,
+        ),
     );
+    fillet_edges(&mut k, &mut b, &[rim], 10.0, 0, 2, 0.0).unwrap();
+    let want = PI * 2000.0 * (2.0 / 3.0);
+    let got = volume_of(&k, &mut b);
+    assert!((got - want).abs() <= 1e-6 * want, "{got} vs {want}");
+    assert_eq!(lumps(&b), 1);
+    assert_eq!(b.face_list().len(), 3);
 }
 
 /// The bossed can (r7 h48.2, a boss r2.7 on its top) with its top rim rounded 6.9: the
@@ -257,9 +254,7 @@ fn two_rounds_on_a_narrow_end_fit_where_their_bands_meet() {
 #[test]
 fn fillet_edges_returns_the_fit_on_the_refusal() {
     let mut k = kernel();
-    // the round on the continued top; with `fillet_round_ends_on_outline` it ends on the
-    // body's outline and keeps the bridge (`wr730_round_ends_on_outline.rs`)
-    k.fixes.fillet_round_ends_on_outline = false;
+    // the round on the continued top, trimmed at its crease
     let block = create_box(&mut k, Point3::ZERO, 20.0, 4.0, 10.0).unwrap();
     let slot = create_box(&mut k, Point3::new(8.0, -1.0, -1.0), 4.0, 6.0, 10.0).unwrap();
     let mut b = boolean_difference(&mut k, block, slot).unwrap();

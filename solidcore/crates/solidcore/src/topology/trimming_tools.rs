@@ -34,9 +34,8 @@
 //! | [`min`]                                      | `SmTrimmingTools::Min`                                    |
 //!
 //! Deviations:
-//! - **Not upstream (WR-591, opt-in `Kernel::fixes.loops_go_on_round_the_vertex`;
-//!   SolidCraft change, tangency-labs/smlib 9209e76).** Where several curve ends meet
-//!   at a vertex, [`order_curves_into_loops`] goes on along the end next round the
+//! - **Not upstream (WR-591; SolidCraft change, tangency-labs/smlib 9209e76).** Where
+//!   several curve ends meet at a vertex, [`order_curves_into_loops`] goes on along the end next round the
 //!   vertex from the arriving curve (`next_round_the_vertex`, the fork's
 //!   `sm_NextRoundTheVertex`) instead of the first by index, turning about one normal
 //!   for the whole list (`loops_turn_normal`, tangency-labs/smlib b0ee3f9).
@@ -54,10 +53,10 @@
 //!   is used, ...) the port returns [`SolidError::InvalidInput`]. `SER` / `NER` returns
 //!   are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the upstream code (`SM_ERR`, `SM_ERR_NULL_POINTER`,
 //!   `SM_ERR_INVALID_INPUT` for a failed `Unitize`).
-//! - **Projected seam endpoints (WR-440, #530), opt-in.** With
-//!   `Kernel::fixes.check_loop_projected_seam_ends` (off by default: upstream's raw UV
-//!   jump), `CheckLoop` lifts only an end obtained from vertex projection to its
-//!   nearest period in a closed direction. Exact UV trim jumps remain errors, and the
+//! - **Projected seam endpoints (WR-440, #530), not upstream.** `CheckLoop` lifts
+//!   only an end obtained from vertex projection to its nearest period in a closed
+//!   direction, where upstream compares the raw UV values and reports a one-period
+//!   seam jump as `SM_ERR`. Exact UV trim jumps remain errors, and the
 //!   physical gap uses the original parameters.
 //! - **Assert reports.** `pAList` is an optional [`AssertArray`]. The release build tests
 //!   every predicate (`eTestLevel < SM_LEVEL_0` is never true), so `eTestLevel` and
@@ -82,18 +81,16 @@
 //!   (`plan/upstream-issues/` WR-97). Here a failing `GetCanonical` propagates as `Err`
 //!   ([`is_iso_curve_at`], and through it [`is_iso_curve`] and
 //!   [`fix_backwards_outer_loop_on_seam`]).
-//!   `MirrorCurve` divides rational control points by their weights twice, as upstream
-//!   (WR-98); with
-//!   `Kernel::fixes.mirror_curve_keeps_euclidean_control_points` (off by default) it
-//!   keeps the Euclidean points `GetCanonical` returns.
+//!   `MirrorCurve` keeps the Euclidean control points `GetCanonical` returns, where
+//!   upstream divides rational control points by their weights a second time (WR-98).
 //! - **`FindOuterLoops`** with a loop of zero area reads past its arrays upstream
 //!   (UB-119): [`SolidError::InvalidInput`]. A null curve of `OrderCurvesIntoLoops`
 //!   (UB-120) cannot be passed.
 //! - **`CheckLoop`** takes the surface separately, as upstream; `CheckFace` passes a
 //!   copy of the face's surface (the edge use UV extremes need the B-rep mutably).
-//!   With the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (WR-381, #476) its gap
-//!   limit also honours a shared vertex's zone tolerance; upstream (the default) uses only
-//!   the edge intersection tolerance and rejects consistent widened vertices.
+//!   Its gap limit also honours a shared vertex's zone tolerance (WR-381, #476);
+//!   upstream uses only the edge intersection tolerance and rejects consistent widened
+//!   vertices.
 //! - **Callees.** `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`) and
 //!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`) call their ports. Unported callees
 //!   return [`SolidError::Unported`]: `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
@@ -112,7 +109,10 @@ use std::borrow::Cow;
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    EntityRef, Failure, Result, SolidError, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
+};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -173,11 +173,25 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// A value the trimming tools compute with that has no defined result, as the phrase
-/// says (upstream `SM_ERR_INVALID_INPUT`).
-pub(crate) fn invalid_value(what: &'static str) -> SolidError {
-    SolidError::topology_invalid_value(OP, what)
+/// A topology failure of the trimming tools ([`SolidError::topology`]).
+pub(crate) fn failure(cause: TopologyFailure) -> SolidError {
+    SolidError::topology(OP, cause)
 }
+
+/// [`failure`] with the status of the site it replaces, where that is not the cause's own.
+pub(crate) fn failure_with_status(cause: TopologyFailure, status: i32) -> SolidError {
+    Failure::new(OP, cause).with_status(status).into_error()
+}
+
+/// A defect ([`TopologyFailure::Defect`]): a link of the B-rep or a surface the trim holds
+/// is gone, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(why: &'static str) -> SolidError {
+    failure_with_status(TopologyFailure::Defect { why }, SM_ERR_NULL_POINTER)
+}
+
+/// Why the retained transfer is gone after the early checks read its surface.
+const SURFACE_CHECKED: &str = "the retained transfer is gone, though the early checks just \
+                               read its surface and nothing between takes it";
 
 /// The identity a face or loop has in an assert report (upstream compares pointers):
 /// its `SmTopoTypes.h` code in the high bits and its arena index in the low ones.
@@ -493,21 +507,25 @@ impl TrimSurfaceTransfer {
 }
 
 enum TrimSurfaceBackend<'a> {
-    Legacy(&'a mut Option<Surface>),
+    Legacy(Box<Surface>),
     Retained(&'a mut TrimSurfaceTransfer),
 }
 
 impl TrimSurfaceBackend<'_> {
     fn surface(&self) -> Result<&Surface> {
         match self {
-            Self::Legacy(surface) => surface
-                .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim")),
+            Self::Legacy(surface) => Ok(&**surface),
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?
-                .owned_surface(),
+                .and_then(crate::topology::brep::p6::FaceSurfaceTransfer::owned_surface)
+                .ok_or_else(|| {
+                    broken_link(
+                        "the retained surface to trim is gone or installed before the trim, \
+                         though the trim's transfer is made with it and gives it up only to \
+                         the face it builds",
+                    )
+                }),
         }
     }
 
@@ -579,7 +597,6 @@ pub fn trim_surface_with_model_space_curves(
         uv_domain,
         surface_orientation,
     } = input;
-    let mut surface = Some(surface);
     trim_surface_impl(
         k,
         b,
@@ -593,7 +610,7 @@ pub fn trim_surface_with_model_space_curves(
             uv_domain,
             surface_orientation,
         },
-        TrimSurfaceBackend::Legacy(&mut surface),
+        TrimSurfaceBackend::Legacy(Box::new(surface)),
         first_is_outer,
         oriented_correctly,
         may_cross_seam,
@@ -616,19 +633,20 @@ fn trim_surface_impl(
 ) -> Result<Vec<FaceId>> {
     // Native SmObjDelete/SmObjsDelete remain active through these early checks.
     let early = (|| {
-        let region = region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the region for the new faces"))?;
+        let region = region.ok_or_else(|| {
+            failure_with_status(TopologyFailure::NoRegionGiven, SM_ERR_NULL_POINTER)
+        })?;
         if !b.region(region)?.in_brep {
-            return Err(SolidError::topology_missing(OP, "the region in the B-rep"));
+            return Err(failure_with_status(
+                TopologyFailure::NotInBrep,
+                SM_ERR_NULL_POINTER,
+            ));
         }
         let _ = first_is_outer; // SM_ASSERT only
         brep_set_tolerance(k, b, tol_3d)?;
         let g1_surface = surface_continuity_check(k, surface.surface()?)?;
         if !g1_surface && !oriented_correctly {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surface is not G1 and the loops are not oriented",
-            ));
+            return Err(failure(TopologyFailure::UnorientedLoopsOnNonG1Surface));
         }
         Ok((region, g1_surface))
     })();
@@ -643,15 +661,12 @@ fn trim_surface_impl(
     // Native clears the temporary cleanup immediately before MakeFace(s).
     let mut new_faces = match surface {
         TrimSurfaceBackend::Legacy(surface) => {
-            let surface = surface
-                .take()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?;
             let input = TrimInput {
                 loop_counts: input.loop_counts,
                 curves: input.curves,
                 orientations: input.orientations,
                 loop_points: input.loop_points,
-                surface,
+                surface: *surface,
                 uv_domain: input.uv_domain,
                 surface_orientation: input.surface_orientation,
             };
@@ -685,7 +700,7 @@ fn trim_surface_impl(
                 transfer
                     .transfer
                     .as_mut()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?,
+                    .ok_or_else(|| broken_link(SURFACE_CHECKED))?,
                 &input.uv_domain,
                 input.surface_orientation,
                 None,
@@ -1309,12 +1324,19 @@ fn move_loopuse_first(
 ) -> Result<()> {
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let pos = list.iter().position(|&x| x == lu).ok_or_else(|| {
-        SolidError::topology_failed(OP, "the loop use is not in the face use's loop uses")
+        failure(TopologyFailure::Defect {
+            why: "the loop use is not in its face use's list, though the face use is read \
+                  from the loop use",
+        })
     })?;
     list.remove(pos);
     list.insert(0, lu);
     Ok(())
 }
+
+/// Why a loop use of a face's loop has no face use.
+const LU_NO_FU: &str = "a loop use of the face's loop has no face use, though a face's loop \
+                        uses sit in its face uses";
 
 /// `FixTrimLoopOrder`: takes the loop whose UV trim curves have the largest bounding box
 /// (by squared diagonal) as the outer loop, orients it as outer and the others as inner
@@ -1335,7 +1357,7 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Get the loops
     let loops = fp2::loops(b, f, false, None)?;
     if loops.is_empty() {
-        return Err(SolidError::topology_failed(OP, "the face has no loops")); // no loops at all
+        return Err(failure(TopologyFailure::FaceWithoutLoops)); // no loops at all
     }
 
     // Find the outer loop
@@ -1417,12 +1439,14 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Move outer to the first position
     let (lu_a, lu_b) = lu1::loop_loopuses(b, outer_loop)?;
     let lu_b = lu_b.ok_or_else(|| null("loop without second loop use"))?;
-    let fu_a = b.loopuse(lu_a)?.faceuse.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
-    })?;
-    let fu_b = b.loopuse(lu_b)?.faceuse.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
-    })?;
+    let fu_a = b
+        .loopuse(lu_a)?
+        .faceuse
+        .ok_or_else(|| broken_link(LU_NO_FU))?;
+    let fu_b = b
+        .loopuse(lu_b)?
+        .faceuse
+        .ok_or_else(|| broken_link(LU_NO_FU))?;
     move_loopuse_first(b, fu_a, lu_a)?;
     move_loopuse_first(b, fu_b, lu_b)?;
 
@@ -1476,10 +1500,10 @@ impl OrderedLoops {
         if self.closed && self.on_plane {
             Ok(())
         } else {
-            Err(SolidError::topology_failed(
-                OP,
-                "the loops do not close, or a curve is off their plane",
-            ))
+            Err(failure(TopologyFailure::LoopsNotClosedOrPlanar {
+                closed: self.closed,
+                on_plane: self.on_plane,
+            }))
         }
     }
 }
@@ -1488,12 +1512,30 @@ fn eval_point(k: &Kernel, c: &Curve, t: f64) -> Result<Point3> {
     c.evaluate_point(k, t)
 }
 
+/// Whether `c` is collapsed to `p`: the curve has a certified bounding box
+/// ([`Curve::certified_bounding_box`], which contains the curve) and the sphere enclosing
+/// that box lies in the ball of radius `tol` about `p`. A curve without a certified box,
+/// or a closed curve through `p` with any extent beyond `tol`, is not.
+///
+/// # Errors
+///
+/// Those of [`Curve::certified_bounding_box`].
+fn curve_within(k: &Kernel, c: &Curve, p: Point3, tol: f64) -> Result<bool> {
+    let Some(ext) = c.certified_bounding_box(k, &c.natural_interval())? else {
+        return Ok(false);
+    };
+    let sphere = ext.sphere_bound();
+    Ok(sphere.center.distance(p) + sphere.radius <= tol)
+}
+
 /// Not upstream (WR-591, the fork's `sm_NextRoundTheVertex`, tangency-labs/smlib
 /// 9209e76): the curve end a loop goes on from at a vertex where several curve ends
 /// meet. `arrive` is the end the loop arrives by (`2i` the start of curve `i`, `2i + 1`
 /// its end), `close` the start of the loop's first curve, `found` the nearest end to
 /// `arrive`. The ends at that vertex (within `tol_3d` of `found`) that the loop can go
-/// on from are those of curves it has not used, and `close`. Of them it takes the one
+/// on from are those of curves it has not used, and `close`; a curve that lies wholly within
+/// `tol_3d` of the vertex (collapsed there) offers only its start, so it is run forwards,
+/// while a closed curve through the vertex offers both ends. Of them it takes the one
 /// whose leaving tangent comes next round the vertex from the arriving curve's,
 /// counterclockwise about `turn_normal` (unit, one for all the vertices of a call, from
 /// `loops_turn_normal`; zero where the curves lie on one line; tangency-labs/smlib
@@ -1524,6 +1566,21 @@ fn next_round_the_vertex(
         if at(seen, ii / 2)? && ii != close {
             continue;
         }
+        // a curve collapsed to this vertex (all of it within `tol_3d` of it) leaves it
+        // only from its start: its end's tangent would run it backwards (#17033). A
+        // closed curve through the vertex has both ends there too but is not collapsed:
+        // both its ends stay candidates.
+        if ii % 2 == 1
+            && at(ends, ii - 1)?.distance(found_pt) <= tol_3d
+            && curve_within(
+                k,
+                curves.get(ii / 2).ok_or_else(|| null("curve index"))?,
+                found_pt,
+                tol_3d,
+            )?
+        {
+            continue;
+        }
         candidates.push(ii);
     }
     if candidates.len() < 2 {
@@ -1549,10 +1606,7 @@ fn next_round_the_vertex(
     };
     let (mut back, _) = leaving(arrive)?;
     if back.length() <= 0.0 {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the arriving edge's tangent has zero length",
-        ));
+        return Err(failure(TopologyFailure::CurveEndWithoutTangent));
     }
     back /= back.length();
 
@@ -1561,10 +1615,7 @@ fn next_round_the_vertex(
     for &end in &candidates {
         let (ray, acc) = leaving(end)?;
         if ray.length() <= 0.0 {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a leaving edge's tangent has zero length",
-            ));
+            return Err(failure(TopologyFailure::CurveEndWithoutTangent));
         }
         rays.push(ray);
         accs.push(acc);
@@ -1726,13 +1777,9 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     let face_radius = out.curves_box.sphere_bound().radius;
     let feature_size = face_radius / 1000.0;
 
-    // Not upstream (WR-591, opt-in; tangency-labs/smlib b0ee3f9): the normal the loops
-    // turn about where several curve ends meet, one for the whole call
-    let turn_normal = if k.fixes.loops_go_on_round_the_vertex {
-        loops_turn_normal(k, curves, out.curves_box.sphere_bound().center)?
-    } else {
-        Vec3::new(0.0, 0.0, 0.0)
-    };
+    // Not upstream (WR-591; tangency-labs/smlib b0ee3f9): the normal the loops turn
+    // about where several curve ends meet, one for the whole call
+    let turn_normal = loops_turn_normal(k, curves, out.curves_box.sphere_bound().center)?;
 
     let mut plane_base_count: usize = 0;
 
@@ -1812,24 +1859,20 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
                 break;
             }
 
-            // Not upstream (WR-591, opt-in): where more curve ends meet at this vertex
-            // (loops touching there), the loop goes on along the curve next round the
-            // vertex from the one it arrives by, so it never crosses itself
-            let found_index = if k.fixes.loops_go_on_round_the_vertex {
-                next_round_the_vertex(
-                    k,
-                    curves,
-                    &vertex_points,
-                    &seen,
-                    turn_normal,
-                    target,
-                    2 * first_curve_index,
-                    tol_3d,
-                    m.index,
-                )?
-            } else {
-                m.index
-            };
+            // Not upstream (WR-591): where more curve ends meet at this vertex (loops
+            // touching there), the loop goes on along the curve next round the vertex
+            // from the one it arrives by, so it never crosses itself
+            let found_index = next_round_the_vertex(
+                k,
+                curves,
+                &vertex_points,
+                &seen,
+                turn_normal,
+                target,
+                2 * first_curve_index,
+                tol_3d,
+                m.index,
+            )?;
 
             // Matching Curve index and seen status
             let next_index = if found_index % 2 == 0 {
@@ -1885,9 +1928,9 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
             plane_base_count += 1;
             jj += 2;
         }
-        let loop_normal = loop_normal
-            .unitize()
-            .map_err(|_| invalid_value("the loop's normal has zero length"))?;
+        let loop_normal = loop_normal.unitize().map_err(|_| {
+            failure_with_status(TopologyFailure::LoopWithoutNormal, SM_ERR_INVALID_INPUT)
+        })?;
 
         // Update the plane data for all loops
         if out.loop_counts.len() == 1 {
@@ -1915,7 +1958,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     out.plane_normal = out
         .plane_normal
         .unitize()
-        .map_err(|_| invalid_value("the loops' average normal has zero length"))?;
+        .map_err(|_| failure(TopologyFailure::NoCurveGiven))?;
 
     // test every curve to see if it's on the plane
     for c in curves {
@@ -2200,7 +2243,7 @@ pub fn check_face(
             UNDEF_DOUBLE,
             UNDEF_DOUBLE,
         )?;
-        return Err(SolidError::topology_failed(OP, "the face has no loops")); // Loops are missing
+        return Err(failure(TopologyFailure::FaceWithoutLoops)); // Loops are missing
     }
 
     // (not upstream, which passes such a face unchecked: "it's not a problem when an edge
@@ -2230,10 +2273,7 @@ pub fn check_face(
         )?;
         if !present {
             made?;
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face's UV trim curves cannot be made, so its loops cannot be checked",
-            ));
+            return Err(failure(TopologyFailure::UvTrimCurvesNotMade));
         }
     }
 
@@ -2280,10 +2320,7 @@ pub fn check_face(
 
         // signal bad loop errors: we want 1st Loop Outer, rest Inner
         if (ii == 0 && lo == OrientType::Opposite) || (ii != 0 && lo == OrientType::Same) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the first loop is not outer, or a later loop is not inner",
-            ));
+            return Err(failure(TopologyFailure::LoopsMisoriented));
         }
 
         report(
@@ -2300,7 +2337,7 @@ pub fn check_face(
 
         // Also check for zero-area loop.
         if lo == OrientType::Unknown {
-            return Err(SolidError::topology_failed(OP, "a loop has zero area"));
+            return Err(failure(TopologyFailure::LoopOrientationUndecided));
         }
     }
     Ok(())
@@ -2326,10 +2363,11 @@ pub fn check_faces(
 
 /// `sm_IsLoopUVGapWithinTolerance`: whether the UV gap from `start_uv` to `end_uv` on a
 /// B-spline surface (any `SmBSplineSurface` kind) is certified closed: the gap's UV
-/// rectangle lies in the natural domain and every control point of its exact sub-patch
+/// rectangle lies in the natural domain and every control point of its covering patch
 /// (or, for a zero-width rectangle, of the iso-parametric curve over the gap) has a
-/// positive weight and lies within `xsect_tol_3d` of both `start_point` and
-/// `end_point`. Failures of the extraction give `false`.
+/// positive weight and lies within `xsect_tol_3d` of both endpoints, allowing for
+/// the certified distance from a procedural blend's net to its definition.
+/// Failures of the extraction give `false`.
 ///
 /// # Errors
 ///
@@ -2436,21 +2474,43 @@ pub fn is_loop_uv_gap_within_tolerance(
             Err(_) => return Ok(false),
         }
     } else {
-        let patch = match bss.copy_sub_patch(&gap) {
-            Ok(p) => p,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Ok(false),
+        // A gap one rounding error away from an isoline can be narrower than a
+        // representable knot span. Extract a containing strip in that direction.
+        // Only the hull and coverage tests below can certify the gap.
+        let strip = |lo: f64, hi: f64, a: f64, z: f64| {
+            let pad = f64::EPSILON.sqrt() * (z - a);
+            if hi - lo < pad {
+                ((lo - pad).max(a), (hi + pad).min(z))
+            } else {
+                (lo, hi)
+            }
         };
-
-        // CopySubPatch can snap to knots. A shrunken domain cannot certify this gap.
-        let pd = patch.natural_uv_domain();
-        if pd.min().x > gap.min().x
-            || pd.min().y > gap.min().y
-            || pd.max().x < gap.max().x
-            || pd.max().y < gap.max().y
-        {
-            return Ok(false);
-        }
+        let (u0, u1) = strip(gap.min().x, gap.max().x, nat.min().x, nat.max().x);
+        let (v0, v1) = strip(gap.min().y, gap.max().y, nat.min().y, nat.max().y);
+        let enclosing = Extent2d::from_bounds(u0, v0, u1, v1);
+        // Try the original rectangle first. Extraction may snap its limits to
+        // knots; the extracted patch must still contain the full original gap.
+        let extract = |domain: &Extent2d| -> Result<Option<BSplineSurface>> {
+            let patch = match bss.copy_sub_patch(domain) {
+                Ok(patch) => patch,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let pd = patch.natural_uv_domain();
+            let covers = pd.min().x <= gap.min().x
+                && pd.min().y <= gap.min().y
+                && pd.max().x >= gap.max().x
+                && pd.max().y >= gap.max().y;
+            Ok(covers.then_some(patch))
+        };
+        let patch = match extract(&gap)? {
+            Some(patch) => patch,
+            None if enclosing != gap => match extract(&enclosing)? {
+                Some(patch) => patch,
+                None => return Ok(false),
+            },
+            None => return Ok(false),
+        };
         match patch.control_point_net() {
             Ok(net) => (net.points, net.weights),
             Err(_) => return Ok(false),
@@ -2460,14 +2520,24 @@ pub fn is_loop_uv_gap_within_tolerance(
         return Ok(false);
     }
 
+    // The hull encloses the net B. At the same UV, |S - endpoint| is at most
+    // |S - B| + |B - endpoint|. Round the remaining distance down if the
+    // subtraction rounded up (when bound <= tolerance, FastTwoSum's residual).
+    let bound = crate::surface::surface_cache::p3::definition_bound(surface);
+    let remaining = xsect_tol_3d - bound;
+    let net_tolerance = if xsect_tol_3d - remaining < bound {
+        crate::geom::certified::next_down(remaining)
+    } else {
+        remaining
+    };
     // Empty weights mean a nonrational curve or patch, with implicit unit weights.
     let rational = !weights.is_empty();
     for (i, p) in points.iter().enumerate() {
         let w = weights.get(i).copied().unwrap_or(0.0);
         #[allow(clippy::neg_cmp_op_on_partial_ord)] // upstream's NaN-safe tests
         if (rational && !(w > 0.0))
-            || !(p.distance(start_point) <= xsect_tol_3d)
-            || !(p.distance(end_point) <= xsect_tol_3d)
+            || !(p.distance(start_point) <= net_tolerance)
+            || !(p.distance(end_point) <= net_tolerance)
         {
             return Ok(false);
         }
@@ -2481,41 +2551,6 @@ fn edge_zone_tol(k: &Kernel, b: &Brep, e: Option<EdgeId>) -> Result<f64> {
         Some(e) => tol::zone_tol3d(k, crate::topology::edge::tolerance(b, e)?),
         None => tol::zone_tol_3d(k, SmallTopoType::NormalSize),
     })
-}
-
-// Only a genuinely shared topological vertex can enlarge the edge/edge limit, and only
-// with the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (WR-381, #476).
-// Use the previous edge use's mate: its vertex use is the previous end regardless
-// of either edge use's orientation (including closed edges and reversed loops).
-fn loop_junction_tolerance(
-    k: &Kernel,
-    b: &Brep,
-    current: EdgeuseId,
-    previous: EdgeuseId,
-) -> Result<f64> {
-    let edge_limit = tol::xsect_tol_3d_from_zones(
-        k,
-        edge_zone_tol(k, b, eu1::edge(b, current)?)?,
-        edge_zone_tol(k, b, eu1::edge(b, previous)?)?,
-    );
-    if !k.fixes.check_loop_vertex_tolerance {
-        return Ok(edge_limit);
-    }
-    let Some(start_use) = eu1::vertexuse(b, current)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end) = eu1::mate(b, previous)? else {
-        return Ok(edge_limit);
-    };
-    let Some(end_use) = eu1::vertexuse(b, end)? else {
-        return Ok(edge_limit);
-    };
-    let start_vertex = b.vertexuse(start_use)?.vertex;
-    let end_vertex = b.vertexuse(end_use)?.vertex;
-    if let Some(vertex) = start_vertex.filter(|v| Some(*v) == end_vertex) {
-        return Ok(edge_limit.max(tol::zone_tol3d(k, b.vertex(vertex)?.tolerance)));
-    }
-    Ok(edge_limit)
 }
 
 // A projected endpoint is known only modulo the natural period. Exact UV trims
@@ -2536,14 +2571,15 @@ fn nearest_period(value: f64, target: f64, period: f64) -> f64 {
 
 /// `CheckLoop`: for each pair of consecutive edge uses of the loop whose UV ends differ
 /// (by more than `1e-10`), the surface points must be within the edges'
-/// intersection tolerance (with `Kernel::fixes.check_loop_vertex_tolerance`, the larger of
-/// it and their shared vertex's zone tolerance; else closure 3, signalled only) and the UV jump must stay under a tenth of
+/// intersection tolerance (plus twice the shared vertex zone when each endpoint meets
+/// its edge and vertex zones, WR-381, not upstream; else closure 3, signalled only) and
+/// the UV jump must stay under a tenth of
 /// the natural domain in each direction, unless both ends are singular in that
 /// direction or the gap is certified by [`is_loop_uv_gap_within_tolerance`] (not across
 /// a seam). A large UV jump gives closure 1 when an end is singular, else `SM_ERR`.
-/// With `Kernel::fixes.check_loop_projected_seam_ends` (WR-440), projected ends without
-/// UV trims are compared on the nearest natural period in closed directions; exact trim
-/// ends retain their sheet. The 3D gap is always measured at the original parameters.
+/// Projected ends without UV trims are compared on the nearest natural period in closed
+/// directions (WR-440, not upstream); exact trim ends retain their sheet. The 3D gap is
+/// always measured at the original parameters.
 /// Returns the closure: 0 closed, 1 closed except at singularities, 3 not closed in 3D.
 ///
 /// # Errors
@@ -2579,9 +2615,18 @@ pub fn check_loop(
             let current_start_3d = surface.evaluate_point(k, current_start)?;
             let end_start_dist = previous_end_3d.distance(current_start_3d);
 
-            // A widened shared vertex covers gaps that the two edge zones alone
-            // need not cover (#476). Retain the existing edge intersection limit.
-            let xsect = loop_junction_tolerance(k, b, cur, prev)?;
+            let previous_zone = edge_zone_tol(k, b, eu1::edge(b, prev)?)?;
+            let current_zone = edge_zone_tol(k, b, eu1::edge(b, cur)?)?;
+            // Use the same bounded shared-vertex junction as IsClosed3d; the
+            // surface-domain checks below still constrain the UV gap.
+            let xsect = crate::topology::loopuse::junction_tolerance(
+                k,
+                b,
+                prev,
+                cur,
+                [previous_end_3d, current_start_3d],
+                [previous_zone, current_zone],
+            )?;
             report(
                 &mut alist,
                 lp,
@@ -2600,10 +2645,8 @@ pub fn check_loop(
             let dom = surface.natural_uv_domain_with_nurb(k)?;
             let mut gap_start = current_start;
             let mut gap_end = previous_end;
-            // WR-440 (#530), opt-in: upstream compares the raw representatives.
-            if k.fixes.check_loop_projected_seam_ends
-                && (current_uv.start_weight.is_none() || previous_uv.end_weight.is_none())
-            {
+            // WR-440 (#530), not upstream: upstream compares the raw representatives.
+            if current_uv.start_weight.is_none() || previous_uv.end_weight.is_none() {
                 for (start, end, period, direction) in [
                     (
                         &mut gap_start.x,
@@ -2692,10 +2735,7 @@ pub fn check_loop(
                     closure = 1;
                 }
                 if closure >= 2 {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "the loop crosses the surface's closure more than once",
-                    ));
+                    return Err(failure(TopologyFailure::LoopJumpsInUv));
                 }
             }
         }
@@ -2715,22 +2755,18 @@ pub fn surface_continuity_check(k: &Kernel, surface: &Surface) -> Result<bool> {
     let (cu, _) = surface.calculate_continuities(k, SurfParamType::U)?;
     let (cv, _) = surface.calculate_continuities(k, SurfParamType::V)?;
     if cu == ContinuityType::Discontinuous || cv == ContinuityType::Discontinuous {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the surface is discontinuous",
-        ));
+        return Err(failure(TopologyFailure::SurfaceDiscontinuous));
     }
     Ok(!(cu == ContinuityType::C0 || cv == ContinuityType::C0))
 }
 
 /// `MirrorCurve`: reflects the UV curve's `side` coordinate (u for
-/// [`SurfParamType::U`]) about the middle of `[low, high]` (`high - (x - low)`), then
-/// divides each control point by its weight again (as upstream does with the Euclidean
-/// points `GetCanonical` returns) and makes the curve 2D. `tolerance` is unused.
+/// [`SurfParamType::U`]) about the middle of `[low, high]` (`high - (x - low)`), keeping
+/// the Euclidean control points `GetCanonical` returns, and makes the curve 2D.
+/// `tolerance` is unused.
 ///
-/// With `Kernel::fixes.mirror_curve_keeps_euclidean_control_points` the second division
-/// is skipped, so a rational curve is reflected instead of moved and distorted (WR-98).
-/// Off by default: the pinned C++ divides twice.
+/// Upstream divides each control point by its weight a second time, so a rational curve
+/// is moved and distorted instead of reflected (WR-98); the port does not.
 ///
 /// # Errors
 ///
@@ -2750,18 +2786,13 @@ pub fn mirror_curve(
     // Get the curve's control point info
     let canon = bspline_of(curve)?.canonical()?;
     let mut cps = canon.control_points;
-    for (ii, p) in cps.iter_mut().enumerate() {
+    // Upstream then divides the Euclidean points `GetCanonical` returns by their
+    // weights again (WR-98), which moves and distorts a rational curve; they are kept
+    // as they are.
+    for p in &mut cps {
         let v = p.component(coord);
         if let Ok(c) = p.component_mut(coord) {
             *c = high - (v - low);
-        }
-        if let Some(&w) = canon.weights.get(ii) {
-            // Upstream divides the Euclidean points `GetCanonical` returns by their
-            // weights again (WR-98); the opt-in fix keeps them as they are.
-            if !k.fixes.mirror_curve_keeps_euclidean_control_points {
-                // operator/(v, d): plain division (`/=` guards tiny divisors)
-                *p = Vec3::new(p.x / w, p.y / w, p.z / w);
-            }
         }
     }
     let data = CanonicalData {
@@ -2873,6 +2904,51 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+    #[test]
+    fn nearly_isoparametric_gap_uses_a_containing_strip() {
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+
+        let k = Kernel::default();
+        let height = 0.00044;
+        let net = [0.0, 1.0].map(|u| [0.0, height].map(|v| CPoint::new(u, v, 0.0, NOW)).to_vec());
+        let patch = NlSurface::new(
+            net.to_vec(),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, height, height],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(patch, false));
+        let u = 0.125_f64;
+        let start = Point2::new(u, 0.0);
+        let end = Point2::new(f64::from_bits(u.to_bits() + 1), height);
+        let a = surface.evaluate_point(&k, start).unwrap();
+        let z = surface.evaluate_point(&k, end).unwrap();
+        assert!(is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0005).unwrap());
+        assert!(!is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0004).unwrap());
+    }
+
+    #[test]
+    fn a_blend_gap_reserves_the_certified_distance_from_its_net() {
+        let (k, blend) = crate::surface::extend::tests::round_blend(1, true);
+        let bound = blend.bound();
+        let net = Surface::from(blend.net().clone());
+        let surface = Surface::from(blend);
+        // Finite length along the straight generator and a one-ulp gap across it.
+        let start = Point2::new(0.25, 0.5);
+        let end = Point2::new(0.5, crate::geom::certified::next_up(start.y));
+        let a = surface.evaluate_point(&k, start).unwrap();
+        let z = surface.evaluate_point(&k, end).unwrap();
+        let distance = a.distance(z);
+        let fits = |s: &Surface, tol| {
+            is_loop_uv_gap_within_tolerance(&k, s, start, end, a, z, tol).unwrap()
+        };
+        assert!(fits(&net, distance + bound / 2.0));
+        assert!(!fits(&surface, distance + bound / 2.0));
+        assert!(fits(&surface, distance + 2.0 * bound));
+    }
 
     #[test]
     fn original_g1_trim_retains_surface_identity_and_issued_face_owner() {
@@ -3083,7 +3159,7 @@ mod tests {
                 TrimSurfaceLocation::Destroyed => {
                     assert!(mode == 1 || mode == 2);
                     let code = if mode == 1 {
-                        crate::error::SM_ERR_NULL_POINTER
+                        SM_ERR_NULL_POINTER
                     } else {
                         crate::error::SM_ERR
                     };
@@ -3339,15 +3415,9 @@ mod tests {
         (b, l)
     }
 
-    fn fixed_kernel() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.check_loop_vertex_tolerance = true;
-        k
-    }
-
     #[test]
     fn issue_476_loop_gap_uses_shared_vertex_tolerance() {
-        let k = fixed_kernel();
+        let k = Kernel::default();
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,
             Vec3::Z,
@@ -3355,7 +3425,8 @@ mod tests {
         for (gap, vertex_tol, same_vertex, expected) in [
             (1.3e-5, 2.6e-5, true, 0),
             (2.6e-5, 2.6e-5, true, 0),
-            (2.61e-5, 2.6e-5, true, 3),
+            (2.61e-5, 2.6e-5, true, 0),
+            (3.19e-5, 2.6e-5, true, 3), // One endpoint exceeds vertex + edge zone.
             (1.3e-5, 1e-6, true, 3),
             (1e-5, 1e-6, true, 0), // Existing edge intersection tolerance remains valid.
             (1.3e-5, 2.6e-5, false, 3), // Unrelated vertices cannot bridge the gap.
@@ -3376,28 +3447,9 @@ mod tests {
     }
 
     #[test]
-    fn issue_476_default_keeps_the_edge_only_gap_limit() {
-        // Default (SMLib): a gap the widened shared vertex would cover is closure 3.
-        let k = Kernel::default();
-        assert!(!k.fixes.check_loop_vertex_tolerance);
-        let surface = Surface::from(crate::surface::plane::Plane::from_normal(
-            Vec3::ZERO,
-            Vec3::Z,
-        ));
-        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
-        assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 3);
-        // The same loop with the field on is accepted.
-        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
-        assert_eq!(
-            check_loop(&fixed_kernel(), &mut b, &surface, l, 1e-5, None).unwrap(),
-            0
-        );
-    }
-
-    #[test]
     fn issue_476_loop_junction_uses_previous_end_not_previous_start() {
         use crate::topology::{Edge, Edgeuse, VertexId, Vertexuse, VertexuseId};
-        let k = fixed_kernel();
+        let k = Kernel::default();
         let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, false);
         // The first edge leaves a tight vertex; its far end joins the second edge
         // at the widened vertex. Looking at the previous start gives the wrong limit.
@@ -3436,11 +3488,19 @@ mod tests {
             Vec3::ZERO,
             Vec3::Z,
         ));
+        // FromNormal chooses its own UV axes: UV (0.5, 0) need not map to
+        // world (0.5, 0, 0). Put the shared vertex at the actual trim endpoint.
+        b.vertex_mut(VertexId::from_index(1)).unwrap().point =
+            surface.evaluate_point(&k, Point2::new(0.5, 0.0)).unwrap();
         for start in 0..4 {
             b.loopuse_mut(crate::topology::LoopuseId::from_index(0))
                 .unwrap()
                 .start = crate::topology::LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(start)));
-            assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+            assert_eq!(
+                check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                0,
+                "loop start edge use {start}"
+            );
         }
         // Missing endpoint topology must fall back to the edges, not another vertex.
         b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;
@@ -3455,7 +3515,6 @@ mod tests {
             ([1.0, 0.0, 0.0], [2.0, 0.0, 3.0]),
         ] {
             let mut k = Kernel::default();
-            k.fixes.check_loop_projected_seam_ends = true;
             let mut b =
                 crate::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
                     .unwrap();
@@ -3469,7 +3528,7 @@ mod tests {
             .unwrap();
             let loops: Vec<_> = b.loops().iter().map(|(id, _)| id).collect();
             assert!(!loops.is_empty());
-            let mut mixed_seam_off = None;
+            let mut mixed_seams = 0;
             for l in loops {
                 let eus = loop_edgeuses(&b, l).unwrap();
                 assert!(!eus.is_empty());
@@ -3506,14 +3565,7 @@ mod tests {
                         0,
                         "mixed seam {eu:?}, profile {start:?} -> {end:?}"
                     );
-                    // Off (the default), the raw one-period jump is upstream's.
-                    if mixed_seam_off.is_none() {
-                        let mut off = k.fixes;
-                        off.check_loop_projected_seam_ends = false;
-                        let on = core::mem::replace(&mut k.fixes, off);
-                        mixed_seam_off = Some(check_loop(&k, &mut b, &surface, l, 1e-5, None));
-                        k.fixes = on;
-                    }
+                    mixed_seams += 1;
                     // A short physical gap must still fail after lifting the U
                     // representative (including at a clamped surface boundary).
                     a.y += 0.001;
@@ -3552,18 +3604,18 @@ mod tests {
                 b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line([u1, v1], [u1, v0]));
                 assert!(check_loop(&k, &mut b, &surface, l, 1e-5, None).is_err());
             }
-            // With the fix off the cylinder's mixed seam is upstream's SM_ERR (1001).
-            let off = mixed_seam_off.expect("a mixed seam was checked");
-            if start[0] == end[0] {
-                assert!(off.is_err(), "profile {start:?} -> {end:?}: {off:?}");
-            }
+            assert!(
+                mixed_seams > 0,
+                "profile {start:?} -> {end:?}: no mixed seam"
+            );
         }
     }
 
-    // Both opt-in CheckLoop fixes on one junction: a seam edge use keeps its exact UV
-    // trim on the far sheet (WR-440 lifts its projected neighbours) and is displaced in
-    // V by a 3D gap that only the widened shared vertices cover (WR-381). Each field
-    // alone leaves the loop failing; both together close it.
+    // Both CheckLoop fixes on one junction: a seam edge use keeps its exact UV trim on
+    // the far sheet (WR-440 lifts its projected neighbours) and is displaced in V by a
+    // 3D gap that only the widened shared vertices cover (WR-381). Together they close
+    // the loop; with the vertices at their own tolerances the same 3D gap is still
+    // closure 3.
     #[test]
     fn issue_476_and_530_fixes_combine_on_a_mixed_seam_gap() {
         use crate::topology::VertexId;
@@ -3578,11 +3630,18 @@ mod tests {
             Vec3::Z,
         )
         .unwrap();
-        for i in 0..b.vertices().len() {
-            b.vertex_mut(VertexId::from_index(i as u32))
-                .unwrap()
-                .tolerance = 0.01;
-        }
+        let own_tolerances: Vec<f64> = (0..b.vertices().len())
+            .map(|i| b.vertex(VertexId::from_index(i as u32)).unwrap().tolerance)
+            .collect();
+        assert!(own_tolerances.iter().all(|&t| t < 1e-4));
+        let set_vertex_tolerances = |b: &mut Brep, widened: bool| {
+            for (i, &own) in own_tolerances.iter().enumerate() {
+                b.vertex_mut(VertexId::from_index(i as u32))
+                    .unwrap()
+                    .tolerance = if widened { 0.01 } else { own };
+            }
+        };
+        set_vertex_tolerances(&mut b, true);
         let loops: Vec<_> = b.loops().iter().map(|(id, _)| id).collect();
         let mut checked = 0;
         for l in loops {
@@ -3607,15 +3666,18 @@ mod tests {
             a.y += 0.001;
             z.y += 0.001;
             b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line([a.x, a.y], [z.x, z.y]));
-            let mut run = |vertex: bool, seam: bool| {
-                k.fixes.check_loop_vertex_tolerance = vertex;
-                k.fixes.check_loop_projected_seam_ends = seam;
-                check_loop(&k, &mut b, &surface, l, 1e-5, None)
-            };
-            assert_eq!(run(true, true).unwrap(), 0, "both fixes");
-            assert_eq!(run(false, true).unwrap(), 3, "seam fix only: 3D gap");
-            assert!(run(true, false).is_err(), "vertex fix only: raw seam jump");
-            assert_ne!(run(false, false).ok(), Some(0), "SMLib");
+            assert_eq!(
+                check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                0,
+                "widened vertices cover the 3D gap"
+            );
+            set_vertex_tolerances(&mut b, false);
+            assert_eq!(
+                check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(),
+                3,
+                "own vertex tolerances: the 3D gap is reported"
+            );
+            set_vertex_tolerances(&mut b, true);
             checked += 1;
         }
         assert!(checked > 0);
@@ -3651,8 +3713,7 @@ mod tests {
 
     #[test]
     fn mirror_rational_keeps_euclidean_control_points() {
-        let mut k = Kernel::default();
-        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let k = Kernel::default();
         for side in [SurfParamType::U, SurfParamType::V] {
             for (low, high) in [(0.0, 2.0), (-1.5, 0.75)] {
                 let mut fixture = mirror_rational_fixture_curve();
@@ -3663,50 +3724,29 @@ mod tests {
     }
 
     #[test]
-    fn mirror_rational_default_divides_by_weight_twice() {
-        // The pinned C++ (fix off) divides the reflected Euclidean control points by
-        // their weights again: the old wrong result is pinned by that rule, and the
-        // fixture's middle point is checked numerically.
+    fn mirror_rational_middle_point_closed_form() {
+        // Canonical middle x is 0.5/w (w = 1/sqrt(2)), so reflecting about x = 1 gives
+        // 2 - 0.5/w = 2 - sqrt(2)/2 and y stays 0.5/w = sqrt(2)/2. Upstream's second
+        // division by w gave (2 - 0.5/w)/w = 1.828... and 0.5/w^2 = 1 (WR-98).
         let k = Kernel::default();
         let mut c = mirror_rational_fixture_curve();
-        let before = bspline_of(&c).unwrap().canonical().unwrap();
         mirror_curve(&k, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
         let after = bspline_of(&c).unwrap().canonical().unwrap();
-        for (index, ((old, &w), new)) in before
-            .control_points
-            .iter()
-            .zip(&before.weights)
-            .zip(&after.control_points)
-            .enumerate()
-        {
-            for i in 0..3 {
-                let reflected = if i == 0 {
-                    2.0 - old.component(i)
-                } else {
-                    old.component(i)
-                };
-                assert_close(
-                    new.component(i),
-                    reflected / w,
-                    &format!("control point {index} component {i}"),
-                );
-            }
-        }
-        // Canonical middle x is 0.5/w, so the double division gives
-        // (2 - 0.5/w)/w = 2/w - 0.5/w^2, and y gives 0.5/w^2 = 1.
         assert_close(
             after.control_points[1].x,
-            1.828_427_124_746_190_3,
+            2.0 - core::f64::consts::FRAC_1_SQRT_2,
             "middle x",
         );
-        assert_close(after.control_points[1].y, 1.0, "middle y");
-        assert!((after.control_points[1].x - 1.292_893_218_813_452_5).abs() > 0.5);
+        assert_close(
+            after.control_points[1].y,
+            core::f64::consts::FRAC_1_SQRT_2,
+            "middle y",
+        );
     }
 
     #[test]
     fn mirror_rational_twice_is_the_identity() {
-        let mut k = Kernel::default();
-        k.fixes.mirror_curve_keeps_euclidean_control_points = true;
+        let k = Kernel::default();
         let mut c = mirror_rational_fixture_curve();
         let ts = [0.0, 0.25, 0.5, 0.75, 1.0];
         let original: Vec<Point3> = ts
@@ -3729,47 +3769,167 @@ mod tests {
     }
 
     #[test]
-    fn mirror_non_rational_geometry_unchanged_by_fix() {
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.mirror_curve_keeps_euclidean_control_points = true;
+    fn mirror_non_rational_reflects_control_points() {
+        let k = Kernel::default();
+        // V about [-0.5, 1.5]: v' = 1.5 - (v + 0.5) = 1 - v.
         let mut a = uv_line([0.1, 0.2], [0.9, 0.8]);
-        let mut b = uv_line([0.1, 0.2], [0.9, 0.8]);
-        mirror_curve(&off, &mut a, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();
-        mirror_curve(&on, &mut b, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();
+        let knots = bspline_of(&a).unwrap().canonical().unwrap().knots;
+        mirror_curve(&k, &mut a, SurfParamType::V, -0.5, 1.5, 0.0).unwrap();
         let ca = bspline_of(&a).unwrap().canonical().unwrap();
-        let cb = bspline_of(&b).unwrap().canonical().unwrap();
         assert!(ca.weights.is_empty());
-        assert_eq!(ca.control_points, cb.control_points);
-        assert_eq!(ca.weights, cb.weights);
-        assert_eq!(ca.knots, cb.knots);
-        let ea = a.ends(&off).unwrap();
-        let eb = b.ends(&on).unwrap();
-        for i in 0..3 {
-            assert_close(ea.start.component(i), eb.start.component(i), "start");
-            assert_close(ea.end.component(i), eb.end.component(i), "end");
+        assert_eq!(ca.knots, knots);
+        let want = [[0.1, 0.8], [0.9, 0.2]];
+        assert_eq!(ca.control_points.len(), want.len());
+        for (index, (got, want)) in ca.control_points.iter().zip(want).enumerate() {
+            for (i, w) in want.into_iter().enumerate() {
+                assert_close(got.component(i), w, &format!("line point {index} [{i}]"));
+            }
         }
 
-        // A rational curve whose weights are all 1 also takes the division unchanged.
-        let unit_weight = || {
-            let pw = vec![
-                CPoint::new(0.1, 0.2, NOZ, 1.0),
-                CPoint::new(0.9, 0.8, NOZ, 1.0),
-            ];
-            let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
-            Curve::from(BSplineCurve::from_nurb(nl, 2, false))
-        };
-        let mut c = unit_weight();
-        let mut d = unit_weight();
-        mirror_curve(&off, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
-        mirror_curve(&on, &mut d, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
+        // A rational curve whose weights are all 1: U about [0, 2], u' = 2 - u.
+        // `N_Iges126Crv` makes a curve non-rational when every weight is equal, so it
+        // comes back non-rational.
+        let pw = vec![
+            CPoint::new(0.1, 0.2, NOZ, 1.0),
+            CPoint::new(0.9, 0.8, NOZ, 1.0),
+        ];
+        let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let mut c = Curve::from(BSplineCurve::from_nurb(nl, 2, false));
+        mirror_curve(&k, &mut c, SurfParamType::U, 0.0, 2.0, 0.0).unwrap();
         let cc = bspline_of(&c).unwrap().canonical().unwrap();
-        let cd = bspline_of(&d).unwrap().canonical().unwrap();
-        // `N_Iges126Crv` makes a curve non-rational when every weight is equal, so the
-        // all-ones curve comes back non-rational from both settings.
         assert!(cc.weights.is_empty());
-        assert_eq!(cc.control_points, cd.control_points);
-        assert_eq!(cc.weights, cd.weights);
+        let want = [[1.9, 0.2], [1.1, 0.8]];
+        assert_eq!(cc.control_points.len(), want.len());
+        for (index, (got, want)) in cc.control_points.iter().zip(want).enumerate() {
+            for (i, w) in want.into_iter().enumerate() {
+                assert_close(
+                    got.component(i),
+                    w,
+                    &format!("unit-weight point {index} [{i}]"),
+                );
+            }
+        }
+    }
+
+    /// #16998 review: a closed curve through a touching vertex is not collapsed, so both
+    /// its ends stay candidates there and the turn-order rule picks between them. A
+    /// 4 x 4 square and, inside it, a closed counterclockwise triangle (one degree-1
+    /// curve `(0,0) -> (2,1) -> (1,2) -> (0,0)`) touching its corner (0, 0). Arriving at
+    /// the corner along the square's left side, the next ray counterclockwise is the
+    /// triangle's end, so the triangle runs backwards (clockwise, a hole touching the
+    /// outline) and the loop goes on to the square's bottom side: one loop of five.
+    /// Excluding the closed curve's end (a guard on its end points alone) ran it
+    /// forwards, `Same`, in all 96 of these orders. Every order whose first curve is not
+    /// the triangle is checked against main's result (the triangle first starts its own
+    /// loop).
+    #[test]
+    fn closed_curve_at_the_vertex_keeps_the_turn_order() {
+        let k = Kernel::default();
+        let tri = [
+            [0.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [1.0, 2.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        let pw = tri
+            .iter()
+            .map(|p| CPoint::new(p[0], p[1], p[2], NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0]).unwrap();
+        let cs = [
+            line3([0.0, 0.0, 0.0], [4.0, 0.0, 0.0]),
+            line3([4.0, 0.0, 0.0], [4.0, 4.0, 0.0]),
+            line3([4.0, 4.0, 0.0], [0.0, 4.0, 0.0]),
+            line3([0.0, 4.0, 0.0], [0.0, 0.0, 0.0]),
+            Curve::from(BSplineCurve::from_nurb(nl, 3, false)),
+        ];
+        let mut orders = vec![vec![]];
+        for _ in 0..5 {
+            let mut next = Vec::new();
+            for o in &orders {
+                for i in 0..5usize {
+                    if !o.contains(&i) {
+                        let mut v: Vec<usize> = o.clone();
+                        v.push(i);
+                        next.push(v);
+                    }
+                }
+            }
+            orders = next;
+        }
+        let mut checked = 0;
+        for o in orders.iter().filter(|o| o[0] != 4) {
+            let input: Vec<Curve> = o.iter().map(|&i| cs[i].clone()).collect();
+            let r = order_curves_into_loops(&k, &input, 1e-6).unwrap();
+            assert!(r.status().is_ok(), "order {o:?}");
+            assert_eq!(r.loop_counts, vec![5], "order {o:?}");
+            let seq: Vec<usize> = r.ordered.iter().map(|&i| o[i]).collect();
+            let want: Vec<usize> = (0..5).map(|n| (o[0] + n) % 5).collect();
+            assert_eq!(seq, want, "order {o:?}");
+            for (&c, &orient) in seq.iter().zip(&r.orients) {
+                let expect = if c == 4 {
+                    OrientType::Opposite
+                } else {
+                    OrientType::Same
+                };
+                assert_eq!(orient, expect, "order {o:?}, curve {c}");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 96);
+    }
+
+    /// #17033: the partial cone profile with a top line shorter than the tolerance. Its
+    /// side, top and axis ends all meet at the top vertex; going on round that vertex
+    /// must run the collapsed top line forwards (from its start), not backwards from its
+    /// end. Backwards, the profile face made the sweep report the axis inside the face
+    /// (1025) instead of the degenerate swept face (1007, UB-215).
+    #[test]
+    fn issue_17033_collapsed_curve_at_the_vertex_runs_forwards() {
+        let k = Kernel::default();
+        for top in [1e-9, 1e-7, 9.9e-7] {
+            // as `create_partial_cone` builds it: side, base, axis, top
+            let cs = vec![
+                line3([1.0, 0.0, 0.0], [top, 0.0, 1.0]),
+                line3([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+                line3([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+                line3([top, 0.0, 1.0], [0.0, 0.0, 1.0]),
+            ];
+            for tol in [1e-6, 1e-5] {
+                let r = order_curves_into_loops(&k, &cs, tol).unwrap();
+                assert!(r.status().is_ok(), "top {top}, tol {tol}");
+                assert_eq!(r.loop_counts, vec![4], "top {top}, tol {tol}");
+                assert_eq!(r.ordered, vec![0, 3, 2, 1], "top {top}, tol {tol}");
+                assert_eq!(
+                    r.orients,
+                    vec![
+                        OrientType::Same,
+                        OrientType::Same,
+                        OrientType::Opposite,
+                        OrientType::Same
+                    ],
+                    "top {top}, tol {tol}"
+                );
+            }
+            let mut kk = Kernel::default();
+            let e = crate::primitive::api_primitives::create_partial_cone(
+                &mut kk,
+                Point3::new(0.0, 0.0, 0.0),
+                1.0,
+                top,
+                1.0,
+                0.0,
+                90.0,
+            )
+            .unwrap_err();
+            // the goldens record this refusal as 1007 (`SolidError::InvalidInput`), as
+            // upstream's degenerate swept face; run backwards it was 1025, axis inside face
+            assert!(
+                matches!(e, SolidError::InvalidInput { .. })
+                    && e.to_string().contains("degenerates to a curve or point"),
+                "top {top}: {e}"
+            );
+        }
     }
 
     #[test]

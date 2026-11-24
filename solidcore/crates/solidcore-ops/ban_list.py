@@ -17,7 +17,8 @@ FLOATS = ["sqrt", "cbrt", "hypot", "sin", "cos", "tan", "sin_cos", "asin", "acos
 # nothing on another. Kept: constructors from given values, field reads and writes, and the
 # kernel's certified queries on a transform (`is_regular`, `row_lengths`, `of_placement`), and the
 # kernel's maps built from an application's numbers and their composition (`rotation`,
-# `uniform_scaling`, `reflection`, `concat`, `inverse`), which ops calls rather than computes.
+# `uniform_scaling`, `reflection`, `concat`, `inverse`) and a box's reach along a direction
+# (`span_along`), which ops calls rather than computes.
 TYPES = [
     ("geom/vector3d.rs", "Vec3", "solidcore::Vec3",
      {"new", "from_array", "to_array", "set_uninitialized", "is_initialized", "is_undef",
@@ -42,7 +43,8 @@ TYPES = [
      {"new", "from_bounds", "init", "is_defined", "is_init", "set_unbounded", "min", "max",
       "u_min", "u_max", "v_min", "v_max", "w_min", "w_max", "u_interval", "v_interval",
       "w_interval", "set_u_interval", "set_v_interval", "set_min_max", "set_min_max_coords",
-      "set_u_min", "set_u_max", "set_v_min", "set_v_max", "boundary_types", "is_bounded"}),
+      "set_u_min", "set_u_max", "set_v_min", "set_v_max", "boundary_types", "is_bounded",
+      "span_along"}),
     ("geom/extent2d.rs", "Extent2d", "solidcore::geom::extent2d::Extent2d",
      {"new", "from_bounds", "init", "is_init", "set_min_max", "set_min_max_coords",
       "set_u_interval", "set_v_interval", "set_u_min", "set_u_max", "set_v_min", "set_v_max",

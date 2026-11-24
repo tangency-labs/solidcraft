@@ -851,7 +851,7 @@ fn blur_zero_has_no_marker_or_tint_override() {
     let mut state = crate::blur::State::default();
     state.set_radius(0.0).unwrap();
     let ctx = crate::test_support::context();
-    let _scope = state.begin(&ctx, true);
+    let _scope = state.begin(&ctx);
     assert!(!crate::blur::enabled());
     let fill = egui::Color32::from_rgba_unmultiplied(40, 80, 100, 180);
     assert_eq!(crate::blur::panel_fill(fill), fill);
@@ -1763,6 +1763,46 @@ fn window_body_buttons_stay_visible_after_the_page_grows_from_nothing() {
 }
 
 #[test]
+fn a_wrapping_footer_keeps_the_native_actions_at_wide_and_narrow_widths() {
+    for (width, stacked) in [(620.0, false), (180.0, true)] {
+        let ctx = crate::test_support::context();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 250.0));
+        let run = |events| {
+            registry::clear_handles();
+            let mut action = Action::None;
+            raw_frame(&ctx, egui::RawInput { screen_rect: Some(screen), events, focused: true, ..Default::default() }, |ui| {
+                action = Window::new(egui::Id::unique("wrap_actions"), "update", "Update available")
+                    .cards(3.0)
+                    .actions("Install and close SolidCraft", "Remind me later", Some("Skip this version"))
+                    .wrap_actions()
+                    .show(ui.ctx(), true, |ui| {
+                        for _ in 0..30 {
+                            ui.label("Release note");
+                        }
+                    })
+                    .1;
+            });
+            action
+        };
+        for _ in 0..3 {
+            run(Vec::new());
+        }
+        let footer = registry::rect_of("dialog:footer").unwrap();
+        let targets = ["dialog:ok", "dialog:apply", "dialog:cancel"].map(|id| registry::rect_of(id).unwrap());
+        assert!(screen.contains_rect(footer), "{width}: {footer:?}");
+        assert!(targets.iter().all(|target| footer.contains_rect(*target)), "{width}: {targets:?} in {footer:?}");
+        if stacked {
+            assert!(targets.windows(2).all(|pair| pair[0].bottom() <= pair[1].top()), "{targets:?}");
+        } else {
+            assert_eq!(footer.height(), Tokens::get().form_footer_height);
+            assert!(targets.windows(2).all(|pair| pair[0].left() >= pair[1].right()), "{targets:?}");
+        }
+        assert_eq!(run(key(egui::Key::Enter)), Action::Ok);
+        assert_eq!(run(key(egui::Key::Escape)), Action::Cancel);
+    }
+}
+
+#[test]
 fn adjoining_compact_frames_share_one_stroke_and_only_exposed_corners_round() {
     use crate::DockEdges;
     use crate::{LayoutMode, frame::Side};
@@ -2010,4 +2050,180 @@ fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
     );
     let anchor = panel.bounded_anchor(&ctx);
     assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
+}
+
+/// Cards for a column, in the shape a host measures them: content height and minimum height.
+fn stack_cards(spec: &[(f32, f32)]) -> Vec<StackCard> {
+    spec.iter().map(|&(content, minimum)| StackCard { content, minimum }).collect()
+}
+
+/// Places a stack and checks what must hold for every host: inside the column, never overlapping,
+/// a floor kept unless the card is folded, and an honest `scrolls`.
+fn checked_stack(column: egui::Rect, cards: &[StackCard]) -> Vec<StackSlot> {
+    let slots = Panel::stack_bounds(column, cards);
+    assert_eq!(slots.len(), cards.len(), "one rect per card");
+    let mut previous: Option<egui::Rect> = None;
+    for (i, (slot, card)) in slots.iter().zip(cards).enumerate() {
+        assert_eq!(slot.rect.width(), column.width(), "card {i} spans the column");
+        assert!(slot.rect.top().is_finite() && slot.rect.bottom().is_finite(), "card {i} is drawn at a finite height");
+        assert!(slot.rect.top() >= column.top() - 0.01, "card {i} starts {} above the column", column.top() - slot.rect.top());
+        assert!(slot.rect.bottom() <= column.bottom() + 0.01, "card {i} ends {} below the column", slot.rect.bottom() - column.bottom());
+        if let Some(above) = previous {
+            assert!(slot.rect.top() >= above.bottom() - 0.01, "card {i} overlaps the card above it");
+        }
+        if !slot.folded {
+            assert!(slot.rect.height() >= card.minimum - 0.01, "card {i} is {} high, below its minimum {}", slot.rect.height(), card.minimum);
+        }
+        assert_eq!(slot.scrolls, card.content > slot.rect.height() + 0.5, "card {i} must report whether it scrolls");
+        previous = Some(slot.rect);
+    }
+    slots
+}
+
+/// With room for every card, each one gets exactly its content height: nothing scrolls and nothing
+/// folds, for two, three and five cards.
+#[test]
+fn stacked_cards_share_a_tall_column_by_their_content() {
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 1400.0));
+    for spec in [
+        &[(120.0, 60.0), (200.0, 60.0)][..],
+        &[(120.0, 60.0), (200.0, 60.0), (80.0, 60.0)][..],
+        &[(120.0, 60.0), (200.0, 60.0), (80.0, 60.0), (90.0, 60.0), (150.0, 60.0)][..],
+    ] {
+        let cards = stack_cards(spec);
+        let slots = checked_stack(column, &cards);
+        for (i, (slot, card)) in slots.iter().zip(&cards).enumerate() {
+            assert_eq!(slot.rect.height(), card.content, "card {i} is given exactly what its content needs");
+            assert!(!slot.scrolls && !slot.folded, "card {i} fits, so it neither scrolls nor folds");
+        }
+    }
+}
+
+/// With room for the minimums but not for every content, every card keeps its minimum and says it
+/// scrolls, and the space left over goes to the card that lacks the most.
+#[test]
+fn stacked_cards_share_a_short_column_down_to_their_minimums() {
+    let t = Tokens::get();
+    let cards = stack_cards(&[(400.0, 80.0), (300.0, 60.0), (200.0, 40.0)]);
+    let height = 80.0 + 60.0 + 40.0 + t.space_8 * 2.0 + 60.0;
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, height));
+    let slots = checked_stack(column, &cards);
+    for (i, slot) in slots.iter().enumerate() {
+        assert!(slot.scrolls && !slot.folded, "card {i} scrolls, it is not folded");
+    }
+    assert!(slots[0].rect.height() > slots[1].rect.height(), "the card that lacks most gets most");
+    assert!(slots[0].rect.height() > 80.0 && slots[2].rect.height() > 40.0, "the spare goes to the cards that lack room");
+}
+
+/// A column too short for every minimum folds the lowest cards to their header, and keeps the ones
+/// above at their minimum, without ever overlapping.
+#[test]
+fn stacked_cards_fold_to_their_header_when_the_column_cannot_hold_every_minimum() {
+    let t = Tokens::get();
+    let cards = stack_cards(&[(300.0, 120.0), (300.0, 120.0), (300.0, 120.0), (300.0, 120.0)]);
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 2.0 * 120.0 + t.form_header_height + t.space_8 * 3.0));
+    let slots = checked_stack(column, &cards);
+    assert_eq!(slots.iter().filter(|slot| slot.folded).count(), 3, "three of the four cards have to fold");
+    assert!(!slots[0].folded, "the top card keeps its minimum");
+    assert!(slots[1].folded && slots[2].folded && slots[3].folded, "the lowest cards fold first");
+    for slot in slots.iter().filter(|slot| slot.folded) {
+        assert!(slot.rect.height() <= t.form_header_height + 0.01, "a folded card is its header high");
+    }
+}
+
+/// A column too short even for the headers still gives finite, ordered rects that stay inside it,
+/// and nothing panics on nonsense measurements.
+#[test]
+fn stacked_cards_degrade_to_finite_rects_and_never_overlap() {
+    let cards = stack_cards(&[(300.0, 120.0), (300.0, 120.0), (300.0, 120.0)]);
+    for height in [120.0, 40.0, 0.0] {
+        let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, height));
+        let slots = checked_stack(column, &cards);
+        assert!(slots.iter().all(|slot| slot.folded), "nothing fits at {height}: every card folds");
+    }
+    // Un rect invertido no es un sitio donde dibujar: se trata como vacio, sin panic ni rects sueltos.
+    let inverted = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, -50.0));
+    for slot in Panel::stack_bounds(inverted, &cards) {
+        assert!(slot.rect.height() == 0.0 && slot.rect.top() == inverted.top(), "an inverted column holds nothing");
+    }
+    assert!(Panel::stack_bounds(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0)), &[]).is_empty());
+    let nonsense = stack_cards(&[(f32::NAN, -10.0), (f32::INFINITY, f32::NAN)]);
+    let column = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, f32::NAN));
+    for slot in Panel::stack_bounds(column, &nonsense) {
+        assert!(slot.rect.top().is_finite() && slot.rect.height().is_finite(), "a nonsense measurement still draws somewhere finite");
+    }
+}
+
+/// A dialog body running on past its viewport fades out at the end that has more, so a field cut
+/// by the header or the footer reads as scrollable; a body that fits has no fade.
+#[test]
+fn feature_body_fades_out_only_where_content_runs_on() {
+    /// (fade at the top, fade at the bottom) after `wheel` points of scrolling down.
+    fn fades(rows: usize, wheel: f32) -> (bool, bool) {
+        fn walk(shape: &egui::Shape, found: &mut (bool, bool)) {
+            match shape {
+                egui::Shape::Vec(all) => all.iter().for_each(|shape| walk(shape, found)),
+                egui::Shape::Mesh(mesh) => {
+                    let clear = |want: bool| mesh.vertices.iter().filter(move |v| (v.color == egui::Color32::TRANSPARENT) == want).map(|v| v.pos.y);
+                    if let (Some(clear_y), Some(fill_y)) = (clear(true).reduce(f32::min), clear(false).reduce(f32::min)) {
+                        // A bottom fade runs from clear at its top to the card colour below.
+                        if clear_y < fill_y { found.1 = true } else { found.0 = true }
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = crate::test_support::context();
+        let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 300.0));
+        let over = egui::pos2(vp.right() - 80.0, vp.center().y);
+        let mut output = None;
+        for frame in 0..12 {
+            registry::clear_handles();
+            let events = if frame >= 3 && wheel > 0.0 {
+                vec![
+                    egui::Event::PointerMoved(over),
+                    egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -wheel / 9.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    },
+                ]
+            } else {
+                Vec::new()
+            };
+            let input = egui::RawInput { screen_rect: Some(vp), time: Some(f64::from(frame) * 0.1), events, ..Default::default() };
+            output = Some(crate::test_support::raw_frame(&ctx, input, |_| {
+                DialogButtons::Bottom.publish(&ctx);
+                let side = crate::frame::Side::Right;
+                let anchor = egui::pos2(vp.right() - crate::SHELL_GAP, vp.top());
+                let panel =
+                    Panel::new("Hole", egui::Id::unique("fade"), anchor, vp, side, Panel::feature_frame(&ctx, crate::LayoutMode::Floating, side));
+                panel.window(&ctx).show(&ctx, |ui| {
+                    let heading = FeatureOptions {
+                        icon: "fillet",
+                        title: "Hole",
+                        drag_key: "fade",
+                        moved: egui::Vec2::ZERO,
+                        docked: anchor,
+                        apply_label: None,
+                    };
+                    panel.feature(ui, heading, true, true, |ui| {
+                        for _ in 0..rows {
+                            text(ui, "Input", Text::Note("row"));
+                        }
+                        ComputeStatus { text: None, busy: false, applying: false }
+                    });
+                });
+            }));
+        }
+        let mut found = (false, false);
+        output.unwrap().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut found));
+        found
+    }
+    assert_eq!(fades(1, 0.0), (false, false), "short content has no fade");
+    assert_eq!(fades(40, 0.0), (false, true), "at the top, long content fades out above the footer only");
+    assert_eq!(fades(40, 200.0), (true, true), "scrolled part way, it fades out at both ends");
+    assert_eq!(fades(40, 10_000.0), (true, false), "at the end, it fades out below the header only");
 }

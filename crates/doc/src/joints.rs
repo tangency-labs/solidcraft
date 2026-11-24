@@ -182,11 +182,23 @@ impl EdgeAxis {
 
 /// What sets a joint origin's x axis (its turn about z): a direction, or a face found by its
 /// persistent name, so a round origin keeps its turn when the design changes.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum XRef {
     /// A direction (component coordinates); its part square to z is taken.
     Dir(Vec3),
+    Reference {
+        reference: AlignmentRef,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
+    /// A secondary alignment face. Unlike legacy x references it must remain one planar
+    /// face on the origin's component, with a nonzero projection square to its axis.
+    Planar {
+        planar_face: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
     /// A face: a plane's outward normal, a cylinder's way from the origin to its axis (another
     /// hole), any other face's way from the origin to the point of it nearest `pick` (component
     /// coordinates; it also tells the pieces of a split face apart, default the origin).
@@ -197,16 +209,186 @@ pub enum XRef {
     },
 }
 
+/// A strict typed secondary reference; legacy face and direction forms keep their meaning.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecondaryAlignmentX {
+    pub reference: AlignmentRef,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverse: bool,
+}
+
+/// Compatibility name for the typed secondary-axis request.
+pub type SecondaryAxisRef = AlignmentRef;
+
+impl<'de> Deserialize<'de> for XRef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(d)?;
+        if value.get("reference").is_some() {
+            let typed: SecondaryAlignmentX = serde_json::from_value(value).map_err(D::Error::custom)?;
+            return Ok(Self::Reference { reference: typed.reference, reverse: typed.reverse });
+        }
+        if value.get("planar_face").is_some() {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Planar {
+                planar_face: String,
+                #[serde(default)]
+                reverse: bool,
+            }
+            let p: Planar = serde_json::from_value(value).map_err(D::Error::custom)?;
+            return Ok(Self::Planar { planar_face: p.planar_face, reverse: p.reverse });
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Legacy {
+            Dir(Vec3),
+            Face {
+                face: String,
+                #[serde(default)]
+                pick: Option<Vec3>,
+            },
+        }
+        match serde_json::from_value::<Legacy>(value).map_err(D::Error::custom)? {
+            Legacy::Dir(v) => Ok(Self::Dir(v)),
+            Legacy::Face { face, pick } => Ok(Self::Face { face, pick }),
+        }
+    }
+}
+
+/// A directional or positional identity, resolved in the origin component on every solve. There is no
+/// nearest-geometry or captured-vector fallback when one disappears or changes its kind.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AlignmentRef {
+    Edge {
+        name: String,
+    },
+    Cylinder {
+        name: String,
+    },
+    /// Centre of the named rim of a cylindrical face; supplies a positional clocking reference.
+    CircleCenter(Box<CircleCenterRef>),
+    Construction {
+        feature: u64,
+    },
+    ConstructionPlane {
+        feature: u64,
+    },
+    SketchLine {
+        sketch: u64,
+        curve: String,
+    },
+    OriginAxis {
+        axis: String,
+    },
+    OriginPlane {
+        plane: String,
+    },
+}
+
+/// A circle centre's persistent face and rim identities. Boxing this payload keeps the
+/// common reference and origin types compact when they contain existing direction refs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CircleCenterRef {
+    pub name: String,
+    pub end: String,
+}
+
+impl XRef {
+    /// Whether the reference's stored values form a bounded, finite identity.
+    pub fn is_finite(&self) -> bool {
+        let name = |n: &str| !n.is_empty() && n.len() <= 512;
+        match self {
+            Self::Dir(d) => d.is_finite(),
+            Self::Face { pick, .. } => pick.is_none_or(|p| p.is_finite()),
+            Self::Planar { planar_face, .. } => name(planar_face),
+            Self::Reference { reference, .. } => match reference {
+                AlignmentRef::Edge { name: n } | AlignmentRef::Cylinder { name: n } => name(n),
+                AlignmentRef::CircleCenter(r) => name(&r.name) && name(&r.end),
+                AlignmentRef::Construction { feature } | AlignmentRef::ConstructionPlane { feature } => *feature != 0,
+                AlignmentRef::SketchLine { sketch, curve } => *sketch != 0 && name(curve),
+                AlignmentRef::OriginAxis { axis } => matches!(axis.as_str(), "X" | "Y" | "Z"),
+                AlignmentRef::OriginPlane { plane } => matches!(plane.as_str(), "XY" | "XZ" | "YZ"),
+            },
+        }
+    }
+
+    fn geometry_names(&self) -> Vec<&String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => vec![face],
+            Self::Reference { reference: AlignmentRef::CircleCenter(rim), .. } => vec![&rim.name, &rim.end],
+            _ => Vec::new(),
+        }
+    }
+
+    fn geometry_names_mut(&mut self) -> Vec<&mut String> {
+        match self {
+            Self::Face { face, .. }
+            | Self::Planar { planar_face: face, .. }
+            | Self::Reference { reference: AlignmentRef::Edge { name: face } | AlignmentRef::Cylinder { name: face }, .. } => vec![face],
+            Self::Reference { reference: AlignmentRef::CircleCenter(rim), .. } => {
+                let rim = rim.as_mut();
+                vec![&mut rim.name, &mut rim.end]
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
 impl Snap {
+    pub fn secondary_axis_feature_mut(&mut self) -> Option<&mut u64> {
+        let x = match self {
+            Self::FaceCenter { x, .. } | Self::CircleCenter { x, .. } | Self::Plane { x, .. } | Self::Axis { x, .. } => x,
+            _ => return None,
+        };
+        match x {
+            Some(XRef::Reference {
+                reference:
+                    AlignmentRef::Construction { feature }
+                    | AlignmentRef::ConstructionPlane { feature }
+                    | AlignmentRef::SketchLine { sketch: feature, .. },
+                ..
+            }) => Some(feature),
+            _ => None,
+        }
+    }
+
+    fn strict_alignment(&self) -> bool {
+        matches!(
+            self,
+            Self::FaceCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                | Self::CircleCenter { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                | Self::Plane { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+                | Self::Axis { x: Some(XRef::Reference { .. } | XRef::Planar { .. }), .. }
+        )
+    }
+
+    fn helper_alignment(&self) -> bool {
+        let x = match self {
+            Self::FaceCenter { x, .. } | Self::CircleCenter { x, .. } | Self::Plane { x, .. } | Self::Axis { x, .. } => x.as_ref(),
+            _ => None,
+        };
+        matches!(
+            x,
+            Some(XRef::Reference {
+                reference: AlignmentRef::Construction { .. } | AlignmentRef::ConstructionPlane { .. } | AlignmentRef::SketchLine { .. },
+                ..
+            })
+        )
+    }
+
     /// The persistent face and edge names the snap refers to (its face, its end's, its x reference's;
     /// an edge origin's edge, face and corner edge).
     pub fn face_names(&self) -> Vec<&String> {
         let mut out = Vec::new();
         if let Snap::FaceCenter { face, x, .. } | Snap::CircleCenter { face, x, .. } = self {
             out.extend(face.iter());
-            if let Some(XRef::Face { face, .. }) = x {
-                out.push(face);
-            }
+            out.extend(x.as_ref().into_iter().flat_map(XRef::geometry_names));
         }
         if let Snap::CircleCenter { end: Some(end), .. } = self {
             out.push(end);
@@ -214,8 +396,8 @@ impl Snap {
         if let Snap::Edge { edge, face, corner, .. } = self {
             out.extend(edge.iter().chain(face.iter()).chain(corner.iter()));
         }
-        if let Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } = self {
-            out.push(face);
+        if let Snap::Plane { x, .. } | Snap::Axis { x, .. } = self {
+            out.extend(x.as_ref().into_iter().flat_map(XRef::geometry_names));
         }
         out
     }
@@ -226,21 +408,15 @@ impl Snap {
         match self {
             Snap::FaceCenter { face, x, .. } => {
                 out.extend(face.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
-                    out.push(face);
-                }
+                out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::CircleCenter { face, end, x, .. } => {
                 out.extend(face.iter_mut());
                 out.extend(end.iter_mut());
-                if let Some(XRef::Face { face, .. }) = x {
-                    out.push(face);
-                }
+                out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
-            Snap::Plane { x: Some(XRef::Face { face, .. }), .. } | Snap::Axis { x: Some(XRef::Face { face, .. }), .. } => {
-                out.push(face);
-            }
+            Snap::Plane { x, .. } | Snap::Axis { x, .. } => out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut)),
             _ => {}
         }
         out
@@ -294,11 +470,7 @@ impl Snap {
 
     /// Whether every point and direction in the snap is finite.
     pub fn is_finite(&self) -> bool {
-        let x_ok = |x: &Option<XRef>| match x {
-            Some(XRef::Dir(d)) => d.is_finite(),
-            Some(XRef::Face { pick, .. }) => pick.is_none_or(|p| p.is_finite()),
-            None => true,
-        };
+        let x_ok = |x: &Option<XRef>| x.as_ref().is_none_or(XRef::is_finite);
         match self {
             Snap::Frame { origin, z, x } => origin.is_finite() && z.is_finite() && x.is_none_or(|x| x.is_finite()),
             Snap::FaceCenter { pick, x, .. } | Snap::CircleCenter { pick, x, .. } => pick.is_finite() && x_ok(x),
@@ -604,6 +776,10 @@ pub struct Joint {
     /// Distance from A's frame to B's along z, and a turn about it (radians).
     #[serde(default)]
     pub offset: f64,
+    /// Offsets along A's frame x and y, applied before the joint's motion.
+    /// Older designs keep their saved A frame and have no additional lateral offset.
+    #[serde(default)]
+    pub offset_xy: [f64; 2],
     #[serde(default)]
     pub angle: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -622,18 +798,39 @@ pub struct Joint {
 }
 
 impl Joint {
+    /// Whether either side of the joint refers to one of these occurrences.
+    pub fn uses_any_occurrence(&self, occurrences: &BTreeSet<u64>) -> bool {
+        !occurrences.is_empty() && self.a.occurrences().chain(self.b.occurrences()).any(|o| occurrences.contains(&o))
+    }
+
     /// Whether its values start where its parts are when it is made or changed, so B moves no
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
         self.kind.is_relation() || self.constraint.is_some()
     }
+
+    /// A's attachment frame with its lateral offsets, in the frame's coordinate space.
+    /// Applying the offset here keeps its origin fixed while a revolute joint turns.
+    pub fn offset_frame_a(&self, frame: Mat) -> Mat {
+        if self.offset_xy == [0.0; 2] {
+            return frame;
+        }
+        let mut offset = IDENTITY;
+        offset[3][0] = self.offset_xy[0];
+        offset[3][1] = self.offset_xy[1];
+        mat_mul(&frame, &offset)
+    }
 }
 
-/// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
-/// the angle and each value (angles or lengths as the joint's values are). A number typed in
-/// place of one drops it.
+/// Expressions a joint's numbers follow (over the design's parameters): the lateral offsets, the
+/// axial offset (lengths), the angle and each value (angles or lengths as the joint's values are).
+/// A number typed in place of one drops it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointExprs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -641,11 +838,38 @@ pub struct JointExprs {
     /// By value index, as in `Joint::values`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<Option<String>>,
+    /// The minimum and maximum of each value's limits, by value index as in `Joint::limits`
+    /// (in the units of the value: angles or lengths).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<[Option<String>; 2]>,
 }
 
 impl JointExprs {
     pub fn is_empty(&self) -> bool {
-        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none)
+        self.offset_x.is_none()
+            && self.offset_y.is_none()
+            && self.offset.is_none()
+            && self.angle.is_none()
+            && self.values.iter().all(Option::is_none)
+            && self.limits.iter().all(|l| l == &[None, None])
+    }
+
+    /// The expressions the minimum and maximum of value `i`'s limits follow.
+    pub fn limit(&self, i: usize) -> [Option<&str>; 2] {
+        self.limits.get(i).map_or([None, None], |[lo, hi]| [lo.as_deref(), hi.as_deref()])
+    }
+
+    /// Value `i`'s limits follow `e` (or nothing).
+    pub fn set_limit(&mut self, i: usize, e: [Option<String>; 2]) {
+        if e != [None, None] && self.limits.len() <= i {
+            self.limits.resize(i + 1, [None, None]);
+        }
+        if let Some(slot) = self.limits.get_mut(i) {
+            *slot = e;
+        }
+        while self.limits.last().is_some_and(|l| l == &[None, None]) {
+            self.limits.pop();
+        }
     }
 
     /// The expression value `i` follows.
@@ -692,14 +916,23 @@ impl<'a> Params<'a> {
     }
 }
 
-/// A joint's offset, angle and values worked out from its expressions (those without one keep
-/// their numbers), or why one can't be: an unknown name, a wrong unit, or a number too large.
-pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
+/// A joint's lateral offsets, axial offset, angle and values worked out from its expressions
+/// (those without one keep their numbers), or why one can't be: an unknown name, a wrong unit, or
+/// a number too large.
+pub fn expressed(params: &Params, j: &Joint) -> Result<([f64; 2], f64, f64, Vec<f64>)> {
     let eval = |e: &str, kind: crate::expr::Kind, what: &str| -> Result<f64> {
         let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {what} `{e}`: {err}", j.name)))?;
         if v.is_finite() && v.abs() < MAX_EXPR_VALUE { Ok(v) } else { Err(DocError::Invalid(format!("joint {}: {what} `{e}` gives {v}", j.name))) }
     };
     let x = &j.exprs;
+    let offset_x = match &x.offset_x {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_x")?,
+        None => j.offset_xy[0],
+    };
+    let offset_y = match &x.offset_y {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_y")?,
+        None => j.offset_xy[1],
+    };
     let offset = match &x.offset {
         Some(e) => eval(e, crate::expr::Kind::Length, "offset")?,
         None => j.offset,
@@ -721,7 +954,42 @@ pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
             *slot = v;
         }
     }
-    Ok((offset, angle, values))
+    Ok(([offset_x, offset_y], offset, angle, values))
+}
+
+/// A joint's limits worked out from their expressions (an end without one keeps its number), or
+/// why they can't be: an unknown name, a wrong unit, a number too large, or a minimum that comes
+/// out above the maximum.
+pub fn expressed_limits(params: &Params, j: &Joint) -> Result<Vec<Option<(f64, f64)>>> {
+    let mut limits = j.limits.clone();
+    for (i, ends) in j.exprs.limits.iter().enumerate().take(j.kind.dofs().len()) {
+        if ends == &[None, None] {
+            continue;
+        }
+        let kind = if j.kind.is_angle(i) { crate::expr::Kind::Angle } else { crate::expr::Kind::Length };
+        let name = j.kind.dofs().get(i).copied().unwrap_or("value");
+        let (lo, hi) = limits.get(i).copied().flatten().unwrap_or((0.0, 0.0));
+        let mut ends_now = [lo, hi];
+        for ((e, slot), which) in ends.iter().zip(ends_now.iter_mut()).zip(["minimum", "maximum"]) {
+            let Some(e) = e else { continue };
+            let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {name} {which} `{e}`: {err}", j.name)))?;
+            if !(v.is_finite() && v.abs() < MAX_EXPR_VALUE) {
+                return Err(DocError::Invalid(format!("joint {}: {name} {which} `{e}` gives {v}", j.name)));
+            }
+            *slot = v;
+        }
+        let [lo, hi] = ends_now;
+        if lo > hi {
+            return Err(DocError::Invalid(format!("joint {}: {name} limits: the minimum comes out above the maximum", j.name)));
+        }
+        if limits.len() <= i {
+            limits.resize(i + 1, None);
+        }
+        if let Some(slot) = limits.get_mut(i) {
+            *slot = Some((lo, hi));
+        }
+    }
+    Ok(limits)
 }
 
 /// Values the loop solver leaves alone: those a motion link sets and those an expression does.
@@ -916,6 +1184,13 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// The parts an import placed, each group held where they are by one record rather than a
+    /// rigid joint per placement (`rigid-groups`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rigid_groups: Vec<RigidGroup>,
+    /// The bill of materials views numbered, with their saved item numbers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_numbers: Vec<crate::bom::ItemNumbers>,
 }
 
 impl Assembly {
@@ -925,11 +1200,21 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &self.joints {
             let x = &j.exprs;
+            out.extend(x.offset_x.as_deref().map(|e| (j.id, "offset_x".to_string(), e)));
+            out.extend(x.offset_y.as_deref().map(|e| (j.id, "offset_y".to_string(), e)));
             out.extend(x.offset.as_deref().map(|e| (j.id, "offset".to_string(), e)));
             out.extend(x.angle.as_deref().map(|e| (j.id, "angle".to_string(), e)));
             for (i, e) in x.values.iter().enumerate() {
                 if let Some(e) = e {
                     out.push((j.id, j.kind.dofs().get(i).copied().unwrap_or("value").to_string(), e.as_str()));
+                }
+            }
+            for (i, ends) in x.limits.iter().enumerate() {
+                let name = j.kind.dofs().get(i).copied().unwrap_or("value");
+                for (e, which) in ends.iter().zip(["minimum", "maximum"]) {
+                    if let Some(e) = e {
+                        out.push((j.id, format!("{name} {which}"), e.as_str()));
+                    }
                 }
             }
         }
@@ -957,9 +1242,12 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &mut self.joints {
             let x = &mut j.exprs;
+            out.extend(x.offset_x.as_mut());
+            out.extend(x.offset_y.as_mut());
             out.extend(x.offset.as_mut());
             out.extend(x.angle.as_mut());
             out.extend(x.values.iter_mut().flatten());
+            out.extend(x.limits.iter_mut().flatten().flatten());
         }
         for l in &mut self.links {
             for s in l.coupling.as_mut().map(Coupling::sizes_mut).unwrap_or_default() {
@@ -990,13 +1278,20 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.rigid_groups.is_empty()
+            && self.item_numbers.is_empty()
     }
 }
 
 /// A frame: origin and orthonormal axes, as a transform (local → parent).
 fn frame(o: Vec3, z: Vec3, x: Option<Vec3>) -> Option<Mat> {
+    frame_with_x_policy(o, z, x, false)
+}
+
+fn frame_with_x_policy(o: Vec3, z: Vec3, x: Option<Vec3>, strict_x: bool) -> Option<Mat> {
     let z = z.normalized()?;
-    let x = x.and_then(|x| (x - z * x.dot(z)).normalized()).unwrap_or_else(|| z.any_perp());
+    let projected_x = x.and_then(|x| (x - z * x.dot(z)).normalized());
+    let x = if strict_x { projected_x? } else { projected_x.unwrap_or_else(|| z.any_perp()) };
     let y = z.cross(x).normalized()?;
     Some([[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [z.x, z.y, z.z, 0.0], [o.x, o.y, o.z, 1.0]])
 }
@@ -1186,7 +1481,58 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
-    let bad = || DocError::Invalid("joint origin: degenerate frame".into());
+    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
+    // not depend on the joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+        let kept = origin_key(doc, st, o);
+        if let Some((key, bodies)) = &kept
+            && let Some(found) = st.origin_frames.get(key, bodies)
+        {
+            return Ok(found);
+        }
+        let made = resolve_snap(doc, st, o)?;
+        st.origin_frames.note_resolved();
+        if let Some((key, bodies)) = kept {
+            st.origin_frames.put(key, made, bodies);
+        }
+        return Ok(made);
+    }
+    resolve_snap(doc, st, o)
+}
+
+/// What [`ModelState::origin_frames`] keys an origin by: its definition, its component, and each
+/// body of the component's identity and offset, with the bodies themselves to check a hit
+/// against. `None` when a body has no identity to key by.
+fn origin_key(doc: &Document, st: &ModelState, o: &JointOrigin) -> Option<((String, u64, Vec<u64>), Vec<solidcraft_kernel::Body>)> {
+    use std::hash::{Hash, Hasher};
+    if o.snap.helper_alignment() {
+        return None;
+    }
+    let comp = component_of(doc, o.part()).ok()?;
+    let (mut bodies, mut kept) = (Vec::new(), Vec::new());
+    for b in component_bodies(doc, st, comp) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        b.name.hash(&mut h);
+        doc.model_body_offset(b).iter().flat_map(|m| m.iter().flatten()).for_each(|v| v.to_bits().hash(&mut h));
+        bodies.push(b.geometry_key()?);
+        bodies.push(h.finish());
+        kept.push(b.body.clone());
+    }
+    Some(((format!("{:?}", o.snap), comp, bodies), kept))
+}
+
+/// [`resolve_origin`] of an origin on one part, from the bodies.
+fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
+    let bad = || {
+        DocError::Invalid(
+            if o.snap.strict_alignment() {
+                "secondary alignment: the direction is parallel to the primary axis or the frame is degenerate"
+            } else {
+                "joint origin: degenerate frame"
+            }
+            .into(),
+        )
+    };
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
         Snap::Point { point, z, x } => frame(*point, z.unwrap_or(Vec3::Z), *x).ok_or_else(bad),
@@ -1202,12 +1548,18 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                 Some(cn) => cn,
                 None => nearest_plane(doc, st, o, named.as_ref().map_or(*pick, |f| f.point))?,
             };
-            frame(c, n, face::x_axis(doc, st, comp, x.as_ref(), c)?).ok_or_else(bad)
+            frame_with_x_policy(c, n, face::x_axis(doc, st, comp, x.as_ref(), c)?, o.snap.strict_alignment()).ok_or_else(bad)
         }
         Snap::Edge { .. } => edge::edge_frame(doc, st, component_of(doc, o.occurrence)?, &o.snap),
         Snap::CircleCenter { x, .. } => {
             let r = round_of(doc, st, o)?;
-            frame(r.centre, r.z, face::x_axis(doc, st, component_of(doc, o.occurrence)?, x.as_ref(), r.centre)?).ok_or_else(bad)
+            frame_with_x_policy(
+                r.centre,
+                r.z,
+                face::x_axis(doc, st, component_of(doc, o.occurrence)?, x.as_ref(), r.centre)?,
+                o.snap.strict_alignment(),
+            )
+            .ok_or_else(bad)
         }
         Snap::Plane { plane, pick, x } => {
             let comp = component_of(doc, o.occurrence)?;
@@ -1218,7 +1570,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             // planes, a placement's datum) and is mapped into the side's frame — through the
             // side's exact occurrence, not `resolve_datum_in`'s first-placement mapping.
             let pl = match plane.as_ref() {
-                PlaneRef::Construction { feature } => {
+                PlaneRef::Construction { feature, .. } => {
                     if doc.feature(feature.0).map(|f| f.component) != Some(comp) {
                         return Err(DocError::Unknown(format!("construction plane is not on this component (occurrence {})", o.occurrence)));
                     }
@@ -1239,7 +1591,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                 Some(_) => face::x_axis(doc, st, comp, x.as_ref(), origin)?,
                 None => Some(pl.x),
             };
-            frame(origin, n, x_axis).ok_or_else(bad)
+            frame_with_x_policy(origin, n, x_axis, o.snap.strict_alignment()).ok_or_else(bad)
         }
         Snap::Axis { axis, pick, x } => {
             let comp = component_of(doc, o.occurrence)?;
@@ -1250,7 +1602,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                 None => line_origin,
             };
             let x_axis = face::x_axis(doc, st, comp, x.as_ref(), origin)?;
-            frame(origin, z, x_axis).ok_or_else(bad)
+            frame_with_x_policy(origin, z, x_axis, o.snap.strict_alignment()).ok_or_else(bad)
         }
     }
 }
@@ -1468,7 +1820,7 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 /// unless flipped. Two datum references (a plane or an axis on each side) both point along the
 /// geometry's own normal rather than out of a body, so they mate aligned - each part keeps its
 /// side of the datum - and `flip` asks for the mated relation.
-fn flip_of(j: &Joint) -> Mat {
+pub fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);
@@ -1631,6 +1983,11 @@ impl Placements<'_, '_, '_> {
 /// on at most: larger ones are only checked (a group with more values moves only those of its
 /// loops that need to move, `moving_loops_values`).
 const MAX_LOOP_VALUES: usize = 64;
+/// Values a group of loops is solved with when it cannot be narrowed to the loops that need to
+/// move (`moving_loops_values`): a ring of links, where every loop of the group runs through the
+/// value that moves, is one group of them all and cannot be narrowed. The group is solved whole,
+/// as long as it is this big, so that closing such a ring does not lock the model up (#18880).
+const MAX_LOOP_VALUES_WHOLE: usize = 256;
 const MAX_LOOPS: usize = 100;
 /// Loop-closing joints one solve takes on at most, over all its groups: a part placed by several
 /// relations closes a loop with each one after the first, so a panel of parts has many small
@@ -2239,14 +2596,44 @@ fn close_group(
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
     let scale = loop_scale(tree, around, vals);
-    let mut vars = unknowns(tree, around, asm, linked, held);
-    if vars.len() > MAX_LOOP_VALUES {
-        // Too many to move at once: only the loops that need to move, or none.
-        match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
-            Some(few) => vars = few,
-            None => return Some(BTreeMap::new()),
-        }
+    let vars = unknowns(tree, around, asm, linked, held);
+    if vars.len() <= MAX_LOOP_VALUES {
+        return close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars);
     }
+    // Too many to move at once: only the loops that need to move, or none.
+    let whole = vars.len() <= MAX_LOOP_VALUES_WHOLE;
+    match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
+        // The loops that need to move, kept closed by their own values and the closing joints'
+        // of the closed loops those values move. Where that can't follow a held value's motion,
+        // the group is solved whole as below: in a ring of hinged parts (#18880) a hinge turned at
+        // one place folds the ring at another, through values of loops that are closed and stay so.
+        Some(few) => match close_group_by(tree, closing, around, moves, asm, spent, vals, scale, few) {
+            None if whole && !moves.is_empty() && spent.get() <= MAX_LOOP_WORK => {
+                close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars)
+            }
+            done => done,
+        },
+        // The group cannot be narrowed: every loop of it runs through the value that moves (a
+        // ring of links), or none of them needs to move. It is solved whole when it is small
+        // enough to solve, so that closing such a ring moves the model instead of locking it up
+        // (#18880).
+        None if whole => close_group_by(tree, closing, around, moves, asm, spent, vals, scale, vars),
+        None => Some(BTreeMap::new()),
+    }
+}
+
+/// `close_group` moving the values `vars` (and the held ones), at the loops' size `scale`.
+fn close_group_by(
+    tree: &Tree,
+    closing: &[u64],
+    around: &BTreeSet<u64>,
+    moves: &[(u64, usize, f64, f64)],
+    asm: &Assembly,
+    spent: &std::cell::Cell<usize>,
+    vals: &mut Values,
+    scale: f64,
+    vars: Vec<(u64, usize)>,
+) -> Option<BTreeMap<(u64, usize), f64>> {
     let bounds = limit_bounds(tree, &vars);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
@@ -2418,7 +2805,7 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
     if n == 0 {
         return largest(&r) <= tol;
     }
-    let mut lambda = 1e-3;
+    let (mut lambda, mut stalled) = (1e-3, 0usize);
     for _ in 0..50 {
         if largest(&r) <= tol {
             return true;
@@ -2446,15 +2833,16 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
         }
         let mut stepped = false;
         while lambda < 1e12 {
-            let mut a = jtj.clone();
+            let mut damped = jtj.clone();
             for p in 0..n {
-                a.add(p, p, lambda * (1.0 + jtj.get(p, p)));
+                damped.add(p, p, lambda * (1.0 + jtj.get(p, p)));
             }
-            if let Some(d) = linalg::solve(a, g.clone()) {
+            if let Some(d) = bounded_step(&damped, &g, x, bounds) {
                 let next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv).max(*lo).min(*hi)).collect();
                 if let Some(rn) = f(&next)
                     && norm(&rn) < norm(&r)
                 {
+                    stalled = if norm(&rn) > STALLED * norm(&r) { stalled + 1 } else { 0 };
                     *x = next;
                     r = rn;
                     lambda = (lambda / 3.0).max(1e-9);
@@ -2464,11 +2852,83 @@ fn least_squares(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>
             }
             lambda *= 4.0;
         }
-        if !stepped {
-            return false;
+        // Steps that hardly get closer have reached what the loops can come to (faces modelled a
+        // few nanometres apart): the caller decides whether that is close enough
+        // (`close_within`), without fifty more Jacobians that end in the same place.
+        if !stepped || (stalled >= MAX_STALLED && largest(&r) > tol) {
+            return largest(&r) <= tol;
         }
     }
     largest(&r) <= tol
+}
+
+/// A least squares step that leaves more than this share of the squared gaps has hardly got
+/// closer; `MAX_STALLED` such steps in a row end the solve.
+const STALLED: f64 = 0.99;
+const MAX_STALLED: usize = 3;
+
+/// One damped Gauss–Newton step `d` from `x` (the damped normal equations `damped`, `g` = −Jᵀr)
+/// that stays within `bounds`: the least squares step with its values boxed in. A value
+/// the step would take past one of its bounds is held at that bound and the step is solved again
+/// for the others; a held value is let go again where the step does better with it moving back
+/// inside. So a loop whose values sit at their limits (the pins of a folding toy, #18880) moves
+/// by the values that are free to move. Cut back to the bounds after an unbounded solve instead,
+/// the step spreads the motion over every value, the ones at a limit can't take their share, and
+/// the loops stay open: the solve crept along and stopped.
+fn bounded_step(damped: &linalg::Mat, g: &[f64], x: &[f64], bounds: &[(f64, f64)]) -> Option<Vec<f64>> {
+    let n = x.len();
+    // The values held at a bound: the move that takes each there, and whether it is the lower one.
+    let mut held: Vec<Option<(f64, bool)>> = vec![None; n];
+    let mut last = None;
+    // Each pass holds or lets go of values; a box this small settles in a few.
+    for _ in 0..3 * n + 3 {
+        let mut a = damped.clone();
+        let mut rhs = g.to_vec();
+        for (p, h) in held.iter().enumerate() {
+            let Some((d, _)) = *h else { continue };
+            for q in (0..n).filter(|q| *q != p) {
+                if let Some(r) = rhs.get_mut(q) {
+                    *r -= a.get(q, p) * d;
+                }
+                a.set(q, p, 0.0);
+                a.set(p, q, 0.0);
+            }
+            a.set(p, p, 1.0);
+            if let Some(r) = rhs.get_mut(p) {
+                *r = d;
+            }
+        }
+        let d = linalg::solve(a, rhs)?;
+        // Free values the step takes past a bound are held there.
+        let mut changed = false;
+        for (p, ((v, dv), (lo, hi))) in x.iter().zip(&d).zip(bounds).enumerate() {
+            let Some(slot) = held.get_mut(p).filter(|h| h.is_none()) else { continue };
+            if v + dv < *lo {
+                *slot = Some((lo - v, true));
+                changed = true;
+            } else if v + dv > *hi {
+                *slot = Some((hi - v, false));
+                changed = true;
+            }
+        }
+        if !changed {
+            // Held values the model would rather move back inside are let go: the slope of
+            // ½ dᵀAd − gᵀd along each, which is negative where moving up does better.
+            for (p, slot) in held.iter_mut().enumerate() {
+                let Some((_, lower)) = *slot else { continue };
+                let slope = (0..n).map(|q| damped.get(p, q) * d.get(q).copied().unwrap_or(0.0)).sum::<f64>() - g.get(p).copied().unwrap_or(0.0);
+                if (lower && slope < 0.0) || (!lower && slope > 0.0) {
+                    *slot = None;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return Some(d);
+        }
+        last = Some(d);
+    }
+    last
 }
 
 /// Place occurrences from the joint graph.
@@ -2487,10 +2947,14 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
+    let active = doc.active_assembly();
+    let doc = &*active;
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
-    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, &mut sol);
+    // The rigid groups' joints, after the design's own.
+    let held_contents = doc.rigid_group_joints();
+    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &held_contents, &vals, &mut sol);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
         (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
@@ -2537,7 +3001,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     let bad: Vec<u64> = placed.iter().filter(|(_, m)| !crate::is_placement(m)).map(|(occ, _)| *occ).collect();
     for occ in bad {
         placed.remove(&occ);
-        for j in asm.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
+        for j in asm.joints.iter().chain(&held_contents).filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
             sol.errors.push((j.id, j.name.clone(), format!("it would place occurrence {occ} outside a rigid placement within 1e9 mm")));
         }
     }
@@ -2566,9 +3030,9 @@ struct Built<'a> {
 /// the **earlier-queued parent** wins the tie (the original behaviour, predating `BinaryHeap`).
 /// Two runs of the same design place identically; a design's tree can still differ from
 /// `BinaryHeap`'s, which broke ties by joint creation index instead.
-fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
+fn build<'a>(doc: &'a Document, st: &'a ModelState, held_contents: &'a [Joint], vals: &Values, sol: &mut Solution) -> Built<'a> {
     let asm = &doc.assembly;
-    let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    let joints: Vec<&Joint> = asm.joints.iter().chain(held_contents).filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out). An origin several joints
     // share (a panel face every part sits on) is found once.
     let mut frames: BTreeMap<u64, JointFrames> = BTreeMap::new();
@@ -2592,19 +3056,39 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     };
     let params = Params::new(doc);
     for j in &joints {
+        if !j.offset_xy.iter().all(|v| v.is_finite() && v.abs() < MAX_EXPR_VALUE) {
+            sol.errors.push((j.id, j.name.clone(), "joint lateral offsets must be finite and smaller than 1e9 mm".into()));
+            continue;
+        }
         // A joint whose expressions can't be worked out (a parameter gone) is left out rather
         // than placed by numbers that no longer say what it was defined by.
         if !j.exprs.is_empty()
-            && let Err(e) = expressed(&params, j)
+            && let Err(e) = expressed(&params, j).and_then(|_| expressed_limits(&params, j))
         {
             sol.errors.push((j.id, j.name.clone(), e.to_string()));
             continue;
         }
         match (resolve(&j.a), resolve(&j.b)) {
             (Ok(fa), Ok(fb)) => {
-                frames.insert(j.id, JointFrames::new(fa, fb));
+                frames.insert(j.id, JointFrames::new(j.offset_frame_a(fa), fb));
             }
-            (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
+            (Err(e), _) | (_, Err(e)) => {
+                sol.errors.push((j.id, j.name.clone(), e.to_string()));
+                // A rigid joint whose origin is lost (its face is gone) still holds its two
+                // parts as they are now: leaving it out would cut every part joined through it
+                // from the grounded ones, and driving a joint on the far side would move nothing.
+                if j.kind == JointKind::Rigid {
+                    // Traversal applies the joint's constant link (its flip, angle and offset),
+                    // so the frame carries that link's inverse and the part lands on its saved pose.
+                    let link = link_of(j, &[]);
+                    let held = mat_inverse(&occurrence_world(doc, j.a.occurrence))
+                        .map(|inv| mat_mul(&inv, &occurrence_world(doc, j.b.occurrence)))
+                        .and_then(|held| mat_inverse(&link).map(|inv| mat_mul(&held, &inv)));
+                    if let Some(held) = held {
+                        frames.insert(j.id, JointFrames::new(held, IDENTITY));
+                    }
+                }
+            }
         }
     }
     // Fixed: the root, grounded occurrences; with neither involved, the first joint's A side.
@@ -2626,7 +3110,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     sol.fixed = placed.keys().copied().collect();
     let mut tree =
         // Every joint's values are known, suppressed ones too (their motion links still set values).
-        Tree { joints: asm.joints.iter().map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
+        Tree { joints: asm.joints.iter().chain(held_contents).map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
     let mut used: BTreeSet<u64> = BTreeSet::new();
 
     // An occurrence's degrees of freedom are the distinct values that move it: those of the
@@ -2767,14 +3251,32 @@ impl Document {
             }
         }
         let parents: BTreeMap<u64, u64> = self.occurrences.iter().map(|o| (o.id, o.parent)).collect();
+        let inactive = self.inactive_pattern_occurrences();
         let (mut occurrence_at, mut first_of) = (std::collections::HashMap::new(), std::collections::HashMap::new());
         for (i, o) in self.occurrences.iter().enumerate() {
             occurrence_at.entry(o.id).or_insert(i);
-            first_of.entry(o.component).or_insert(i);
+            if !inactive.contains(&o.id) {
+                first_of.entry(o.component).or_insert(i);
+            }
         }
-        for (occ, world) in &sol.world {
+        // Outer occurrences first: each one is stored in its parent's frame as this loop has left
+        // it, so a parent the solution also moves must be moved before the parts inside it. In id
+        // order, a part with a lower id than its parent was stored in the frame the parent was
+        // leaving, and then moved again with the parent (#17305).
+        let depth = |occ: u64| {
+            let (mut c, mut d) = (parents.get(&occ).copied().unwrap_or(0), 0usize);
+            while c != 0 && d < 1000 {
+                d += 1;
+                c = first_of.get(&c).and_then(|&i| self.occurrences.get(i)).map_or(0, |o| o.parent);
+            }
+            d
+        };
+        let mut order: Vec<(usize, u64, &Mat)> = sol.world.iter().map(|(occ, world)| (depth(*occ), *occ, world)).collect();
+        order.sort_by_key(|&(d, occ, _)| (d, occ));
+        for (_, occ, world) in order {
+            let occ = &occ;
             let parent = parents.get(occ).copied().unwrap_or(0);
-            // Through the transforms as this loop has left them, as `component_transform` reads.
+            // Through the active parent transforms as this loop has left them, as the solver read them.
             let occurrences = &self.occurrences;
             let pw = if parent == 0 {
                 IDENTITY
@@ -2820,19 +3322,24 @@ impl Document {
 pub mod cam;
 
 #[path = "joints_edge.rs"]
-mod edge;
+pub(crate) mod edge;
 pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
 mod reach;
+pub use reach::ball_values_from_rotation_vector;
 
 #[path = "joints_face.rs"]
 mod face;
 pub use face::{end_faces, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
-pub use reach::{REACH_TOL, Reach, Reached, reach};
+pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};
 pub use relations::relation_values;
+
+#[path = "joints_rigid_groups.rs"]
+mod rigid_groups;
+pub use rigid_groups::RigidGroup;
 
 /// The rest angle that turns B least as joint `j` is made, as B sits now: none or a half turn
 /// about the joint's z. Origins whose x is chosen for them (a face, a circle, a point without
@@ -2840,6 +3347,7 @@ pub use relations::relation_values;
 /// 0, spin B a half turn about their shared normal.
 pub fn least_turn_angle(doc: &Document, st: &ModelState, j: &Joint) -> f64 {
     let (Ok(fa), Ok(fb)) = (resolve_origin(doc, st, &j.a), resolve_origin(doc, st, &j.b)) else { return 0.0 };
+    let fa = j.offset_frame_a(fa);
     let (ta, tb) = (occurrence_world(doc, j.a.occurrence), occurrence_world(doc, j.b.occurrence));
     let mut q = j.values.clone();
     q.resize(j.kind.dofs().len(), 0.0);
@@ -3042,6 +3550,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
             })
@@ -3170,6 +3679,7 @@ mod tests {
             name: format!("O{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         };
         // Component 1 sits at the root twice (its first occurrence is the frame its children sit
@@ -3192,6 +3702,180 @@ mod tests {
         let values: Vec<_> = doc.assembly.joints.iter().map(|j| j.values.clone()).collect();
         assert_eq!(values, vec![vec![0.0], vec![0.75]]);
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    /// A part nested in a component the same solution moves lands where the solution puts it,
+    /// also when its occurrence has a lower id than its parent's (#17305): it is stored in the
+    /// parent's moved frame, not in the frame the parent leaves, which moved it twice.
+    #[test]
+    fn a_solution_places_a_nested_occurrence_with_a_lower_id_than_its_parent() {
+        let occurrence = |id, component, parent| crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        };
+        // Component 3 sits in component 2, which sits in component 1: the deeper the occurrence,
+        // the lower its id.
+        let mut doc = Document { occurrences: vec![occurrence(5, 3, 2), occurrence(7, 2, 1), occurrence(10, 1, 0)], ..Document::default() };
+        // The slider moves the outer part 10 mm along X; the inner parts ride on it and turn.
+        let w10 = shift(10.0, 0.0, 0.0);
+        let w7 = mat_mul(&w10, &rot_z(0.4));
+        let w5 = mat_mul(&w7, &mat_mul(&shift(0.0, 3.0, 0.0), &rot_x(0.2)));
+        let world = BTreeMap::from([(5, w5), (7, w7), (10, w10)]);
+        assert!(doc.apply_joint_solution(&Solution { world: world.clone(), ..Solution::default() }));
+        for (component, w) in [(1, w10), (2, w7), (3, w5)] {
+            let at = doc.component_transform(component);
+            assert!(close(&at, &w), "component {component}: at x {:.3}, wanted {:.3}", at[3][0], w[3][0]);
+        }
+        assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn a_solution_places_children_in_their_active_parents_frame() {
+        let mut doc = Document::default();
+        let parent = doc.add_component(Some("Parent"), 0).unwrap();
+        let original = doc.occurrence_of(parent).unwrap().id;
+        let inactive = doc.add_occurrence(parent, 0, shift(20.0, 0.0, 0.0)).unwrap();
+        let replacement = doc.add_occurrence(parent, 0, shift(4.0, 0.0, 0.0)).unwrap();
+        let child = doc.add_component(Some("Child"), parent).unwrap();
+        let child = doc.occurrence_of(child).unwrap().id;
+        let pattern = doc
+            .add_feature(
+                FeatureKind::Pattern {
+                    features: Vec::new(),
+                    pattern: crate::PatternKind::Rectangular {
+                        dir1: crate::Dir(Vec3::X),
+                        count1: "2".into(),
+                        spacing1: "20".into(),
+                        dir2: None,
+                        count2: None,
+                        spacing2: None,
+                        alignment: Default::default(),
+                        alignment2: Default::default(),
+                        reversed: false,
+                        reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
+                    },
+                    bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: vec![parent],
+                    occurrences: vec![inactive],
+                },
+                Some("Copies"),
+            )
+            .unwrap();
+        doc.feature_mut(pattern).unwrap().suppressed = true;
+        doc.remove_occurrences(&BTreeSet::from([original]));
+        let target = shift(12.0, 0.0, 0.0);
+        assert!(doc.apply_joint_solution(&Solution { world: BTreeMap::from([(child, target)]), ..Solution::default() }));
+        assert_eq!(doc.path_placement(&[replacement, child]).unwrap().1, target);
+    }
+
+    #[test]
+    fn secondary_construction_axis_x_reference_roundtrips_without_capturing_a_direction() {
+        let wire = serde_json::json!({"reference": {"type": "construction", "feature": 17}});
+        let parsed = serde_json::from_value::<XRef>(wire.clone());
+        assert!(parsed.is_ok(), "a persistent secondary construction-axis reference must be accepted: {parsed:?}");
+        assert_eq!(serde_json::to_value(parsed.unwrap()).unwrap(), wire);
+    }
+
+    #[test]
+    fn secondary_construction_axis_keeps_direction_and_primary_frame_after_edits() {
+        let mut doc = Document::default();
+        let id = doc
+            .add_feature(
+                crate::FeatureKind::ConstructionAxis {
+                    def: crate::construct::AxisDef::TwoPoints {
+                        a: crate::construct::GeoRef::Point { p: Vec3::ZERO },
+                        b: crate::construct::GeoRef::Point { p: Vec3::X },
+                    },
+                },
+                Some("Clocking"),
+            )
+            .unwrap();
+        let x = serde_json::from_value(serde_json::json!({"reference": {"type": "construction", "feature": id}})).unwrap();
+        let o = JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "XY".into() }), pick: None, x: Some(x) });
+        let mut st = ModelState::default();
+        st.construct.push(crate::construct::Construct {
+            feature: id,
+            name: "Clocking".into(),
+            geom: ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::X },
+            bodies: Vec::new(),
+        });
+        for (direction, expected) in [(Vec3::X, Vec3::X), (Vec3::Y, Vec3::Y), (Vec3::new(1.0, 0.0, 1.0), Vec3::X), (-Vec3::X, -Vec3::X)] {
+            st.construct[0].geom = ConstructGeom::Axis { origin: Vec3::new(9.0, 8.0, 7.0), dir: direction };
+            let m = resolve_origin(&doc, &st, &o).unwrap();
+            assert_eq!(apply_vector(&m, Vec3::X), expected);
+            assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+            assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        }
+        // A construction-only edit must not share the cache keyed only by body identities.
+        let face = JointOrigin::new(
+            0,
+            Snap::FaceCenter {
+                pick: Vec3::ZERO,
+                face: None,
+                x: match o.snap.clone() {
+                    Snap::Plane { x, .. } => x,
+                    _ => None,
+                },
+            },
+        );
+        assert!(origin_key(&doc, &st, &face).is_none());
+        st.construct[0].geom = ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::Z };
+        assert!(resolve_origin(&doc, &st, &o).is_err(), "collinear projected X is refused");
+        st.construct[0].geom = ConstructGeom::Point(Vec3::ZERO);
+        assert!(resolve_origin(&doc, &st, &o).is_err(), "wrong evaluated kind is refused");
+        st.construct.clear();
+        assert!(resolve_origin(&doc, &st, &o).is_err(), "missing evaluated axis is refused");
+    }
+
+    #[test]
+    fn secondary_construction_axis_refuses_mixed_unknown_and_wrong_owner_references() {
+        for wire in [
+            serde_json::json!({"reference": {"type": "circle_center", "name": "F1"}}),
+            serde_json::json!({"reference": {"type": "construction", "feature": 17}, "face": "F1"}),
+            serde_json::json!({"reference": {"type": "construction", "feature": 17, "extra": true}}),
+        ] {
+            assert!(serde_json::from_value::<XRef>(wire).is_err());
+        }
+        // Old direction and face forms retain their meaning and permissive face metadata.
+        for wire in [serde_json::json!([1, 0, 0]), serde_json::json!({"face": "F1", "extra": true})] {
+            assert!(serde_json::from_value::<XRef>(wire).is_ok());
+        }
+        let mut doc = Document::default();
+        let id = doc
+            .add_feature(
+                crate::FeatureKind::ConstructionAxis {
+                    def: crate::construct::AxisDef::TwoPoints {
+                        a: crate::construct::GeoRef::Point { p: Vec3::ZERO },
+                        b: crate::construct::GeoRef::Point { p: Vec3::X },
+                    },
+                },
+                Some("Foreign"),
+            )
+            .unwrap();
+        let mut st = ModelState::default();
+        st.construct.push(crate::construct::Construct {
+            feature: id,
+            name: "Foreign".into(),
+            geom: ConstructGeom::Axis { origin: Vec3::ZERO, dir: Vec3::X },
+            bodies: Vec::new(),
+        });
+        let r = SecondaryAlignmentX { reference: SecondaryAxisRef::Construction { feature: id }, reverse: false };
+        assert!(face::alignment_direction(&doc, &st, &r.reference, 999, Vec3::ZERO).is_err());
+        st.construct.push(st.construct[0].clone());
+        assert!(face::alignment_direction(&doc, &st, &r.reference, 0, Vec3::ZERO).is_err(), "ambiguous evaluated identity is refused");
     }
 
     #[test]
@@ -3243,8 +3927,10 @@ mod tests {
         // 3. Construction plane by feature (PlaneRef::Construction: the name-overload of
         //    PlaneRef::Origin is gone — a construction plane is a feature, bound to its
         //    component).
-        let o_wp =
-            JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into() }), pick: None, x: None });
+        let o_wp = JointOrigin::new(
+            0,
+            Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into(), placement: None }), pick: None, x: None },
+        );
         let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
         assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
         assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);

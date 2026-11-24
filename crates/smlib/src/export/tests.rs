@@ -489,7 +489,7 @@ mod mapped_tests {
             knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
         };
-        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| false, &|_| true).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([3.0, 5.0]));
         same_curve_on(&out, &base(), [3.0, 5.0]);
@@ -509,7 +509,7 @@ mod mapped_tests {
             knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
         };
-        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0], &|_, _| false).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0], &|_, _| false, &|_| true).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([1.0, 3.0]));
         same_curve_on(&out, &want, [1.0, 3.0]);
@@ -526,7 +526,7 @@ mod mapped_tests {
             knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [6.0, 1.0], [7.0, 2.0], [8.0, 3.0], [9.0, 4.0]],
         };
-        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0], &|_, _| false, &|_| true).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([3.0, 5.0]));
         let want = b::Curve2::Spline {
@@ -538,10 +538,87 @@ mod mapped_tests {
         same_curve_on(&out, &want, [3.0, 5.0]);
     }
 
+    /// A 1.26 µm edge at the start of a straight Bézier whose knots span 1.02e-7 (Siemens NX
+    /// writes both, solidcraft#15065) lies on [0, 6.4e-12], and the rest of the curve's edge
+    /// starts there, its trim a rounding before it (SMLib's, as handed over). A floor of 1 on the
+    /// rounding (10⁻⁹ absolute) snapped every knot of the micro edge's trim onto its start, an
+    /// empty domain the record refuses, and the solid was lost. Each trim maps onto its edge as
+    /// a valid record, unchanged on it.
+    #[test]
+    fn a_micro_edges_trim_on_a_tiny_interval_keeps_its_span() {
+        let (t, end) = (6.430814112915728e-12, 1.020781457822e-7);
+        let line = |a: f64, b: f64| b::Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.0], [b, 0.0]] };
+        for (trim, edge) in [(line(0.0, t), [0.0, t]), (line(6.430814112910789e-12, end), [t, end])] {
+            let out = mapped(&trim, true, [1.0, 0.0], edge, &|_, _| false, &|_| true).unwrap();
+            check_curve2(&out, &mut Budget::input()).unwrap();
+            assert_eq!(out.interval(), Some(edge));
+            let at = |c: &b::Curve2, s: f64| eval(c, s).unwrap()[0];
+            for s in edge {
+                assert!((at(&out, s) - s).abs() <= 1e-9 * edge[1], "{out:?} at {s}");
+            }
+        }
+        // A trim genuinely off that edge is still refused, even where the caller finds its ends
+        // on the edge: SMLib's [0, 1] (the issue's message), and one on [0, 5e-10], which the
+        // floor took for a rounding of [0, 6.4e-12].
+        for z in [1.0, 5e-10] {
+            assert!(mapped(&line(0.0, z), true, [1.0, 0.0], [0.0, t], &|_, _| true, &|_| true).is_err(), "[0, {z}]");
+        }
+    }
+
+    /// An edge on an interval of at most `SM_EFF_ZERO` (10⁻¹²) is below SMLib's knot resolution:
+    /// SMLib's check takes its trim's end knots for one ("Bad Knot Count") and its mass properties
+    /// find a trim of fewer than two knots. Such a trim is refused, its interval named, even when
+    /// it lies exactly on the edge (a 1.283 nm edge on solidcraft#15065's Bézier, [0, 6.549e-15]);
+    /// an interval just above the resolution maps.
+    #[test]
+    fn a_trim_on_an_interval_below_smlibs_knot_resolution_is_refused() {
+        let line = |b: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, b, b], points: vec![[0.0, 0.0], [b, 0.0]] };
+        for t in [6.5490500023792094e-15, 1e-12] {
+            let e = mapped(&line(t), true, [1.0, 0.0], [0.0, t], &|_, _| true, &|_| true).unwrap_err();
+            let e = e.to_string();
+            assert!(e.contains(&format!("its edge on [0, {t}]")) && e.contains("no longer than SMLib's knot resolution"), "{e}");
+        }
+        let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false, &|_| true).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        // Each other refusal says which end is off, not the knot resolution.
+        let e = mapped(&line(0.9), true, [1.0, 0.0], [0.0, 0.5], &|_, _| false, &|_| true).unwrap_err().to_string();
+        assert!(e.contains("its end 0.4 from the edge's") && !e.contains("its start") && !e.contains("knot resolution"), "{e}");
+    }
+
+    /// An edge on a spline whose knots run from 5e-12 to 2.5e-4 (a file may write knots in
+    /// metres), its start vertex projecting 4e-12 inside the curve's first knot (0.29 nm along
+    /// it), and SMLib's trim of the use against it starting on that knot: one point of the edge, so
+    /// the trim is the edge's. Reversing the trim took its start to (k + 2.5e-4) − 2.5e-4, 2e-20
+    /// below the knot and off the curve, so it was not found on the edge and the solid came in as
+    /// no body.
+    #[test]
+    fn a_reversed_trim_starting_on_its_curves_first_knot_near_zero_is_the_edges() {
+        let (k0, k1) = (5e-12, 2.5e-4);
+        let edge = [k0 + 4e-12, k1];
+        let curve = b::Curve::Spline {
+            knots: vec![k0, k0, k0, k0, k1, k1, k1, k1],
+            points: vec![[0.0, 0.0, 0.0], [6.0, 1.0, 0.0], [6.0, 9.0, 0.0], [0.0, 10.0, 0.0]],
+        };
+        assert!((k0 + edge[1]) - edge[1] < k0, "the rounding this case is about");
+        let on_edge = |s: f64, t: f64| match (point3(&curve, s), point3(&curve, t)) {
+            (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= 2.5e-3,
+            _ => false,
+        };
+        // SMLib's trim, along the use (against the edge): from the edge's end to the curve's knot.
+        let (a, z) = (k0, edge[1]);
+        let trim = b::Curve2::Spline { knots: vec![a, a, a, a, z, z, z, z], points: vec![[3.0, 2.5], [2.0, 2.4], [1.0, 2.2], [0.0, 2.0]] };
+        let out = mapped(&trim, false, [1.0, 0.0], edge, &on_edge, &|_| true).unwrap_or_else(|e| panic!("{e}"));
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some(edge));
+        // Reversed: the use's end is the edge's start.
+        assert_eq!(eval(&out, edge[0]), eval(&trim, z));
+        assert_eq!(eval(&out, edge[1]), eval(&trim, a));
+    }
+
     /// A trim already on its edge is left as it is.
     #[test]
     fn a_trim_on_its_edge_is_unchanged() {
-        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0], &|_, _| false).unwrap();
+        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0], &|_, _| false, &|_| true).unwrap();
         assert_eq!(out, base());
     }
 
@@ -580,14 +657,44 @@ mod mapped_tests {
         };
         // SMLib's trim of the quarter arc in the face's (u, v), on [0, 1].
         let trim = b::Curve2::Spline { knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], points: vec![[0.0, 0.0], [0.3, 0.1], [0.7, 0.2], [1.0, 0.4]] };
-        let out = mapped(&trim, true, [1.0, 0.0], [0.0, end], &on_edge).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [0.0, end], &on_edge, &|_| true).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([0.0, end]));
         assert_eq!(eval(&out, end), eval(&trim, 1.0));
         // The same gap where the edge's points there are farther apart than its tolerance is
         // not the edge's end: the trim is refused, as one a quarter short would be.
-        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false).is_err());
-        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, 1.5], &on_edge).is_err());
+        assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false, &|_| true).is_err());
+        // (Its unit-interval form, [0, 1] on an edge [0, 1.5], is the case of a short edge on a spline
+        // face, carried onto the edge's interval; a trim ending at 0.9 there is refused.)
+        assert!(mapped(&trim, true, [0.9, 0.0], [0.0, 1.5], &on_edge, &|_| true).is_err());
+    }
+
+    /// SMLib gives the trim of an edge that runs off its face further than it tolerates on the unit
+    /// interval, whatever the edge's own parameter (solidcraft#20530). That trim is the edge's
+    /// where it is carried onto the edge's interval and lies along the edge there: the face's
+    /// point at each of its parameters is the edge's point at the same parameter. A [0, 1] trim
+    /// on an edge [0, 0.5] that is not the edge's unit trim is refused as it was, naming its end.
+    #[test]
+    fn a_unit_trim_is_carried_onto_its_edge_only_where_it_lies_along_the_edge() {
+        let plane = b::Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+        let line = b::Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
+        let edge = [0.0, 0.5];
+        let reach = 1e-6;
+        let along = |c: &b::Curve2| along_edge(c, &plane, &line, edge, reach);
+        let unit = |to: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0, 0.0], [to, 0.0]] };
+        // The edge's own unit trim: the plane's x runs 0 to 0.5 along it.
+        let out = mapped(&unit(0.5), true, [1.0, 0.0], edge, &|_, _| false, &along).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some(edge));
+        assert_eq!(eval(&out, 0.5), Some([0.5, 0.0]));
+        // A [0, 1] trim that reaches x = 1 over the same interval is the edge's at its ends only:
+        // half way along, it is at x = 0.5 where the edge is at 0.25.
+        let e = mapped(&unit(1.0), true, [1.0, 0.0], edge, &|_, _| false, &along).unwrap_err().to_string();
+        assert!(e.contains("its end 0.5 from the edge's") && e.contains("more than a rounding"), "{e}");
+        // The same trim on the same edge, off its face by a hair within the tolerance, is the edge's.
+        let near = |c: &b::Curve2| along_edge(c, &plane, &line, edge, 1e-3);
+        let hair = b::Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0, 0.0], [0.5 + 1e-4, 0.0]] };
+        assert!(mapped(&hair, true, [1.0, 0.0], edge, &|_, _| false, &near).is_ok());
     }
 
     /// A trim that runs past its edge's end by more than a rounding but within the edge's
@@ -601,7 +708,7 @@ mod mapped_tests {
             knots: vec![3.0, 3.0, 3.0, 3.0, 5.0 - 0.5 * g, 5.0 + g, 5.0 + g, 5.0 + g, 5.0 + g],
             points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
         };
-        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| true).unwrap();
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| true, &|_| true).unwrap();
         check_curve2(&out, &mut Budget::input()).unwrap();
         assert_eq!(out.interval(), Some([3.0, 5.0]));
         let b::Curve2::Spline { knots, .. } = &out else { panic!("{out:?}") };

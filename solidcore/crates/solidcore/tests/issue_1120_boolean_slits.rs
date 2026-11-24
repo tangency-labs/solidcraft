@@ -3,9 +3,9 @@
 //! faces that this way become one then has the merged face on both sides: a slit. Here a
 //! disc extruded from two half arcs stands on a cylinder of the same radius: the union
 //! merges both wall halves into the cylinder's wall, and the line between the halves at
-//! 180 degrees stays as a slit. The opt-in `Kernel::fixes.boolean_cleanup_removes_slits`
-//! also checks the merged face's edges with one face, by the same `IsTopological` test
-//! (which keeps seams).
+//! 180 degrees stays as a slit (SMLib). The port also checks the merged face's edges with
+//! one face, by the same `IsTopological` test (which keeps seams); that is the only path
+//! since its flag was retired.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -44,9 +44,8 @@ fn half_arc(k: &Kernel, start: f64, end: f64) -> Curve {
 }
 
 /// A cylinder r 30, z -6..0, united with a disc r 30, z 0..5, extruded from two half arcs.
-fn joined(remove_slits: bool) -> Brep {
+fn joined() -> Brep {
     let mut k = Kernel::default();
-    k.fixes.boolean_cleanup_removes_slits = remove_slits;
     let flange = create_cylinder(&mut k, Point3::new(0.0, 0.0, -6.0), R, 6.0).unwrap();
     let a = half_arc(&k, 0.0, 180.0);
     let b = half_arc(&k, 180.0, 360.0);
@@ -84,18 +83,10 @@ fn one_face_edges(b: &Brep) -> usize {
 }
 
 #[test]
-fn issue_1120_slit_left_by_default() {
-    let upstream = one_face_edges(&joined(false));
-    let fixed = one_face_edges(&joined(true));
-    assert!(
-        fixed < upstream,
-        "upstream keeps the slit: {upstream} one-face edges, fixed {fixed}"
-    );
-}
-
-#[test]
 fn issue_1120_slit_removed_seams_kept() {
-    // The merged wall keeps one seam, so at least one one-face edge is left.
-    let fixed = one_face_edges(&joined(true));
-    assert!(fixed >= 1, "{fixed} one-face edges");
+    // The merged wall is one face on a periodic cylinder: it keeps exactly its one seam,
+    // and the slit at 180 degrees (a second one-face edge upstream) is gone. The planar
+    // ends have no one-face edge.
+    let fixed = one_face_edges(&joined());
+    assert_eq!(fixed, 1, "{fixed} one-face edges");
 }

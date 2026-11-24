@@ -1,6 +1,7 @@
 //! Why an operation failed, as data. An application words these for its users; the
 //! [`std::fmt::Display`] here is a plain statement of the variant for logs and tests.
 
+use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
 
 pub use solidcore::topology::brep::SolidTest;
@@ -13,16 +14,32 @@ pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
+    /// Input the kernel refuses, in its words (its `SolidError::InvalidInput`): the routine that
+    /// refused it and what was wrong, as the kernel states them. Displays as
+    /// `"{operation}: {reason}"`.
+    Refused {
+        /// The kernel routine that refused the input.
+        operation: &'static str,
+        /// What was wrong with it.
+        reason: &'static str,
+    },
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
+    /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
+    /// result must hold material: an intersection of the operands was missed.
+    EmptyRefuted {
+        /// The operand's vertex the result must hold.
+        at: [f64; 3],
+    },
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
     /// [`SolidTest`], the first that fails in the order the tests run). [`Error::NotSolid`]
-    /// stays for the calls that return it; [`crate::Body::check_solid`] returns this one.
+    /// stays for the calls that return it; [`crate::Body::check_solid`] and the result check of
+    /// an operation under [`crate::Contract::Proved`] return this one.
     #[non_exhaustive]
     NotSolidBecause(SolidTest),
     /// No room for the operation: an inward offset (a shell's wall, faces moved in) leaves none
@@ -33,7 +50,8 @@ pub enum Error {
     WallsTouch,
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (the kernel's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
     TooLarge {
         /// The largest size that builds it.
         size: f64,
@@ -41,8 +59,20 @@ pub enum Error {
         kind: FitKind,
         /// A point at the middle of the edge it was found for.
         at: Option<[f64; 3]>,
+        /// An exact point on the face that limits the size, when the kernel names it.
+        face: Option<[f64; 3]>,
         /// Why there is no room.
         why: Option<RoomReason>,
+    },
+    /// A blend whose surface the kernel could not certify within its tolerance in the work a
+    /// certificate is allowed (`BlendFailure::NotCertified`): the round is refused (not built),
+    /// no size named. The budget, not the geometry, decides it: the kernel's class is
+    /// `NotWithinTolerance`, not one of its refusal classes.
+    BlendNotCertified {
+        /// The spans its certificate halved.
+        halvings: usize,
+        /// Its stations.
+        stations: usize,
     },
     /// A shell, offset or thicken whose wall is thicker than a face curves (the kernel's
     /// `OffsetFailure::Folds`): the largest wall that works, when the kernel names one.
@@ -53,10 +83,29 @@ pub enum Error {
     /// The kernel cannot build this exactly yet (a variable radius that is zero inside its
     /// edge): what it cannot.
     Unsupported(&'static str),
-    /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
-    CornerUnsupported,
+    /// A blend's edges meet at a vertex of a kind no blend corner builds yet: the kernel's
+    /// reason and the vertex's point, where its session notes them.
+    CornerUnsupported {
+        /// The kernel's reason, without the "Fillet Error:" that says only whose it is.
+        why: Option<String>,
+        /// The vertex's point.
+        at: Option<[f64; 3]>,
+    },
+    /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
+    /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
+    /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
+    /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    TurnRefused {
+        /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
+        room: bool,
+        /// The kernel's reason.
+        why: String,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+    },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
-    /// back a corner only where every edge meeting it is blended, all convex or all concave.
+    /// back a corner only where every edge meeting it is blended, all convex or all concave, or
+    /// of mixed convexity with curvature-continuous rounds between planes.
     CornerRefused {
         /// The corner's index among the call's corners.
         corner: usize,
@@ -100,6 +149,9 @@ pub enum Error {
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
+    /// A frame-stock path or its section the kernel refuses, including the curve index
+    /// when its exact path checks name one.
+    FrameMember(solidcore::sweep::member::Refusal),
     /// The geometry has no value where one is needed (the kernel's `Degenerate`): a normal
     /// at a pole or an apex, a zero-length vector, a collapsed edge.
     Degenerate,
@@ -179,6 +231,14 @@ pub enum Error {
         /// The longest distance that works.
         largest: Option<f64>,
     },
+    /// An offset whose distance from its curve, measured at stations along it, strays from the
+    /// distance asked by more than the tolerance: the tolerance and the worst found.
+    OffsetPastTolerance {
+        /// The tolerance asked.
+        tolerance: f64,
+        /// The largest difference found between a station's distance and the distance asked.
+        worst: f64,
+    },
     /// A loft guided by rails whose guided edges were asked within `asked` of their rails: at
     /// the most wires asked, `wires`, the bound the kernel proved was still `reached`
     /// (`solidcore::sweep::loft_rails`).
@@ -236,6 +296,14 @@ pub enum Error {
     },
     /// Ops was called from inside a kernel call or from the failure callback.
     Reentered,
+    /// A classification that needs one nearest point on a face's surface found `found` of them,
+    /// also within 100 times the zone tolerance (the kernel's `IntersectFailure::NotOneFoot`,
+    /// `compute_point_parameters`, `intersect/point_class.rs`): the point's place on the face is
+    /// undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A record the conversion cannot carry to the kernel, and why.
     Record(String),
     /// The kernel panicked; the session caught it: the call, then the panic's message.
@@ -271,6 +339,23 @@ pub enum Error {
         tolerance: f64,
         /// The least radius that rounds it.
         smallest: f64,
+    },
+    /// A control-point edit that moves a point on edge `edge` (its record index), whose two
+    /// faces' boundary rows along it are not one curve's control polygon (the kernel's
+    /// `seam_twins`): moving the point on one face would open the seam, and the faces are not
+    /// rebuilt to make the rows match. Why, as the kernel names it.
+    SeamMismatch {
+        /// The edge's record index.
+        edge: usize,
+        /// Why its two rows are not one curve's.
+        why: crate::surface_cvs::SeamMismatch,
+    },
+    /// A control-point edit that moves a vertex ending edge `edge` (its record index), which
+    /// cannot follow it: it is not a line between planar faces the edit keeps, so moving its end
+    /// would leave a gap at the vertex.
+    EdgeLeftBehind {
+        /// The edge's record index.
+        edge: usize,
     },
     /// A corner's setback too short for the corner: it stops short of where the rails of the
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
@@ -333,6 +418,144 @@ pub enum Error {
     },
 }
 
+/// What failed, as stable data: the same failure always gives the same code, compared as plain
+/// values, so failures can be grouped and matched without reading their messages.
+///
+/// Every part is a static string or an integer: nothing from the model (no geometry, names or
+/// numbers). [`FailureCode::kind`] is the stable part and the bucket; [`FailureCode::operation`]
+/// splits a coarse kind and follows the kernel's module paths, so a refactor can move it: it is
+/// the second level of a grouping, never its key.
+///
+/// The session gives it for every failed call it runs but a cancelled one
+/// ([`crate::session::take_failure_code`], [`crate::session::Failure::code`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FailureCode {
+    /// The ops call that failed: the session's call name (`"fillet"`, `"boolean"`, ...), as
+    /// [`crate::session::current_call`] gives it while it runs.
+    pub call: &'static str,
+    /// The kernel's [`solidcore::error::ErrorKind::code`] of the error the call failed with,
+    /// never changing meaning once released; [`FailureCode::OPS`] (0) for a failure ops itself
+    /// decided, with no kernel error behind it (an argument refused before the kernel saw it, a
+    /// result the call's own checks refuse, a caught panic).
+    pub kind: u16,
+    /// The kernel routine that failed ([`solidcore::SolidError::operation`], a module path such
+    /// as `"blend::fillet_executive::…"`); for a failure ops decided ([`FailureCode::OPS`]),
+    /// the name of its [`Error`] variant ([`Error::name`]).
+    pub operation: &'static str,
+}
+
+impl FailureCode {
+    /// The kind of a failure ops itself decided, with no kernel error behind it.
+    pub const OPS: u16 = 0;
+
+    /// The code of `call` failing with the kernel's error `e`.
+    #[must_use]
+    pub fn of_kernel(call: &'static str, e: &SolidError) -> Self {
+        Self {
+            call,
+            kind: e.kind().code(),
+            operation: e.operation(),
+        }
+    }
+
+    /// The code of `call` failing with `e`, an error ops decided itself ([`FailureCode::OPS`]).
+    #[must_use]
+    pub fn of_ops(call: &'static str, e: &Error) -> Self {
+        Self {
+            call,
+            kind: Self::OPS,
+            operation: e.name(),
+        }
+    }
+}
+
+/// `call · kind · operation`, as a failure signature writes it (`fillet · 108 · blend::…`).
+impl std::fmt::Display for FailureCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} · {} · {}", self.call, self.kind, self.operation)
+    }
+}
+
+impl Error {
+    /// The test a body failed where this is [`Error::NotSolidBecause`], and `None` for every
+    /// other error. A caller can then tell a body that is not a solid from one whose volume's
+    /// sign the kernel could not prove ([`SolidTest::VolumeUndecided`]), which is undecided
+    /// rather than refused. The variant is `#[non_exhaustive]`, so this is how a caller outside
+    /// this crate reads its test without naming its field.
+    #[must_use]
+    pub const fn not_solid_test(&self) -> Option<SolidTest> {
+        match self {
+            Error::NotSolidBecause(test) => Some(*test),
+            _ => None,
+        }
+    }
+
+    /// The variant's name (`"TooLarge"`, `"Status"`, ...): a stable static string with nothing
+    /// of the failure's values in it. A variant keeps its name once released.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Error::Status(..) => "Status",
+            Error::Refused { .. } => "Refused",
+            Error::Argument => "Argument",
+            Error::Empty => "Empty",
+            Error::EmptyRefuted { .. } => "EmptyRefuted",
+            Error::NotSolid => "NotSolid",
+            Error::NotSolidBecause(..) => "NotSolidBecause",
+            Error::NoRoom => "NoRoom",
+            Error::WallsTouch => "WallsTouch",
+            Error::TooLarge { .. } => "TooLarge",
+            Error::BlendNotCertified { .. } => "BlendNotCertified",
+            Error::WallFolds { .. } => "WallFolds",
+            Error::Unsupported(..) => "Unsupported",
+            Error::CornerUnsupported { .. } => "CornerUnsupported",
+            Error::TurnRefused { .. } => "TurnRefused",
+            Error::CornerRefused { .. } => "CornerRefused",
+            Error::RoundsCross { .. } => "RoundsCross",
+            Error::TaperEndUnsupported { .. } => "TaperEndUnsupported",
+            Error::FacesCloseAtBothEnds => "FacesCloseAtBothEnds",
+            Error::RoomRunsOut { .. } => "RoomRunsOut",
+            Error::NoEffect => "NoEffect",
+            Error::CurveDoesNotCut => "CurveDoesNotCut",
+            Error::NotExact => "NotExact",
+            Error::Profile(..) => "Profile",
+            Error::FrameMember(..) => "FrameMember",
+            Error::Degenerate => "Degenerate",
+            Error::UnsureRegion { .. } => "UnsureRegion",
+            Error::DraftCornerRefused { .. } => "DraftCornerRefused",
+            Error::PathUndecided { .. } => "PathUndecided",
+            Error::PathGap { .. } => "PathGap",
+            Error::BoundaryGap { .. } => "BoundaryGap",
+            Error::NoCrossing { .. } => "NoCrossing",
+            Error::NetworkGap { .. } => "NetworkGap",
+            Error::PastTolerance { .. } => "PastTolerance",
+            Error::TooFar { .. } => "TooFar",
+            Error::OffsetPastTolerance { .. } => "OffsetPastTolerance",
+            Error::RailPastTolerance { .. } => "RailPastTolerance",
+            Error::Exception => "Exception",
+            Error::Invariant { .. } => "Invariant",
+            Error::ContactUndecided { .. } => "ContactUndecided",
+            Error::Cancelled => "Cancelled",
+            Error::DefinitionNotCertified { .. } => "DefinitionNotCertified",
+            Error::Reentered => "Reentered",
+            Error::NotOneFoot { .. } => "NotOneFoot",
+            Error::Record(..) => "Record",
+            Error::Internal(..) => "Internal",
+            Error::Unported(..) => "Unported",
+            Error::EdgeNotBlendable { .. } => "EdgeNotBlendable",
+            Error::ContinuesInto { .. } => "ContinuesInto",
+            Error::RoundTooSmall { .. } => "RoundTooSmall",
+            Error::SeamMismatch { .. } => "SeamMismatch",
+            Error::EdgeLeftBehind { .. } => "EdgeLeftBehind",
+            Error::SetbackTooShort { .. } => "SetbackTooShort",
+            Error::SetbackTooLong { .. } => "SetbackTooLong",
+            Error::ChamferAngleTooLarge { .. } => "ChamferAngleTooLarge",
+            Error::OffsetRefused { .. } => "OffsetRefused",
+            Error::BlendFailed { .. } => "BlendFailed",
+        }
+    }
+}
+
 /// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
 /// `OffsetFailure` names it. More reasons get names of their own, so match it with a wildcard.
 #[derive(Clone, Debug, PartialEq)]
@@ -353,6 +576,15 @@ pub enum OffsetRefusal {
         distance: f64,
         /// The radius of curvature the face attains on the displaced side.
         radius: f64,
+    },
+    /// The wall reaches half the width between two opposite planar faces (a square boss inset
+    /// by half its width): the material between them has no offset left. `largest` is half
+    /// the narrowest such width, the largest wall that fits.
+    WallsMeetAcross {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The largest wall that fits.
+        largest: f64,
     },
     /// Loops of the face's offset cross in a way the offset does not resolve: how.
     LoopsCross {
@@ -381,6 +613,28 @@ pub enum OffsetRefusal {
     /// In a local operation, the new surfaces of the face and of its neighbour across an
     /// edge meet nowhere near the edge, so the edge cannot be found again.
     FacesApart,
+    /// In a local operation, the face moves past where the curved face beside it ends (a
+    /// sphere's cap moved past the sphere's top): no extension of that face meets it there.
+    /// `largest` is how far the face could move and still meet it.
+    PastSide {
+        /// How far the face could move and still meet the face beside it.
+        largest: f64,
+    },
+    /// In a local operation, the face (a band bounded by two faces, such as a narrow ring
+    /// between a countersink's cone and the well below it) closes to nothing as the faces
+    /// move: its two sides would pass over each other and turn it inside out. `largest` is
+    /// how far the faces could move before it closes.
+    FaceCloses {
+        /// How far the faces could move before the face closes.
+        largest: f64,
+    },
+    /// A draft that would carry the drafted face (a cone or cylinder about the pull) into
+    /// another shell of the body, a cavity's wall or another lump, closing the wall between
+    /// them. `largest` is the largest draft angle that keeps a wall, radians.
+    DraftClosesWall {
+        /// The largest draft angle that keeps a wall, radians.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -388,10 +642,13 @@ pub enum OffsetRefusal {
     /// An offset face has a gap in its loops, and the segment that would bridge it is not
     /// established within tolerance.
     LoopGapUncertified,
+    /// The offset moves a vertex onto or past its edge's other end, so the edge closes to
+    /// nothing: as where a wall is as thick as the part is there.
+    EdgeVanishes,
     /// The body built fails what the input did not: what.
     Unsound {
         /// What the built body fails.
-        what: solidcore::error::offset::Unsoundness,
+        what: Unsoundness,
     },
     /// A failure the kernel states only in words so far: a routine's own failure (its phrase
     /// causes `Failed`, `Missing`, `InvalidValue` and `Inconsistent`), or a reason this version
@@ -418,6 +675,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
+            OffsetRefusal::WallsMeetAcross { largest, .. } => write!(
+                f,
+                "the wall reaches half the width between two opposite faces of a boss; the \
+                 largest wall that fits is {largest}"
+            ),
             OffsetRefusal::LoopsCross { crossing } => write!(
                 f,
                 "its offset's loops cross in a way the offset cannot resolve: {crossing}"
@@ -442,6 +704,21 @@ impl std::fmt::Display for OffsetRefusal {
                     "its new surface and a neighbour's meet nowhere near their edge"
                 )
             }
+            OffsetRefusal::PastSide { largest } => write!(
+                f,
+                "it would move past where the curved face beside it ends; it meets that face \
+                 only while it moves less than {largest}"
+            ),
+            OffsetRefusal::FaceCloses { largest } => write!(
+                f,
+                "it closes to nothing between the faces beside it as they move; it stays open \
+                 only while they move less than {largest}"
+            ),
+            OffsetRefusal::DraftClosesWall { largest } => write!(
+                f,
+                "the drafted face would reach another shell of the body, closing the wall \
+                 between them; the largest draft angle that keeps a wall is {largest} rad"
+            ),
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
@@ -454,8 +731,105 @@ impl std::fmt::Display for OffsetRefusal {
                     "a gap in its offset's loops cannot be bridged within tolerance"
                 )
             }
+            OffsetRefusal::EdgeVanishes => write!(
+                f,
+                "an edge of its offset closes to nothing: a vertex moves onto or past the edge's other end"
+            ),
             OffsetRefusal::Unsound { what } => write!(f, "{what}"),
             OffsetRefusal::Phrase { phrase, .. } => f.write_str(phrase),
+        }
+    }
+}
+
+/// What a body built by an offset, a shell or a local operation fails that its input did not
+/// ([`OffsetRefusal::Unsound`]), as the kernel's check names it (`Unsoundness`), an entity by
+/// its record index. More reasons get names of their own, so match it with a wildcard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum Unsoundness {
+    /// The check reports `failures` failure lines more than the input's; the first is test
+    /// `test_index` of the reporting type `reporting_type` (`None` for a failed status).
+    Check {
+        /// The number of failure lines beyond the input's.
+        failures: usize,
+        /// The first failed report's reporting type and test index.
+        first: Option<(i64, u64)>,
+    },
+    /// The body's pointer check failed, so its geometry was not checked.
+    GeometryUnchecked,
+    /// A loop's certified area leaves its orientation undecided.
+    LoopOrientationUndecided,
+    /// A gap in a loop cannot be closed within the tolerances its certificates allow.
+    LoopGapNotClosable,
+    /// The input was a manifold solid and the body is not.
+    NotManifoldSolid,
+    /// The body is a manifold solid whose volume is proved below 0.
+    VolumeNotPositive,
+    /// The body is a manifold solid whose volume's sign is not proved.
+    VolumeUndecided,
+    /// The tolerance of an edge or vertex grew to `tolerance`, past the `bound` its certificate
+    /// allows.
+    ToleranceBeyondBound {
+        /// The entity of the input it comes from, by its record index: `None` where the kernel
+        /// names none, where the call's order does not hold it, or for an edge or vertex of a
+        /// call without an order.
+        entity: Option<RecordEntity>,
+        /// Its tolerance.
+        tolerance: f64,
+        /// The largest tolerance its certificate allows.
+        bound: f64,
+    },
+}
+
+impl std::fmt::Display for Unsoundness {
+    /// The kernel's statement of the reason, an entity by its record index.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use solidcore::error::offset::Unsoundness as K;
+        let kernel = match *self {
+            Unsoundness::Check { failures, first } => K::Check { failures, first },
+            Unsoundness::GeometryUnchecked => K::GeometryUnchecked,
+            Unsoundness::LoopOrientationUndecided => K::LoopOrientationUndecided,
+            Unsoundness::LoopGapNotClosable => K::LoopGapNotClosable,
+            Unsoundness::NotManifoldSolid => K::NotManifoldSolid,
+            Unsoundness::VolumeNotPositive => K::VolumeNotPositive,
+            Unsoundness::VolumeUndecided => K::VolumeUndecided,
+            Unsoundness::ToleranceBeyondBound {
+                entity,
+                tolerance,
+                bound,
+            } => {
+                match entity {
+                    Some(e) => write!(f, "the tolerance at {e} of the input")?,
+                    None => f.write_str("the tolerance of an edge or vertex")?,
+                }
+                return write!(
+                    f,
+                    " grew to {tolerance:e}, past the {bound:e} its certificate allows"
+                );
+            }
+        };
+        write!(f, "{kernel}")
+    }
+}
+
+/// A face, edge or vertex by its index in the caller's record [`crate::Order`] (a face of a call
+/// without one: by its index among the body's faces).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordEntity {
+    /// Record face `i`.
+    Face(usize),
+    /// Record edge `i`.
+    Edge(usize),
+    /// Record vertex `i`.
+    Vertex(usize),
+}
+
+impl std::fmt::Display for RecordEntity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecordEntity::Face(i) => write!(f, "face {i}"),
+            RecordEntity::Edge(i) => write!(f, "edge {i}"),
+            RecordEntity::Vertex(i) => write!(f, "vertex {i}"),
         }
     }
 }
@@ -499,6 +873,12 @@ pub enum RoomReason {
     CornersTakeWholeEdge,
     /// A blend past its faces runs off a face into the material.
     RunsIntoMaterial,
+    /// A blend past its faces keeps none of its edge, no corner taking any of it: a knife
+    /// edge's chamfer wider than the part takes all of it.
+    OverflowKeepsNothing,
+    /// A round passes over the face it ends on: that face falls away under it, so nothing
+    /// ends the round there.
+    EndPassesOverEndFace,
 }
 
 /// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
@@ -506,7 +886,7 @@ pub enum RoomReason {
 pub enum FitKind {
     /// A round's radius.
     Radius,
-    /// An equal chamfer's distance.
+    /// A chamfer's first distance, for equal distances or a fixed angle.
     Distance,
     /// A factor on a chamfer's two distances.
     Scale,
@@ -536,6 +916,32 @@ impl RoomReason {
             }
             RoomReason::CornersTakeWholeEdge => "its corners take the whole of the edge",
             RoomReason::RunsIntoMaterial => "the blend runs off a face into the material",
+            RoomReason::OverflowKeepsNothing => {
+                "the round or chamfer runs past its faces and keeps none of its edge"
+            }
+            RoomReason::EndPassesOverEndFace => {
+                "the round passes over the face it ends on, which falls away under it, so nothing ends the round there"
+            }
+        }
+    }
+
+    /// The reason in words for a blend whose size is `kind`: a chamfer (a distance or a scale)
+    /// has no rolling ball, so its reasons speak of its offset instead (#12128); a round's are
+    /// [`RoomReason::words`].
+    #[must_use]
+    pub const fn words_for(self, kind: FitKind) -> &'static str {
+        if !matches!(kind, FitKind::Distance | FitKind::Scale) {
+            return self.words();
+        }
+        match self {
+            RoomReason::BallDoesNotFit => "the chamfer's offset does not fit a face it runs along",
+            RoomReason::RailLeavesFace => "the chamfer's contact line leaves the face it runs along",
+            RoomReason::FaceConsumed => "the chamfers take the whole of a face they run along",
+            RoomReason::BallsFold => "the chamfer's offsets fold over each other along the edge",
+            RoomReason::OffsetCollapses => {
+                "the offset is as wide as a face it runs along, so the chamfer cannot end at the edge's end"
+            }
+            other => other.words(),
         }
     }
 }
@@ -560,8 +966,13 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
+            Error::EmptyRefuted { at: [x, y, z] } => write!(
+                f,
+                "the result is empty, but the operand's vertex ({x}, {y}, {z}) lies where it must have material: an intersection was missed"
+            ),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NotSolidBecause(test) => {
                 write!(f, "the body is not a closed solid facing out: {test}")
@@ -575,6 +986,10 @@ impl std::fmt::Display for Error {
                 f,
                 "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
             ),
+            Error::OffsetPastTolerance { tolerance, worst } => write!(
+                f,
+                "the offset strays up to {worst} from the distance asked, past the tolerance {tolerance}"
+            ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
             Error::DefinitionNotCertified { face, eps } => {
                 write!(f, "the definition of face {face} does not certify its net within {eps}")
@@ -582,9 +997,27 @@ impl std::fmt::Display for Error {
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
             }
+            Error::BlendNotCertified { halvings, stations } => write!(
+                f,
+                "the blend could not be certified within its tolerance in the work allowed ({halvings} spans halved, {stations} stations)"
+            ),
             Error::WallFolds { largest } => write!(f, "the wall folds (largest {largest:?})"),
-            Error::CornerUnsupported => {
-                write!(f, "a blend corner of this kind is not supported yet")
+            Error::CornerUnsupported { why, at } => {
+                write!(f, "a blend corner of this kind is not supported yet")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some(why) = why {
+                    write!(f, ": {why}")?;
+                }
+                Ok(())
+            }
+            Error::TurnRefused { why, at, .. } => {
+                write!(f, "the swept corner is not built")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ": {why}")
             }
             Error::CornerRefused { corner } => write!(f, "corner {corner} is not set back"),
             Error::RoundsCross { at, fit } => write!(
@@ -617,6 +1050,7 @@ impl std::fmt::Display for Error {
                         "free-form segments must be finite and of some length",
                 }
             ),
+            Error::FrameMember(reason) => reason.fmt(f),
             Error::Degenerate => write!(f, "degenerate geometry where a value is needed"),
             Error::UnsureRegion { region } => {
                 write!(f, "unsure whether region {region} is material")
@@ -676,6 +1110,10 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::NotOneFoot { found } => write!(
+                f,
+                "a classification found {found} nearest points on the face's surface, where one is needed"
+            ),
             Error::Record(w) => write!(f, "record: {w}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unsupported(what) | Error::Unported(what) => {
@@ -694,6 +1132,14 @@ impl std::fmt::Display for Error {
             Error::RoundTooSmall { edge, smallest, .. } => write!(
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
+            ),
+            Error::SeamMismatch { edge, why } => write!(
+                f,
+                "edge {edge} is not one curve on its two faces, so its points cannot move together: {why}"
+            ),
+            Error::EdgeLeftBehind { edge } => write!(
+                f,
+                "edge {edge} cannot follow its moved end: it is not a line between planar faces"
             ),
             Error::SetbackTooShort {
                 vertex: Some(vertex),
@@ -734,15 +1180,26 @@ impl std::error::Error for Error {}
 /// An operation's result.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A kernel error as the operation's, by its type: a kernel status where it stands for one
-/// (input refused, not converged, the kernel's other failures), a refusal of what the kernel does
+/// A kernel error as the operation's, by its type: input it refuses in its words
+/// ([`Error::Refused`]), a kernel status where it stands for one (not converged, the kernel's
+/// other failures), a refusal of what the kernel does
 /// not support or has not ported, a cancellation, a broken invariant of the kernel's
 /// ([`Error::Invariant`]), or a call made before the preparation it needs.
+///
+/// Noted for the call running on this thread ([`crate::session::noted`]), so a refusal of it
+/// keeps the kernel's [`FailureCode`].
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
-    use solidcore::error::{SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_CONVERGING};
+    let (kind, operation) = (e.kind(), e.operation());
+    crate::session::noted_as(kind.code(), operation, typed(e))
+}
+
+/// [`status`]'s typing of the kernel error `e`.
+fn typed(e: SolidError) -> Error {
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
-        SolidError::InvalidInput { .. } => Error::Status(SM_ERR_INVALID_INPUT),
+        SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
         SolidError::NotConverged { .. } => Error::Status(SM_ERR_NOT_CONVERGING),
         SolidError::NotFound { .. } => Error::Status(SM_ERR),
         SolidError::Degenerate { .. } => Error::Degenerate,
@@ -759,8 +1216,50 @@ pub(crate) fn status(e: SolidError) -> Error {
             reason,
         },
         SolidError::PreparationRequired { .. } => Error::Exception,
+        // compute_point_parameters' ambiguous point solve, by its type: the status stays `SM_ERR`
+        // (the table in `error/intersect.rs`), the count travels with it
+        e if matches!(
+            e.intersect_failure(),
+            Some(IntersectFailure::NotOneFoot { .. })
+        ) =>
+        {
+            let Some(IntersectFailure::NotOneFoot { found }) = e.intersect_failure() else {
+                unreachable!("matched above")
+            };
+            Error::NotOneFoot { found: *found }
+        }
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
-        e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
+        e => match e.blend_failure() {
+            // a blend certificate that ran out of its work budget: a refusal of its own
+            Some(&BlendFailure::NotCertified { halvings, stations }) => {
+                Error::BlendNotCertified { halvings, stations }
+            }
+            _ => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
+        },
+    }
+}
+
+/// The kernel-to-ops typing of `compute_point_parameters`' ambiguous point solve: the typed
+/// refusal carries its count and keeps its status; the `union_all` retry in SolidCraft fires on
+/// it and on nothing else.
+#[cfg(test)]
+mod not_one_foot_tests {
+    use super::{status, Error};
+    use solidcore::error::{intersect::IntersectFailure, Failure, Reason};
+
+    #[test]
+    fn the_kernel_refusal_becomes_the_typed_error() {
+        let e = Failure::new(
+            "intersect::compute_point_parameters",
+            Reason::Intersect(IntersectFailure::NotOneFoot { found: 2 }),
+        )
+        .into_error();
+        let typed = status(e);
+        assert_eq!(typed, Error::NotOneFoot { found: 2 });
+        assert_eq!(
+            typed.to_string(),
+            "a classification found 2 nearest points on the face's surface, where one is needed"
+        );
     }
 }

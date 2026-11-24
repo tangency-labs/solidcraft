@@ -356,3 +356,44 @@ fn hollow_tool_booleans_keep_planar_support_certificates() {
         assert_exact_planes(&r);
     }
 }
+
+/// A certified block (40 by 40 by 10) joined with an open cone surface (radius 6 at z 0, 10 at
+/// z 100) that stands on the block's bottom and crosses its top (#15570). The union is two
+/// shells: the block, its top split along the circle where the cone crosses it (radius 6.4), and
+/// the cone above the top, whose cut edge lies on that circle. The top's halves share the block's
+/// source, but that circle is where the cone meets the block, not a construction split: it stays
+/// an edge. By hand: the block's 6 faces, 12 edges and 8 corners, the top's inner disc with its
+/// circle and the circle's one vertex, the cone's wall with its cut edge, its seam, its rim and
+/// their two vertices: 8 faces, 16 edges, 11 vertices.
+#[test]
+fn union_with_a_surface_crossing_a_certified_face_keeps_the_circle_it_meets_it_along() {
+    use std::f64::consts::TAU;
+    let block = crate::box_solid(Vec3::new(-20., -20., 0.), Vec3::new(20., 20., 10.)).unwrap().with_box_certificate(42).unwrap();
+    let ring = |radius: f64| vec![Seg2::Arc { center: Vec2::ZERO, radius, start: 0., sweep: TAU }];
+    let top = Plane::new(Vec3::new(0., 0., 100.), Vec3::X, Vec3::Y).unwrap();
+    let cone = crate::loft_sheet(&[(Plane::XY, ring(6.)), (top, ring(10.))]).unwrap();
+    let r = crate::boolean(&block, &cone, crate::BoolOp::Union).unwrap().unwrap();
+    assert_eq!((r.shell_count(), r.face_count(), r.edge_count(), r.vertex_count()), (2, 8, 16, 11));
+    let top_faces = (0..r.face_count())
+        .filter(|i| {
+            matches!(
+                r.face_sources().and_then(|s| s.get(*i)).and_then(Option::as_ref),
+                Some(FaceSource::Box { producer: Some(42), axis: 2, high: true, .. })
+            )
+        })
+        .count();
+    assert_eq!(top_faces, 2, "the block's top, split along the circle the cone crosses it in");
+    // The cone's piece above the block is kept (it reaches z 100), and the split is where the
+    // cone crosses z 10: radius 6 + (10 - 6) * 10 / 100 = 6.4. That circle has two vertices (the
+    // split's and the cone's cut edge's), the rim at z 100 one (radius 10); each within its own
+    // tolerance.
+    assert!((r.exact_bounds().unwrap().max.z - 100.).abs() <= r.record().tolerance, "{:?}", r.exact_bounds());
+    let on = |z: f64, radius: f64| {
+        r.record()
+            .vertices
+            .iter()
+            .filter(|v| (v.point[2] - z).abs() <= v.tolerance && (v.point[0].hypot(v.point[1]) - radius).abs() <= v.tolerance)
+            .count()
+    };
+    assert_eq!((on(10., 6.4), on(100., 10.)), (2, 1), "{:?}", r.record().vertices);
+}

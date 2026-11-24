@@ -24,7 +24,7 @@ use solidcore_record::Vec2;
 use super::check::{located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::sketch_shapes::Created;
+use super::sketch_shapes::{CornerPoint, Created, SlotWidth};
 use super::types::{AngleExpr, LengthExpr, Point2, Point3, SketchRef, not_blank_pattern, present};
 use crate::params;
 
@@ -229,6 +229,77 @@ pub struct SplineReverseResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Add a point to a fit point spline, where the curve passes nearest to it, between its
+/// neighbours; or make it the spline's new first or last point with `end`. The curve still runs
+/// through the new point and all its old ones, and the constraints on those stay. Refused for a
+/// control point spline, and for an `end` joined to other geometry.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = insert_point_required)]
+pub struct SplineInsertPointParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    // Optional in the type and required in the schema (`insert_point_required`): the handler's
+    // message for a missing `at` is the one it gives for a point it cannot read, so it is the one
+    // a caller should hear.
+    /// Where the curve is to run through the new point: `[x, y]` or `{x, y}` in mm. Without `end`,
+    /// the nearest place along the curve; with it, the new end's place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointXY")]
+    pub at: Option<PointXY>,
+    /// `start` or `end`: `at` becomes the spline's new first or last point instead, and the curve
+    /// runs on to it.
+    #[serde(default, deserialize_with = "spline_end", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "spline_end_schema")]
+    pub end: Option<SplineEnd>,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// `at` is required in the schema, though the type leaves it to the handler (#16085).
+fn insert_point_required(schema: &mut Schema) {
+    require(schema, "at");
+}
+
+/// Which end of the spline `at` becomes the new point of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplineEnd {
+    /// The new first point.
+    Start,
+    /// The new last point.
+    End,
+}
+
+/// `end` as the handler reads it: `null` is as left out, and anything that is not `start` or
+/// `end` is refused with its message.
+fn spline_end<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SplineEnd>, D::Error> {
+    nullable(d, |v| match v.as_str() {
+        Some("start") => Ok(SplineEnd::Start),
+        Some("end") => Ok(SplineEnd::End),
+        _ => refuse("`end` must be start or end"),
+    })
+}
+
+fn spline_end_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"enum": ["start", "end"]})
+}
+
+/// What `sketch.spline.insert_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineInsertPointResult {
+    /// The new point's id.
+    pub point: String,
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------------------------
 // The creation commands of `cmd/sketch_create.rs` (#12550)
 
@@ -298,7 +369,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -311,7 +382,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
         forms.push(json!({"description": "A point on a model edge [x, y, z] in mm, projected into the sketch.", "type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}));
         "A sketch point: [x, y] in mm (a coordinate may be an expression), an existing point's id (\"l1.end\"), {ref} or {at}, a snap as text (\"mid:<line>\", \"on:<curve>:x,y\", \"x:<a>+<b>:x,y\", \"vertex:x,y,z\"), or a model {vertex} or {on_edge}."
     } else {
-        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters), an existing point's id such as \"l1.end\", or {ref} or {at}."
+        "A sketch point: [x, y] in mm (a coordinate may be an expression over the design's parameters or over another point's coordinate, \"p1.x\"), an existing point's id such as \"l1.end\", or {ref} or {at}."
     };
     json_schema!({"description": description, "anyOf": forms})
 }
@@ -356,31 +427,6 @@ impl JsonSchema for SnapPoint {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         point_arg_schema(generator, true)
-    }
-}
-
-/// A width, as the slot commands read it: a number above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(w) if w > 1e-9 => Ok(SlotWidth(w)),
-            _ => Err(D::Error::custom("must be positive")),
-        }
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: more than 0.000000001 and below 1 000 000 000.",
-            "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e9
-        })
     }
 }
 
@@ -464,31 +510,25 @@ impl JsonSchema for BlendContinuity {
     }
 }
 
-/// `periodic`, as `spline` reads it: true or false (`null` too is refused). Only a cubic fit
-/// point spline (`FIT`) can be periodic; the control point splines refuse `true`.
+/// `periodic`, as `spline` reads it: true or false (`null` too is refused).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Periodic<const FIT: bool>(pub bool);
+pub struct Periodic(pub bool);
 
-impl<'de, const FIT: bool> Deserialize<'de> for Periodic<FIT> {
+impl<'de> Deserialize<'de> for Periodic {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::Bool(b) if FIT || !b => Ok(Periodic(b)),
-            Value::Bool(_) => Err(D::Error::custom(whole("periodic mode requires a cubic fit spline"))),
+            Value::Bool(b) => Ok(Periodic(b)),
             _ => Err(D::Error::custom(whole("periodic must be boolean"))),
         }
     }
 }
 
-impl<const FIT: bool> JsonSchema for Periodic<FIT> {
+impl JsonSchema for Periodic {
     fn schema_name() -> Cow<'static, str> {
-        if FIT { "PeriodicFit" } else { "PeriodicNever" }.into()
+        "Periodic".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        if FIT {
-            json_schema!({"description": "Close the spline smoothly through its points (needs at least 3 distinct points). Default: false.", "type": "boolean"})
-        } else {
-            json_schema!({"description": "Not available for a control point spline: only false is accepted. Default: false.", "type": "boolean", "const": false})
-        }
+        json_schema!({"description": "Close the spline. A fit spline passes smoothly through its points (cubic, at least 3 distinct points); a control point spline wraps its control polygon into a loop (degree 3 or 5, at least degree + 1 points). Default: false.", "type": "boolean"})
     }
 }
 
@@ -726,7 +766,8 @@ pub struct SlotCenterPointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -761,7 +802,8 @@ pub struct ArcSlotThreePointParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub end: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -809,7 +851,8 @@ pub struct ArcSlotCenterKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointXY")]
     pub start: Option<PointXY>,
-    /// The slot's width, in mm.
+    /// The slot's width, in mm: a number, or an expression over the design's parameters, which
+    /// makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -861,14 +904,23 @@ impl JsonSchema for ArcSlotCenterParams {
     }
 }
 
-/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MinorRadius(pub f64);
+/// The minor radius of an ellipse, as `sketch.ellipse` reads it: a number of mm above 0, or
+/// text that is an expression over the design's parameters. Whether an expression evaluates to
+/// a positive size is the handler's to check. Kept as given.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinorRadius(pub Value);
 
 impl<'de> Deserialize<'de> for MinorRadius {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)?.as_f64().and_then(params::finite) {
-            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(r)),
+        let v = Value::deserialize(d)?;
+        if v.is_string() {
+            return match params::expr(&json!({ "v": v }), "v") {
+                Some(_) => Ok(MinorRadius(v)),
+                None => Err(D::Error::custom(whole(format!("`minor_radius` {}", params::expr_problem(Some(&v)))))),
+            };
+        }
+        match v.as_f64().and_then(params::finite) {
+            Some(r) if r > 1e-9 && r < 1e8 => Ok(MinorRadius(v)),
             _ => Err(D::Error::custom(whole("the minor radius must be positive"))),
         }
     }
@@ -879,7 +931,13 @@ impl JsonSchema for MinorRadius {
         "MinorRadius".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "The minor radius in mm: above 0.000000001 and below 100 000 000.", "type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8})
+        json_schema!({
+            "description": "The minor radius: a number of mm above 0.000000001 and below 100 000 000, or an expression over the design's parameters such as \"w / 4\" (a dimension driven by them; text naming no parameter is just that number, in the design's length unit).",
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": 1e-9, "exclusiveMaximum": 1e8},
+                {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": not_blank_pattern()}
+            ]
+        })
     }
 }
 
@@ -920,15 +978,17 @@ fn axes_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = ellipse_required)]
 pub struct EllipseKeys {
-    /// The ellipse's centre, [x, y] in mm.
+    /// The ellipse's centre, [x, y] in mm. A coordinate typed as an expression holds it where
+    /// the parameters put it.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub center: Option<PointXY>,
-    /// The end of the major axis, [x, y] in mm; not the centre.
+    #[schemars(with = "CornerPoint")]
+    pub center: Option<CornerPoint>,
+    /// The end of the major axis, [x, y] in mm, as `center` is given; not the centre.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "PointXY")]
-    pub major: Option<PointXY>,
-    /// The minor radius in mm. Wins over `minor`, which is then not read.
+    #[schemars(with = "CornerPoint")]
+    pub major: Option<CornerPoint>,
+    /// The minor radius in mm: a number, or an expression over the design's parameters, which
+    /// makes it a dimension driven by them. Wins over `minor`, which is then not read.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MinorRadius")]
     pub minor_radius: Option<MinorRadius>,
@@ -957,14 +1017,15 @@ fn ellipse_required(schema: &mut Schema) {
 }
 
 /// `sketch.ellipse`'s parameters: [`EllipseKeys`], with `minor` left unread when there is a
-/// `minor_radius`, and a `minor_radius` that isn't a number left unread, as the handler does.
+/// `minor_radius`, and a `minor_radius` that is neither a number nor text left unread, as the
+/// handler does.
 #[derive(Debug)]
 pub struct EllipseParams(pub EllipseKeys);
 
 impl<'de> Deserialize<'de> for EllipseParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let mut value = Value::deserialize(d)?;
-        let radius = params::num(&value, "minor_radius").is_some();
+        let radius = params::num(&value, "minor_radius").is_some() || value.get("minor_radius").is_some_and(Value::is_string);
         if let Some(keys) = value.as_object_mut() {
             keys.remove(if radius { "minor" } else { "minor_radius" });
         }
@@ -1056,14 +1117,100 @@ pub struct FitPointSplineParams {
     pub points: Option<SplinePoints>,
     /// Close it smoothly through its points. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<true>")]
-    pub periodic: Option<Periodic<true>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
+}
+
+/// A contour of points for a tolerance fit (#20048): plain [x, y] coordinates, 2 to 10000 of
+/// them. A contour is data, not picks, so no point references.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContourPoints(pub Vec<[f64; 2]>);
+
+impl<'de> Deserialize<'de> for ContourPoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let Value::Array(list) = Value::deserialize(d)? else {
+            return Err(D::Error::custom(whole("`points` must be a list")));
+        };
+        if list.len() < 2 || list.len() > 10_000 {
+            return Err(D::Error::custom(whole("a contour needs 2 to 10000 points")));
+        }
+        let mut out = Vec::with_capacity(list.len());
+        for v in &list {
+            let bad = || D::Error::custom(whole("each point is [x, y]"));
+            let pair = v.as_array().filter(|a| a.len() == 2).ok_or_else(bad)?;
+            let x = pair[0].as_f64().filter(|x| x.is_finite()).ok_or_else(bad)?;
+            let y = pair[1].as_f64().filter(|y| y.is_finite()).ok_or_else(bad)?;
+            out.push([x, y]);
+        }
+        Ok(ContourPoints(out))
+    }
+}
+
+impl JsonSchema for ContourPoints {
+    fn schema_name() -> Cow<'static, str> {
+        "ContourPoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<[f64; 2]>();
+        json_schema!({
+            "description": "The contour's points, 2 to 10000, in order along it, each [x, y].",
+            "type": "array", "items": point, "minItems": 2, "maxItems": 10000
+        })
+    }
+}
+
+/// Fit one spline to a contour of many points within a tolerance (#20048), passing through as
+/// few of the points as the tolerance needs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ToleranceSplineParams {
+    /// The contour's points, in order along it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ContourPoints")]
+    pub points: Option<ContourPoints>,
+    /// How far (mm) any given point may stray from the spline. Default: 0.01.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<crate::schema::sketch_equation::Tolerance>,
+    /// Close the contour smoothly. Default: false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.spline.fit_tolerance` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToleranceSplineResult {
+    /// The new curve's id, as a list (as other drawing commands return it).
+    pub curves: Vec<String>,
+    /// The new curve's id.
+    pub curve: String,
+    /// How many of the given points the spline goes through (a closed contour's start counted
+    /// once).
+    pub points: usize,
+    /// The contour closes smoothly where it ends.
+    pub closed: bool,
+    /// The largest distance (mm) found between the spline and the given points.
+    pub deviation: f64,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// What it added: `{points, curves, constraints, dimensions}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// Draw a control point spline: a cubic one (`sketch.spline.control_point`) or one of degree 5
@@ -1075,10 +1222,10 @@ pub struct ControlPointSplineParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SplinePoints")]
     pub points: Option<SplinePoints>,
-    /// Refused as true: only a cubic fit point spline can be periodic. Default: false.
+    /// Close the control polygon into a loop. Default: false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Periodic<false>")]
-    pub periodic: Option<Periodic<false>>,
+    #[schemars(with = "Periodic")]
+    pub periodic: Option<Periodic>,
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -1089,6 +1236,38 @@ pub struct ControlPointSplineParams {
 
 fn points_required(schema: &mut Schema) {
     require(schema, "points");
+}
+
+/// Draw a control point spline with its own knots and weights (`sketch.spline.control_knots`): the
+/// clamped B-spline of `degree` over its points, with exactly the knots it is given (#19524).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = knots_required)]
+pub struct ControlKnotsSplineParams {
+    /// The control points.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SplinePoints")]
+    pub points: Option<SplinePoints>,
+    /// The degree: 1 to 9.
+    pub degree: u8,
+    /// The clamped knot vector: points + degree + 1 non-decreasing numbers, the first and last
+    /// degree + 1 equal to the domain's ends, no interior knot repeated more than degree times.
+    pub knots: Vec<f64>,
+    /// One positive weight per point; none: all 1. A weighted spline must have degree 2 (a
+    /// rational quadratic, exact as conics).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub weights: Option<Vec<f64>>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+fn knots_required(schema: &mut Schema) {
+    require(schema, "points");
+    require(schema, "degree");
+    require(schema, "knots");
 }
 
 /// Join the end points of two curves with a blend curve: a tangent spline (g1), or one Bézier that

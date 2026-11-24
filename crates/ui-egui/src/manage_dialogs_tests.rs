@@ -270,7 +270,7 @@ fn configurations(command: &str) {
         assert!(scenario::rect_of(&format!("dialog:column:configuration_table:{label}")).is_some());
     }
     assert_eq!(scenario::rect_of("dialog:table:configuration_table:Default").unwrap().height(), crate::ui_kit::table_row_height());
-    assert!(h.widget("Add Column").is_some());
+    assert!(h.widget("Add column").is_some());
     assert!(h.widget("Add configuration").is_some());
     h.step(&json!({"click":{"handle":"dialog:table:configuration_table:add"}})).unwrap();
     assert_eq!(h.app.session.doc.configs.rows.len(), 1, "add inserts a draft, not a saved row");
@@ -491,6 +491,36 @@ fn configuration_inventory_keeps_library_rules_preview_and_inline_row_lifecycle(
     h.step(&json!({"click":{"handle":"dialog:collapse"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:button:Actions:Delete"}})).unwrap();
     assert_eq!(h.app.session.doc.configs.rows.len(), 1, "bin retains immediate deletion");
+}
+
+#[test]
+fn configuration_rows_rename_by_double_click_and_move_with_the_arrows() {
+    // #17287: a Configuration is renamed by double-clicking its name, and moved up or down the
+    // table with the arrows, without deleting and recreating it.
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    for name in ["Wide", "Narrow"] {
+        h.app.run("config.row", json!({"name": name})).unwrap();
+    }
+    let names = |h: &Harness| h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&h), ["Default", "Wide", "Narrow"]);
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"config:up:Narrow"}})).unwrap();
+    assert_eq!(names(&h), ["Default", "Narrow", "Wide"], "the arrow moves the row up one place");
+    h.step(&json!({"click":{"handle":"config:down:Default"}})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Wide"], "and down one place");
+    h.step(&json!({"click":{"handle":"config:down:Wide"}})).unwrap();
+    h.step(&json!({"click":{"handle":"config:up:Narrow"}})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Wide"], "the last row can't go down and the first can't go up");
+    h.frames(40); // Separate the rename gesture from preceding clicks (egui also recognizes triple-clicks).
+    h.step(&json!({"click":{"handle":"config:name:Wide"},"double":true})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_some() && h.app.session.doc.configs.rows.iter().any(|r| r.name == "Wide"));
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"Extra wide"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(names(&h), ["Narrow", "Default", "Extra wide"], "double-click renames the row where it stands");
 }
 
 #[test]
@@ -1043,4 +1073,132 @@ fn configuration_escape_discards_a_cell_edit() {
         .unwrap();
     h.frames(3);
     assert_eq!(config_cell(&h, &first, 0), before, "Escape discards");
+}
+
+/// A suppression column is a check box ([T-692](https://tickets.solidcraft.io/t/692)): a click or
+/// Space toggles it, and Tab and Enter move on from it, as from a value cell, without toggling.
+#[test]
+fn configuration_suppression_cells_are_check_boxes() {
+    let mut h = fixture();
+    let feature = h.app.session.doc.features[0].name.clone();
+    h.app.run("config.configure", json!({"params":["width"],"features":[feature]})).unwrap();
+    h.app.run("config.row", json!({"name":"Small"})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    let suppressed = |h: &Harness, row: &str| config_cell(h, row, 1);
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    let (first, second) = (&rows[0], &rows[1]);
+    assert_eq!(suppressed(&h, first), "false");
+    let column = format!("suppress:{feature}");
+    let checkbox = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox).count();
+    assert!(checkbox >= 2, "one check box per row, not a text box");
+    h.step(&json!({"click":{"handle":format!("config:cell:{first}:{column}")}})).unwrap();
+    h.frames(2);
+    assert_eq!(suppressed(&h, first), "true", "a click suppresses");
+    h.run(&json!([{"key":"Space"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, first), "false", "Space toggles the focused box");
+    h.run(&json!([{"key":"Enter"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, first), "false", "Enter moves on rather than toggling");
+    h.run(&json!([{"key":"Space"}, {"frames":2}])).unwrap();
+    assert_eq!(suppressed(&h, second), "true", "Enter moved down the column");
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"frames":2}, {"key":"Tab"}, {"frames":2}, {"key":"Space"}, {"frames":2}]))
+        .unwrap();
+    assert_eq!(suppressed(&h, first), "true", "Tab lands in the box");
+}
+
+/// The Configurations card resizes by its edges and remembers it; a column's header divider sets
+/// that column's width, kept by its column so adding another column doesn't move it; and long
+/// headings get room for their names ([T-693](https://tickets.solidcraft.io/t/693)).
+#[test]
+fn configuration_card_and_columns_resize_and_remember() {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"a_rather_long_parameter_name","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width","a_rather_long_parameter_name"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    let long = scenario::rect_of("dialog:column:configuration_table:a_rather_long_parameter_name").unwrap();
+    let output = painted_frame(&mut h);
+    assert!(!painted_text(&output, "a_rather_long_parameter_name", long).galley.elided, "a long heading has room for its name");
+
+    // The card's free (left) edge widens it, and the width is kept.
+    let card = scenario::rect_of("dialog:outer").unwrap();
+    let side = scenario::rect_of("config:resize:side").unwrap();
+    h.step(&json!({"drag":[[side.center().x, side.center().y],[side.center().x - 120.0, side.center().y]]})).unwrap();
+    h.frames(3);
+    let wider = scenario::rect_of("dialog:outer").unwrap();
+    assert!(wider.width() > card.width() + 60.0, "{card:?} -> {wider:?}");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    assert!((scenario::rect_of("dialog:outer").unwrap().width() - wider.width()).abs() < 1.0, "the card opens at the width it was given");
+
+    // A column divider sets the width column's width, which stays when a column is added.
+    let width = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    let divider = scenario::rect_of("dialog:column_divider:configuration_table:1").unwrap();
+    h.step(&json!({"drag":[[divider.center().x, divider.center().y],[divider.center().x + 80.0, divider.center().y]]})).unwrap();
+    h.frames(3);
+    let dragged = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    assert!(dragged.width() > width.width() + 40.0, "{width:?} -> {dragged:?}");
+    let feature = h.app.session.doc.features[0].name.clone();
+    h.app.run("config.column", json!({"feature":feature})).unwrap();
+    h.frames(4);
+    let kept = scenario::rect_of("dialog:column:configuration_table:width").unwrap();
+    assert!((kept.width() - dragged.width()).abs() < 1.0, "{dragged:?} -> {kept:?}");
+
+    // The configuration names are held at the left while the table scrolls sideways.
+    assert_eq!(
+        scenario::rect_of("dialog:column:configuration_table:Configuration").unwrap().x_range(),
+        scenario::rect_of("dialog:table:configuration_table:Default:cell:Configuration").unwrap().x_range()
+    );
+}
+
+/// When the design no longer matches the active configuration, Update sits beside Apply and takes
+/// the design's values into the row; a change the table has no column for is named below it
+/// ([T-686](https://tickets.solidcraft.io/t/686)).
+#[test]
+fn configuration_update_takes_the_designs_values_into_the_active_row() {
+    let mut h = fixture();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    assert!(scenario::handle_at("config:update:Default").is_none(), "nothing to update while the design matches the row");
+    h.app.run("parameters.change", json!({"name":"width","expression":"25 mm"})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("timeline.suppress", json!({"feature":feature,"suppressed":true})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"config:update:Default"}})).unwrap();
+    h.frames(3);
+    assert_eq!(config_cell(&h, "Default", 0), "25 mm");
+    assert!(h.app.session.doc.configuration_matches());
+    assert!(scenario::handle_at("config:update:Default").is_none(), "the design matches the row again");
+    assert!(scenario::rect_of("dialog:report:not_captured").is_some(), "the suppression without a column is named");
+}
+
+/// Configurations as columns ([T-690](https://tickets.solidcraft.io/t/690)): the same table the
+/// other way round, a row per parameter and a column per configuration. Cells edit as before;
+/// Enter goes down to the configuration's next value and Tab across to the next configuration.
+#[test]
+fn configurations_as_columns_swap_the_table_and_its_keys() {
+    let mut h = configuration_cells();
+    let rows: Vec<String> = h.app.session.doc.configs.rows.iter().map(|r| r.name.clone()).collect();
+    let (first, second) = (&rows[0], &rows[1]);
+    h.step(&json!({"click":{"handle":"config:as_columns"}})).unwrap();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table_swapped:viewport").is_some(), "the swapped table is shown");
+    assert!(scenario::rect_of(&format!("dialog:column:configuration_table_swapped:{second}")).is_some(), "a column per configuration");
+    h.run(&json!([{"click":{"handle":format!("config:cell:{first}:param:width")}}, {"key":"A","cmd":true}, {"text":"11 mm"}, {"key":"Enter"}, {"frames":2}]))
+        .unwrap();
+    assert_eq!(config_cell(&h, first, 0), "11 mm", "Enter commits the cell");
+    h.run(&json!([{"text":"6 mm"}, {"frames":1}, {"key":"Tab"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, first, 1), "6 mm", "Enter went down to the configuration's next value");
+    h.run(&json!([{"text":"7 mm"}, {"frames":1}, {"key":"Enter"}, {"frames":2}])).unwrap();
+    assert_eq!(config_cell(&h, second, 1), "7 mm", "Tab went across to the next configuration");
+    // The choice is the viewer's: the design is unchanged by it, and it is kept for next time.
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table_swapped:viewport").is_some(), "kept when the table opens again");
+    h.step(&json!({"click":{"handle":"config:as_columns"}})).unwrap();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:table:configuration_table:viewport").is_some(), "and switched back");
 }

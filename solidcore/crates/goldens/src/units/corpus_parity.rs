@@ -43,7 +43,6 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
-use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
 use solidcore::topology::brep_data::BrepData;
 use solidcore::topology::brep_data_write::FromBrepEnv;
@@ -148,7 +147,8 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
             records: &mut records,
             next_key: GEOMETRY_KEYS,
         };
-        let breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
+        let mut breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
+        breps.iter_mut().for_each(crate::tolsub::after_read);
         return Ok(Read {
             breps,
             attributes,
@@ -164,7 +164,8 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
         records: &mut records,
         next_key: GEOMETRY_KEYS,
     };
-    read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
+    crate::refit::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
+    crate::tolsub::after_read(&mut b);
     Ok(Read {
         breps: vec![b],
         attributes,
@@ -632,12 +633,13 @@ fn put_records(mut out: Output, prefix: &str, records: &[f64]) -> Result<Output,
 /// stopped (an error recorded, or a deferral), so no later side runs.
 fn run_side(
     out: &mut Output,
+    measure: &dyn Fn(&str, &str) -> Measured,
     side: &str,
     prefix: &str,
     stage: &str,
     path: &str,
 ) -> Result<bool, HarnessError> {
-    match measure_isolated(side, path) {
+    match measure(side, path) {
         Measured::Values { records, error } => {
             *out = put_records(std::mem::take(out), prefix, &records)?;
             let more = error.is_none();
@@ -652,6 +654,27 @@ fn run_side(
         }
         Measured::Broken(why) => Err(HarnessError::new(format!("{side}: {why}"))),
     }
+}
+
+/// A case's output, each side measured by `measure` (`measure_isolated` in a child; the
+/// tests measure in process, where [`crate::tolsub`] sees the reads).
+fn run_with(case: &Case, measure: &dyn Fn(&str, &str) -> Measured) -> Result<Output, HarnessError> {
+    let i: Inputs = case.parse()?;
+    let mut out = Output::new();
+    if run_side(&mut out, measure, "rust", "", "", &i.path)? {
+        run_side(&mut out, measure, "rust-roundtrip", "rt_", "round trip: ", &i.path)?;
+    }
+    Ok(out)
+}
+
+/// [`UnitDiff::run_rust`] measured in this process: `run_child`'s sides without the child.
+#[cfg(test)]
+pub(crate) fn run_in_process(case: &Case) -> Result<Output, HarnessError> {
+    run_with(case, &|side, path| match side {
+        "rust" => measure_rust(Path::new(path), ACCURACY),
+        "rust-roundtrip" => measure_rust_roundtrip(Path::new(path), ACCURACY),
+        _ => Measured::Broken(format!("no side {side}")),
+    })
 }
 
 impl UnitDiff for Runner {
@@ -695,12 +718,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let i: Inputs = case.parse()?;
-        let mut out = Output::new();
-        if run_side(&mut out, "rust", "", "", &i.path)? {
-            run_side(&mut out, "rust-roundtrip", "rt_", "round trip: ", &i.path)?;
-        }
-        Ok(out)
+        run_with(case, &measure_isolated)
     }
 
     fn generate(&self, _rng: &mut crate::Rng) -> Option<Value> {

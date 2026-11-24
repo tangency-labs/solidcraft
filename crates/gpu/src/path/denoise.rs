@@ -1,8 +1,7 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
-use super::{Context, Result, SHADER, TIMEOUT, Task, checked, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
+use super::{Context, Result, SHADER, TIMEOUT, Task, checked, gpu, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
 use solidcraft_render::job::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
 use std::sync::atomic::{AtomicBool, Ordering};
-use wgpu::util::DeviceExt;
 
 pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
 pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
@@ -188,11 +187,19 @@ impl Resources {
             .collect();
         let guide_bind =
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("denoise guides"), layout: &context.layout, entries: &entries });
-        let filter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("denoise parameters"),
-            contents: &[0; 48],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let filter_uniform = match solidcraft_viewport_gpu::buffer_init(
+            device,
+            "denoise parameters",
+            &[0; 48],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        ) {
+            Ok(buffer) => buffer,
+            Err(e) => {
+                // Drain the scopes in order before returning.
+                let _ = checked(error_scopes);
+                return Err(gpu(e));
+            }
+        };
         let filter_binds = [(accumulation, &output), (&output, &temporary), (&temporary, &output)]
             .into_iter()
             .map(|(source, destination)| {
@@ -208,7 +215,16 @@ impl Resources {
                 })
             })
             .collect();
-        let adaptive = adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size));
+        let adaptive =
+            match adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size)).transpose()
+            {
+                Ok(adaptive) => adaptive,
+                Err(e) => {
+                    // Drain the scopes in order before returning.
+                    let _ = checked(error_scopes);
+                    return Err(e);
+                }
+            };
         checked(error_scopes)?;
         Ok(Self {
             adaptive,
@@ -495,7 +511,7 @@ impl AdaptiveInput {
         filter_uniform: &wgpu::Buffer,
         output: &wgpu::Buffer,
         size: u64,
-    ) -> Self {
+    ) -> Result<Self> {
         let device = &context.device;
         let pixels = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("adaptive preview denoise input"),
@@ -503,11 +519,13 @@ impl AdaptiveInput {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("adaptive preview parameters"),
-            contents: &[0; 32],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform = solidcraft_viewport_gpu::buffer_init(
+            device,
+            "adaptive preview parameters",
+            &[0; 32],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        )
+        .map_err(gpu)?;
         let entries: Vec<_> = (0..3)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -559,7 +577,7 @@ impl AdaptiveInput {
             layout: &pipelines.filter_layout,
             entries: &entries,
         });
-        Self { _pixels: pixels, uniform, pipeline, bind, filter_bind }
+        Ok(Self { _pixels: pixels, uniform, pipeline, bind, filter_bind })
     }
     fn normalize_window(&self, task: &Task, window: Window) -> Result<()> {
         let options = task.options.adaptive.ok_or_else(|| super::gpu("missing adaptive preview options"))?;

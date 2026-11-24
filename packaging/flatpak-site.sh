@@ -12,7 +12,7 @@ app_id=io.tangencylabs.solidcraft
 # repository, marked end-of-life with a rebase to $app_id once a release under $app_id has been
 # imported. Until then (the latest release is still from before the move), the release's bundles
 # carry an old id and are published as they are.
-legacy_ids=(ai.storyteller.solidcraft ai.storyteller.solvecraft)
+legacy_ids=(ai.storyteller.solidcraft)
 if [ -z "$tag" ]; then
   tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
     --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
@@ -80,8 +80,7 @@ done
 # `flatpak update` then offers existing installs of an old id the move to the new one, and
 # Flatpak moves their ~/.var/app data folder along. The mark is a new commit on the old ref (the
 # same app, so a skipped update changes nothing); it is made once and mirrored by later runs. A
-# ref already marked with a rebase to an older id (ai.storyteller.solvecraft pointed at
-# ai.storyteller.solidcraft) is marked again, so every old install moves straight to $app_id.
+# ref is marked again if its rebase points elsewhere, so every old install moves to $app_id.
 for arch in x86_64 aarch64; do
   new_ref="app/$app_id/$arch/stable"
   # Only rebase to an app the repository has: a release from before the move has no new ref.
@@ -118,7 +117,4 @@ flatpak remote-add --user --if-not-exists solidcraft $base_url/flatpak/solidcraf
 flatpak install --user solidcraft $published_id
 flatpak run $published_id</pre></main></body></html>
 HTML
-# Compatibility shim (docs/compatibility.md): links and instructions from before the rename point
-# at solvecraft.flatpakrepo. Existing remotes keep working either way: they store the repo URL.
-cp "$site/flatpak/solidcraft.flatpakrepo" "$site/flatpak/solvecraft.flatpakrepo"
 touch "$site/.nojekyll"

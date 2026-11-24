@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.agent_chat_interrupted": "The agent stopped before finishing the task.",
+    "ui.agent_chat_continue": "Continue",
+    "ui.agent_chat_continue_tip": "Ask the agent to carry on with the task it could not finish"
+  },
+  "ar": {
+    "ui.agent_chat_interrupted": "توقف الوكيل قبل أن ينهي المهمة.",
+    "ui.agent_chat_continue": "متابعة",
+    "ui.agent_chat_continue_tip": "اطلب من الوكيل أن يتابع المهمة التي لم يستطع إنهاؤها"
+  },
+  "he": {
+    "ui.agent_chat_interrupted": "הסוכן נעצר לפני סיום המשימה.",
+    "ui.agent_chat_continue": "המשך",
+    "ui.agent_chat_continue_tip": "בקש מהסוכן להמשיך את המשימה שלא הצליח לסיים"
+  },
+  "ja": {
+    "ui.agent_chat_interrupted": "エージェントはタスクを終える前に停止しました。",
+    "ui.agent_chat_continue": "続行",
+    "ui.agent_chat_continue_tip": "エージェントに、完了できなかったタスクを続行するよう依頼します"
+  },
+  "vi": {
+    "ui.agent_chat_interrupted": "Tác tử đã dừng lại trước khi hoàn thành tác vụ.",
+    "ui.agent_chat_continue": "Tiếp tục",
+    "ui.agent_chat_continue_tip": "Yêu cầu tác tử tiếp tục tác vụ mà nó chưa hoàn thành"
+  },
+  "zh": {
+    "ui.agent_chat_interrupted": "智能体在完成任务前已停止。",
+    "ui.agent_chat_continue": "继续",
+    "ui.agent_chat_continue_tip": "让智能体继续它未能完成的任务"
+  },
+  "de": {
+    "ui.agent_chat_interrupted": "Der Agent hat die Aufgabe nicht zu Ende ausgeführt.",
+    "ui.agent_chat_continue": "Fortsetzen",
+    "ui.agent_chat_continue_tip": "Den Agenten die Aufgabe fortsetzen lassen, die er nicht abschließen konnte"
+  },
+  "ko": {
+    "ui.agent_chat_interrupted": "에이전트가 작업을 마치기 전에 중단되었습니다.",
+    "ui.agent_chat_continue": "계속",
+    "ui.agent_chat_continue_tip": "완료하지 못한 작업을 에이전트가 계속하도록 요청합니다"
+  }
+}

@@ -9,6 +9,7 @@ pub(super) const FORM: &str = "sc_dense_form";
 pub(super) const LABEL: &str = "sc_form_label";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
 pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
+const LABEL_TOOLTIP: &str = "sc_row_label_tooltip";
 
 /// A form whose card widens so its widest label fits (#10620). Each pass the form publishes,
 /// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
@@ -69,6 +70,19 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
 /// selected_bg, selected_ink`.
 pub fn selection_ink(t: &Tokens) -> egui::Color32 {
     if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+}
+
+/// The ink to draw on `fill`: `preferred` where it reads there (at least `floor`:1, 3 for icons,
+/// bold labels and marks, 4.5 for body text), else whichever of the theme's selected and body
+/// inks reads better. Themes whose own ink reads keep it; SolidCraft 95, CGA and the 1-bit pair,
+/// whose primary colour is their selection colour, and themes whose primary sits too close to
+/// it get an ink that reads. Tokens: `selected_ink, form_ink`.
+pub fn ink_on(t: &Tokens, fill: egui::Color32, preferred: egui::Color32, floor: f64) -> egui::Color32 {
+    use solidcraft_theme::contrast_ratio;
+    if contrast_ratio(preferred, fill) >= floor {
+        return preferred;
+    }
+    if contrast_ratio(t.selected_ink, fill) >= contrast_ratio(t.form_ink, fill) { t.selected_ink } else { t.form_ink }
 }
 
 /// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
@@ -202,6 +216,12 @@ pub fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R) -> R 
     sized_row(ui, text, row_height(), control)
 }
 
+/// Override row labels' hover text within `add` when a description is available.
+/// Controls retain their own tooltips. Tokens: the enclosed rows' tokens.
+pub fn with_row_label_tooltip<R>(ui: &mut Ui, tip: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL_TOOLTIP, tip.to_owned())), add).inner
+}
+
 /// Aligned label/value row for read-only text (what a sketch is on now): the value wraps in the
 /// control column and the row grows to hold every line, so a long value is never clipped.
 /// One line keeps the 28 pt row. Tokens: `row, font_label, form_ink, space_8`.
@@ -244,7 +264,17 @@ pub fn status_line(ui: &mut Ui, text: &str, tone: StatusTone) -> Response {
 pub fn expr_row(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::field(ui, value)
+    })
+}
+
+/// Expression row whose scrubbed value stops at zero (for physical dimensions like radius or thickness).
+pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::field(ui, value)
     })
@@ -260,7 +290,17 @@ pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::C
 pub fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::hint_field(ui, value, hint)
+    })
+}
+
+/// Expression row with a hint whose scrubbed value stops at zero.
+pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::hint_field(ui, value, hint)
     })
@@ -286,6 +326,19 @@ pub fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bo
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
+}
+
+/// A card row whose control is one action: the kit's [`super::button_at`] across the control
+/// column, under an empty label column so it lines up with the rows' fields, its text the
+/// catalog's for `label`. Returns whether it was clicked. Published as `dialog:action:{key}`.
+/// Tokens: `row, button`.
+pub fn action_row(ui: &mut Ui, key: &str, label: &str) -> bool {
+    row(ui, "", |ui| {
+        let rect = ui.max_rect();
+        let response = super::button_at(ui, &format!("action_row:{key}"), rect, solidcraft_ui_text::tr_label(label), super::Button::Normal);
+        solidcraft_ui_registry::publish_target(&format!("dialog:action:{key}"), response.rect);
+        response.clicked()
+    })
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
@@ -343,6 +396,15 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
     let help = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
+    let tooltip = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(LABEL_TOOLTIP)).cloned();
+    let add_label = |ui: &mut Ui| {
+        let response = ui.add(
+            egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label))
+                .truncate()
+                .show_tooltip_when_elided(tooltip.is_none()),
+        );
+        response.backing_on_hover_text(tooltip.as_deref().unwrap_or(&shown))
+    };
     if label_width > 0.0 {
         ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             // Left aligned in the label column, as in the design.
@@ -354,18 +416,14 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, scrub: bool, control:
                         egui::UiBuilder::new()
                             .max_rect(egui::Rect::from_min_size(label_rect.min, vec2(width, height)))
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                        |ui| {
-                            ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
-                                .backing_on_hover_text(&shown)
-                        },
+                        add_label,
                     )
                     .inner;
                 let help = super::help_icon(ui, help);
                 solidcraft_ui_registry::publish_rect(&format!("dialog:row_label:{text}"), label.rect);
                 solidcraft_ui_registry::publish_rect(&format!("dialog:row_help:{text}"), help.rect);
             } else {
-                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
-                    .backing_on_hover_text(shown);
+                add_label(ui);
             }
         });
     }
@@ -822,6 +880,17 @@ fn note_galley(ui: &Ui, text: &str) -> std::sync::Arc<egui::Galley> {
 #[cfg(any(test, feature = "test-support"))]
 pub fn note_height(ui: &Ui, text: &str) -> f32 {
     note_galley(ui, text).size().y + Tokens::get().space_4 * 2.0
+}
+
+/// Take the room [`text`] would take in the `Text::Hint` style at the current width: the same
+/// allocation [`text`] would make, so the rows under a hint whose words are only shown some of the
+/// time stay where they are while the words are hidden. Nothing is painted, and no handle or
+/// widget info is published: the row is not there to be found.
+pub fn hint_space(ui: &mut Ui, text: &str) {
+    let t = Tokens::get();
+    let width = dimension(ui.available_width());
+    let galley = ui.painter().layout(text.to_owned(), egui::FontId::proportional(t.font_body), t.form_dim, width);
+    ui.allocate_exact_size(vec2(width, galley.size().y), egui::Sense::hover());
 }
 
 pub fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {

@@ -116,15 +116,43 @@ impl Brep {
     /// SMLib's export lists faces and edges in the body's own order (`SmBrep::GetFaces`,
     /// `GetEdges`), the order its history uses.
     pub fn to_native_ordered(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
+        self.to_native_ordered_report().map(|(brep, order, _)| (brep, order))
+    }
+
+    /// [`Brep::to_native_ordered`], with what the mapping kept as SMLib wrote it and repaired.
+    pub fn to_native_ordered_report(&self) -> std::result::Result<(b::Brep, Order, Report), ExportError> {
         let arrays = self.arrays().map_err(ExportError::Smlib)?;
-        let r = native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+        let r = native_ordered(&arrays).and_then(|(mut brep, report, order)| {
             self.with_definitions(&mut brep, &order)?;
-            Ok((brep, order))
+            Ok((brep, order, report))
         });
-        if let Ok((record, _)) = &r {
+        if let Ok((record, _, _)) = &r {
             crate::trace::exported(self, record);
         }
         r
+    }
+
+    /// [`Brep::to_native_ordered`] of a sheet made only to read a file's trims from
+    /// ([`crate::pcurves`]): the trims SMLib builds for it raise their edges by upstream's
+    /// sampled distance, not a proved one (see [`crate::core::to_arrays_sampled_trims`] and
+    /// [`solidcore::Kernel::with_sampled_trim_raise`]).
+    pub(crate) fn to_native_ordered_sampled_trims(&self) -> std::result::Result<(b::Brep, Order), ExportError> {
+        let arrays = crate::core::to_arrays_sampled_trims(self.core()).map_err(ExportError::Smlib)?;
+        native_ordered(&arrays).and_then(|(mut brep, _, order)| {
+            self.with_definitions(&mut brep, &order)?;
+            Ok((brep, order))
+        })
+    }
+
+    /// Export the canonical record and, when a complex shell order was already confirmed,
+    /// prepare its runtime body for the STEP import's modelling check. The runtime body
+    /// is built from this export so it agrees with the body reconstructed from a saved file.
+    pub fn to_native_prepared(&self) -> Res<(b::Brep, Order, Option<Brep>, Report)> {
+        let (record, order, report) = self.to_native_ordered_report()?;
+        let ready = (self.enclosing_shell_order_proven && record.regions.iter().skip(1).any(|region| region.shells.len() > 1))
+            .then(|| Self::from_proven_shell_order(&record).ok())
+            .flatten();
+        Ok((record, order, ready, report))
     }
 }
 
@@ -158,6 +186,9 @@ pub struct Report {
     pub nurbs_edges: usize,
     /// Faces whose loops were reversed (SMLib's natural normal against the record's).
     pub reversed_faces: usize,
+    /// SMLib edges split because sheet faces use them more than twice: each counts once, however
+    /// many copies the further uses were given (an edge of four uses is one, with two copies).
+    pub split_edges: usize,
 }
 
 /// Why an SMLib body has no schema 4 record.
@@ -435,6 +466,43 @@ impl Nurbs {
     }
 }
 
+/// The points of edge `e`'s start and end vertices, in SMLib's direction along it.
+fn edge_ends(flat: View, e: usize) -> Res<[[f64; 3]; 2]> {
+    let ends = flat.i(EDGE_VERTICES);
+    let point = |k: usize| -> Res<[f64; 3]> {
+        let v = usize::try_from(at(ends, k, "edge vertices")?).map_err(|_| invalid("edge vertex"))?;
+        v3(flat.f(VERTEX_POSITION), v, "edge vertex")
+    };
+    Ok([point(2 * e)?, point(2 * e + 1)?])
+}
+
+/// `SM_INFINITE_PARAMETER`: the parameter range of an unbounded line.
+const INFINITE_PARAMETER: f64 = 1_234_567.0;
+
+/// A NURBS edge on an unbounded line given as a B-spline (degree 1, two control points of one
+/// weight, knots at [`INFINITE_PARAMETER`]): the line through the edge's own vertices, its
+/// interval, and the [`TrimMap`] that carries SMLib's parameter onto it (affine, as the
+/// B-spline's is). SMLib's mirror gives every line so (upstream's `CreateMirrorCurve` over the
+/// line's whole range): control points that far out lose the edge's precision and, once the edge
+/// is longer than 810 mm, pass the 1e9 the flat arrays take back, so the mirrored body could not
+/// be measured or used again. None for anything else: a B-spline with knots of its own (a round's
+/// straight piece) stays as SMLib holds it.
+fn straight_piece(n: &Nurbs, r: [f64; 2], ends: [[f64; 3]; 2]) -> Option<(b::Curve, [f64; 2], [f64; 2])> {
+    let ([k0, k1], [w0, w1]) = match (n.knots.as_slice(), n.points.len(), n.weights.as_slice()) {
+        ([a, b, c, d], 2, [w0, w1]) if a == b && c == d => ([*a, *c], [*w0, *w1]),
+        _ => return None,
+    };
+    let (lo, hi) = (r[0].min(r[1]), r[0].max(r[1]));
+    if w0 != w1 || k0 != -INFINITE_PARAMETER || k1 != INFINITE_PARAMETER || !(k0 < lo && lo < hi && hi < k1) || ends[0] == ends[1] {
+        return None;
+    }
+    // The vertex at `lo` starts the line: SMLib's start vertex sits at r[0].
+    let (start, end) = if r[0] <= r[1] { (ends[0], ends[1]) } else { (ends[1], ends[0]) };
+    let scale = 1.0 / (hi - lo);
+    let on = |t: f64| (t - lo) * scale;
+    Some((b::Curve::Line { start, end }, [on(r[0]), on(r[1])], [scale, -lo * scale]))
+}
+
 /// How a UV trim's parameter (SMLib's edge parameter, as the arrays carry it) becomes the edge
 /// record's: t ↦ scale · t + offset, scale > 0. None where the record's parameter is not an
 /// affine image of SMLib's (a circle or ellipse, whose angle is not its NURBS parameter).
@@ -514,14 +582,20 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 }
             }
             CURVE_NURBS => {
-                let c = next_nurbs()?.record();
-                // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
-                // gives lines, circles and ellipses as their own kinds, and nothing is recognised here.
-                // SMLib's interval may start or end a rounding past its knots (a variable round's
-                // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
-                kept += 1;
-                let r = onto(r, c.natural());
-                (c, None, r, Some([1.0, 0.0]))
+                let n = next_nurbs()?;
+                if let Some((line, r, map)) = straight_piece(&n, r, edge_ends(flat, e)?) {
+                    (line, None, r, Some(map))
+                } else {
+                    let c = n.record();
+                    // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
+                    // gives lines, circles and ellipses as their own kinds, and nothing else is recognised
+                    // here (a piece of a straight B-spline is a line, [`straight_piece`]).
+                    // SMLib's interval may start or end a rounding past its knots (a variable round's
+                    // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
+                    kept += 1;
+                    let r = onto(r, c.natural());
+                    (c, None, r, Some([1.0, 0.0]))
+                }
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });
@@ -575,22 +649,43 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 }
 
 /// A trim along its edge, its parameter moved onto the edge record's ([`TrimMap`]): one whose
-/// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
-/// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
-/// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), or by more but at one point of the edge
-/// within its tolerance (`on_edge`: a circle on its NURBS form whose end lies a rounding past the
-/// quarter line its trim stops on moves along it 10⁻⁷ of the form's parameter, a micron), every
-/// knot within that of an interval end is that end, and the end spans this leaves without length
-/// go with their control points, so the pcurve is a valid record defined on the edge; farther
-/// apart is an error.
-fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
+/// edgeuse runs against the edge (`same` false) reversed exactly (points reversed, knots
+/// t ↦ a + b − t on its domain [a, b], whose ends swap exactly), then the knots mapped. SMLib
+/// keeps a trim on its edge's interval; where the ends differ by the rounding of SMLib's own or
+/// this remap (10⁻⁹ of the interval's magnitude, no floor: a micro edge on knots spanning 10⁻⁷
+/// lies on [0, 6e-12]), or by more but at one point of the edge within its tolerance (`on_edge`:
+/// a circle on its NURBS form ending a rounding past its trim's quarter line), every knot within
+/// that of an end is that end, and the end spans left without length go with their control
+/// points. Farther is an error naming the end, as is (worded apart) an interval of at most
+/// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
+fn mapped(
+    trim: &b::Curve2,
+    same: bool,
+    [scale, offset]: [f64; 2],
+    [t0, t1]: [f64; 2],
+    on_edge: &dyn Fn(f64, f64) -> bool,
+    carried_along_edge: &dyn Fn(&b::Curve2) -> bool,
+) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
         }
-        let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
-        (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
+        // About the domain [a, b], whose ends swap exactly (as SMLib's `reverse_knots` swaps
+        // them): (a + b) − b is a only to the precision of b, so a start at 4.3e-12 on a domain
+        // ending at 3e-4 came back 1e-20 lower, off the edge's curve where it starts on the
+        // curve's first knot, and the whole solid was refused.
+        let degree = knots.len().saturating_sub(points.len() + 1);
+        let (a, b) = (knots.get(degree).copied().unwrap_or(0.0), knots.get(points.len()).copied().unwrap_or(0.0));
+        let reversed = |t: f64| {
+            if t == a {
+                b
+            } else if t == b {
+                a
+            } else {
+                a + b - t
+            }
+        };
+        (knots.iter().rev().map(|t| reversed(*t)).collect(), points.iter().rev().cloned().collect())
     }
     // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
     // interval, inside or past it, is that end, and the end spans that leaves without length are
@@ -609,12 +704,14 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         [scale, offset]: [f64; 2],
         [t0, t1]: [f64; 2],
         on_edge: &dyn Fn(f64, f64) -> bool,
+        carried_along_edge: &dyn Fn(&b::Curve2) -> bool,
+        build: &dyn Fn(&[f64], &[T]) -> b::Curve2,
     ) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
         let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
-        let rounding = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
+        let rounding = 1e-9 * t0.abs().max(t1.abs());
         // Each end's slack: the rounding, or the gap where it is one point of the edge (less
         // than a quarter of the interval, so the two ends' slacks never meet).
         let end = |x: f64, t: f64| {
@@ -627,8 +724,38 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
                 None
             }
         };
+        let trim_on = || format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]");
+        if t1 - t0 <= 1e-12 {
+            return Err(invalid(format!("{}: the edge's interval is no longer than SMLib's knot resolution (1e-12)", trim_on())));
+        }
         let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
-            return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
+            // SMLib gives the trim of an edge that runs further off its face than it tolerates
+            // on the unit interval, whatever the edge's own parameter is (it reports it as
+            // having no length): the same position along the edge, so the knots are carried
+            // onto its interval, the ends exactly.
+            // Only where each end that is not the edge's is far from it (a quarter of the interval,
+            // as for `end`: a rounding or a point within tolerance short of it is refused as
+            // before), and the edge is not a micro edge, whose [0, 1] trim stays refused. The
+            // carried trim is then checked against the edge ([`along_edge`]): a [0, 1] trim that is
+            // not the edge's own unit trim is refused as before.
+            let far = |x: f64, t: f64| end(x, t).is_some() || (x - t).abs() >= 0.25 * (t1 - t0).abs();
+            if a == 0.0 && z == 1.0 && t1 - t0 > 1e-6 && far(a, t0) && far(z, t1) {
+                let carried: Vec<f64> = k.iter().map(|x| t0 * (1.0 - *x) + t1 * *x).collect();
+                if carried_along_edge(&build(&carried, &points)) {
+                    return Ok((carried, points));
+                }
+            }
+            // Which ends: more than a rounding apart and not one point of the edge.
+            let off: Vec<String> = [("start", a, t0), ("end", z, t1)]
+                .into_iter()
+                .filter(|(_, x, t)| end(*x, *t).is_none())
+                .map(|(which, x, t)| format!("its {which} {} from the edge's", (x - t).abs()))
+                .collect();
+            return Err(invalid(format!(
+                "{}: {}, more than a rounding and not at one point of the edge within its tolerance",
+                trim_on(),
+                off.join(" and ")
+            )));
         };
         // A knot within the rounding of an end is that end, and so is one past the end on the
         // side the trim runs over it, up to the trim's end; a knot inside the edge's interval
@@ -656,14 +783,36 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge)?;
+            let build = |knots: &[f64], points: &[[f64; 2]]| b::Curve2::Spline { knots: knots.to_vec(), points: points.to_vec() };
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge, carried_along_edge, &build)?;
             b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge)?;
+            let build =
+                |knots: &[f64], homogeneous: &[[f64; 3]]| b::Curve2::RationalSpline { knots: knots.to_vec(), homogeneous: homogeneous.to_vec() };
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge, carried_along_edge, &build)?;
             b::Curve2::RationalSpline { knots, homogeneous }
         }
+    })
+}
+
+/// Whether `trim`, on the edge's interval, lies along the edge: at its ends and four interior
+/// parameters, evenly spaced, the face's `surface` at the trim's point is the edge `curve`'s point
+/// at the same parameter, within `reach` (the edge's tolerance). False where any of them cannot be
+/// evaluated.
+fn along_edge(trim: &b::Curve2, surface: &b::Surface, curve: &b::Curve, [t0, t1]: [f64; 2], reach: f64) -> bool {
+    const STEPS: u8 = 5;
+    let ts: Vec<f64> = (0..=STEPS).map(|i| if i == STEPS { t1 } else { t0 + (t1 - t0) * f64::from(i) / f64::from(STEPS) }).collect();
+    let Some(uvs) = ts.iter().map(|t| solidcore_ops::pcurve::eval(trim, *t)).collect::<Option<Vec<_>>>() else {
+        return false;
+    };
+    let Some(on_face) = solidcore_ops::pcurve::surface_points(surface, &uvs) else {
+        return false;
+    };
+    ts.iter().zip(&on_face).all(|(t, p)| match point3(curve, *t) {
+        Some(q) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
+        None => false,
     })
 }
 
@@ -863,7 +1012,8 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                             (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
                             _ => false,
                         };
-                        Some(mapped(trim, same, map, edge.interval, &on_edge)?)
+                        let carried_along_edge = |carried: &b::Curve2| along_edge(carried, params, curve, edge.interval, reach);
+                        Some(mapped(trim, same, map, edge.interval, &on_edge, &carried_along_edge)?)
                     }
                     _ => None,
                 });
@@ -985,7 +1135,10 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         }
         other => other,
     };
-    made.map(|(brep, order)| (brep, report, order))
+    made.map(|(brep, order, split)| {
+        report.split_edges = split;
+        (brep, report, order)
+    })
 }
 
 /// Which runtime shell a record shell is made from.
@@ -1203,13 +1356,13 @@ impl Tolerances {
     }
 }
 
-fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerances) -> Res<(b::Brep, Order)> {
+fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerances) -> Res<(b::Brep, Order, usize)> {
     let tolerance = tolerances.body;
     let Parts { mut faces, mut edges, shells, regions, radial } = parts;
     let n_edges = edges.len();
     // A copy made by the splits keeps the tolerance of the array edge or vertex it copies.
     let (mut edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
-    split_touching(&mut faces, &mut edges, &mut edge_source, radial.as_ref())?;
+    let split = split_touching(&mut faces, &mut edges, &mut edge_source, radial.as_ref())?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -1381,7 +1534,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             .push(pieces.iter().find(|p| p.edge == e).map_or_else(|| edge_new.get(e).copied().ok_or_else(|| invalid("edge")), |p| Ok(p.canonical))?);
     }
     let order = Order { faces: placed(&face_new)?, edges: edges_out, pieces };
-    Ok((brep, order))
+    Ok((brep, order, split))
 }
 
 /// Edges and vertices that solids touching each other share (faces of more than one shell use
@@ -1480,7 +1633,7 @@ fn split_shared(faces: &mut [Face], edges: &mut Vec<Edge>, shells: &[Vec<(u32, b
 /// where the boundary meets itself: copies would give a face whose loop passes the point twice two
 /// coincident vertices, which SMLib also refuses (test 32). The geometry is unchanged; each copy
 /// is added to `edge_source` with its original's source.
-fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut Vec<usize>, radial: Option<&Radial>) -> Res<()> {
+fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut Vec<usize>, radial: Option<&Radial>) -> Res<usize> {
     // The records using each edge, and where each record is: (face, loop, position).
     let mut records_of: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
     let mut place: HashMap<usize, (usize, usize, usize)> = HashMap::new();
@@ -1500,7 +1653,7 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
     }
     let crowded: Vec<usize> = (0..edges.len()).filter(|e| records_of.get(*e).is_some_and(|r| r.len() > 2)).collect();
     if crowded.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let radial = radial.ok_or_else(|| unsupported("a solid touching itself along an edge, without SMLib's radial order"))?;
     let face_of = |r: usize| place.get(&r).map(|p| p.0).ok_or_else(|| invalid("edgeuse record"));
@@ -1513,8 +1666,30 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
     let after = |r: usize| -> Res<bool> { Ok(material_same(r)? != top_entry(r)?) };
     let before = |r: usize| -> Res<bool> { Ok(material_same(r)? == top_entry(r)?) };
 
+    // The original edges split because only sheet faces use them (each once).
+    let mut split_sheets = 0;
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
+        // An edge only sheet faces use (no material on either side of any of them) has no
+        // sectors to pair across: the first two uses keep it, every further use gets a copy of
+        // its own, so the sheet stays one open body with the extra uses as boundary edges.
+        let only_sheets = mine.iter().all(|r| face_of(*r).ok().and_then(|f| radial.material_same.get(f).copied()).is_some_and(|m| m.is_none()));
+        if only_sheets {
+            split_sheets += 1;
+            for &r in mine.iter().skip(2) {
+                let c = edges.len();
+                edges.push(edges.get(e).ok_or_else(|| invalid("edge"))?.clone());
+                edge_source.push(edge_source.get(e).copied().ok_or_else(|| invalid("edge"))?);
+                let (f, li, p) = place.get(&r).copied().ok_or_else(|| invalid("edgeuse record"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| if let Loop::Edges(u) = l { u.get_mut(p) } else { None })
+                    .ok_or_else(|| invalid("edgeuse record"))?;
+                slot.0 = index(c)?;
+            }
+            continue;
+        }
         let start = *mine.first().ok_or_else(|| invalid("edge"))?;
         // The edge's radial list from one of its records, keeping this edge's (another solid's
         // faces may lie between them where solids touch each other too).
@@ -1578,7 +1753,7 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
             }
         }
     }
-    Ok(())
+    Ok(split_sheets)
 }
 
 /// What the pcurve routine needs of one edge: the curve its parameter is on, its interval and its

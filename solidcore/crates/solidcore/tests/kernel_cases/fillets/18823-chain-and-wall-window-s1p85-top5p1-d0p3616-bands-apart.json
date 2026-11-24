@@ -1,0 +1,237 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b38": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b39"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b40"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b40"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b41"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b42"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  2.579351122989408,
+                  -10.0,
+                  5.0
+                ]
+              ],
+              "index": 29
+            },
+            {
+              "at": [
+                [
+                  2.1356094930489036,
+                  -9.048398431197104,
+                  5.1
+                ],
+                [
+                  2.0510854447185047,
+                  -8.867137058439347,
+                  5.1
+                ]
+              ],
+              "index": 48
+            },
+            {
+              "at": [
+                [
+                  1.936475578197164,
+                  -8.62135680834962,
+                  6.378643191650378
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 25
+            },
+            {
+              "at": [
+                [
+                  1.3115,
+                  -7.2811,
+                  7.438696885238559
+                ],
+                [
+                  1.452353201580983,
+                  -7.583158942753129,
+                  7.240064785777431
+                ]
+              ],
+              "index": 35
+            }
+          ],
+          "points": [
+            [
+              2.2579133505932862,
+              -9.31067840417481,
+              5.689321595825189
+            ],
+            [
+              2.093347468883704,
+              -8.957767744818225,
+              5.1
+            ],
+            [
+              1.6944143898890736,
+              -8.102257875551375,
+              6.809353988713904
+            ],
+            [
+              1.3819266007904916,
+              -7.432129471376564,
+              7.3393808355079955
+            ]
+          ],
+          "tolerance": 1.601781059358212
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.3616,
+          0.3616,
+          0.3616,
+          0.3616
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "18823-chain-and-wall-window-s1p85-top5p1-d0p3616-bands-apart",
+  "expected": {
+    "body_count": 1,
+    "method": "The chain's chamfer on the wall: solidcore keeps a chamfer's offsets along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg; surface/procedural_blend/chamfer.rs), r = d tan(36.306 deg) off the wall and off the slope, the r1 round or the r3 groove. Its rail on the wall is the foot on the wall of the point standing r off both, solved section by section along the chain (independently, with no kernel output). The window's chamfer is between two planes at 90 deg: it takes the wall from its top edge up to d above it, over the window's 0.2 along the wall, and ends on the window's side walls. On the window's span the chain's rail on the wall stays 0.00031 above the top of the window's strip, so the bands are apart and the two chamfers remove separate material (main refused it). V0 = 4962.01269 (the part before the window: see 18823-chamfer-slot-wall-edge-running-on-into-a-round); the window, 0.2 x 0.5 x 1.0, lies wholly in the part: 0.1; the chain's chamfer removes R = 0.35928 (the material on the edge's side of the chord between the rails' feet, integrated on a 0.005 grid; 0.01 gives 0.0006 less at 0.4); the window's chamfer removes d^2/2 x 0.2 = 0.013075. V = 4961.54033, within 0.003.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#18823"
+    ],
+    "volume_mm3": [
+      4961.5373,
+      4961.5433
+    ],
+    "what": "issue 18823's part (a block with a 45 deg slope, a groove with r1 rounds and a slot slanted 65 deg in plan; see 18823-chamfer-slot-wall-edge-running-on-into-a-round) with a window 0.2 wide, 0.5 tall and 1.0 deep cut square into the slot's inner wall, centred 1.85 along the wall from its back corner (1.3115, -7.2811), its top edge at z = 5.1. A 0.3616 chamfer on the wall's top edge, with its tangent chain, and on the window's top edge together."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 70,
+      "faces": 27,
+      "vertices": 46
+    }
+  },
+  "records": "18823-chain-and-wall-window-s1p85-top5p1-d0p3616-bands-apart.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b42"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1812.9399353632668,
+      "body_count": 1,
+      "edges": 67,
+      "faces": 26,
+      "vertices": 44,
+      "volume_mm3": 4961.54072554467
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#18823"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "issue 18823's part (a block with a 45 deg slope, a groove with r1 rounds and a slot slanted 65 deg in plan; see 18823-chamfer-slot-wall-edge-running-on-into-a-round) with a window 0.2 wide, 0.5 tall and 1.0 deep cut square into the slot's inner wall, centred 1.85 along the wall from its back corner (1.3115, -7.2811), its top edge at z = 5.1. A 0.3616 chamfer on the wall's top edge, with its tangent chain, and on the window's top edge together.",
+  "why_not": []
+}

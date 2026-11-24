@@ -78,7 +78,9 @@ impl EditInPlace {
 /// A linked component the window edits in place when it is double-clicked: in a saved design
 /// (its links are found from its file) with `double_click_components` on.
 pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
-    app.preferences.double_click_components && app.session.path.is_some() && app.session.doc.links.contains_key(&component)
+    app.preferences.double_click_components
+        && app.session.path.is_some()
+        && app.session.doc.links.get(&component).is_some_and(|link| link.step_names.is_none())
 }
 
 /// A component double-clicked in the browser: a linked one is edited in place (Preferences:
@@ -248,6 +250,11 @@ fn enter(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) 
 /// and nothing changes.
 fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) -> Result<(PartContext, Value), String> {
     check_enter(app)?;
+    // Opening a source tab uses its saved row, which may differ from this link's selection.
+    // Do not show that other row as though it were the component being edited.
+    if app.session.doc.links.get(&component).is_some_and(|link| link.configuration.is_some()) {
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_configuration_source").to_string());
+    }
     let Some(assembly) = app.session.path.clone() else {
         return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };
@@ -391,7 +398,10 @@ fn take_refresh(app: &mut SolveApp) {
     let occurrences = &computed.doc.occurrences;
     computed.pending_moves =
         session.pending_moves.iter().filter(|(id, _)| occurrences.iter().any(|o| o.id == **id)).map(|(id, m)| (*id, *m)).collect();
-    session.accept_computed(computed);
+    if let Err(error) = session.accept_computed(computed) {
+        app.set_status(error.to_string(), true);
+        return;
+    }
     // Every link was read as its file was when the run started: one saved since is read again
     // when the assembly's tab comes back.
     crate::documents::record_stamps_at(app, &r.assembly, &r.stamps);
@@ -409,7 +419,11 @@ fn take_refresh(app: &mut SolveApp) {
         }
     }
     let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label("component.update_links")))]), false);
+    app.set_status(
+        language
+            .format("ui.command_done", &[("command", language.command("component.update_links", crate::command_label("component.update_links")))]),
+        false,
+    );
 }
 
 /// Finish Edit from the window (its button, the back button): a part with changes is saved
