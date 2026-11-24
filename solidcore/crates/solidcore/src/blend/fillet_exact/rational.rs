@@ -466,34 +466,35 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
             ))
         }
     };
-    let cross = normal.cross(axis);
-    let u = if cross == Vec3::ZERO {
-        // A plane square to the axis cuts a circle: either in-plane direction
-        // is principal. Choose the coordinate least aligned with its normal.
-        let seed = if normal.x.abs() <= normal.y.abs() && normal.x.abs() <= normal.z.abs() {
-            Vec3::new(1.0, 0.0, 0.0)
-        } else if normal.y.abs() <= normal.z.abs() {
-            Vec3::new(0.0, 1.0, 0.0)
-        } else {
-            Vec3::new(0.0, 0.0, 1.0)
-        };
-        normal.cross(seed).unitize()?
-    } else {
-        cross
-            .length_and_unit()
-            .ok_or_else(|| {
-                SolidError::blend(
-                    OP,
-                    BlendFailure::SectionNotConic {
-                        reason: SectionShape::NoQuadraticForm,
-                        quadratic_scale: 0.0,
-                        discriminant: None,
-                        centered_value: None,
-                    },
-                )
-            })?
-            .1
-    };
+    // The principal direction u is square to the axis and in the plane. It is built from
+    // the axis's in-plane part `axis - (axis . n) n`, not from `n x axis`. Either has an
+    // absolute rounding error of about 1e-16, so a part of length l has its direction to
+    // 1e-16 / l. But u = -(part / l) x n is square to the part up to 1e-16 whatever l is
+    // (the part's own error is along the part's perpendicular, which u is not), and the
+    // section's coefficients assume `axis . u = 0`. Reading u from `n x axis` instead left
+    // `axis . u` at 1e-16 / l: a plane square to the axis up to rounding gave an arbitrary u
+    // and a different conic. Below `EFF_ZERO` the part is rounding noise: the plane is square
+    // to the axis, any in-plane direction is principal (a circle), and u is chosen from the
+    // plane alone. The section is then the circle of the axis taken square to the plane, off
+    // by at most `EFF_ZERO` times the distance to the quadric's point, which the exact checks
+    // of the round refuse where it matters.
+    let in_plane = axis - normal * axis.dot(normal);
+    let u = match in_plane.length_and_unit() {
+        Some((length, direction)) if length > EFF_ZERO => (direction * -1.0).cross(normal),
+        _ => {
+            // A plane square to the axis cuts a circle: either in-plane direction
+            // is principal. Choose the coordinate least aligned with its normal.
+            let seed = if normal.x.abs() <= normal.y.abs() && normal.x.abs() <= normal.z.abs() {
+                Vec3::new(1.0, 0.0, 0.0)
+            } else if normal.y.abs() <= normal.z.abs() {
+                Vec3::new(0.0, 1.0, 0.0)
+            } else {
+                Vec3::new(0.0, 0.0, 1.0)
+            };
+            normal.cross(seed)
+        }
+    }
+    .unitize()?;
     let v = normal.cross(u).unitize()?;
     let (s, t) = (axis.dot(v), axis.dot(normal));
     let (l0, l1) = (radial, radial * t * t + axial * s * s);
@@ -516,7 +517,10 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
         // F = R (x-pu)^2 - 2 B pn (y-pv) + N pn^2 - k0.
         // A zero linear term gives lines, not a parabola.
         let linear = coupling * pn;
-        if linear.abs() <= EFF_ZERO * dscale {
+        // `linear` is a length (a dimensionless coefficient times `pn`), `dscale` a
+        // dimensionless one: the bound is relative to the extent of the section's data.
+        let extent = max2(max2(pn.abs(), pv.abs()), max2(pu.abs(), k0.sqrt()));
+        if linear.abs() <= EFF_ZERO * dscale * extent {
             // R x^2 + (N pn^2 - k0) = 0: no real roots, or one/two lines.
             let constant = (radial * s * s + axial * t * t) * pn * pn - k0;
             let discriminant = -4.0 * radial * constant;
@@ -1632,30 +1636,52 @@ mod tests {
     /// certificate must survive rebuilding the supports from their rational forms.
     #[test]
     fn a_shallow_cone_round_keeps_its_certificate_through_its_record() {
-        shallow_cone_round_at(&Axis2Placement::default());
+        shallow_cone_round_at(&Axis2Placement::default(), false);
     }
 
     /// A quarter turn: the placement's axes are exact in floating point, so the plane
     /// square to the cone's axis stays exactly square to it.
     #[test]
     fn a_rotated_shallow_cone_round_keeps_its_certificate_through_its_record() {
-        shallow_cone_round_at(&Axis2Placement::new(
-            Point3::ZERO,
-            Vec3::new(0.0, 0.0, -1.0),
-            Vec3::new(0.0, 1.0, 0.0),
-        ));
+        shallow_cone_round_at(
+            &Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            false,
+        );
+    }
+
+    /// The 3-4-5 rotation has axes that are not floats, and the cone's apex is 19200 from
+    /// its section: the hyperbola's centre is then known to 4e-12 along the plane's normal,
+    /// and the exact check of the spine against the plane's offset (about 2e-13 here) refuses
+    /// it. The round is refused, never built off its faces.
+    #[test]
+    fn a_shallow_cone_round_in_a_rotation_of_inexact_axes_is_refused() {
+        shallow_cone_round_at(
+            &Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::new(3.0 / 5.0, 0.0, -4.0 / 5.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            true,
+        );
     }
 
     #[test]
     fn a_shallow_cone_round_whose_placement_is_a_nanoradian_off_keeps_its_certificate() {
-        shallow_cone_round_at(&Axis2Placement::new(
-            Point3::new(60.0, 0.0, 0.0),
-            Vec3::new(-1.0, 1e-9, 0.0),
-            Vec3::new(0.0, 0.0, 1.0),
-        ));
+        shallow_cone_round_at(
+            &Axis2Placement::new(
+                Point3::new(60.0, 0.0, 0.0),
+                Vec3::new(-1.0, 1e-9, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+            false,
+        );
     }
 
-    fn shallow_cone_round_at(placement: &Axis2Placement) {
+    fn shallow_cone_round_at(placement: &Axis2Placement, refused: bool) {
         use crate::surface::plane::Plane;
 
         let k = Kernel::default();
@@ -1746,7 +1772,16 @@ mod tests {
         )
         .unwrap();
         let mut net = parts.surface;
-        assert_eq!(round.recertify(&k, &net).unwrap(), 0.0);
+        let certified = round.recertify(&k, &net);
+        if refused {
+            let error = certified.unwrap_err();
+            assert!(
+                matches!(error, SolidError::InvalidInput { .. }),
+                "{error:?}"
+            );
+            return;
+        }
+        assert_eq!(certified.unwrap(), 0.0);
         net.set_exact_round(Some(round));
         let record = exact_to_record(&k, &net).unwrap();
         let rebuilt = exact_rebuild(&k, &record).unwrap();
@@ -1770,6 +1805,64 @@ mod tests {
             exact_rebuild(&k, &off).is_err(),
             "a spine off its plane is refused"
         );
+    }
+
+    /// A plane square to the axis up to rounding cuts a circle, whichever way the rounding
+    /// goes: the frame of the section is not read from the rounding of `n x axis` (the 3-4-5
+    /// axis, a few ulps off the plane's normal in each coordinate, and 1e-14 off).
+    #[test]
+    fn a_plane_square_to_the_axis_up_to_rounding_cuts_a_circle() {
+        let normal = Vec3::new(0.6, 0.0, 0.8);
+        let u = f64::EPSILON;
+        let steps = [
+            (0.0, 0.0),
+            (u, 0.0),
+            (-u, 0.0),
+            (0.0, u),
+            (0.0, -u),
+            (u, -u),
+            (-u, u),
+            (3.0 * u, 2.0 * u),
+            (1e-14, -1e-14),
+        ];
+        for (dx, dz) in steps {
+            let dir = Vec3::new(0.6 + dx, 0.0, 0.8 + dz);
+            let plane_point = Point3::ZERO + normal * 5.0;
+            let cylinder = BlendQuadric {
+                kind: QuadricKind::Cylinder,
+                point: Point3::ZERO,
+                dir,
+                radius: 4.0,
+                angle: 0.0,
+                side: 1.0,
+                tube: 0.0,
+            };
+            let cone = BlendQuadric {
+                kind: QuadricKind::Cone,
+                point: Point3::ZERO,
+                dir,
+                radius: 0.0,
+                angle: 0.3,
+                side: 1.0,
+                tube: 0.0,
+            };
+            for (q, radius) in [(cylinder, 4.0), (cone, 5.0 * 0.3_f64.tan())] {
+                let kc = plane_section(plane_point, normal, &q).unwrap();
+                assert_eq!(kc.kind, ConicKind::Ellipse, "{dx:e} {dz:e}");
+                assert!((kc.a1.length() - radius).abs() < 1e-9, "{dx:e} {dz:e}");
+                assert!((kc.a2.length() - radius).abs() < 1e-9, "{dx:e} {dz:e}");
+                assert!(kc.a1.dot(kc.a2).abs() < 1e-9, "{dx:e} {dz:e}");
+                assert!((kc.c - plane_point).length() < 1e-9, "{dx:e} {dz:e}");
+                for i in 0..8 {
+                    let p = conic_point(&kc, f64::from(i));
+                    assert!((p - plane_point).dot(normal).abs() < 1e-12, "{dx:e} {dz:e}");
+                    assert!(
+                        ((p - plane_point).length() - radius).abs() < 1e-9,
+                        "{dx:e} {dz:e}"
+                    );
+                }
+            }
+        }
     }
 
     /// A point of a tilted convex cylinder, far along the axis from the plane of the spine
