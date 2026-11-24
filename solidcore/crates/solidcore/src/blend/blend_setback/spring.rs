@@ -29,13 +29,14 @@
 //! | [`SpringCurve`], [`SpringHalf`] | its out-params `rFromP`, `rFromQ`, `pTanP`, `pTanQ` |
 //!
 //! Deviations: the halves and their partials are returned as homogeneous control points, not
-//! as flat arrays; the reason of a refusal is the [`Refusal`]'s. No recursion.
+//! as flat arrays; the reason of a refusal is the [`Refusal`]'s. The parameter plane, its
+//! frame and the closures `toPlane` and `tangents` are [`FacePlane`]'s (moved unchanged). No
+//! recursion.
 
-use super::{axpy, bern_elevate, bern_mul, el, el_mut, sm_err, Bern, Hom, Refusal, HOM_ZERO};
+use super::face_plane::FacePlane;
+use super::{axpy, bern_elevate, bern_mul, el, el_mut, sm_err, Bern, Refusal, HOM_ZERO};
 use super::{Face, FaceKind};
-use crate::error::Result;
-use crate::geom::vector3d::sqrt;
-use crate::math::{Point3, Vec3, EFF_ZERO, PI};
+use crate::math::{Point3, Vec3, EFF_ZERO};
 
 /// One half of a spring curve, from its rail end (`curve[0]`) to the base point (its last
 /// control point).
@@ -63,118 +64,6 @@ pub struct SpringCurve {
     pub from_q: SpringHalf,
 }
 
-/// The parameter-plane point and tangent of a point `x` with a tangent `t` on `face`, in the
-/// frame `(o, e1, e2, e3)` (the closure `toPlane`). `SM_ERR` where the point is on a
-/// quadric's axis or pole, or more than a half turn about a cylinder's or cone's axis.
-fn to_plane(
-    face: &Face,
-    frame: (Vec3, Vec3, Vec3, Vec3),
-    x: Point3,
-    t: Vec3,
-) -> Result<([f64; 2], [f64; 2])> {
-    let (o, e1, e2, e3) = frame;
-    let r = face.radius;
-    let u = x - o;
-    let (u1, u2, u3) = (u.dot(e1), u.dot(e2), u.dot(e3));
-    let (d1, d2, d3) = (t.dot(e1), t.dot(e2), t.dot(e3));
-    match face.kind {
-        FaceKind::Plane => Ok(([u1, u2], [d1, d2])),
-        FaceKind::Sphere => {
-            let den = r + u3;
-            if !(den > EFF_ZERO * r) {
-                return Err(sm_err());
-            }
-            Ok((
-                [u1 / den, u2 / den],
-                [
-                    (d1 * den - u1 * d3) / (den * den),
-                    (d2 * den - u2 * d3) / (den * den),
-                ],
-            ))
-        }
-        FaceKind::Cylinder | FaceKind::Cone => {
-            let rho = sqrt(u1 * u1 + u2 * u2);
-            if !(rho > EFF_ZERO) {
-                return Err(sm_err());
-            }
-            let theta = u2.atan2(u1);
-            if theta.abs() >= 0.5 * PI {
-                return Err(sm_err()); // more than a half turn between P and Q
-            }
-            let tt = (0.5 * theta).tan();
-            let dtheta = (-theta.sin() * d1 + theta.cos() * d2) / rho;
-            Ok(([tt, u3], [0.5 * (1.0 + tt * tt) * dtheta, d3]))
-        }
-    }
-}
-
-/// The face's parametric partials along the parameter-plane parabola `(cu, cv)` (the closure
-/// `tangents`).
-fn partials(
-    face: &Face,
-    frame: (Vec3, Vec3, Vec3, Vec3),
-    cu: &[f64],
-    cv: &[f64],
-) -> Result<[Vec<Hom>; 2]> {
-    let (o, e1, e2, e3) = frame;
-    let r = face.radius;
-    let mut xyz: [Vec<Vec3>; 2] = [Vec::new(), Vec::new()];
-    let mut w: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
-    match face.kind {
-        FaceKind::Plane => {
-            xyz = [vec![e1], vec![e2]];
-            w = [vec![0.0], vec![0.0]];
-        }
-        FaceKind::Sphere => {
-            // S(a, b) = O (1 + a^2 + b^2) + R (2 a e1 + 2 b e2 + (1 - a^2 - b^2) m),
-            // w = 1 + a^2 + b^2: S_a = (2 a O + R (2 e1 - 2 a m), 2 a), S_b likewise; affine in
-            // (a, b), quadratic along it
-            for (k, (xk, wk)) in xyz.iter_mut().zip(w.iter_mut()).enumerate() {
-                for i in 0..3 {
-                    let da = if k == 0 { el(cu, i)? } else { el(cv, i)? };
-                    let ee = if k == 0 { e1 } else { e2 };
-                    xk.push(o * (2.0 * da) + (ee * 2.0 - e3 * (2.0 * da)) * r);
-                    wk.push(2.0 * da);
-                }
-            }
-        }
-        FaceKind::Cylinder | FaceKind::Cone => {
-            // the circumferential direction -2 t e1 + (1 - t^2) e2 (degree 4), and the
-            // cylinder's axis or the cone's generator kappa (1 - t^2) e1 + 2 kappa t e2 +
-            // (1 + t^2) e3 (degree 4)
-            let tt = bern_mul(cu, cu)?;
-            let t4 = bern_elevate(cu, 4)?;
-            let [x0, x1] = &mut xyz;
-            let [w0, w1] = &mut w;
-            for i in 0..5 {
-                x0.push(e1 * (-2.0 * el(&t4, i)?) + e2 * (1.0 - el(&tt, i)?));
-                w0.push(0.0);
-            }
-            if face.kind == FaceKind::Cylinder {
-                *x1 = vec![e3];
-                *w1 = vec![0.0];
-            } else {
-                let kk = face.slope;
-                for i in 0..5 {
-                    x1.push(
-                        e1 * (kk * (1.0 - el(&tt, i)?))
-                            + e2 * (2.0 * kk * el(&t4, i)?)
-                            + e3 * (1.0 + el(&tt, i)?),
-                    );
-                    w1.push(0.0);
-                }
-            }
-        }
-    }
-    let mut out: [Vec<Hom>; 2] = [Vec::new(), Vec::new()];
-    for ((ok, xk), wk) in out.iter_mut().zip(&xyz).zip(&w) {
-        for (x, &wi) in xk.iter().zip(wk) {
-            ok.push([x.x, x.y, x.z, wi]);
-        }
-    }
-    Ok(out)
-}
-
 /// `SmBlendSetback::SpringCurve`: the spring curve on `face` from `p` to `q`, tangent there
 /// to the unit directions `tp` (leaving P) and `tq` (arriving at Q), in the face's rational
 /// parameter plane (module docs), returned as its two halves meeting at its middle (the base
@@ -191,40 +80,13 @@ pub fn spring_curve(
     tp: Vec3,
     q: Point3,
     tq: Vec3,
-) -> core::result::Result<SpringCurve, Refusal> {
-    let o = face.point;
-    // the frame: e3 the axis (a plane's normal), e1 radial halfway between P and Q (a
-    // plane's: P to Q)
-    let mut e3 = if face.kind == FaceKind::Plane {
-        face.normal
-    } else {
-        face.axis
-    };
-    e3 = e3.unitize()?;
-    let mut e1 = match face.kind {
-        FaceKind::Plane => q - p,
-        FaceKind::Sphere => {
-            let up = (p - o).unitize()?;
-            let uq = (q - o).unitize()?;
-            e3 = (up + uq).unitize()?; // m: the middle of P's and Q's directions
-            uq - up
-        }
-        FaceKind::Cylinder | FaceKind::Cone => {
-            let mut rp = p - o;
-            let mut rq = q - o;
-            rp = rp - e3 * rp.dot(e3);
-            rq = rq - e3 * rq.dot(e3);
-            rp.unitize()? + rq.unitize()?
-        }
-    };
-    e1 = e1 - e3 * e1.dot(e3);
-    e1 = e1.unitize()?;
-    let e2 = e3.cross(e1);
+) -> Result<SpringCurve, Refusal> {
+    let plane = FacePlane::new(face, p, q)?;
+    let (o, e1, e2, e3) = (plane.o, plane.e1, plane.e2, plane.e3);
     let r = face.radius;
-    let frame = (o, e1, e2, e3);
 
-    let (pp, dp) = to_plane(face, frame, p, tp)?;
-    let (qq, dq) = to_plane(face, frame, q, tq)?;
+    let (pp, dp) = plane.to_plane(p, tp)?;
+    let (qq, dq) = plane.to_plane(q, tq)?;
     // X^: P^ + a dP^ = Q^ - b dQ^, i.e. a dP^ + b dQ^ = Q^ - P^
     let det = dp[0] * dq[1] - dp[1] * dq[0];
     if !(det.abs() > EFF_ZERO) {
@@ -346,11 +208,11 @@ pub fn spring_curve(
     Ok(SpringCurve {
         from_p: SpringHalf {
             curve: left,
-            partials: partials(face, frame, &ul, &vl)?,
+            partials: plane.partials(&ul, &vl)?,
         },
         from_q: SpringHalf {
             curve: right,
-            partials: partials(face, frame, &ur, &vr)?,
+            partials: plane.partials(&ur, &vr)?,
         },
     })
 }

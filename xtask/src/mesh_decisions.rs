@@ -11,17 +11,18 @@
 //! functions whose job is display, export, previews or mesh bodies are skipped
 //! ([`SKIPPED_MODULES`], [`SKIPPED_FUNCTIONS`], each with its reason).
 //! Every other function that uses a mesh is a decision site. The sites there are today are
-//! listed in [`LIST`], one a line, `<path>:<function> <what it decides with the mesh>`, sorted
-//! (the kernel rig's known-failing format). The list only shrinks: the check fails on a site the
-//! list does not name, and on a listed site that no longer uses a mesh (its fix removes its
-//! line), as `tests/KNOWN_FAILING_TESTS` and `schema/unconverted.txt` do.
+//! listed in [`LIST`], one file a site, `<path>/<function>.txt` holding what it decides with the
+//! mesh (a method `Type::name` is `Type.name.txt`), so two fixes never edit the same file. The
+//! list only shrinks: the check fails on a site the list does not name, and on a listed site that
+//! no longer uses a mesh (its fix deletes its file), as `tests/KNOWN_FAILING_TESTS` and
+//! `schema/unconverted.txt` do.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use syn::visit::{self, Visit};
 
-pub const LIST: &str = "xtask/mesh-decisions.txt";
+pub const LIST: &str = "xtask/mesh-decisions";
 
 /// The crates whose code decides geometry: the document, the engine and the kernel.
 pub const CRATES: &[&str] = &["crates/doc", "crates/engine", "crates/kernel"];
@@ -48,11 +49,13 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/silhouette.rs", "a picture's view-aligned silhouette of the display meshes"),
     ("crates/engine/src/cmd/surface_analysis.rs", "view analyses: zebra, draft and curvature shading of the display mesh"),
     ("crates/engine/src/cosmetic_threads.rs", "cosmetic thread hatching drawn on the displayed triangles"),
+    ("crates/engine/src/drawing_view_lines.rs", "a drawing's view lines and their counts, from display meshes"),
     ("crates/engine/src/fuzz.rs", "the fuzz harness, which frames what it built"),
     ("crates/engine/src/mesh_lines/meshes.rs", "a drawing's view lines from display meshes"),
     ("crates/engine/src/mesh_lines/scene.rs", "a drawing's hidden-line occlusion over display meshes"),
     ("crates/engine/src/product_scene.rs", "the scene a rendered picture draws"),
     ("crates/engine/src/render_jobs.rs", "rendered pictures"),
+    ("crates/engine/src/schema/drawing_view.rs", "the counts of a drawing's view lines from display meshes"),
     ("crates/engine/src/slicer_files.rs", "the mesh export a 3D-printing slicer opens"),
     ("crates/engine/src/snap.rs", "the pointer's snap preview over the display mesh"),
     ("crates/engine/src/view.rs", "the viewport's meshes, edges and highlights"),
@@ -69,6 +72,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
         "crates/doc/src/document.rs:MeshData::generate_crease_normals",
         "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
     ),
+    ("crates/doc/src/document.rs:MeshData::eq", "mesh bodies: compares imported mesh source-array identities"),
     ("crates/doc/src/construct.rs:lies_on_mesh", "mesh bodies: whether a face pick landed on a mesh body, which has no faces"),
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
@@ -84,15 +88,21 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ModelState::warm_display", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_display_at", "display meshes made ahead"),
     ("crates/doc/src/eval.rs:ModelState::warm_meshes", "display meshes made ahead"),
+    ("crates/doc/src/eval.rs:PreparedMeshImport::body", "mesh-body imports: compares retained source-array identities"),
+    ("crates/doc/src/eval.rs:build_import_mesh", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:feature_json", "fingerprints feature inputs; triangles are only embedded mesh-body source data"),
-    ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
+    ("crates/doc/src/placement_reuse.rs:same_feature", "mesh bodies: compares imported mesh source-array identities"),
     ("crates/doc/src/project3d.rs:flat_outline", "mesh bodies: the flat patch of an imported mesh's triangles that a face pick on it means"),
+    ("crates/engine/src/cmd/component_link.rs:session_bodies", "mesh bodies: copies a linked mesh body's data"),
+    ("crates/engine/src/cmd/file.rs:mesh_data", "mesh bodies: copies a linked mesh body's data"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
+    ("crates/engine/src/cmd/plugin.rs:mesh", "a plugin's model.mesh export: a bounded copy of a body's display tessellation"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),
     ("crates/kernel/src/body.rs:Body::unmeshed_faces", "the mesher's report of faces it left out"),
+    ("crates/kernel/src/step_in/records.rs:mesh_part", "mesh bodies: an imported part given as triangles, checked and made a mesh body"),
 ];
 
 /// What a function does with a mesh, the patterns the check matches:
@@ -144,8 +154,39 @@ pub fn run(root: &Path) -> Result<(), String> {
 /// The sites under `root`, these modules and functions skipped, graded against [`LIST`].
 fn check(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str)]) -> Result<String, String> {
     let found = scan_skipping(root, modules, functions)?;
-    let text = std::fs::read_to_string(root.join(LIST)).map_err(|e| format!("{LIST}: {e}"))?;
+    let text = read_list(&root.join(LIST)).map_err(|e| format!("{LIST}: {e}"))?;
     grade(&text, &found).map_err(|e| format!("{LIST}: {e}"))
+}
+
+/// The listed sites as the known-failing format grades them: `<path>:<function> <why>`, one a
+/// line, sorted. Each `.txt` file under `dir` is a site: its path below `dir` is the source file
+/// and its stem the function (`.` for `::`), and it holds the reason on one line.
+fn read_list(dir: &Path) -> Result<String, String> {
+    let mut lines = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(here) = pending.pop() {
+        for entry in std::fs::read_dir(&here).map_err(|e| format!("{}: {e}", here.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|x| x != "txt") {
+                continue;
+            }
+            let shown = relative(dir, &path);
+            let (file, function) = shown.rsplit_once('/').ok_or_else(|| format!("{shown}: a site's file sits under its source path"))?;
+            let function = function.strip_suffix(".txt").unwrap_or(function).replace('.', "::");
+            let text = std::fs::read_to_string(&path).map_err(|e| format!("{shown}: {e}"))?;
+            let why = text.trim();
+            if why.is_empty() || why.contains('\n') {
+                return Err(format!("{shown}: say on one line what the function decides with the mesh"));
+            }
+            lines.push(format!("{file}:{function} {why}"));
+        }
+    }
+    lines.sort();
+    Ok(lines.join("\n"))
 }
 
 /// Every decision site under `root`, these modules and functions skipped: `<path>:<function>`
@@ -159,21 +200,30 @@ fn scan_skipping(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str
     }
     let mut found = BTreeMap::new();
     for krate in CRATES {
-        let lib = root.join(krate).join("src/lib.rs");
         let model_body = MODEL_BODY_CRATES.contains(krate);
-        let mut files = Vec::new();
-        module_files(&lib, true, &mut files)?;
-        files.sort();
-        files.dedup();
-        for path in files {
-            let rel = relative(root, &path);
-            if modules.iter().any(|(skip, _)| rel == *skip || rel.starts_with(&format!("{skip}/"))) {
-                continue;
+        // The crate's module files a level of the module tree at a time, each read and parsed once
+        // on a core of its own: its sites, and the files of the modules it declares (the next level).
+        let mut level = vec![(root.join(krate).join("src/lib.rs"), true)];
+        let mut seen = BTreeSet::new();
+        while !level.is_empty() {
+            let parsed = crate::parallel::map(&level, |(file, owns_dir)| module(file, *owns_dir, model_body))?;
+            let mut next = Vec::new();
+            for ((file, owns_dir), parsed) in level.iter().zip(parsed) {
+                let (sites, children) = parsed?;
+                // A file reached again the same way adds nothing; reached as `name.rs` and as a
+                // directory's module it declares children in two places, as before.
+                if !seen.insert((file.clone(), *owns_dir)) {
+                    continue;
+                }
+                let rel = relative(root, file);
+                if !modules.iter().any(|(skip, _)| rel == *skip || rel.starts_with(&format!("{skip}/"))) {
+                    for (function, uses) in sites {
+                        found.insert(format!("{rel}:{function}"), uses);
+                    }
+                }
+                next.extend(children);
             }
-            let source = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
-            for (function, uses) in sites(&source, model_body).map_err(|e| format!("{rel}: {e}"))? {
-                found.insert(format!("{rel}:{function}"), uses);
-            }
+            level = next;
         }
     }
     for (skip, _) in functions {
@@ -184,25 +234,48 @@ fn scan_skipping(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str
     Ok(found)
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+pub(crate) fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
+}
+
+/// A function's name in its file, with the mesh patterns it uses.
+type Sites = BTreeMap<String, Vec<&'static str>>;
+
+/// The module at `file`, read and parsed once: the functions in it that use a mesh, and the files
+/// of the non-test modules it declares, each with whether it owns its directory. `owns_dir` is
+/// whether `file` is a `lib.rs` or `mod.rs` (its submodules sit beside it) rather than `name.rs`
+/// (its submodules sit in `name/`).
+fn module(file: &Path, owns_dir: bool, model_body: bool) -> Result<(Sites, Vec<(PathBuf, bool)>), String> {
+    let source = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let ast = syn::parse_file(&source).map_err(|e| format!("{}: cannot parse Rust source: {e}", file.display()))?;
+    let here = file.parent().unwrap_or(Path::new("."));
+    let dir = if owns_dir { here.to_path_buf() } else { here.join(file.file_stem().unwrap_or_default()) };
+    let mut children = Vec::new();
+    declared_modules(&ast.items, here, &dir, &mut children);
+    Ok((sites_in(&ast, model_body), children))
 }
 
 /// The source files of the module at `file` and of every non-test module below it, into `out`.
 /// `owns_dir` is whether `file` is a `lib.rs` or `mod.rs` (its submodules sit beside it) rather
 /// than `name.rs` (its submodules sit in `name/`).
-fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
+pub(crate) fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let source = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
     let ast = syn::parse_file(&source).map_err(|e| format!("{}: cannot parse Rust source: {e}", file.display()))?;
     out.push(file.to_path_buf());
     let here = file.parent().unwrap_or(Path::new("."));
     let dir = if owns_dir { here.to_path_buf() } else { here.join(file.file_stem().unwrap_or_default()) };
-    declared_modules(&ast.items, here, &dir, out)
+    let mut children = Vec::new();
+    declared_modules(&ast.items, here, &dir, &mut children);
+    for (child, owns) in children {
+        module_files(&child, owns, out)?;
+    }
+    Ok(())
 }
 
-/// The out-of-line modules `items` declare. `here` is the directory of the file they are in
-/// (`#[path]` resolves against it); `dir` is where their files sit without one.
-fn declared_modules(items: &[syn::Item], here: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+/// The files of the out-of-line modules `items` declare, each with whether it owns its directory.
+/// `here` is the directory of the file they are in (`#[path]` resolves against it); `dir` is where
+/// their files sit without one.
+fn declared_modules(items: &[syn::Item], here: &Path, dir: &Path, out: &mut Vec<(PathBuf, bool)>) {
     for item in items {
         let syn::Item::Mod(m) = item else { continue };
         if test_only(&m.attrs) {
@@ -216,26 +289,25 @@ fn declared_modules(items: &[syn::Item], here: &Path, dir: &Path, out: &mut Vec<
                     Some(p) => here.join(p),
                     None => dir.join(&name),
                 };
-                declared_modules(inner, &base, &base, out)?;
+                declared_modules(inner, &base, &base, out);
             }
             None => match path {
                 Some(p) => {
                     let file = here.join(p);
                     let owns = file.file_name().is_some_and(|f| f == "mod.rs");
-                    module_files(&file, owns, out)?;
+                    out.push((file, owns));
                 }
                 None => {
                     let flat = dir.join(format!("{name}.rs"));
                     if flat.is_file() {
-                        module_files(&flat, false, out)?;
+                        out.push((flat, false));
                     } else {
-                        module_files(&dir.join(&name).join("mod.rs"), true, out)?;
+                        out.push((dir.join(&name).join("mod.rs"), true));
                     }
                 }
             },
         }
     }
-    Ok(())
 }
 
 fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
@@ -250,7 +322,7 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
 
 /// Whether `attrs` keep an item to test builds: `#[test]`, `#[cfg(test)]` or
 /// `#[cfg(all(.., test, ..))]`.
-fn test_only(attrs: &[syn::Attribute]) -> bool {
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         if a.path().is_ident("test") {
             return true;
@@ -270,11 +342,17 @@ fn test_only(attrs: &[syn::Attribute]) -> bool {
 }
 
 /// The functions of `source` that use a mesh, with the patterns each uses (outside test code).
-pub fn sites(source: &str, model_body: bool) -> Result<BTreeMap<String, Vec<&'static str>>, String> {
+#[cfg(test)]
+fn sites(source: &str, model_body: bool) -> Result<Sites, String> {
     let ast = syn::parse_file(source).map_err(|e| format!("cannot parse Rust source: {e}"))?;
+    Ok(sites_in(&ast, model_body))
+}
+
+/// [`sites`] of a file already parsed.
+fn sites_in(ast: &syn::File, model_body: bool) -> Sites {
     let mut finder = Finder { model_body, scope: Vec::new(), found: BTreeMap::new() };
-    finder.visit_file(&ast);
-    Ok(finder.found)
+    finder.visit_file(ast);
+    finder.found
 }
 
 struct Finder {
@@ -316,7 +394,7 @@ impl Finder {
     }
 }
 
-fn type_name(ty: &syn::Type) -> String {
+pub(crate) fn type_name(ty: &syn::Type) -> String {
     match ty {
         syn::Type::Path(p) => p.path.segments.last().map_or_else(|| "<type>".to_owned(), |s| s.ident.to_string()),
         syn::Type::Reference(r) => type_name(&r.elem),
@@ -495,6 +573,23 @@ mod tests {
     }
 
     #[test]
+    fn a_site_is_a_file_under_its_source_path() {
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("solidcraft-mesh-list-{}-{unique}", std::process::id()));
+        std::fs::create_dir_all(dir.join("crates/doc/src/sheet.rs")).unwrap();
+        std::fs::create_dir_all(dir.join("crates/doc/src/a.rs")).unwrap();
+        std::fs::write(dir.join("crates/doc/src/sheet.rs/Sheet.near.txt"), "nears by the mesh\n").unwrap();
+        std::fs::write(dir.join("crates/doc/src/a.rs/decides.txt"), "decides by the mesh").unwrap();
+        assert_eq!(
+            read_list(&dir).unwrap(),
+            "crates/doc/src/a.rs:decides decides by the mesh\ncrates/doc/src/sheet.rs:Sheet::near nears by the mesh"
+        );
+        std::fs::write(dir.join("crates/doc/src/a.rs/decides.txt"), "\n").unwrap();
+        assert!(read_list(&dir).unwrap_err().contains("one line"), "a site with no reason fails");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn the_module_tree_leaves_out_test_modules_and_follows_paths() {
         let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let root = std::env::temp_dir().join(format!("solidcraft-mesh-decisions-{}-{unique}", std::process::id()));
@@ -515,8 +610,11 @@ mod tests {
         assert!(scan_skipping(&root, &[], &[("crates/doc/src/more.rs:other", "x")]).is_err(), "a skipped function without a mesh fails");
         let keys: Vec<&str> = found.keys().map(String::as_str).collect();
         assert_eq!(keys, ["crates/doc/src/eval/nested.rs:hit", "crates/doc/src/more.rs:skip"]);
-        std::fs::create_dir_all(root.join("xtask")).unwrap();
-        std::fs::write(root.join(LIST), "crates/doc/src/eval/nested.rs:hit picks a face\ncrates/doc/src/more.rs:skip skips a body\n").unwrap();
+        std::fs::create_dir_all(root.join(LIST).join("crates/doc/src/eval/nested.rs")).unwrap();
+        std::fs::create_dir_all(root.join(LIST).join("crates/doc/src/more.rs")).unwrap();
+        std::fs::write(root.join(LIST).join("crates/doc/src/eval/nested.rs/hit.txt"), "picks a face\n").unwrap();
+        std::fs::write(root.join(LIST).join("crates/doc/src/more.rs/skip.txt"), "skips a body\n").unwrap();
+        std::fs::write(root.join(LIST).join("README.md"), "not a site\n").unwrap();
         let skips: &[(&str, &str)] = &[("crates/kernel/src/tess", "the mesher")];
         check(&root, skips, &[]).unwrap();
         std::fs::write(src.join("eval/nested.rs"), "fn hit(b: &Body) { b.exact_bounds(); }").unwrap();

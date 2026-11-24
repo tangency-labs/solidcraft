@@ -311,3 +311,137 @@ fn an_older_two_sided_extrude_with_a_negative_distance_keeps_its_sides() {
         check(&Session::new(Document::from_json(&opened.doc.to_json()).unwrap()), if distance == "-width" { -15.0 } else { lo }, hi);
     }
 }
+
+#[test]
+fn through_all_reach_uses_exact_body_bounds() {
+    let s = fixture(json!({"direction": "positive", "distance": "10 mm"}));
+    let st = s.model.state();
+    let reach = super::through_all_reach(&st, &json!({"through_all": true}), solidcore_record::Vec3::ZERO);
+    assert!(reach.is_some());
+    let reach = reach.unwrap();
+    assert!(reach > 10.0);
+}
+
+#[test]
+fn symmetric_extrude_with_symmetric_offset_leaves_clearance_gap_and_follows_parameters() {
+    let mut s = fixture(json!({
+        "distance": "10 mm",
+        "direction": "symmetric",
+        "start_offset": "3 mm",
+        "symmetric_offset": true,
+    }));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2);
+    let b0 = &st.bodies[0];
+    let b1 = &st.bodies[1];
+    let bounds0 = b0.mesh().bounds();
+    let bounds1 = b1.mesh().bounds();
+    let (neg, pos) = if bounds0.min.z < bounds1.min.z { (bounds0, bounds1) } else { (bounds1, bounds0) };
+    assert!((neg.min.z - (-8.0)).abs() < 1e-7 && (neg.max.z - (-3.0)).abs() < 1e-7, "{neg:?}");
+    assert!((pos.min.z - 3.0).abs() < 1e-7 && (pos.max.z - 8.0).abs() < 1e-7, "{pos:?}");
+    let m0 = solidcraft_kernel::measure(&b0.body).unwrap();
+    let m1 = solidcraft_kernel::measure(&b1.body).unwrap();
+    assert!((m0.volume - 500.0).abs() < 1e-7 && (m1.volume - 500.0).abs() < 1e-7);
+
+    // Changing the distance expression stretches both wings outward, leaving the clearance gap intact.
+    let name = s.doc.find_feature("Depth").unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name": name, "expression": "20 mm"}));
+    let st = s.model.state();
+    let bounds0 = st.bodies[0].mesh().bounds();
+    let bounds1 = st.bodies[1].mesh().bounds();
+    let (neg, pos) = if bounds0.min.z < bounds1.min.z { (bounds0, bounds1) } else { (bounds1, bounds0) };
+    assert!((neg.min.z - (-13.0)).abs() < 1e-7 && (neg.max.z - (-3.0)).abs() < 1e-7, "{neg:?}");
+    assert!((pos.min.z - 3.0).abs() < 1e-7 && (pos.max.z - 13.0).abs() < 1e-7, "{pos:?}");
+
+    // Undo returns to original bounds.
+    run(&mut s, "edit.undo", json!({}));
+    let st = s.model.state();
+    let bounds0 = st.bodies[0].mesh().bounds();
+    let bounds1 = st.bodies[1].mesh().bounds();
+    let (neg, pos) = if bounds0.min.z < bounds1.min.z { (bounds0, bounds1) } else { (bounds1, bounds0) };
+    assert!((neg.min.z - (-8.0)).abs() < 1e-7 && (neg.max.z - (-3.0)).abs() < 1e-7);
+    assert!((pos.min.z - 3.0).abs() < 1e-7 && (pos.max.z - 8.0).abs() < 1e-7);
+
+    // Sketch attached to a wing cap keeps its attachment across parameter edits.
+    let on_cap = s.execute("sketch.create", &json!({"plane": {"face": [5, 5, 8]}, "name": "OnPosCap", "project_edges": false})).unwrap()["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": name, "expression": "20 mm"}));
+    assert!((s.model.state().sketch(on_cap).unwrap().plane.origin.z - 13.0).abs() < 1e-7);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+
+    // Serialization roundtrip preserves symmetric_offset and geometry.
+    let reloaded = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reloaded.model.results.iter().all(|r| r.error.is_none()));
+    let st = reloaded.model.state();
+    assert_eq!(st.bodies.len(), 2);
+    let FeatureKind::Extrude { extent, .. } = &reloaded.doc.find_feature("Depth").unwrap().kind else { panic!("extrude") };
+    assert!(extent.symmetric_offset);
+
+    // Extrude Cut with symmetric offset leaves the central web untouched.
+    let mut sc = Session::default();
+    run(&mut sc, "solid.box", json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20], "body_name": "Target"}));
+    run(&mut sc, "sketch.create", json!({"plane": "XY", "name": "CutSquare"}));
+    run(&mut sc, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut sc, "sketch.finish", json!({}));
+    run(
+        &mut sc,
+        "solid.extrude",
+        json!({
+            "sketch": "CutSquare",
+            "distance": "10 mm",
+            "direction": "symmetric",
+            "start_offset": "3 mm",
+            "symmetric_offset": true,
+            "operation": "cut",
+            "targets": ["Target"],
+        }),
+    );
+    assert!(sc.model.results.iter().all(|r| r.error.is_none()));
+    let st_c = sc.model.state();
+    let tb = st_c.body("Target").unwrap();
+    let m_cut = solidcraft_kernel::measure(&tb.body).unwrap();
+    // 64000 - 2 * (10 * 10 * 5) = 63000
+    assert!((m_cut.volume - 63000.0).abs() < 1e-5, "volume {}", m_cut.volume);
+}
+
+#[test]
+fn symmetric_offset_with_second_distance_is_rejected() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s
+        .execute(
+            "solid.extrude",
+            &json!({
+                "sketch": "Square",
+                "distance": "10 mm",
+                "distance2": "4 mm",
+                "direction": "symmetric",
+                "start_offset": "3 mm",
+                "symmetric_offset": true,
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("symmetric offset with a second distance"), "unexpected error: {err}");
+
+    let err_from = s
+        .execute(
+            "solid.extrude",
+            &json!({
+                "sketch": "Square",
+                "distance": "10 mm",
+                "direction": "symmetric",
+                "from": [0, 0, 3],
+                "symmetric_offset": true,
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err_from.contains("symmetric offset with From Object"), "unexpected error: {err_from}");
+}

@@ -404,7 +404,12 @@ pub fn theme_option_control(
     }
 }
 
-pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
+pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) -> Response {
+    theme_option_switch_with_focus_ring(ui, label, on, true)
+}
+
+/// Some compact menu controls retain keyboard focus without a separate outline.
+pub(crate) fn theme_option_switch_with_focus_ring(ui: &mut Ui, label: &str, on: &mut bool, show_focus_ring: bool) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_24 + t.space_8, t.control_height), Sense::click());
     if response.clicked() {
@@ -414,11 +419,12 @@ pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     ui.painter().rect_filled(track, t.radius_xl, if *on { t.form_primary_fill } else { t.control_border });
     let x = if *on { track.right() - t.space_8 - t.space_2 } else { track.left() + t.space_8 + t.space_2 };
     ui.painter().circle_filled(pos2(x, track.center().y), t.space_6, if *on { t.on_accent } else { t.form_ink });
-    if response.has_focus() {
+    if show_focus_ring && response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     solidcraft_ui_registry::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
+    response
 }
 
 /// Page scroller keeps content aligned while centring its bar in the window's right inset.
@@ -842,21 +848,14 @@ pub(super) fn rounded_perimeter(r: Rect, radius: f32) -> Vec<Pos2> {
         .collect()
 }
 
-pub use super::preferences_figure_data::{
-    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
-};
-
 #[derive(Clone, Copy)]
 pub struct LayoutPreview {
     pub compact: bool,
     pub labels: bool,
-    pub history: usize,
-    pub translucent: bool,
-    pub dialog_left: bool,
+    pub history_in_browser: bool,
 }
 
-/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices;
-/// `note` is the host's hover text for it.
+/// A schematic of window styling, toolbar labels and History visibility.
 pub fn layout_preview(ui: &mut Ui, state: LayoutPreview, note: &str) {
     super::preferences_figures::paint_layout(ui, state, note);
 }

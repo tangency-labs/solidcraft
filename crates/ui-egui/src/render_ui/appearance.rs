@@ -281,11 +281,11 @@ pub(in crate::render_workspace) fn footer_stacked(app: &SolveApp, ui: &egui::Ui)
         > ui.available_width()
 }
 
-pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: Option<bool>) {
+pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui, stacked: bool) {
     let enabled = !app.session.selection.is_empty();
     let draw_save = |app: &mut SolveApp, ui: &mut egui::Ui| {
         let label = app.tr("render.inspector_save_library");
-        let response = if stacked.is_some() && ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
+        let response = if ui_kit::icon_label_width(ui, label, Some("plus"), false) > ui.available_width() {
             ui_kit::icon_action(ui, label, "plus", enabled, false)
         } else {
             ui_kit::icon_label_action(ui, label, Some("plus"), enabled, false)
@@ -299,7 +299,7 @@ pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui,
             reset(app);
         }
     };
-    if stacked == Some(true) {
+    if stacked {
         ui.vertical(|ui| {
             draw_save(app, ui);
             draw_reset(app, ui);
@@ -323,7 +323,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         return true;
     }
     let mut view = std::mem::take(&mut app.render_workspace.view.inspector.selection_appearance);
-    let pick_mode = if app.ui.pick_components { 2 } else { usize::from(!app.ui.pick_bodies) };
+    let pick_mode = if app.picks_components() { 2 } else { usize::from(!app.picks_bodies()) };
     if view.selection == app.session.selection && view.pick_mode != pick_mode {
         view.mode = pick_mode;
         view.inspected = None;
@@ -334,7 +334,7 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
     view.pick_mode = pick_mode;
     if view.selection != app.session.selection {
         view.selection = app.session.selection.clone();
-        view.mode = if app.ui.pick_components || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. })) {
+        view.mode = if app.picks_components() || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. })) {
             2
         } else if view.selection.iter().any(|s| matches!(s, Sel::Face { .. })) {
             1

@@ -53,15 +53,26 @@
 //!   only looked up by id.
 //! - **Kept attributes** are owned copies ([`Attribute::make_copy`]) instead of heap
 //!   pointers freed by a scope guard.
-//! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
-//!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
+//! - **A removal that fails part way** (it deleted the blend face, then failed) is
+//!   refused [`OffsetFacesRefusal::Unsupported`] at once; the fork goes on with the
+//!   blend's dead face.
+//! - **Refusals** return [`OffsetFailure::FacesMoveRefused`] (`SM_ERR`) with the refusal, and
+//!   its reason on the executive, as the fork's `Refuse` returns `SM_ERR`.
+//! - **Failures** (#15034) keep the fork's statuses and are named: a blend whose rail has no
+//!   face across it ([`OffsetFailure::BlendRailWithoutSupport`]) or whose section is not
+//!   found ([`OffsetFailure::BlendSectionNotFound`]), a moved face whose offset collapses
+//!   ([`OffsetFailure::MoveCollapses`]), the caller's body as supplied (an edge with no curve,
+//!   a face with no surface or no outer face use), the caller's arguments (no face, a zero
+//!   distance, a followed blend not as `collect` made it); a step that fails through the
+//!   kernel's fault is an [`OffsetFailure::Defect`] whose reason (one of the named `const`s)
+//!   says why. A put-back the fillet
 //!   executive fails for a reason other than room also records
 //!   [`OffsetFacesRefusal::NotPutBack`] (the fork returns the status untyped), keeping
-//!   the fillet's status.
-//! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
-//!   one that stayed on one surface runs only with
-//!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
-//!   on a new surface there when it is a moved face ([`MARK_MOVED`]) lying on one.
+//!   the fillet's status; so does a put-back whose stitched result leaves a closed solid
+//!   open (WR-212, as the public edge-fillet wrappers refuse it).
+//! - **Closed walls.** 9504880's removal of the edges between a moved face and one that
+//!   stayed on one surface (WR-566 addendum): a face is on a new surface there when it is
+//!   a moved face ([`MARK_MOVED`]) lying on one.
 //! - No recursion.
 
 use crate::blend::feature_executive::{is_open_base_refusal, FeatureExecutive, RebuildBrepType};
@@ -73,7 +84,10 @@ use crate::blend::fillet_removal::FilletRemoval;
 use crate::blend::fillet_solver::p1::FilletSolverType;
 use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use crate::blend::identify_fillet::{identify_fillet, IdentifyFilletOptions};
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{
+    EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
+};
 use crate::geom::attribute::{
     ids, ApplicationValue, Attribute, AttributeHandle, AttributeHandlers, AttributeValue,
     AttributeView, Behavior, ObjectKey, Placement,
@@ -84,6 +98,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_executive::p2::local_operation_simple;
 use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation};
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -98,14 +113,42 @@ use crate::topology::{edge, Brep, EdgeId, FaceId, FaceuseId};
 
 const OP: &str = "offset::offset_faces";
 
-fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+/// The face move's failure for `cause`, with the status of the cause (that of the site it
+/// replaced: `SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+#[track_caller]
+fn failed(cause: OffsetFailure) -> SolidError {
+    Failure::new(OP, cause).into_error()
 }
 
-/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
-fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::null_pointer(OP))
+/// A defect of the face move ([`OffsetFailure::Defect`]) with `status`, the status of the
+/// site it replaced (`SM_ERR_NULL_POINTER` for an `NER`).
+#[track_caller]
+fn defect(why: &'static str, status: i32) -> SolidError {
+    Failure::new(OP, OffsetFailure::Defect { why })
+        .with_status(status)
+        .into_error()
 }
+
+/// `index` (of a slice, so below `isize::MAX`, and so an exact `i64` on every target) as a
+/// term of a mark code.
+const fn code_term(index: usize) -> i64 {
+    index as i64
+}
+
+// Why each step that fails here is the kernel's fault (`OffsetFailure::Defect`).
+
+/// Why a rail has no primary edge use ([`OffsetFacesExecutive::collect`]).
+const RAIL_WITHOUT_PRIMARY_EDGEUSE: &str = "a rail of a followed blend has no primary edge use, \
+     though `identify_fillet` took that edge use to name the edge a rail and nothing has changed \
+     the body since";
+/// Why the moved face's new surface is not in the move's store
+/// ([`OffsetFacesExecutive::move_faces`]).
+const MOVED_SURFACE_NOT_STORED: &str = "the face move's store does not hold the new surface the \
+     face's offset returned, though the store only appends and the handle is the index it \
+     appended at";
+/// Why a removal names no sharp edge ([`OffsetFacesExecutive::take_off`]).
+const REMOVAL_WITHOUT_SHARP_EDGE: &str = "a blend's removal reported success without the sharp \
+     edge it replaced the blend with, which every removal that succeeds makes";
 
 /// `s_dTangencyTolDeg`: the tangency tolerance the removals judge rails by
 /// (`SmFilletRemoval::CollectFilletTopology`).
@@ -150,7 +193,7 @@ pub enum OffsetFacesRefusal {
     /// blends were taken off and the faces moved, but putting the blends back failed in
     /// the fillet executive for a reason other than room (a corner or a rollover it
     /// cannot build, #2020). The reason carries the fillet's error comment; the status is
-    /// the fillet's.
+    /// the fillet's. Also a put-back that left a closed solid open (`SM_ERR`, WR-212).
     NotPutBack,
 }
 
@@ -415,19 +458,39 @@ impl OffsetFacesExecutive {
     }
 
     /// `Refuse(eRefusal, cReason, cMore)`: notes why the operation is refused; the
-    /// `SM_ERR` to return.
+    /// [`OffsetFailure::FacesMoveRefused`] to return (`SM_ERR`).
     fn refuse(
         &mut self,
         refusal: OffsetFacesRefusal,
         reason: &str,
         more: Option<&str>,
     ) -> SolidError {
+        self.refuse_after(refusal, reason, more, None)
+    }
+
+    /// [`Self::refuse`] for a refusal decided by an error the step caught (`cause`), kept as
+    /// the failure's cause (rule 6): [`OffsetFailure::FacesMoveRefused`] is neither a defect
+    /// nor a refusal class of its own, so the cause's class decides
+    /// ([`SolidError::is_refusal`], [`SolidError::is_defect`]). A refusal the move decides
+    /// from the geometry itself has none.
+    fn refuse_after(
+        &mut self,
+        refusal: OffsetFacesRefusal,
+        reason: &str,
+        more: Option<&str>,
+        cause: Option<SolidError>,
+    ) -> SolidError {
         self.refusal = refusal;
         self.reason = match more {
             Some(m) if !m.is_empty() => format!("{reason}: {m}"),
             _ => reason.to_string(),
         };
-        sm_err()
+        let failure = Failure::new(OP, OffsetFailure::FacesMoveRefused { refusal });
+        match cause {
+            Some(cause) => failure.caused_by(cause),
+            None => failure,
+        }
+        .into_error()
     }
 
     /// `OffsetFaces` step 1: the blends that follow `faces` (beside a moved face across a
@@ -496,10 +559,14 @@ impl OffsetFacesExecutive {
                         None,
                     ));
                 };
-                let supports = [
-                    ner(face_across(b, rail0, blend)?)?,
-                    ner(face_across(b, rail1, blend)?)?,
-                ];
+                // (a manifold rail of the blend's outer loop: no face across it is the blend
+                // on both its sides)
+                let support = |rail| -> Result<FaceId> {
+                    face_across(b, rail, blend)?.ok_or_else(|| {
+                        failed(OffsetFailure::BlendRailWithoutSupport { edge: rail })
+                    })
+                };
+                let supports = [support(rail0)?, support(rail1)?];
                 if supports[0] == supports[1] {
                     return Err(self.refuse(
                         OffsetFacesRefusal::Unsupported,
@@ -511,9 +578,13 @@ impl OffsetFacesExecutive {
                 // The faces it rolls on must meet at an angle: a half round between
                 // parallel faces (a slot's end) blends no edge.
                 {
-                    let prim = ner(primary_edgeuse(b, rail0)?)?;
+                    let prim = primary_edgeuse(b, rail0)?
+                        .ok_or_else(|| defect(RAIL_WITHOUT_PRIMARY_EDGEUSE, SM_ERR_NULL_POINTER))?;
                     let on0 = normalized_evaluate(k, b, prim, 0.5, false, false, true)?.point;
-                    let rail1_curve = ner(edge::curve(b, rail1)?)?;
+                    let rail1_curve = edge::curve(b, rail1)?.ok_or_else(|| {
+                        failed(OffsetFailure::EdgeHasNoCurve { edge: Some(rail1) })
+                    })?;
+                    let no_section = || failed(OffsetFailure::BlendSectionNotFound { face: blend });
                     let d = rail1_curve.drop_point(
                         k,
                         &edge::interval(b, rail1)?,
@@ -524,10 +595,11 @@ impl OffsetFacesExecutive {
                         SolverOperation::Minimize,
                     )?;
                     if !d.success {
-                        return Err(sm_err());
+                        return Err(no_section());
                     }
                     let on1 = rail1_curve.evaluate_point(k, d.parameter)?;
-                    let surf = ner(crate::topology::face::p2::surface(b, blend)?)?;
+                    let surf = crate::topology::face::p2::surface(b, blend)?
+                        .ok_or_else(|| failed(OffsetFailure::FaceHasNoSurface { face: blend }))?;
                     let domain = surf.natural_uv_domain_with_nurb(k)?;
                     let mut normals = [crate::math::Vec3::UNDEF; 2];
                     for (normal, on) in normals.iter_mut().zip([on0, on1]) {
@@ -538,7 +610,7 @@ impl OffsetFacesExecutive {
                             &DropPointOptions::default(),
                         )?;
                         if !dp.success {
-                            return Err(sm_err());
+                            return Err(no_section());
                         }
                         *normal = surf.evaluate_normal(k, dp.result_uv, Side::Left, Side::Left)?;
                     }
@@ -613,16 +685,23 @@ impl OffsetFacesExecutive {
     pub fn keep_and_mark(&mut self, b: &mut Brep, blends: &mut [Followed]) -> Result<()> {
         let faces: Vec<Option<FaceId>> = blends.iter().map(|x| x.blend).collect();
         for (ii, rb) in blends.iter_mut().enumerate() {
-            let blend = ner(rb.blend)?;
-            let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
+            let blend = rb
+                .blend
+                .ok_or_else(|| failed(OffsetFailure::FollowedBlendIncomplete))?;
+            let base = code_term(ii) * MARK_STRIDE;
             rb.face_attrs = keep(b, EntityRef::Face(blend));
             for jj in 0..2usize {
-                let rail = ner(rb.rails.get(jj).copied().flatten())?;
+                let rail = rb
+                    .rails
+                    .get(jj)
+                    .copied()
+                    .flatten()
+                    .ok_or_else(|| failed(OffsetFailure::FollowedBlendIncomplete))?;
                 if let Some(slot) = rb.rail_attrs.get_mut(jj) {
                     *slot = keep(b, EntityRef::Edge(rail));
                 }
                 let across = face_across(b, rail, blend)?;
-                let code = base + MARK_SUPPORT + i64::try_from(jj).map_err(|_| sm_err())?;
+                let code = base + MARK_SUPPORT + code_term(jj);
                 FollowedBlendMark::add(b, across.map(EntityRef::Face), code)?;
             }
             for e in face_edges(b, blend)? {
@@ -634,14 +713,14 @@ impl OffsetFacesExecutive {
                     rb.seam_attrs = keep(b, EntityRef::Edge(e));
                     continue;
                 };
-                let lk = i64::try_from(rb.end_attrs.len()).map_err(|_| sm_err())?;
-                if lk >= MARK_STRIDE - MARK_END {
+                // the code term of this end edge, while the codes hold one
+                let Some(lk) = (0..MARK_STRIDE - MARK_END).nth(rb.end_attrs.len()) else {
                     return Err(self.refuse(
                         OffsetFacesRefusal::Unsupported,
                         "a blend on a moved face has too many edges to put back",
                         None,
                     ));
-                }
+                };
                 rb.end_attrs.push(keep(b, EntityRef::Edge(e)));
                 // (the last followed blend that face is, as the fork's loop leaves it)
                 let across_blend = faces.iter().rposition(|&f| f == Some(across));
@@ -663,34 +742,34 @@ impl OffsetFacesExecutive {
     /// Those of the topology queries and of [`Brep::add_attribute`].
     pub fn restore(b: &mut Brep, blends: &[Followed]) -> Result<()> {
         let all = crate::topology::brep::p1::faces(b, None)?;
-        let mut new_faces: Vec<(FaceId, usize)> = Vec::new();
+        // (each new blend face with the followed blend it is, by index and by reference)
+        let mut new_faces: Vec<(FaceId, usize, &Followed)> = Vec::new();
         for &new in &all {
             if FollowedBlendMark::has(b, Some(EntityRef::Face(new)), MARK_BEFORE) {
                 continue;
             }
             let bound = face_edges(b, new)?;
-            for ii in 0..blends.len() {
-                let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
+            for (ii, rb) in blends.iter().enumerate() {
+                let base = code_term(ii) * MARK_STRIDE;
                 // the blend's: beside both its faces
                 let mut beside = [false; 2];
                 for &e in &bound {
                     let across = face_across(b, e, new)?.map(EntityRef::Face);
                     for (jj, flag) in beside.iter_mut().enumerate() {
-                        let code = base + MARK_SUPPORT + i64::try_from(jj).map_err(|_| sm_err())?;
+                        let code = base + MARK_SUPPORT + code_term(jj);
                         if FollowedBlendMark::has(b, across, code) {
                             *flag = true;
                         }
                     }
                 }
                 if beside[0] && beside[1] {
-                    new_faces.push((new, ii));
+                    new_faces.push((new, ii, rb));
                     break;
                 }
             }
         }
-        for &(new, ii) in &new_faces {
-            let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
-            let rb = blends.get(ii).ok_or_else(sm_err)?;
+        for &(new, ii, rb) in &new_faces {
+            let base = code_term(ii) * MARK_STRIDE;
             put(b, &rb.face_attrs, Some(EntityRef::Face(new)))?;
             for e in face_edges(b, new)? {
                 let Some(across) = face_across(b, e, new)? else {
@@ -698,7 +777,7 @@ impl OffsetFacesExecutive {
                     continue;
                 };
                 for (jj, rail_attrs) in rb.rail_attrs.iter().enumerate() {
-                    let code = base + MARK_SUPPORT + i64::try_from(jj).map_err(|_| sm_err())?;
+                    let code = base + MARK_SUPPORT + code_term(jj);
                     if FollowedBlendMark::has(b, Some(EntityRef::Face(across)), code) {
                         put(b, rail_attrs, Some(EntityRef::Edge(e)))?;
                     }
@@ -708,13 +787,13 @@ impl OffsetFacesExecutive {
                 let across_blend = new_faces
                     .iter()
                     .rev()
-                    .find(|(f, _)| *f == across)
-                    .map(|&(_, i)| i);
+                    .find(|(f, _, _)| *f == across)
+                    .map(|&(_, i, _)| i);
                 for (kk, end_attrs) in rb.end_attrs.iter().enumerate() {
                     let same = if let Some(i) = across_blend {
                         rb.end_across.get(kk).copied().flatten() == Some(i)
                     } else {
-                        let code = base + MARK_END + i64::try_from(kk).map_err(|_| sm_err())?;
+                        let code = base + MARK_END + code_term(kk);
                         FollowedBlendMark::has(b, Some(EntityRef::Face(across)), code)
                     };
                     if same {
@@ -781,7 +860,12 @@ impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
 
     fn surface(&self, surface: MoveHandle) -> Result<&Surface> {
         match surface {
-            MoveHandle::FaceSurface(f) => ner(self.b.face(f)?.surface.as_ref()),
+            MoveHandle::FaceSurface(f) => self
+                .b
+                .face(f)?
+                .surface
+                .as_ref()
+                .ok_or_else(|| failed(OffsetFailure::FaceHasNoSurface { face: f })),
             MoveHandle::NewSurface(i) => self.surfaces.get(i).ok_or_else(bad_handle),
             _ => Err(bad_handle()),
         }
@@ -801,6 +885,13 @@ impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
 /// Whether face `f` lies on one of `targets` (the fork marks the target surfaces and
 /// asks whether a face's surface carries the mark; see the module deviations): nine
 /// points of the face's surface over its UV domain within `tol` of a target.
+///
+/// (not upstream) An analytic target (a plane, cylinder, cone, sphere or torus) is
+/// measured by its implicit equation ([`AnalyticSupport::implicit`]), the whole surface:
+/// its NURBS form is bounded to where it was made, the extent of the face it was offset
+/// from, and a face the move grew (a cap growing along a cone, two adjacent walls each
+/// extended to meet the other) reaches past that extent, where a drop onto the bounded
+/// form stops at its edge and finds the face off a surface it lies on.
 fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> Result<bool> {
     let Some(s) = crate::topology::face::p2::surface(b, f)? else {
         return Ok(false);
@@ -814,6 +905,13 @@ fn on_target(k: &Kernel, b: &Brep, f: FaceId, targets: &[Surface], tol: f64) -> 
         }
     }
     for t in targets {
+        if let Some(support) = AnalyticSupport::of(t) {
+            let implicit = support.implicit();
+            if points.iter().all(|&p| implicit.distance(p) <= tol) {
+                return Ok(true);
+            }
+            continue;
+        }
         let t_domain = t.natural_uv_domain_with_nurb(k)?;
         let mut all = true;
         for &p in &points {
@@ -862,11 +960,11 @@ impl OffsetFacesExecutive {
                 fu = b.faceuse(x)?.mate;
             }
             let Some(fu) = fu else {
-                return Err(SolidError::Upstream {
-                    operation: OP,
-                    code: crate::error::SM_ERR_INVALID_INPUT,
-                    entity: None,
-                });
+                return Err(
+                    Failure::new(OP, OffsetFailure::FaceHasNoOuterFaceuse { face: f })
+                        .with_status(SM_ERR_INVALID_INPUT)
+                        .into_error(),
+                );
             };
             let mut adapter = MoveBrep {
                 b,
@@ -878,9 +976,13 @@ impl OffsetFacesExecutive {
             // A face whose offset collapses onto its spine has no surface to move to (and
             // since 758829c no other face's offset is missing without failing).
             let Some(MoveHandle::NewSurface(i)) = surface else {
-                return Err(sm_err());
+                return Err(failed(OffsetFailure::MoveCollapses { face: f, distance }));
             };
-            let surface = adapter.surfaces.into_iter().nth(i).ok_or_else(sm_err)?;
+            let surface = adapter
+                .surfaces
+                .into_iter()
+                .nth(i)
+                .ok_or_else(|| defect(MOVED_SURFACE_NOT_STORED, SM_ERR))?;
             faces.push(f);
             surfaces.push(surface);
         }
@@ -888,30 +990,10 @@ impl OffsetFacesExecutive {
         // The local operation takes the surfaces over, also when it fails.
         local_operation_simple(k, b, &faces, surfaces)?;
 
-        if k.fixes.local_operation_closes_walls_to_nothing {
-            return self.join_across_closed_walls(k, b, &targets, tol);
-        }
-
-        // Some face must lie on one of the surfaces, or the operation moved none.
-        let mut moved_any = false;
-        for f in crate::topology::brep::p1::faces(b, None)? {
-            if on_target(k, b, f, &targets, tol)? {
-                moved_any = true;
-                break;
-            }
-        }
-        if !moved_any {
-            return Err(self.refuse(
-                OffsetFacesRefusal::NoEffect,
-                "the local operation reported success but moved no face onto its new surface",
-                None,
-            ));
-        }
-        Ok(())
+        self.join_across_closed_walls(k, b, &targets, tol)
     }
 
-    /// The end of step 4 with `Kernel::fixes.local_operation_closes_walls_to_nothing`
-    /// (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
+    /// The end of step 4 (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
     /// edges between such a face and one that stayed, which `SmEdge::IsTopological`
     /// finds removable, removed (`RemoveTopologicalEdgesAndVertices`), with the vertices
     /// at their ends where those join two edges on one curve. A face the move closed to
@@ -984,21 +1066,25 @@ impl OffsetFacesExecutive {
     /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
     /// where they still lie between its two faces, blended again in one fillet executive
     /// call at each blend's size and of its kind (circular sections), then
-    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6.
+    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6. A closed
+    /// and manifold body whose stitched result is not is refused (not in the fork, WR-212,
+    /// as the public edge-fillet wrappers refuse it).
     ///
     /// # Errors
     ///
     /// `SM_ERR` with [`OffsetFacesRefusal::NoRoom`] when a blend's edge is gone or the
-    /// executive reports no room (its comment as the reason's detail); the executive's
-    /// and the stitch's own errors.
+    /// executive reports no room (its comment as the reason's detail); `SM_ERR` with
+    /// [`OffsetFacesRefusal::NotPutBack`] when the blends put back leave a solid open; the
+    /// executive's and the stitch's own errors.
     pub fn reblend(&mut self, k: &mut Kernel, b: &mut Brep, blends: &[Followed]) -> Result<()> {
+        let closed = crate::topology::brep::p2::is_closed_manifold(b)?;
         let mut edges = Vec::new();
         let mut sections = Vec::new();
         let mut solvers = Vec::new();
         let mut sizes = Vec::new();
         let all = crate::topology::brep::p1::edges(b, None)?;
         for (ii, rb) in blends.iter().enumerate() {
-            let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
+            let base = code_term(ii) * MARK_STRIDE;
             let mut found = 0usize;
             for &e in &all {
                 if !FollowedBlendMark::has(b, Some(EntityRef::Edge(e)), base + MARK_SHARP) {
@@ -1048,10 +1134,11 @@ impl OffsetFacesExecutive {
                 return Err(e);
             }
             if code == FilletErrorType::NoRoom as i32 {
-                return Err(self.refuse(
+                return Err(self.refuse_after(
                     OffsetFacesRefusal::NoRoom,
                     "a blend that follows a moved face no longer fits",
                     Some(&comment),
+                    Some(e),
                 ));
             }
             // (the fork's SM_FILERR_NOT_EXACT has no counterpart here: see the module
@@ -1065,7 +1152,15 @@ impl OffsetFacesExecutive {
             };
             return Err(e);
         }
-        stitch_and_orient(k, b, &StitchAndOrientOptions::default())
+        stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+        if closed && !crate::topology::brep::p2::is_closed_manifold(b)? {
+            return Err(self.refuse(
+                OffsetFacesRefusal::NotPutBack,
+                "putting back the blends that follow the moved faces left no closed solid",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1104,7 +1199,9 @@ impl OffsetFacesExecutive {
                 if rb.taken_off {
                     continue;
                 }
-                let blend = ner(rb.blend)?;
+                let blend = rb
+                    .blend
+                    .ok_or_else(|| failed(OffsetFailure::FollowedBlendIncomplete))?;
                 let face_tol = crate::topology::face::p2::tolerance(b, blend)?;
                 let removed = if RingFilletRemoval::is_ring(k, b, Some(blend), TANGENCY_TOL_DEG)? {
                     let mut removal = RingFilletRemoval::new(blend, face_tol);
@@ -1134,13 +1231,25 @@ impl OffsetFacesExecutive {
                     }
                 };
                 let Some(sharp) = removed else {
+                    // (not in the fork) A removal that failed after it began editing
+                    // has deleted the blend face: the B-rep is half edited and the
+                    // blend's face id names nothing, so no later round or group can
+                    // take it off.
+                    if !crate::topology::brep::p1::faces(b, None)?.contains(&blend) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "a blend on a moved face failed to come off part way through",
+                            None,
+                        ));
+                    }
                     continue;
                 };
-                let sharp = ner(sharp)?;
+                let sharp =
+                    sharp.ok_or_else(|| defect(REMOVAL_WITHOUT_SHARP_EDGE, SM_ERR_NULL_POINTER))?;
                 rb.blend = None; // deleted
                 rb.rails = [None, None];
                 rb.taken_off = true;
-                let base = i64::try_from(ii).map_err(|_| sm_err())? * MARK_STRIDE;
+                let base = code_term(ii) * MARK_STRIDE;
                 FollowedBlendMark::add(b, Some(EntityRef::Edge(sharp)), base + MARK_SHARP)?;
                 progress = true;
             }
@@ -1166,7 +1275,10 @@ impl OffsetFacesExecutive {
             }
             let mut gg = 0;
             while let Some(&member) = group.get(gg) {
-                let face = ner(blends.get(member).and_then(|x| x.blend))?;
+                let face = blends
+                    .get(member)
+                    .and_then(|x| x.blend)
+                    .ok_or_else(|| failed(OffsetFailure::FollowedBlendIncomplete))?;
                 for e in face_edges(b, face)? {
                     let across = face_across(b, e, face)?;
                     for &other in &left {
@@ -1201,7 +1313,9 @@ impl OffsetFacesExecutive {
                             break 'faces;
                         }
                         Some(across) if !faces.contains(&across) => {
-                            let s = ner(crate::topology::face::p2::surface(b, across)?)?;
+                            let s = crate::topology::face::p2::surface(b, across)?.ok_or_else(
+                                || failed(OffsetFailure::FaceHasNoSurface { face: across }),
+                            )?;
                             if !s.is_kind_of(Plane::TYPE)? {
                                 planes = false;
                                 break 'faces;
@@ -1230,7 +1344,8 @@ impl OffsetFacesExecutive {
                     }
                 }
             }
-            let applied = {
+            // (whether the group came off, and the defeature's refusal where it refused)
+            let (applied, refused) = {
                 let mut defeature = FeatureExecutive::new(k, b)?;
                 let Some(feature) = defeature.add_feature(
                     k,
@@ -1245,23 +1360,25 @@ impl OffsetFacesExecutive {
                 // itself; here, not upstream (WR-656), it refuses a base it could not patch,
                 // put back, which is the refusal below)
                 match defeature.do_defeature(k) {
-                    Err(e) if is_open_base_refusal(&e) => false,
+                    Err(e) if is_open_base_refusal(&e) => (false, Some(e)),
                     r => {
                         r?;
-                        defeature
+                        let applied = defeature
                             .features()
                             .get(feature)
-                            .is_some_and(|f| f.base_was_applied)
+                            .is_some_and(|f| f.base_was_applied);
+                        (applied, None)
                     }
                 }
             };
             // (not upstream: the port's cached topology fields)
             b.refresh_cached_topology();
             if !applied {
-                return Err(self.refuse(
+                return Err(self.refuse_after(
                     OffsetFacesRefusal::Unsupported,
                     "mitred blends on a moved face could not be taken off together",
                     None,
+                    refused,
                 ));
             }
             // the extended faces were split where the blends had been: join them again
@@ -1301,7 +1418,7 @@ impl OffsetFacesExecutive {
             // each blend's sharp edge: where its two faces meet now
             let now = crate::topology::brep::p1::edges(b, None)?;
             for &lb in &group {
-                let base = i64::try_from(lb).map_err(|_| sm_err())? * MARK_STRIDE;
+                let base = code_term(lb) * MARK_STRIDE;
                 let mut found = false;
                 for &e in &now {
                     let on = edge::faces(b, e, None)?;
@@ -1380,11 +1497,10 @@ impl OffsetFacesExecutive {
         self.followed = 0;
         let distance_ok = distance.abs() > 0.0;
         if faces.is_empty() || !distance_ok {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(failed(OffsetFailure::FaceMoveEmpty {
+                faces: faces.len(),
+                distance,
+            }));
         }
         // (SmTemporaryChangeValue on m_bEditingEnabled)
         let editing = b.editing_enabled();
@@ -1756,9 +1872,130 @@ mod tests {
             taken_off: true,
         }];
         let mut ex = OffsetFacesExecutive::new();
-        assert!(ex.reblend(&mut k, &mut b, &blends).is_err());
+        let e = ex.reblend(&mut k, &mut b, &blends).unwrap_err();
         assert_eq!(ex.refusal(), OffsetFacesRefusal::NoRoom);
         assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
+        // the refusal is the error too, with the fork's `SM_ERR`
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::FacesMoveRefused {
+                refusal: OffsetFacesRefusal::NoRoom
+            })
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
+        // decided from the marks themselves, not from an error the move caught
+        assert!(e.cause().is_none());
+    }
+
+    /// A face move given no face, or a zero distance, is the caller's argument, with the
+    /// fork's `SM_ERR_INVALID_INPUT`.
+    #[test]
+    fn a_move_of_no_face_or_by_nothing_is_invalid_input() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let top = face_where(&b, |p| (p.z - 10.0).abs() < 1e-6);
+        for (faces, distance) in [(&[][..], 1.0), (&[top][..], 0.0)] {
+            let mut ex = OffsetFacesExecutive::new();
+            let e = ex
+                .offset_faces(&mut k, &mut b, faces, distance)
+                .unwrap_err();
+            assert_eq!(
+                e.offset_failure(),
+                Some(&OffsetFailure::FaceMoveEmpty {
+                    faces: faces.len(),
+                    distance
+                })
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT));
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+            assert_eq!(ex.refusal(), OffsetFacesRefusal::None);
+        }
+    }
+
+    /// A followed blend handed in without its blend face (one taken off, though not marked
+    /// so) is the caller's list, not one `collect` made, with the fork's `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn a_followed_blend_without_its_face_is_invalid_input() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let mut blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 1.0,
+            face_attrs: Vec::new(),
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: false,
+        }];
+        let e = OffsetFacesExecutive::new()
+            .keep_and_mark(&mut b, &mut blends)
+            .unwrap_err();
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::FollowedBlendIncomplete)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        let e = OffsetFacesExecutive::new()
+            .take_off(&mut k, &mut b, &mut blends)
+            .unwrap_err();
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::FollowedBlendIncomplete)
+        );
+    }
+
+    /// Blends put back whose bands overlap are refused as no room. The four vertical edges
+    /// of a 14 x 6 x 10 post, blended again at r 3.5: each round's band on a 6 mm end face
+    /// runs from its edge to its rail, r in from it, so past r = 3 (half the face) the two
+    /// bands on each end face overlap (tangency-labs/solidcore#1073), and the bands' check
+    /// (WR-542) refuses them before the post is edited. (Before that check ran by default,
+    /// the default kernel built an open body here, refused after the stitch as not put
+    /// back, WR-212.)
+    #[test]
+    fn a_put_back_whose_bands_overlap_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
+        // each vertical edge between an end face (support 0) and a side face (support 1)
+        let ends = [0.0, 14.0].map(|x| face_where(&b, |p| (p.x - x).abs() < 1e-6));
+        let sides = [0.0, 6.0].map(|y| face_where(&b, |p| (p.y - y).abs() < 1e-6));
+        for (faces, code) in [(ends, MARK_SUPPORT), (sides, MARK_SUPPORT + 1)] {
+            for f in faces {
+                FollowedBlendMark::add(&mut b, Some(EntityRef::Face(f)), code).unwrap();
+            }
+        }
+        for (x, y) in [(0.0, 0.0), (14.0, 0.0), (14.0, 6.0), (0.0, 6.0)] {
+            let e = edge_where(&b, |p| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6);
+            FollowedBlendMark::add(&mut b, Some(EntityRef::Edge(e)), MARK_SHARP).unwrap();
+        }
+        let blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 3.5,
+            face_attrs: Vec::new(),
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: true,
+        }];
+        let mut ex = OffsetFacesExecutive::new();
+        let result = ex.reblend(&mut k, &mut b, &blends);
+        assert!(
+            result.is_err(),
+            "put back: {} faces, closed {:?}",
+            b.face_list().len(),
+            crate::topology::brep::p2::is_closed_manifold(&b)
+        );
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::NoRoom);
+        assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
+        assert!(ex.reason().contains("inside the band"), "{}", ex.reason());
+        assert_eq!(b.face_list().len(), 6);
+        assert!(crate::topology::brep::p2::is_closed_manifold(&b).unwrap());
     }
 
     #[test]
@@ -1772,5 +2009,78 @@ mod tests {
         ex.move_faces(&mut k, &mut b, -2.0, tol).unwrap();
         let got = volume(&k, &mut b);
         assert!((got - 800.0).abs() <= 1e-9 * 800.0, "volume {got}");
+    }
+
+    /// Two adjacent walls of a 10 mm box moved out 1 each grow into each other: each lies
+    /// on its new plane past the extent of the wall it was offset from. They give the
+    /// 11 x 11 x 10 box (tangency-labs/solidcraft#14412).
+    #[test]
+    fn adjacent_walls_moved_out_grow_onto_their_planes() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let x = face_where(&b, |p| (p.x - 10.0).abs() < 1e-6);
+        let y = face_where(&b, |p| (p.y - 10.0).abs() < 1e-6);
+        let mut ex = OffsetFacesExecutive::new();
+        ex.offset_faces(&mut k, &mut b, &[x, y], 1.0).unwrap();
+        let got = volume(&k, &mut b);
+        assert!((got - 1210.0).abs() <= 1e-9 * 1210.0, "volume {got}");
+    }
+
+    /// Offset Face rebuilds every edge of the body, each new vertex taking the tolerance of
+    /// the original vertex it stands for, not the larger of its edge's two ends: a corner
+    /// of a 10 mm box given 1e-3 leaves the corners along its edges under 1e-3 when the
+    /// bottom is moved down 1, twice (tangency-labs/solidcraft#17624: each offset spread a
+    /// loose tolerance one edge further, until it reached past a short edge and the merge
+    /// joined that edge's ends).
+    #[test]
+    fn a_rebuilt_vertex_keeps_its_own_tolerance() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let at = |b: &Brep, x: f64, y: f64, z: f64| {
+            b.vertices()
+                .ids()
+                .find(|&v| {
+                    let p = vertex::point(b, v).unwrap();
+                    (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6 && (p.z - z).abs() < 1e-6
+                })
+                .unwrap()
+        };
+        let loose = at(&b, 10.0, 10.0, 10.0);
+        vertex::set_tolerance(&mut b, loose, 1e-3, true, true).unwrap();
+        assert!(vertex::tolerance(&b, at(&b, 0.0, 10.0, 10.0)).unwrap() < 1e-3);
+        for step in 1..=2 {
+            let level = -f64::from(step - 1);
+            let bottom = face_where(&b, |p| (p.z - level).abs() < 1e-6);
+            let mut ex = OffsetFacesExecutive::new();
+            ex.offset_faces(&mut k, &mut b, &[bottom], 1.0).unwrap();
+            let want = 1000.0 + 100.0 * f64::from(step);
+            let got = volume(&k, &mut b);
+            assert!((got - want).abs() <= 1e-9 * want, "volume {got}");
+            for (x, y) in [(0.0, 10.0), (10.0, 0.0)] {
+                let v = at(&b, x, y, 10.0);
+                let t = vertex::tolerance(&b, v).unwrap();
+                assert!(t < 1e-3, "after {step}: {t:e}");
+            }
+            assert!(vertex::tolerance(&b, at(&b, 10.0, 10.0, 10.0)).unwrap() >= 1e-3);
+        }
+    }
+
+    /// A face lies on a plane however far it reaches past the extent the plane was made
+    /// over: a cap grown along its cone, here the top of a 10 mm box against the plane of
+    /// a 1 mm box's top at the same height.
+    #[test]
+    fn a_face_past_its_target_planes_extent_lies_on_it() {
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let small = create_box(&mut k, Point3::new(0.0, 0.0, 9.0), 1.0, 1.0, 1.0).unwrap();
+        let top = face_where(&b, |p| (p.z - 10.0).abs() < 1e-6);
+        let small_top = face_where(&small, |p| (p.z - 10.0).abs() < 1e-6);
+        let plane = crate::topology::face::p2::surface(&small, small_top)
+            .unwrap()
+            .unwrap()
+            .clone();
+        assert!(on_target(&k, &b, top, std::slice::from_ref(&plane), 1e-6).unwrap());
+        let bottom = face_where(&b, |p| p.z.abs() < 1e-6);
+        assert!(!on_target(&k, &b, bottom, &[plane], 1e-6).unwrap());
     }
 }

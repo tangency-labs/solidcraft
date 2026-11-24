@@ -1,7 +1,10 @@
 use serde_json::{Value, json};
 use solidcraft_io::MAX_DRAWING_BYTES;
 
-use super::{DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams};
+use super::{
+    AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingInserted, ExportDxfParams, ExportDxfResult, InsertAirfoilParams,
+    InsertDxfParams, InsertSvgParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -10,6 +13,16 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n30\n21\n0\n0\nLINE\n10\n30\n20\n0\n11\n30\n21\n20\n0\nLINE\n10\n30\n20\n20\n11\n0\n21\n20\n0\nLINE\n10\n0\n20\n20\n11\n0\n21\n0\n0\nENDSEC\n0\nEOF\n";
 
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="0" y="0" width="20" height="10"/><text x="2" y="5" font-size="3">Hi</text></svg>"#;
+
+/// A six-point section with an open trailing edge, as a Selig file.
+const DAT: &str = "Six\n1 0.002\n0.5 0.06\n0.1 0.04\n0 0\n0.1 -0.03\n0.5 -0.04\n1 -0.002\n";
+
+/// An SVG with geometry but no sheet: no viewBox, no width and no height.
+const SVG_NO_SHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="4" height="3"/></svg>"#;
+
+/// An SVG that names no size is read at 96 dpi: one of its user units is this many mm, which is
+/// what `solidcraft_io` scales by.
+const PX_MM: f64 = 25.4 / 96.0;
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("solidcraft-12508-{tag}-{}", std::process::id()));
@@ -22,7 +35,12 @@ fn schemas_and_the_key_check_agree() {
     let insert = ["align", "angle", "at", "fixed", "height", "name", "path", "plane", "scale", "size_from", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
+    assert_keys(
+        input_schema_for::<InsertAirfoilParams>(),
+        &["angle", "at", "chord", "flip", "format", "name", "path", "pivot", "plane", "sketch", "text", "tolerance"],
+    );
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
+    assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `path` and
@@ -41,10 +59,41 @@ fn strict_keeps_todays_errors() {
         ("sketch.insert_svg", json!({})),
         ("sketch.insert_svg", json!({"path": " "})),
         ("sketch.insert_svg", json!({"text": null})),
+        ("sketch.drawing_bounds", json!({})),
+        ("sketch.drawing_bounds", json!({"path": ""})),
+        ("sketch.drawing_bounds", json!({"path": "  "})),
+        ("sketch.drawing_bounds", json!({"path": 5})),
+        ("sketch.drawing_bounds", json!({"path": null})),
+        ("sketch.drawing_bounds", json!({"path": "x".repeat(4096)})),
+        ("sketch.drawing_bounds", json!({"text": too_big})),
+        ("sketch.drawing_bounds", json!({"text": null})),
         ("sketch.export_dxf", json!({"sketch": true})),
         ("sketch.export_dxf", json!({"sketch": [1]})),
         ("sketch.export_dxf", json!({"sketch": -1})),
         ("sketch.export_dxf", json!({"sketch": 1.5})),
+        // The airfoil insert reads `text` or `path` first, then `chord` and the rest, so a case
+        // puts one bad key after a good source and chord (serde reads the keys in order).
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": ""})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": "  "})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": 5})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "path": "x".repeat(4096)})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "text": "x".repeat(solidcraft_io::MAX_AIRFOIL_BYTES + 1)})),
+        ("sketch.insert_airfoil", json!({"chord": 0, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": -5, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": null, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": "wide", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": [1], "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": "x", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": null, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "pivot": [0.25], "text": DAT})),
+        ("sketch.insert_airfoil", json!({"angle": "x", "chord": 100, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"angle": null, "chord": 100, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "flip": "yes", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "flip": 1, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "format": "csv", "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "format": 5, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "sketch": true, "text": DAT})),
+        ("sketch.insert_airfoil", json!({"chord": 100, "sketch": 1.5, "text": DAT})),
     ];
     for (id, text) in [("sketch.insert_dxf", DXF), ("sketch.insert_svg", SVG)] {
         for extra in [
@@ -95,6 +144,14 @@ fn strict_keeps_the_handlers_own_refusals() {
         ("sketch.export_dxf", json!({"layers": "all"})),
         ("sketch.export_dxf", json!({"layers": true})),
         ("sketch.export_dxf", json!({"join": "yes"})),
+        ("sketch.drawing_bounds", json!({"text": "0\nEOF\n", "format": "dxf"})),
+        ("sketch.drawing_bounds", json!({"text": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"})),
+        // With `text` and no `format` there is no file name to go by, so the drawing is read as
+        // an SVG: a DXF given that way is refused, today and in strict.
+        ("sketch.drawing_bounds", json!({"text": DXF})),
+        ("sketch.drawing_bounds", json!({"path": "no-such-drawing-15973.dxf"})),
+        ("sketch.drawing_bounds", json!({"text": SVG, "format": "dxf"})),
+        ("sketch.drawing_bounds", json!({"text": DXF, "format": "png"})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
@@ -140,6 +197,27 @@ fn the_types_read_like_the_handler() {
     assert_eq!(issues(json!({"text": "x", "sketch": true})), ["`sketch` must be an id or a name"]);
     assert_eq!(issues(json!({"text": "x", "wdth": 5})), ["unknown key `wdth`; did you mean `width`?"]);
     assert!(issues(json!({"text": "x", "width": 5, "height": "x", "path": 5})).is_empty());
+    let airfoil = |p: Value| serde_json::from_value::<InsertAirfoilParams>(p).is_ok();
+    let airfoil_issues = |p: Value| crate::schema::issues("sketch.insert_airfoil", &p).into_iter().map(|i| i.message).collect::<Vec<_>>();
+    assert!(airfoil(json!({"text": "x", "chord": 100})) && airfoil(json!({"path": "a.dat", "chord": 0.5})));
+    assert!(airfoil(json!({"text": "x", "path": 5, "chord": 100})) && airfoil(json!({"text": "x", "path": "", "chord": 100})));
+    assert!(airfoil(
+        json!({"text": "x", "chord": 100, "pivot": -0.5, "at": [1, 2], "angle": -3, "flip": true, "tolerance": 0.01, "format": "Lednicer"})
+    ));
+    assert!(airfoil(json!({"text": "x", "chord": 100, "plane": 5, "name": [1], "sketch": "S", "flip": null, "format": null, "tolerance": -1})));
+    assert!(!airfoil(json!({"text": "x"})) && !airfoil(json!({"path": "", "chord": 100})) && !airfoil(json!({"path": 5, "chord": 100})));
+    assert!(
+        !airfoil(json!({"text": "x", "chord": 0})) && !airfoil(json!({"text": "x", "chord": "100"})) && !airfoil(json!({"text": "x", "chord": null}))
+    );
+    assert!(!airfoil(json!({"text": "x", "chord": 100, "pivot": null})) && !airfoil(json!({"text": "x", "chord": 100, "flip": "yes"})));
+    assert!(!airfoil(json!({"text": "x", "chord": 100, "format": "dat"})) && !airfoil(json!({"text": "x", "chord": 100, "at": [1]})));
+    assert_eq!(airfoil_issues(json!({"text": "x"})), ["`chord` is required"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": -1})), ["`chord` must be a positive number (mm)"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "pivot": "x"})), ["`pivot` must be a number (a share of the chord)"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "flip": 0})), ["`flip` must be true or false"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "format": "csv"})), ["`format` must be \"selig\" or \"lednicer\""]);
+    assert_eq!(airfoil_issues(json!({"path": " ", "chord": 1})), ["give `path` or `text`"]);
+    assert_eq!(airfoil_issues(json!({"text": "x", "chord": 1, "chrd": 5})), ["unknown key `chrd`; did you mean `chord`?"]);
     let export = |p: Value| serde_json::from_value::<ExportDxfParams>(p).is_ok();
     assert!(export(json!({})) && export(json!({"sketch": null, "path": null})) && export(json!({"sketch": "S", "path": ""})));
     assert!(export(json!({"sketch": 3, "path": "a.dxf"})) && !export(json!({"sketch": true})) && !export(json!({"path": 5})));
@@ -189,6 +267,30 @@ fn the_schemas_take_what_the_handlers_read() {
         assert_eq!(read_path["pattern"], json!(crate::schema::types::not_blank_pattern()));
     }
     takes(
+        input_schema_for::<InsertAirfoilParams>(),
+        &[
+            (json!({"text": "x", "chord": 100}), true),
+            (
+                json!({"path": "a.dat", "chord": 100, "pivot": 0.25, "at": [1, 2], "angle": 5, "flip": true, "tolerance": 0.01, "format": "selig"}),
+                true,
+            ),
+            (json!({"text": "x", "chord": 100, "plane": "XZ", "name": "Root", "sketch": "Sketch1"}), true),
+            (json!({}), false),
+            (json!({"chord": 100}), false),
+            (json!({"text": "x"}), false),
+            (json!({"text": "x", "chord": 0}), false),
+            (json!({"text": "x", "chord": "100"}), false),
+            (json!({"text": "x", "chord": 100, "flip": "yes"}), false),
+            (json!({"text": "x", "chord": 100, "at": [1]}), false),
+            (json!({"text": "x", "chord": 100, "chrd": 5}), false),
+            (json!({"path": "x".repeat(4096), "chord": 100}), false),
+            (json!({"text": "x", "path": 5, "chord": 100}), true),
+        ],
+    );
+    let airfoil_schema = input_schema_for::<InsertAirfoilParams>();
+    let read_path = &airfoil_schema.as_value()["anyOf"][1]["properties"]["path"];
+    assert_eq!(read_path["pattern"], json!(crate::schema::types::not_blank_pattern()));
+    takes(
         input_schema_for::<ExportDxfParams>(),
         &[
             (json!({}), true),
@@ -198,6 +300,81 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"file": "a.dxf"}), false),
         ],
     );
+}
+
+/// `sketch.drawing_bounds` answers with the box around the drawing, in millimetres, and with the
+/// SVG's sheet when the file names one: the same JSON the handler built by hand before it built
+/// its reply from `DrawingBoundsResult`. No `sheet` key for a DXF or for an SVG that says no
+/// sheet; an SVG's y axis points down, so its boxes come back in SolidCraft's y-up ones, and its
+/// user units are scaled by the size the file names (a file that names none is read at 96 dpi).
+#[test]
+fn drawing_bounds_replies_as_its_output_schema_says() {
+    let dir = temp_dir("bounds");
+    let sheet_file = dir.join("plate.svg");
+    let plain_file = dir.join("nosheet.svg");
+    std::fs::write(&sheet_file, SVG).unwrap();
+    std::fs::write(&plain_file, SVG_NO_SHEET).unwrap();
+    let (sheet_path, plain_path) = (sheet_file.to_string_lossy().into_owned(), plain_file.to_string_lossy().into_owned());
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let bounds = |s: &mut Session, p: Value| {
+        let r = s.execute("sketch.drawing_bounds", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        matches(output_schema_for::<DrawingBoundsResult>(), &r);
+        // The session adds `created` to a `sketch.*` reply outside the handler; the schema
+        // describes what the handler builds.
+        let mut own = r.clone();
+        own.as_object_mut().unwrap().remove("created");
+        own
+    };
+
+    // A DXF, named as one: the box around its lines, and no sheet.
+    let r = bounds(&mut s, json!({"text": DXF, "format": "dxf"}));
+    assert_eq!(r, json!({"min": [0.0, 0.0], "max": [30.0, 20.0], "width": 30.0, "height": 20.0}), "{r}");
+    // An SVG with a viewBox: the box around its geometry, and the sheet the viewBox names. The
+    // file's y axis points down, so both boxes come back in SolidCraft's y-up ones.
+    let r = bounds(&mut s, json!({"text": SVG}));
+    assert_eq!(r["sheet"], json!({"min": [0.0, -10.0], "max": [20.0, 0.0], "width": 20.0, "height": 10.0}), "{r}");
+    assert_eq!(r["min"], json!([0.0, -10.0]), "{r}");
+    assert_eq!(r["max"], json!([20.0, 0.0]), "{r}");
+    assert_eq!((r["width"].as_f64(), r["height"].as_f64()), (Some(20.0), Some(10.0)), "{r}");
+    // `text` wins, so the `path` next to it is never read: this is the SVG's box, not the file's.
+    let r = bounds(&mut s, json!({"path": plain_path, "text": SVG}));
+    assert_eq!(r["width"], json!(20.0), "{r}");
+    // An SVG with no sheet named: no `sheet` key at all, and its user units read at 96 dpi,
+    // because the file says no other size.
+    let r = bounds(&mut s, json!({"path": plain_path}));
+    assert_eq!(r["min"], json!([PX_MM, -4.0 * PX_MM]), "{r}");
+    assert_eq!(r["max"], json!([5.0 * PX_MM, -PX_MM]), "{r}");
+    assert!(r["width"].as_f64().is_some_and(|w| (w - 4.0 * PX_MM).abs() < 1e-9), "{r}");
+    assert!(r["height"].as_f64().is_some_and(|h| (h - 3.0 * PX_MM).abs() < 1e-9), "{r}");
+    assert!(r.get("sheet").is_none(), "{r}");
+    // `format` says which reader the drawing is read with, in any case, and anything but `dxf`
+    // reads an SVG; null reads as left out.
+    for p in [
+        json!({"path": sheet_path, "format": "SVG"}),
+        json!({"path": sheet_path, "format": "not a format I know"}),
+        json!({"path": sheet_path, "format": null}),
+        json!({"text": DXF, "format": "dxf"}),
+        json!({"text": DXF, "format": "DXF"}),
+    ] {
+        let r = bounds(&mut s, p);
+        assert!(r["width"].as_f64().is_some_and(|w| w > 0.0), "{r}");
+    }
+    let r = bounds(&mut s, json!({"path": plain_path, "format": "SVG"}));
+    assert!(r["width"].as_f64().is_some_and(|w| (w - 4.0 * PX_MM).abs() < 1e-9), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A misspelt key runs in warn and says so; the reply still matches. Strict refuses it, and so
+    // does a `format` that is not text, which the handler would read as left out.
+    let p = json!({"text": SVG, "frmats": "dxf"});
+    let r = s.execute("sketch.drawing_bounds", &p).unwrap();
+    assert!(r["param_warnings"].as_array().is_some_and(|w| w.iter().any(|m| m.as_str().is_some_and(|m| m.contains("`frmats`")))), "{r}");
+    matches(output_schema_for::<DrawingBoundsResult>(), &r);
+    s.param_check = ParamCheck::Strict;
+    let error = s.execute("sketch.drawing_bounds", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`frmats`"), "{error}");
+    let error = s.execute("sketch.drawing_bounds", &json!({"text": DXF, "format": 5})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`format`"), "{error}");
 }
 
 fn matches(schema: schemars::Schema, r: &Value) {
@@ -266,6 +443,30 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "sketch.insert_svg", json!({"text": SVG, "angle": 15}));
     matches(output_schema_for::<DrawingInserted>(), &r);
     assert_eq!((r["curves"].as_u64(), r["texts"].as_u64()), (Some(4), Some(1)), "{r}");
+    // The airfoil insert, into the sketch being edited and into a new one, from text and a file.
+    let dat_file = dir.join("six.dat");
+    std::fs::write(&dat_file, DAT).unwrap();
+    let airfoil_keys: std::collections::BTreeSet<String> =
+        ["bulge", "created_sketch", "curves", "deviation", "format", "info", "merged", "name", "points", "sketch", "te_gap", "trailing_edge"]
+            .map(String::from)
+            .into();
+    for p in [
+        json!({"text": DAT, "chord": 100}),
+        json!({"text": DAT, "chord": 50, "pivot": 0.25, "at": {"x": 1, "y": 2}, "angle": 90, "flip": true, "tolerance": 0.01, "format": "Selig", "plane": 7, "name": [1], "path": 5}),
+        json!({"path": dat_file.to_string_lossy(), "text": null, "chord": 100, "sketch": id, "flip": null, "format": null}),
+    ] {
+        let r = run(&mut s, "sketch.insert_airfoil", p);
+        matches(output_schema_for::<AirfoilInserted>(), &r);
+        assert_eq!(keys(&r), airfoil_keys, "{r}");
+        assert_eq!((r["sketch"].as_u64(), r["created_sketch"].clone(), r["curves"].as_u64()), (Some(id), Value::Null, Some(2)), "{r}");
+        assert_eq!((r["name"].as_str(), r["format"].as_str(), r["points"].as_u64()), (Some("Six"), Some("selig"), Some(7)), "{r}");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let r = run(&mut s, "sketch.insert_airfoil", json!({"text": DAT, "chord": 100, "plane": "XZ", "name": "Six"}));
+    matches(output_schema_for::<AirfoilInserted>(), &r);
+    assert_eq!(r["created_sketch"], r["sketch"], "{r}");
+    assert_eq!(r["trailing_edge"], "open", "{r}");
+    run(&mut s, "sketch.finish", json!({}));
     let r = run(&mut s, "sketch.insert_svg", json!({"path": svg_path, "width": 40, "align": "center", "at": [10, 10]}));
     assert_eq!(r["texts"], 1, "{r}");
     s.execute("sketch.finish", &json!({})).unwrap();

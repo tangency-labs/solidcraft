@@ -442,8 +442,8 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("solid.web", &["2", ""]),
         ("solid.emboss", &["1"]),
         ("solid.offset_face", &["2"]),
-        ("solid.pattern.rectangular", &["20", "20"]),
-        ("solid.pattern.path", &["20"]),
+        ("solid.pattern.rectangular", &["20", "20", "100", "100"]),
+        ("solid.pattern.path", &["20", ""]),
         ("solid.pipe", &["5", ""]),
         ("solid.bounding_solid", &["2"]),
         ("solid.move", &["0", "0", "0"]),
@@ -519,6 +519,76 @@ fn operation_length_defaults_keep_every_other_operation_on_the_design_unit() {
     let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
     let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
     assert_eq!(values, vec!["2 in".to_string(), "2 in".to_string()], "the preference keeps the old Fillet default");
+}
+
+/// A new Extrude's distance (`extrude_start`): 10 in the design's unit by default, as before; the
+/// last new extrude's distance or a typed length when asked for; and 10 again where that value
+/// isn't a usable length. The remembered distance is kept with the preferences.
+#[test]
+fn new_extrude_starts_at_ten_unless_the_preference_asks_for_the_last_or_a_typed_distance() {
+    let opened = |h: &Harness| match crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").map(|d| d.kind) {
+        Some(Kind::Extrude { distance, .. }) => distance,
+        _ => panic!("no dialog for solid.extrude"),
+    };
+    let mut h = design("in");
+    assert_eq!(h.app.preferences.extrude_start, crate::prefs::ExtrudeStart::Fixed);
+    assert_eq!(opened(&h), "10 in", "the default is unchanged");
+    // Fixed ignores whatever was applied or typed.
+    h.call("ui.prefs", json!({"extrude_custom_distance": "25 mm", "extrude_last_distance": "7 mm"}));
+    assert_eq!(opened(&h), "10 in");
+    h.call("ui.prefs", json!({"extrude_start": "custom"}));
+    assert_eq!(opened(&h), "25 mm");
+    h.call("ui.prefs", json!({"extrude_custom_distance": "nonsense"}));
+    assert_eq!(opened(&h), "10 in", "a custom value that isn't a length gives the fixed 10");
+    h.call("ui.prefs", json!({"extrude_start": "last_used", "extrude_last_distance": ""}));
+    assert_eq!(opened(&h), "10 in", "no extrude applied yet");
+    h.call("ui.prefs", json!({"extrude_last_distance": "7 mm"}));
+    assert_eq!(opened(&h), "7 mm");
+    let mut other = design("in");
+    other.app.load_prefs(&h.app.prefs());
+    assert_eq!(opened(&other), "7 mm", "kept with the preferences");
+    assert_eq!(
+        serde_json::from_value::<crate::prefs::Prefs>(json!({"extrude_start": "later"})).unwrap().extrude_start,
+        crate::prefs::ExtrudeStart::Fixed
+    );
+    assert!(crate::prefs::set(&mut h.app, &json!({"extrude_start": "later"})).is_err(), "asked for by name, an unknown choice is refused");
+}
+
+/// "Last used" remembers the distance of a new extrude applied from its dialog, not an edited
+/// one's, nor a Through All extent.
+#[test]
+fn last_used_extrude_distance_comes_from_new_extrudes_applied_in_the_dialog() {
+    let mut h = design("mm");
+    h.call("ui.prefs", json!({"extrude_start": "last_used"}));
+    h.app.run("sketch.create", json!({"plane":"XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    if let Kind::Extrude { distance, .. } = &mut d.kind {
+        *distance = "12.5 mm".into();
+    }
+    h.frames(3);
+    ok(&mut h);
+    assert!((volume(&mut h.app.session) - 40.0 * 30.0 * 12.5).abs() < 1e-6);
+    assert_eq!(h.app.preferences.extrude_last_distance, "12.5 mm");
+    let d = crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").unwrap();
+    assert!(matches!(&d.kind, Kind::Extrude { distance, .. } if distance == "12.5 mm"), "the next new Extrude starts there");
+    let mut edited = d.clone();
+    if let Kind::Extrude { distance, .. } = &mut edited.kind {
+        *distance = "3 mm".into();
+    }
+    edited.editing = Some((1, None));
+    assert_eq!(crate::dialogs::remembered_extrude_distance(&h.app, &edited), None, "an edited extrude doesn't count");
+    let mut through = d.clone();
+    if let Kind::Extrude { distance, all, .. } = &mut through.kind {
+        *distance = "3 mm".into();
+        *all = true;
+    }
+    assert_eq!(crate::dialogs::remembered_extrude_distance(&h.app, &through), None, "Through All has no distance");
 }
 
 #[test]
@@ -1028,4 +1098,27 @@ fn a_point_selected_in_the_open_sketch_still_places_the_sphere_when_the_sketch_e
     h.frames(3);
     assert!(h.app.session.active_sketch.is_none(), "the sphere ends the sketch");
     assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+}
+
+#[test]
+fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
+    // #11230: the Point input wakes snap points (a hole's centre, an edge's middle, a face's
+    // centre), and a snapped point fills the placement fields.
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let mut h = design("mm");
+        h.app.start(cmd);
+        h.frames(3);
+        assert!(crate::snap_wake::wanted(&h.app), "{cmd}");
+        let point = solidcore_record::Vec3::new(5.0, 7.5, 0.0);
+        let hit = crate::viewport::Hit::Vertex { body: String::new(), point };
+        let sel = h.app.dialog.as_ref().and_then(|d| d.active_input()).and_then(|i| i.accepts(&hit, None, |_, _| false));
+        let Some(sel) = sel else { panic!("{cmd}: the snap point is not taken") };
+        crate::viewport::dialog_pick(&mut h.app, &hit, sel);
+        h.frames(2);
+        let want: Vec<(&str, String)> = [("X", "5 mm"), ("Y", "7.5 mm"), ("Z", "0 mm")].iter().map(|(k, v)| (*k, v.to_string())).collect();
+        assert_shown(&h, &want);
+        // Off in Preferences, nothing wakes.
+        h.app.preferences.snap_points = false;
+        assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
+    }
 }

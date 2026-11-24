@@ -69,8 +69,9 @@ existing digest reuses its first recorded provenance; later imports do not repla
 that author, source or license metadata. The design stores at most
 32 unique images and 64 MiB total encoded storage; each image is at most 16 MiB
 and 1024×1024. Complete decode and metadata validation happen before publishing
-any resource. Native containers reuse verified `blobs/` entries; portable JSON
-uses bounded canonical base64. Save, delete the source file, and reopen offline:
+any resource. Native containers reuse verified `blobs/` entries; a plain JSON
+design can't hold the images (saving one as `.json` is refused), and an older one's
+bounded canonical base64 still opens. Save, delete the source file, and reopen offline:
 no filesystem path is retained or reopened. Failed import/open leaves the prior
 design intact. Older applications refuse the newer format instead of discarding
 its resources.

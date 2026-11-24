@@ -100,6 +100,55 @@ fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
     assert!(s.execute("sketch.dimension_text", &json!({"dimension": param, "at": [f64::NAN, 0]})).is_err());
 }
 
+/// Two lines that meet at a corner divide the plane around it into four sectors (the lines
+/// taken as extended past their ends): the text placed in one dimensions that sector's angle,
+/// and the arc is drawn there, in either of the two sectors past the corner that measure the
+/// supplement, not only the one beside the longer line (#11800).
+#[test]
+fn an_angle_dimension_measures_and_draws_the_sector_its_text_is_in() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::dim_frame_at;
+    // A 100 long base running left from the corner, a slanted line up and right from it: 135°
+    // inside, 45° to the base's extension past the corner.
+    let corner = |at: [f64; 2], value: Option<&str>| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[-100, 0], [0, 0], [30, 30]]}));
+        let mut p = json!({"entities": ["l1", "l2"], "text_at": at});
+        if let Some(v) = value {
+            p["value"] = json!(v);
+        }
+        let measured = run(&mut s, "sketch.dimension", p)["measured"].as_f64().unwrap_or(f64::NAN);
+        (measured, sketch(&s))
+    };
+    let tau = std::f64::consts::TAU;
+    let in_sector = |d0: Vec2, sweep: f64, t: Vec2| (t.angle() - d0.angle()).rem_euclid(tau) <= sweep;
+    for (at, expected) in [([-5.0, 20.0], 135.0), ([20.0, 5.0], 45.0), ([-20.0, -5.0], 45.0), ([5.0, -20.0], 135.0)] {
+        let (measured, sk) = corner(at, None);
+        assert!((measured - expected).abs() < 1e-6, "text at {at:?}: measured {measured}");
+        let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+        let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+        let t = Vec2::new(at[0], at[1]) - vertex;
+        assert!(vertex.len() < 1e-9 && (sweep.to_degrees() - expected).abs() < 1e-6, "text at {at:?}: {vertex:?} {sweep}");
+        assert!(in_sector(d0, sweep, t), "text at {at:?}: the arc from {d0:?} by {sweep} is drawn away from it");
+        // Both rays lie along the lines.
+        let along = |u: Vec2| u.y.abs() < 1e-9 || (u.x - u.y).abs() < 1e-9;
+        assert!(along(d0) && along(Vec2::from_angle(d0.angle() + sweep)), "{d0:?} {sweep}");
+        let lay = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, c.text, 0.1, Default::default());
+        assert!(lay.text.dist(Vec2::new(at[0], at[1])) < 1e-9);
+    }
+    // A value typed for the sector past the corner drives that angle, and the arc stays there.
+    let (_, sk) = corner([20.0, 5.0], Some("30 deg"));
+    let pt = |id: &str| sk.point(sk.resolve_point(id).expect("a point")).expect("its position");
+    let (base, slant) = (pt("l1.end") - pt("l1.start"), pt("l2.end") - pt("l2.start"));
+    assert!((base.cross(slant).atan2(base.dot(slant)).to_degrees() - 30.0).abs() < 1e-6, "{base:?} {slant:?}");
+    let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+    let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+    assert!(in_sector(d0, sweep, Vec2::new(20.0, 5.0) - vertex), "{d0:?} {sweep}");
+    // Without a text the arc keeps to the rays that point at the lines.
+    let Some(DimFrame::Angular { d0: plain, .. }) = dim_frame_at(&sk, &c.kind, None) else { panic!("an angular frame") };
+    assert!(Some(DimFrame::Angular { vertex, d0: plain, sweep }) == solidcraft_sketch::dim_frame(&sk, &c.kind));
+}
+
 #[test]
 fn deleting_a_dimension_frees_its_parameter() {
     let mut s = new_sketch();
@@ -757,6 +806,33 @@ fn dragging_a_circumscribed_polygon_keeps_it_regular() {
             }
         }
     }
+}
+
+/// A circumscribed polygon's radius, typed as an expression over a parameter, is a dimension
+/// driven by it: the polygon follows the parameter. Its sides count, typed as an expression, is
+/// read when the polygon is drawn (#20920).
+#[test]
+fn a_circumscribed_polygon_follows_a_radius_parameter() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "5", "unit": ""}));
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": "r", "sides": "n"}));
+    assert_eq!(out["curves"].as_array().unwrap().len(), 5, "sides read from the parameter n");
+    assert_eq!(out["sketch"]["dof"], 1, "only the turn is free (the centre sits on the origin, the size is driven): {}", out["sketch"]);
+    let (corners, _, r) = polygon_shape(&s, &out);
+    assert!((r - 10.0).abs() < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    let (corners_after, c, r) = polygon_shape(&s, &out);
+    assert!((r - 20.0).abs() < 1e-6, "the polygon follows r: {r}");
+    assert_regular(&corners_after, c, "after r changed");
+    assert_eq!(corners.len(), corners_after.len());
+    // A diameter works the same way.
+    let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center": [60, 0], "diameter": "2 * r", "sides": 4}));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "12 mm"}));
+    let (_, _, r) = polygon_shape(&s, &out);
+    assert!((r - 12.0).abs() < 1e-6, "the diameter follows 2 * r: {r}");
+    let bad = s.execute("sketch.polygon.circumscribed", &json!({"center": [0, 0], "radius": 5, "sides": "n * 0.3"}));
+    assert!(bad.is_err(), "a count that is not a whole number is refused");
 }
 
 #[test]
@@ -2445,6 +2521,31 @@ fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
     assert_eq!(s.active_sketch, None);
     assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
     assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// #15414: another edit that finishes the sketch (the Extrude key pressed by mistake) leaves the
+/// sketch's own steps in the history apart: one Undo takes back one change of the sketch, not
+/// the whole session the person had drawn.
+#[test]
+fn undo_after_another_edit_finished_the_sketch_takes_back_one_change() {
+    let (mut s, id) = sketch_below_a_solid();
+    // The person opens the sketch and draws a circle and a line in it.
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 6}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 20], [-10, 25]]}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+    // The Extrude key by mistake: it finishes the sketch and makes the solid.
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    assert_eq!(s.active_sketch, None, "the sketch is finished");
+    // One Undo takes the extrude back; the sketch keeps every curve the person drew.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6, "the sketch keeps every curve");
+    // The next Undo takes back ONE change of the sketch, not the whole session.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5, "one change of the sketch is taken back");
+    // And the next one takes back the other, still one at a time.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4, "the other change is taken back too");
 }
 
 /// #14010: a sketch with features after it, opened by `sketch.edit` without `restore_marker`

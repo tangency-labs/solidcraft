@@ -20,7 +20,9 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 
-use super::{absolute, component_key, file_sha256, inherit_properties, reply, resolve, session_bodies, stored};
+use super::{
+    absolute, component_key, file_sha256, inherit_properties, link_mesh_feature, link_refused, link_target, reply, resolve, session_bodies, stored,
+};
 use crate::params::{bad, str_};
 use crate::schema::component_link::{CopiesResult, CopyInfo, ExtractResult, ReplaceWithLinkResult};
 use crate::{EngineError, Result, Session};
@@ -35,16 +37,56 @@ fn local_path(path: &mut Vec<u64>, own: &BTreeSet<u64>) {
     }
 }
 
-/// Whether two solids measure the same, within what a STEP round trip changes in the measure
-/// of a curved face (a cylinder's volume by about 1e-5).
+/// What a solid is compared by: its volume, area, centre and box, measured once. A solid the
+/// kernel cannot measure (such as a piece of a body whose region integrates to no volume) is
+/// compared by its exact box and its face and edge counts instead.
+enum Shape {
+    Measured(solidcraft_kernel::MassMeasure),
+    Unmeasured { bbox: solidcraft_geom::Aabb3, faces: usize, edges: usize },
+}
+
+impl Shape {
+    fn of(b: &solidcraft_kernel::Body) -> Result<Shape> {
+        Shape::from_measure(b, solidcraft_kernel::measure_mass(b))
+    }
+
+    fn from_measure(b: &solidcraft_kernel::Body, measured: solidcraft_kernel::Result<solidcraft_kernel::MassMeasure>) -> Result<Shape> {
+        Ok(match measured {
+            Ok(m) => Shape::Measured(m),
+            Err(_) => Shape::Unmeasured { bbox: b.exact_bounds()?, faces: b.face_count(), edges: b.edge_count() },
+        })
+    }
+
+    /// Whether two solids are the same, within what a STEP round trip changes in the measure
+    /// of a curved face (a cylinder's volume by about 1e-5).
+    fn matches(&self, other: &Shape) -> bool {
+        let same_box = |a: &solidcraft_geom::Aabb3, b: &solidcraft_geom::Aabb3| {
+            let tolerance = 1e-4 * (1.0 + (a.max - a.min).len());
+            (a.min.dist(b.min) <= tolerance && a.max.dist(b.max) <= tolerance).then_some(tolerance)
+        };
+        match (self, other) {
+            (Shape::Measured(ma), Shape::Measured(mb)) => same_box(&ma.bbox, &mb.bbox).is_some_and(|tolerance| {
+                (ma.volume - mb.volume).abs() <= 1e-4 * (1.0 + ma.volume.abs())
+                    && (ma.area - mb.area).abs() <= 1e-4 * (1.0 + ma.area.abs())
+                    && ma.centroid.dist(mb.centroid) <= tolerance
+            }),
+            (Shape::Unmeasured { bbox: ba, faces: fa, edges: ea }, Shape::Unmeasured { bbox: bb, faces: fb, edges: eb }) => {
+                fa == fb && ea == eb && same_box(ba, bb).is_some()
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether two solids measure the same (see [`Shape::matches`]).
 fn same_solid(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> Result<bool> {
-    let (ma, mb) = (solidcraft_kernel::measure(a)?, solidcraft_kernel::measure(b)?);
-    let tolerance = 1e-4 * (1.0 + (ma.bbox.max - ma.bbox.min).len());
-    Ok((ma.volume - mb.volume).abs() <= 1e-4 * (1.0 + ma.volume.abs())
-        && (ma.area - mb.area).abs() <= 1e-4 * (1.0 + ma.area.abs())
-        && ma.centroid.dist(mb.centroid) <= tolerance
-        && ma.bbox.min.dist(mb.bbox.min) <= tolerance
-        && ma.bbox.max.dist(mb.bbox.max) <= tolerance)
+    Ok(Shape::of(a)?.matches(&Shape::of(b)?))
+}
+
+/// Whether two B-rep bodies hold equal records: a body built again from the same inputs, which
+/// costs a comparison rather than two integrations of its faces.
+fn same_record(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
+    !a.is_mesh() && !b.is_mesh() && a.record() == b.record()
 }
 
 /// Whether two bodies are the same solid, each moved by its offset.
@@ -61,8 +103,11 @@ fn same_solids(a: &[&ModelBody], b: &[&ModelBody]) -> Result<bool> {
 }
 
 /// The first body of `a` that `b` has no same solids for, or what `b` has more of, whatever they
-/// are called. Bodies that changed are compared piece by piece: a link brings a body made of
-/// separate pieces back as one body per piece.
+/// are called. A body rebuilt under the same name is compared with that body first, by its record
+/// and then by its measure: a change early in the timeline rebuilds every later body, and
+/// measuring them all against each other cost a large assembly minutes. The others are compared
+/// piece by piece: a link brings a body made of separate pieces back as one body per piece. Each
+/// piece is measured once.
 fn unmatched(a: &[&ModelBody], b: &[&ModelBody]) -> Result<Option<String>> {
     let mut left: Vec<&ModelBody> = b.to_vec();
     let mut rest = Vec::new();
@@ -72,20 +117,26 @@ fn unmatched(a: &[&ModelBody], b: &[&ModelBody]) -> Result<Option<String>> {
             None => rest.push(*x),
         }
     }
+    let mut changed = Vec::new();
+    for x in rest {
+        if let Some(i) = left.iter().position(|y| y.name == x.name)
+            && (same_record(&x.body, &left[i].body) || same_solid(&x.body, &left[i].body)?)
+        {
+            left.swap_remove(i);
+        } else {
+            changed.push(x);
+        }
+    }
     let mut pieces = Vec::new();
     for y in left {
-        pieces.extend(y.body.lumps()?);
+        for lump in y.body.lumps()? {
+            pieces.push(Shape::of(&lump)?);
+        }
     }
-    for x in rest {
+    for x in changed {
         for lump in x.body.lumps()? {
-            let mut found = None;
-            for (i, y) in pieces.iter().enumerate() {
-                if same_solid(&lump, y)? {
-                    found = Some(i);
-                    break;
-                }
-            }
-            match found {
+            let shape = Shape::of(&lump)?;
+            match pieces.iter().position(|y| shape.matches(y)) {
                 Some(i) => drop(pieces.swap_remove(i)),
                 None => return Ok(Some(format!("body {}", x.name))),
             }
@@ -103,11 +154,12 @@ fn prune_params(doc: &mut Document) {
             used.extend(f.param_names.iter().cloned());
             used.extend(f.kind.expressions().into_iter().flat_map(references));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| references(e)));
             }
         }
         used.extend(doc.assembly.exprs().into_iter().flat_map(|(_, _, e)| references(e)));
+        used.extend(doc.occurrences.iter().flat_map(|o| &o.expressed_moves).flat_map(|m| m.exprs()).flat_map(|(_, e)| references(e)));
         used.extend(doc.params.iter().flat_map(|p| references(&p.expr)));
         let before = doc.params.len();
         doc.params.retain(|p| used.contains(&p.name));
@@ -315,6 +367,12 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if let Some(o) = source.occurrences.iter().find(|o| children.contains(&o.component) && !subtree.contains(&o.parent)) {
         return Err(bad(cmd, format!("{} is placed outside {name} too", o.name)));
     }
+    // A component placed inside and outside keeps its parent outside, so it would be left out of
+    // the new design and the placement inside lost
+    if let Some(o) = source.occurrences.iter().find(|o| subtree.contains(&o.parent) && !subtree.contains(&o.component)) {
+        let shared = source.components.iter().find(|c| c.id == o.component).map_or(o.name.clone(), |c| c.name.clone());
+        return Err(bad(cmd, format!("{shared} is placed inside {name} and elsewhere in the design, so it can't go with {name}")));
+    }
     let mut inside: BTreeSet<u64> = source.features.iter().filter(|f| subtree.contains(&f.component)).map(|f| f.id).collect();
     let state = s.model.state();
     let owners: BTreeMap<String, u64> = state.bodies.iter().map(|b| (b.name.clone(), source.model_body_component(b))).collect();
@@ -402,7 +460,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 *from = to_root(*from);
                 *to = to_root(*to);
             }
-            FeatureKind::Mirror { placements, .. } => {
+            FeatureKind::Mirror { placements, .. } | FeatureKind::Pattern { placements, .. } => {
                 for path in placements {
                     local_path(path, &sc.own);
                 }
@@ -411,7 +469,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 local_path(&mut face.path, &sc.own);
                 local_path(&mut face.author_path, &sc.own);
             }
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. } => {
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     anchor.component = to_root(anchor.component);
                     local_path(&mut anchor.path, &sc.own);
@@ -615,12 +673,20 @@ impl Before {
     }
 }
 
+/// Every body in `state` that the link `link` of component `linked` brings in: its solids, and its
+/// design's mesh bodies, which the Mesh Import feature beside them holds. A component with fewer
+/// bodies is no copy of it.
+fn linked_bodies<'a>(s: &Session, state: &'a ModelState, linked: u64, link: &DesignLink) -> Vec<&'a ModelBody> {
+    let meshes = link_mesh_feature(s, linked, link.feature).map(|(id, _)| id);
+    state.bodies.iter().filter(|b| b.feature == link.feature || Some(b.feature) == meshes).collect()
+}
+
 /// The components other than `linked`, a linked component, whose design on its own builds the
 /// same bodies as its link.
 fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
     let Some(link) = s.doc.links.get(&linked) else { return Ok(Vec::new()) };
     let state = s.model.state();
-    let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
+    let reference = linked_bodies(s, &state, linked, link);
     let volume = |bodies: &[&ModelBody]| bodies.iter().filter_map(|b| solidcraft_kernel::measure(&b.body).ok()).map(|m| m.volume).sum::<f64>();
     let expected = volume(&reference);
     let mut out = Vec::new();
@@ -678,7 +744,8 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
+    // No mesh bodies: `scope` refuses a component that holds one.
+    let (_, sf, faces, _, properties, _) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -770,8 +837,14 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         component_key(s, p, "with", cmd)?
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
-        let file = absolute(Path::new(given));
-        let existing = s.doc.links.iter().find(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
+        let target = link_target(&absolute(Path::new(given)));
+        let existing = s
+            .doc
+            .links
+            .iter()
+            .find(|(_, l)| l.configuration.is_none() && link_target(&resolve(s.path.as_deref(), &l.path)) == target)
+            .map(|(c, _)| *c);
         match existing {
             Some(c) => c,
             None => {
@@ -793,7 +866,7 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         let sc = scope(s, t, cmd)?;
         let (part, _) = part_design(s, &sc, &sc.name, cmd)?;
         let state = s.model.state();
-        let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
+        let reference = linked_bodies(s, &state, linked, &link);
         let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if !same_solids(&reference, &built)? {
@@ -946,6 +1019,8 @@ mod tests {
         // The new design: Plate's history at its root, with Pin, the joint and the parameter it uses
         let mut part = Session::default();
         run(&mut part, "doc.open", json!({"path": file}));
+        assert_ne!(part.design_token().document_id, s.design_token().document_id, "the extracted part is a distinct design");
+        assert_ne!(part.design_token().revision, s.design_token().revision);
         assert_eq!(part.doc.name, "plate");
         assert_eq!(part.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Pin"]);
         assert_eq!(part.doc.occurrences.len(), 1);
@@ -1013,6 +1088,22 @@ mod tests {
         run(&mut s, "component.activate", json!({"component": 0}));
         run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 3, "operation": "new"}));
         refuse(&mut s, json!({"component": "Plate", "path": file}), "uses a sketch of Plate");
+
+        // A component placed twice, with one placement moved into an empty component
+        let mut t = Session::default();
+        run(&mut t, "component.create", json!({"name": "Block"}));
+        run(&mut t, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BlockBody"}));
+        run(&mut t, "component.activate", json!({"component": 0}));
+        let copy = run(&mut t, "occurrence.copy", json!({"component": "Block", "translate": [30, 0, 0]}));
+        let copy = copy["occurrence"].as_u64().unwrap();
+        let holder = run(&mut t, "component.create", json!({"name": "Holder"}))["component"].as_u64().unwrap();
+        run(&mut t, "component.activate", json!({"component": 0}));
+        run(&mut t, "occurrence.reparent", json!({"occurrence": copy, "parent": holder}));
+        let before = serde_json::to_value(&*t.doc).unwrap();
+        let err = t.execute("component.extract", &json!({"component": "Holder", "path": file})).unwrap_err().to_string();
+        assert!(err.contains("Block is placed inside Holder and elsewhere"), "{err}");
+        assert_eq!(serde_json::to_value(&*t.doc).unwrap(), before);
+        assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1187,6 +1278,20 @@ mod tests {
         assert_eq!(run(&mut s, "component.copies", json!({"component": plate}))["copies"], out["copies"]);
         let shapes_before = shapes(&s);
 
+        #[cfg(unix)]
+        {
+            // Reopening resolves the existing link's folder; an alias must still reuse it.
+            let alias = dir.join("source");
+            std::os::unix::fs::symlink(dir.canonicalize().unwrap(), &alias).unwrap();
+            let mut reopened = s.scratch();
+            let design = dir.join("assembly.sc");
+            run(&mut reopened, "file.save", json!({"path": design}));
+            run(&mut reopened, "doc.open", json!({"path": design}));
+            let replaced = run(&mut reopened, "component.replace_with_link", json!({"component": copy, "path": alias.join("plate.solidcraft")}));
+            assert_eq!(replaced["component"], plate);
+            assert_eq!(reopened.doc.links.len(), 1);
+        }
+
         let replaced = run(&mut s, "component.replace_with_link", json!({"components": [copy], "with": plate}));
         assert_eq!(replaced["warnings"], json!([]), "{replaced}");
         assert!(s.doc.components.iter().all(|c| c.id != copy));
@@ -1201,6 +1306,33 @@ mod tests {
         // Not the same: refused, nothing changes
         let before = serde_json::to_value(&*s.doc).unwrap();
         let err = s.execute("component.replace_with_link", &json!({"component": "Taller", "with": plate})).unwrap_err().to_string();
+        assert!(err.contains("not the same"), "{err}");
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #20050: a linked design's mesh bodies are part of what its link brings in, so a component
+    /// with only the same solids is no copy of it and can't be replaced by it.
+    #[test]
+    fn a_component_with_only_the_solids_of_a_link_with_mesh_bodies_is_no_copy() {
+        let dir = folder("mesh-copies");
+        let (board, stl) = (dir.join("board.solidcraft"), dir.join("Chip.stl"));
+        std::fs::write(&stl, super::super::tests::tetra_stl()).unwrap();
+        {
+            let mut b = Session::default();
+            run(&mut b, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Board"}));
+            run(&mut b, "file.insert_mesh", json!({"path": stl}));
+            run(&mut b, "file.save", json!({"path": board}));
+        }
+        let mut s = Session::default();
+        let linked = run(&mut s, "component.insert_design", json!({"path": board}))["component"].as_u64().unwrap();
+        run(&mut s, "component.create", json!({"name": "Bare"}));
+        // Its own name: a second Board would be renamed here and come out as Board on its own
+        run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Plank"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        assert_eq!(run(&mut s, "component.copies", json!({"component": linked}))["copies"], json!([]));
+        let before = serde_json::to_value(&*s.doc).unwrap();
+        let err = s.execute("component.replace_with_link", &json!({"component": "Bare", "with": linked})).unwrap_err().to_string();
         assert!(err.contains("not the same"), "{err}");
         assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1228,5 +1360,51 @@ mod tests {
         assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == linked).map(|o| o.id).collect::<Vec<_>>(), [plate_occ]);
         assert_eq!(shapes(&s), shapes_before);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two designs that build the same boxes, each on its own: equal bodies that are not the
+    /// very same, as a change early in the timeline leaves every body after it.
+    fn boxes(names: &[&str]) -> Session {
+        let mut s = Session::default();
+        for (i, name) in names.iter().enumerate() {
+            run(&mut s, "solid.box", json!({"length": 10 + i, "width": 10, "height": 10, "corner": [20 * i, 0, 0], "body_name": name}));
+        }
+        s
+    }
+
+    #[test]
+    fn rebuilt_bodies_are_matched_by_name_then_by_shape() {
+        let names = ["A", "B", "C"];
+        let (one, two) = (boxes(&names), boxes(&names));
+        let (was, now) = (one.model.state(), two.model.state());
+        let (was, mut now): (Vec<ModelBody>, Vec<ModelBody>) = (was.bodies.clone(), now.bodies.clone());
+        assert!(!was[0].body.same(&now[0].body) && same_record(&was[0].body, &now[0].body));
+        fn refs(v: &[ModelBody]) -> Vec<&ModelBody> {
+            v.iter().collect()
+        }
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), None);
+
+        // Renamed, it is still found by its shape; changed, it is named
+        now[1].name = "Renamed".into();
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), None);
+        let wider = boxes(&["A", "B", "C", "D"]).model.state().bodies[3].body.clone();
+        now[1].body = wider;
+        assert_eq!(unmatched(&refs(&was), &refs(&now)).unwrap(), Some("body B".to_string()));
+    }
+
+    #[test]
+    fn a_solid_the_kernel_cannot_measure_is_compared_by_its_box_and_counts() {
+        // As a body read from STEP whose pieces integrate to no volume ("no mass")
+        let refused = || Err(solidcraft_kernel::KernelError::Invalid("no mass".into()));
+        let bodies = boxes(&["A", "B"]).model.state().bodies.clone();
+        let again = boxes(&["A", "B"]).model.state().bodies.clone();
+        let mut moved = solidcraft_doc::IDENTITY;
+        moved[3][1] = 5.0;
+        let moved = solidcraft_kernel::transform_matrix(&bodies[0].body, moved).unwrap();
+        let unmeasured = |b: &solidcraft_kernel::Body| Shape::from_measure(b, refused()).unwrap();
+        assert!(unmeasured(&bodies[0].body).matches(&unmeasured(&again[0].body)));
+        assert!(!unmeasured(&bodies[0].body).matches(&unmeasured(&moved)));
+        assert!(!unmeasured(&bodies[0].body).matches(&unmeasured(&bodies[1].body)));
+        assert!(!unmeasured(&bodies[0].body).matches(&Shape::of(&again[0].body).unwrap()));
     }
 }

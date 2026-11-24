@@ -100,7 +100,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         by_component.entry(doc.model_body_component(body)).or_default().push(body);
     }
     let mut chosen = None;
-    let mut sheet_face: Option<(String, Plane)> = None;
+    // A face holds the picked point but has no exact plane: a curved face (or a flat one the kernel does not know as a plane), not a missing one.
+    let mut curved = false;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -126,47 +127,45 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             let inverse = mat_inverse(&frame).ok_or_else(|| bad(cmd, "invalid selected face frame"))?;
             let local_point = apply_point(&inverse, point);
             let tolerance = (body.body.size() * 1e-4).max(1e-5);
-            // A flat face of a sheet metal body attaches to its panel (or a panel's rim): the
-            // exact plane comes from the panel's flat region and fold, and the sketch keeps the
-            // face's name to follow it.
-            if !fixed
-                && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.name)
-                && let Some((face, plane)) = sheet.panel_face_at(local_point, tolerance * 10.0)
-            {
-                if chosen.is_some() || sheet_face.is_some() {
-                    return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
-                }
-                let relative = mat_mul(&author_inverse, &frame);
-                let plane = Plane::new(apply_point(&relative, plane.origin), apply_vector(&relative, plane.x), apply_vector(&relative, plane.y))
-                    .ok_or_else(|| bad(cmd, "invalid sheet face plane"))?;
-                sheet_face = Some((solidcraft_doc::sheet::sheet_face_name(&body.name, &face), plane));
-                continue;
-            }
-            let faces = body.body.faces(tolerance)?;
-            let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
+            // A face of a sheet metal body attaches as every body's does, by the model's name for
+            // the face, in the frame the sheet gives it (a panel's: its flat pattern's, see
+            // `ModelBody::sketch_frame`). The model's own mesh of the body, which picks name their
+            // face from: made once and kept, so a face is captured without meshing the body again.
+            // A large body with many B-spline faces took tens of seconds to mesh here twice, at a
+            // tenth of its chord.
+            let mesh = body.mesh();
+            let count = body.body.face_count();
             // The triangles are grouped by face once, and a face's test reads only its own: the
             // work is the mesh plus one plane test per face, not the mesh once per face (a
             // modelled thread leaves thousands of faces, #6720).
-            work = work.saturating_add(mesh.triangles.len()).saturating_add(faces.len());
+            work = work.saturating_add(mesh.triangles.len()).saturating_add(count);
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
-            let by_face = super::face_triangles(&mesh, faces.iter().map(|face| face.index.saturating_add(1)).max().unwrap_or(0));
-            for face in faces {
-                if requested_index.is_some_and(|index| index != face.index) {
+            let by_face = super::face_triangles(&mesh, count);
+            for (index, tris) in by_face.iter().enumerate() {
+                if requested_index.is_some_and(|requested| requested != index) {
+                    continue;
+                }
+                // Whether the point is on the face is read from the mesh before the exact plane is
+                // asked for: a B-spline face's flatness is a kernel check, too slow for every face
+                // of a large body when the point names one.
+                if !super::face_contains(&mesh, tris, local_point, tolerance * 10.0) {
                     continue;
                 }
                 let Some(exact_plane) = (if fixed {
-                    body.body.planar_face(face.index).or_else(|| body.body.face_plane(face.index))
+                    body.body.planar_face(index).or_else(|| body.body.face_plane(index))
                 } else {
-                    body.body.face_plane(face.index).or_else(|| body.body.planar_face(face.index))
+                    body.body.face_plane(index).or_else(|| body.body.planar_face(index))
                 }) else {
+                    curved = true;
                     continue;
                 };
+                // The exact plane's own origin lies on the face's plane: the distance test and the
+                // picked plane's offset read it, not a centre worked out from the mesh.
                 let normal = exact_plane.normal();
-                if (local_point - face.centroid).dot(normal).abs() > tolerance * 10.0
-                    || !super::face_contains(&mesh, by_face.get(face.index).map_or(&[][..], Vec::as_slice), local_point, tolerance * 10.0)
-                {
+                let on_plane = exact_plane.origin;
+                if (local_point - on_plane).dot(normal).abs() > tolerance * 10.0 {
                     continue;
                 }
                 if chosen.is_some() {
@@ -174,20 +173,25 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;
-                let centroid = apply_point(&relative, face.centroid);
-                let picked = Plane::from_normal(normal * centroid.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
-                chosen = Some((body, face.index, path.clone(), picked));
+                let on_plane = apply_point(&relative, on_plane);
+                // The frame the body gives the face (a sheet's panel: its flat pattern's), else one
+                // through the face.
+                let picked = match body.sketch_frame(index).filter(|_| !fixed) {
+                    Some(own) => Plane::new(apply_point(&relative, own.origin), apply_vector(&relative, own.x), apply_vector(&relative, own.y)),
+                    None => Plane::from_normal(normal * on_plane.dot(normal), normal),
+                }
+                .ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
+                chosen = Some((body, index, path.clone(), picked));
             }
         }
     }
-    if let Some((name, plane)) = sheet_face {
-        if chosen.is_some() {
-            return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
+    let (body, index, path, plane) = chosen.ok_or_else(|| {
+        if curved {
+            bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane")
+        } else {
+            bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane")
         }
-        return Ok(PlaneRef::Face { plane, at: apply_point(&author_inverse, point), name: Some(name), anchor: None });
-    }
-    let (body, index, path, plane) =
-        chosen.ok_or_else(|| bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane"))?;
+    })?;
     if fixed {
         return Ok(PlaneRef::Custom { plane });
     }

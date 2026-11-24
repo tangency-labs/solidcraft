@@ -1748,3 +1748,395 @@ impl UnitDiff for Runner {
         serde_json::to_value(gen_inputs(rng)).ok()
     }
 }
+
+
+/// Certificates of the `DropAndTrimCurve` rows that WR-455's contact move changed
+/// (tangency-labs/solidcraft#17404: `Curve::global_curve_intersect` now always moves a point
+/// contact to a curve's end when the curves are certified to stay within tolerance of each
+/// other over the stretch between). The drop intersects the curve with the domain's
+/// boundary curves (`boundary_start_points`), breaks the curve at every contact except one
+/// within `EFF_ZERO_SQRT / 100` of an interval end, and keeps each piece whose midpoint drops
+/// into the domain. In both rows a contact main reported just inside the curve's interval
+/// is now reported at its end, so main's break there, and the piece it cut off, are gone.
+/// No acceptance below is decided by samples.
+#[cfg(test)]
+mod wr455_trim {
+    use super::*;
+    use solidcore::curve::curve::p8::{curves_stay_within, CurveIntersectOptions};
+    use solidcore::geom::solution_array::SolutionType;
+    use solidcore::intersect::surface_drop_curve::SurfaceDropCurve;
+    use solidcore::intersect::surface_tracer::tracer_surface_cache;
+    use solidcore::nurbs::math::gamma;
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::SurfaceKind;
+
+    /// A replayed `trim` case: the drop's breaks, its tolerance (the boundary intersections
+    /// run at it: the curve is on the surface), the domain boundary curves it intersects
+    /// the curve with, and the record the runner writes now.
+    struct Replay {
+        k: Kernel,
+        surface: Surface,
+        curve: Curve,
+        interval: Extent1d,
+        tol: f64,
+        breaks: Vec<f64>,
+        iso: Vec<Curve>,
+        rec: Vec<f64>,
+    }
+
+    fn replay(name: &str) -> Replay {
+        let case = crate::case::regression_case(&Runner, name);
+        let inputs: Inputs = case.parse().unwrap();
+        let Inputs::Trim {
+            surface,
+            curve,
+            domain,
+            interval,
+            tol,
+            on_surface,
+            ..
+        } = &inputs
+        else {
+            panic!("{name}: not a trim case");
+        };
+        assert!(*on_surface, "{name}: the drop intersects the boundaries");
+        let k = Kernel::default();
+        let s = rust_surface(&k, surface).unwrap().unwrap();
+        let c = rust_curve(&k, curve).unwrap();
+        let dom = ext(domain.unwrap());
+        let [lo, hi] = interval.unwrap();
+        let ivl = Extent1d::from_min_max(lo, hi);
+        let (at, breaks, iso) = {
+            let mut drop = SurfaceDropCurve::new(&k, &s, &dom, &c, &ivl).unwrap();
+            drop.set_curve_is_on_surface(true);
+            let mut cache = tracer_surface_cache::<NoObject>(&k, &drop.base).unwrap();
+            drop.drop_trace(&k, &mut cache, (*tol != 0.0).then_some(*tol), None, None)
+                .unwrap();
+            let at = drop.base.approx_tol_3d;
+            let iso = cache.iso_boundary_curves(&k, &dom, at / 3.0).unwrap().curves.to_vec();
+            (at, drop.curve_breaks.clone().unwrap(), iso)
+        };
+        let rec = rust(&inputs).unwrap().values.get("rec").cloned().unwrap();
+        Replay {
+            k,
+            surface: s,
+            curve: c,
+            interval: ivl,
+            tol: at,
+            breaks,
+            iso,
+            rec,
+        }
+    }
+
+    /// The contacts `[t, s]` (curve, boundary curve `j`) the drop's boundary intersection
+    /// reports: each point, and both ends of each range.
+    fn contacts(r: &Replay, j: usize) -> Vec<[f64; 2]> {
+        let iso = r.iso.get(j).unwrap();
+        let sols = r
+            .curve
+            .global_curve_intersect::<NoObject>(
+                &r.k,
+                &r.interval,
+                iso,
+                &iso.natural_interval(),
+                r.tol,
+                &CurveIntersectOptions::default(),
+            )
+            .unwrap();
+        let pair = |e: &solidcore::geom::solution_array::SolutionEnd| {
+            [e.param(0).unwrap(), e.param(1).unwrap()]
+        };
+        sols.as_slice()
+            .iter()
+            .flat_map(|s| {
+                let range = s.solution_type == SolutionType::RangeOfValues;
+                std::iter::once(pair(&s.start)).chain(range.then(|| pair(&s.end)))
+            })
+            .collect()
+    }
+
+    /// Certifies that main's contact `old` with boundary curve `j` and the contact `new`
+    /// reported now are one contact (PROVEN): each is within the tolerance (a path of no
+    /// length), and the curve and the boundary curve stay within it along a path joining
+    /// them (`curves_stay_within`: the library's certified bound, no samples). Returns a
+    /// bound on the 3D length of the curve between them: its speed bound over the stretch
+    /// times the parameter step, widened by `gamma(4)` for the difference and the product.
+    fn same_contact(r: &Replay, name: &str, j: usize, old: [f64; 2], new: [f64; 2]) -> f64 {
+        let iso = r.iso.get(j).unwrap();
+        for p in [old, new] {
+            assert!(
+                curves_stay_within(&r.k, &r.curve, iso, p, p, r.tol).unwrap(),
+                "{name}: {p:?} is not a contact"
+            );
+        }
+        assert!(
+            curves_stay_within(&r.k, &r.curve, iso, old, new, r.tol).unwrap(),
+            "{name}: {old:?} and {new:?} are not joined within {}",
+            r.tol
+        );
+        let (a, b) = (old[0].min(new[0]), old[0].max(new[0]));
+        let speed = r.curve.speed_bound(&Extent1d::from_min_max(a, b)).unwrap();
+        let length = speed * (b - a) * (1.0 + gamma(4));
+        eprintln!("{name}: contacts {old:?} -> {new:?} joined; stretch length <= {length:e}");
+        assert!(length.is_finite());
+        length
+    }
+
+    /// The UV control points of the cubic B-spline piece record that starts at `at`
+    /// (`14033, degree, count, (x, y, z, w) * count, knot count, knots, multiplicities,
+    /// interval`), with its knots and multiplicities.
+    fn cubic_piece(rec: &[f64], at: usize) -> (Vec<[f64; 2]>, Vec<f64>, Vec<f64>) {
+        let head = rec.get(at..at + 3).unwrap();
+        assert_eq!(head, [14033.0, 3.0, 7.0], "a cubic piece of 7 control points");
+        let pts: Vec<[f64; 2]> =
+            rec.get(at + 3..at + 31).unwrap().chunks(4).map(|c| [c[0], c[1]]).collect();
+        let n = rec.get(at + 31).copied().unwrap();
+        assert_eq!(n, 3.0, "three distinct knots");
+        let knots = rec.get(at + 32..at + 35).unwrap().to_vec();
+        let mults = rec.get(at + 35..at + 38).unwrap().to_vec();
+        assert_eq!(mults, [4.0, 3.0, 4.0], "two cubic Bezier segments");
+        assert_eq!(rec.len(), at + 40, "the last piece");
+        (pts, knots, mults)
+    }
+
+    /// An upper bound on `|S_u|` and `|S_v|` of a rational B-spline net over its whole
+    /// domain (PROVEN): for a fixed `v`, `S(., v)` is a rational curve of degree `p` whose
+    /// weights `W_i(v) = sum_j N_j(v) w_ij` lie in `[w_min, w_max]` and whose points
+    /// `Q_i(v) = sum_j N_j(v) w_ij P_ij / W_i(v)` lie in the net's convex hull (convex
+    /// combinations), so, as for a rational curve (`crv_speed_bound`), `|S_u| <= 2 p (w_max /
+    /// w_min) D / h_u`: `D` the net's diameter (at most its box's diagonal) and `h_u` the
+    /// shortest non-empty u span (every degree-`p - 1` basis function that is not zero
+    /// somewhere has a support holding one). Likewise in `v`. The net's coordinates are
+    /// divided by their weights (one rounding), the box's sides and diagonal take four more,
+    /// the quotients and products four more: `gamma(16)` covers them and is applied once.
+    fn net_lipschitz(net: &NurbSurface) -> (f64, f64) {
+        let w = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
+        let cpts: Vec<CPoint> = net.cpts().into_iter().flatten().collect();
+        let (mut wmin, mut wmax) = (f64::MAX, 0.0_f64);
+        let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+        for c in &cpts {
+            let wc = w(c);
+            assert!(wc > 0.0, "a positive weight");
+            wmin = wmin.min(wc);
+            wmax = wmax.max(wc);
+            for (a, x) in [c.x, c.y, c.z].into_iter().enumerate() {
+                lo[a] = lo[a].min(x / wc);
+                hi[a] = hi[a].max(x / wc);
+            }
+        }
+        let diag = (0..3).map(|a| (hi[a] - lo[a]).powi(2)).sum::<f64>().sqrt();
+        let h_min = |knots: &[f64]| {
+            knots
+                .windows(2)
+                .map(|w| w[1] - w[0])
+                .filter(|h| *h > 0.0)
+                .fold(f64::MAX, f64::min)
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let bound = |deg: usize, knots: &[f64]| {
+            2.0 * deg as f64 * (wmax / wmin) * diag / h_min(knots) * (1.0 + gamma(16))
+        };
+        (bound(net.p(), net.u_knots()), bound(net.q(), net.v_knots()))
+    }
+
+    /// Main's record of `trim0041` (merge base ada55bdad).
+    const MAIN_TRIM0041: &str = "[0.0, 1.540549292218044, 0.6477656531906973, 4.0, 14033.0, 1.0, 2.0, 0.8099930304431764,
+0.04483711937998038, 1.7976931348623157e+308, -1.7976931348623157e+308, 0.8099927814150117,
+0.04483711937998038, 1.7976931348623157e+308, -1.7976931348623157e+308, 2.0, 2.0,
+2.0000062216107315, 2.0, 2.0, 2.0, 2.0000062216107315, 14033.0, 1.0, 2.0,
+0.4163857732583449, 0.8565265566577224, 1.7976931348623157e+308, -1.7976931348623157e+308,
+0.4163848152569086, 0.8565265566577224, 1.7976931348623157e+308, -1.7976931348623157e+308,
+2.0, 9.415200699179575, 9.415211055639727, 2.0, 2.0, 9.415200699179575, 9.415211055639727,
+14033.0, 1.0, 2.0, 0.13427082079868075, 0.9827014205224025, 1.7976931348623157e+308,
+-1.7976931348623157e+308, 0.13427070751840312, 0.9827014205224025, 1.7976931348623157e+308,
+-1.7976931348623157e+308, 2.0, 11.99999875353449, 12.0, 2.0, 2.0, 11.99999875353449, 12.0,
+14033.0, 3.0, 19.0, 0.8099929454115713, 0.04483531703858344, 0.0, -1.7976931348623157e+308,
+0.801547559302499, -0.13417498083167556, 0.0, -1.7976931348623157e+308, 0.7912656602113024,
+0.0, 0.0, -1.7976931348623157e+308, 0.7641200119703179, 0.0, 0.0, -1.7976931348623157e+308,
+0.7505471878498257, 0.0, 0.0, -1.7976931348623157e+308, 0.7315814184821634, 0.0, 0.0,
+-1.7976931348623157e+308, 0.7063862627761869, 0.0, 0.0, -1.7976931348623157e+308,
+0.6811911070702104, 0.0, 0.0, -1.7976931348623157e+308, 0.6482011341315796, 0.0, 0.0,
+-1.7976931348623157e+308, 0.6135429702982758, 0.0, 0.0, -1.7976931348623157e+308,
+0.5788848064649719, 0.0, 0.0, -1.7976931348623157e+308, 0.5448965961593462, 0.0, 0.0,
+-1.7976931348623157e+308, 0.5184836967459221, 0.0, 0.0, -1.7976931348623157e+308,
+0.4920707973324981, 0.0, 0.0, -1.7976931348623157e+308, 0.4734652462081046, 0.0, 0.0,
+-1.7976931348623157e+308, 0.460545779257611, 0.0, 0.0, -1.7976931348623157e+308,
+0.43470684535662374, 0.0, 0.0, -1.7976931348623157e+308, 0.4246082928232255,
+0.9329150231641156, 0.0, -1.7976931348623157e+308, 0.4163857732583449, 0.8565265566580085,
+0.0, -1.7976931348623157e+308, 7.0, 2.0000062216107315, 3.8538048410029426,
+4.780704150699048, 5.707603460395154, 6.6345027700912595, 7.5614020797873644,
+9.415200699179575, 4.0, 3.0, 3.0, 3.0, 3.0, 3.0, 4.0, 2.0000062216107315, 9.415200699179575]";
+
+    /// Main's record of `trim0248` (merge base ada55bdad).
+    const MAIN_TRIM0248: &str = "[0.0, 0.021791374733099694, 0.0009911724651202995, 5.0, 14033.0, 1.0, 2.0,
+0.5188545896105052, 0.6958014875742085, 1.7976931348623157e+308, -1.7976931348623157e+308,
+0.5188545292606881, 0.6958014875742085, 1.7976931348623157e+308, -1.7976931348623157e+308,
+2.0, -1.0, -0.9999992203222092, 2.0, 2.0, -1.0, -0.9999992203222092, 14033.0, 1.0, 2.0,
+0.26995605858697974, 0.645939964079408, 1.7976931348623157e+308, -1.7976931348623157e+308,
+0.26995618739155886, 0.645939964079408, 1.7976931348623157e+308, -1.7976931348623157e+308,
+2.0, 2.0878080649322626, 2.0878094872220574, 2.0, 2.0, 2.0878080649322626,
+2.0878094872220574, 14033.0, 1.0, 2.0, 0.7209103359554261, 0.24423615400097023,
+1.7976931348623157e+308, -1.7976931348623157e+308, 0.7209109213691748, 0.24423615400097023,
+1.7976931348623157e+308, -1.7976931348623157e+308, 2.0, 6.616389580735179,
+6.616425259842228, 2.0, 2.0, 6.616389580735179, 6.616425259842228, 14033.0, 1.0, 2.0,
+0.7615156251703623, 0.2430591549246388, 1.7976931348623157e+308, -1.7976931348623157e+308,
+0.7615161600081228, 0.2430591549246388, 1.7976931348623157e+308, -1.7976931348623157e+308,
+2.0, 8.999968557309979, 9.0, 2.0, 2.0, 8.999968557309979, 9.0, 14033.0, 3.0, 7.0,
+0.7209109173000509, 0.24423569724218072, 0.0, -1.7976931348623157e+308, 0.7273837130239268,
+0.23915013258330606, 0.0, -1.7976931348623157e+308, 0.7340677675625935, 0.23627145971325667,
+0.0, -1.7976931348623157e+308, 0.740908793128353, 0.23607000022232297, 0.0,
+-1.7976931348623157e+308, 0.7477498186941125, 0.23586854073138927, 0.0,
+-1.7976931348623157e+308, 0.7548052807751381, 0.2383449396356775, 0.0,
+-1.7976931348623157e+308, 0.7615156251703772, 0.2430591549244301, 0.0,
+-1.7976931348623157e+308, 3.0, 6.616425259842228, 7.808196908576104, 8.999968557309979, 4.0,
+3.0, 4.0, 6.616425259842228, 8.999968557309979]";
+
+    /// trim0041, a two-segment line on a torus' outer equator over `t in [2, 12]`: main's contact
+    /// with a boundary curve of the domain at `t = 11.99999875` is now reported at the curve's end
+    /// `t = 12`, so main's fourth piece, the line over `[11.99999875, 12]`, is gone. PROVEN: the
+    /// two contacts are one (joined within the drop's tolerance 9.43e-3 along the boundary curve),
+    /// so main's piece lies within the tolerance of the domain's boundary over its whole length,
+    /// and it is at most 1.8e-6 long: a touch of the boundary at the curve's end, of no length at
+    /// that tolerance, which the drop reports as no piece wherever the contact lies within
+    /// `EFF_ZERO_SQRT / 100` of the end. Every other value of the record is main's, exactly
+    /// (PROVEN). Class: equal at tolerance; main's piece is a point set the new row lacks, but one
+    /// shorter than the tolerance and on the boundary within it.
+    #[test]
+    fn wr455_trim0041_end_touch_is_one_contact() {
+        let r = replay("trim0041");
+        assert!(matches!(r.surface.kind(), SurfaceKind::SurfOfRevolution(_)));
+        assert_eq!(
+            r.breaks,
+            [2.0, 2.000_006_221_610_731_5, 9.415_200_699_179_575, 9.415_211_055_639_727, 12.0]
+        );
+        let new = contacts(&r, 3)
+            .into_iter()
+            .find(|c| c[0] == r.interval.max())
+            .expect("a contact at the curve's end");
+        // main's contact (its sliver piece starts there)
+        let old = [11.999_998_753_534_49, 0.134_270_820_798_680_72];
+        let length = same_contact(&r, "trim0041", 3, old, new);
+        assert!(length <= 2e-6 && length < r.tol, "{length}");
+        let main: Vec<f64> = serde_json::from_str(MAIN_TRIM0041).unwrap();
+        // main's pieces: two lines, the sliver line over [old, 12], the B-spline
+        let sliver = main.get(40..58).unwrap();
+        assert_eq!(sliver.get(16..18).unwrap(), [old[0], 12.0]);
+        let mut want = main.get(..40).unwrap().to_vec();
+        want.extend_from_slice(main.get(58..).unwrap());
+        want[3] = 3.0;
+        assert_eq!(r.rec, want, "trim0041: only the sliver is gone");
+    }
+
+    /// trim0248, a four-segment line near a torus over `t in [-1, 9]`, tolerance 1e-3: main's
+    /// contacts at `t = -0.99999922` and `t = 8.99996856` (with two of the domain's boundary
+    /// curves) are now reported at the curve's ends. PROVEN, as for trim0041: each pair is one
+    /// contact (joined within the tolerance along the boundary curve), and each stretch between is
+    /// at most 1e-5 long (1% of the tolerance). At the start, main's sliver line over `[-1,
+    /// -0.99999922]` is gone (a touch of the boundary at the end, of no length at the tolerance).
+    /// At the end, main's B-spline over `[6.6164253, 8.99996856]` and its line over `[8.99996856,
+    /// 9]` are now one B-spline over `[6.6164253, 9]`. PROVEN: both B-splines are two cubic Bezier
+    /// segments on the same start, so at the same local parameter they differ by at most their
+    /// largest control point difference (the Bernstein basis is non-negative and sums to one),
+    /// main's line lies within its own extent of main's B-spline's end, and the surface's partials
+    /// are bounded over its whole net (`net_lipschitz`): every point of either row's curves is
+    /// within `delta` (2.33e-4, asserted below 2.5e-4) in 3D of a point of the other's, against the
+    /// tolerance 1e-3. The two lines between are main's, exactly. The header's largest drop and
+    /// deviation are sampled measures of the drop (not certified): 0.0217914 and 9.9117e-4, both
+    /// within 3e-8 of main's. Class: equal at tolerance.
+    #[test]
+    fn wr455_trim0248_end_contacts_are_one_contact() {
+        let r = replay("trim0248");
+        assert_eq!(r.tol, 1e-3);
+        assert_eq!(
+            r.breaks,
+            [
+                -1.0,
+                2.087_808_064_932_262_6,
+                2.087_809_487_222_057_4,
+                4.615_437_813_944_749,
+                6.616_389_580_735_179,
+                6.616_425_259_842_228,
+                9.0
+            ]
+        );
+        let start = contacts(&r, 3)
+            .into_iter()
+            .find(|c| c[0] == r.interval.min())
+            .expect("a contact at the curve's start");
+        let end = contacts(&r, 1)
+            .into_iter()
+            .find(|c| c[0] == r.interval.max())
+            .expect("a contact at the curve's end");
+        let old_start = [-0.999_999_220_322_209_2, 0.518_854_546_798_177_7];
+        let old_end = [8.999_968_557_309_979, 0.761_515_625_170_362_4];
+        for length in [
+            same_contact(&r, "trim0248 start", 3, old_start, start),
+            same_contact(&r, "trim0248 end", 1, old_end, end),
+        ] {
+            assert!(length <= 1e-5 && length < r.tol, "{length}");
+        }
+
+        let main: Vec<f64> = serde_json::from_str(MAIN_TRIM0248).unwrap();
+        // main: sliver line [-1, old_start], two lines, the end line [old_end, 9], B-spline
+        assert_eq!(main.get(16..18).unwrap(), [-1.0, old_start[0]]);
+        assert_eq!(main.get(74..76).unwrap(), [old_end[0], 9.0]);
+        assert_eq!(r.rec.get(..4).unwrap()[3], 3.0);
+        assert_eq!(r.rec.get(4..40).unwrap(), main.get(22..58).unwrap(), "the two lines");
+        for (now, was) in [(r.rec[1], main[1]), (r.rec[2], main[2])] {
+            assert!((now - was).abs() <= 3e-8, "{now} vs {was}");
+        }
+
+        // the B-splines: same start, two cubic segments each
+        let (new_pts, new_knots, _) = cubic_piece(&r.rec, 40);
+        let (old_pts, old_knots, _) = cubic_piece(&main, 76);
+        assert_eq!(new_knots.first(), old_knots.first());
+        assert_eq!(new_knots.last().copied(), Some(9.0));
+        assert_eq!(old_knots.last().copied(), Some(old_end[0]));
+        let (mut du, mut dv) = (0.0_f64, 0.0_f64);
+        for (p, q) in new_pts.iter().zip(&old_pts) {
+            du = du.max((p[0] - q[0]).abs());
+            dv = dv.max((p[1] - q[1]).abs());
+        }
+        // main's end line: from (a, y) to (b, y), against main's B-spline's end
+        let line = main.get(58..76).unwrap();
+        let (l0, l1) = ([line[3], line[4]], [line[7], line[8]]);
+        let s_end = *old_pts.last().unwrap();
+        let hu = du + (l1[0] - l0[0]).abs() + (l0[0] - s_end[0]).abs();
+        let hv = dv + (l1[1] - l0[1]).abs() + (l0[1] - s_end[1]).abs();
+        // each difference, sum and product rounds: gamma(8) covers the few of them
+        let (hu, hv) = (hu * (1.0 + gamma(8)), hv * (1.0 + gamma(8)));
+
+        // every UV point of either row lies in the box of these control points, which the
+        // net's domain holds, so the segment between two matched points does too
+        let SurfaceKind::SurfOfRevolution(rev) = r.surface.kind() else {
+            panic!("a surface of revolution");
+        };
+        let net = rev.base().gw_nurb().expect("the revolution's NURB");
+        let nat = r.surface.natural_uv_domain_with_nurb(&r.k).unwrap();
+        let (u_knots, v_knots) = (net.u_knots(), net.v_knots());
+        assert_eq!(
+            [nat.u_min(), nat.u_max(), nat.v_min(), nat.v_max()],
+            [
+                u_knots[net.p()],
+                u_knots[net.n() + 1],
+                v_knots[net.q()],
+                v_knots[net.m() + 1]
+            ],
+            "the surface's parameters are its net's"
+        );
+        for p in new_pts.iter().chain(&old_pts).chain([&l0, &l1]) {
+            assert!(
+                nat.u_min() <= p[0] && p[0] <= nat.u_max() && nat.v_min() <= p[1] && p[1] <= nat.v_max(),
+                "{p:?} outside the net"
+            );
+        }
+        let (lu, lv) = net_lipschitz(net);
+        let delta = (lu * hu + lv * hv) * (1.0 + gamma(4));
+        eprintln!(
+            "trim0248: UV within ({hu:e}, {hv:e}); |S_u| <= {lu:e}, |S_v| <= {lv:e}; 3D within {delta:e} (tol {})",
+            r.tol
+        );
+        assert!(delta <= 2.5e-4 && delta < r.tol, "{delta}");
+    }
+}

@@ -9,8 +9,11 @@
 //! lints, profiles, patches (made absolute) and external dependencies but none of its path
 //! dependencies except the copied shared crates and the vendored solidcore kernel's crates (under
 //! `solidcore/`, made absolute: shared crates may depend on solidcore, which is published on its
-//! own), and runs `cargo test --workspace` there with the repository's Cargo.lock. A dependency on
-//! any other workspace crate is then simply missing, so the build fails, which is the point.
+//! own), and runs `cargo test --profile ci -p <crate>` there with the repository's Cargo.lock. A
+//! dependency on any other workspace crate is then simply missing, so the build fails, which is
+//! the point. Only the crate itself is tested there, since each shared crate copied along with it
+//! is tested in a scratch workspace of its own, and with the `ci` profile, the one the rest of
+//! `cargo xtask ci` and GitHub CI build tests with.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -72,8 +75,8 @@ pub fn run(root: &Path) -> Result<(), String> {
             std::fs::copy(&lock, scratch.join("Cargo.lock")).map_err(|e| format!("{}: {e}", lock.display()))?;
         }
         let mut c = crate::cargo();
-        c.current_dir(&scratch).env("CARGO_TARGET_DIR", root.join(SCRATCH_TARGET)).args(["test", "--workspace"]);
-        crate::run(c, &format!("cargo test --workspace (shared crate {name} on its own: {})", members.join(", ")))
+        c.current_dir(&scratch).env("CARGO_TARGET_DIR", root.join(SCRATCH_TARGET)).args(["test", "--profile", "ci", "-p", name]);
+        crate::run(c, &format!("cargo test --profile ci -p {name} (shared crate {name} on its own: {})", members.join(", ")))
             .map_err(|e| format!("shared crate {name} does not build and test on its own: {e}"))?;
     }
     println!("shared: {} shared crate(s) build and test on their own", shared.len());
@@ -428,7 +431,8 @@ mod tests {
         assert!(deps.contains_key("serde") && !deps.contains_key("solidcraft-engine"));
         assert_eq!(path_of(&deps["solidcraft-ui-registry"]), Some("ui-registry"));
         let tess = path_of(&deps["solidcore-tess"]).unwrap();
-        assert!(Path::new(tess).is_absolute() && tess.ends_with("solidcore/crates/solidcore-tess"), "{tess}");
+        // By components: on Windows the path reads `\?\C:\...\solidcore\crates\solidcore-tess`.
+        assert!(Path::new(tess).is_absolute() && Path::new(tess).ends_with("solidcore/crates/solidcore-tess"), "{tess}");
         assert!(ws.contains_key("package") && ws.contains_key("lints") && m.contains_key("profile"));
         let winit = path_of(&m["patch"]["crates-io"]["winit"]).unwrap();
         assert!(Path::new(winit).is_absolute() && winit.ends_with("vendor/winit"));

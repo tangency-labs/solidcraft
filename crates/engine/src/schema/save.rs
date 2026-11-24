@@ -67,6 +67,13 @@ pub struct SaveParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -75,6 +82,15 @@ pub struct SaveParams {
     /// design's own file. Default: false.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
+    #[serde(default)]
+    pub sign: Option<bool>,
+    /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's
+    /// default signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<String>,
 }
 
 /// Write the design to a new file (a design file name, `.sc` as a rule) and make that file the
@@ -102,6 +118,13 @@ pub struct SaveAsParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -109,6 +132,27 @@ pub struct SaveAsParams {
     /// program or computer changed it. Default: false.
     #[serde(default)]
     pub overwrite: Option<bool>,
+    /// Sign the saved design with GnuPG, appending one record to its provenance. Default: false.
+    /// Accepted only from the app's own Save (the user chose the key); a script or agent is
+    /// refused.
+    #[serde(default)]
+    pub sign: Option<bool>,
+    /// The GnuPG key to sign with: a fingerprint or user id. Default, or a blank value: GnuPG's
+    /// default signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<String>,
+}
+
+/// What a signed save put in the file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SignedSave {
+    /// The signature scheme: `gpg` for an OpenPGP record made by GnuPG.
+    pub method: String,
+    /// The fingerprint of the (sub)key that signed, uppercase hex.
+    pub fingerprint: String,
+    /// The primary user id of the signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
 }
 
 /// What `file.save` and `file.save_as` return.
@@ -123,7 +167,11 @@ pub struct SaveResult {
     /// A file a newer SolidCraft saved: the format number it keeps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kept_format: Option<String>,
-    /// A newer file: what could not be kept, in sentences, when something could not.
+    /// A requested model cache was omitted and the next open will rebuild the design (#18815).
+    /// Absent when the cache was included, disabled, or the format does not support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_not_saved: Option<String>,
+    /// Save notices shown in the desktop app, including an omitted model cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
     /// A newer file: what could not be kept, one item each, when something could not.
@@ -132,6 +180,9 @@ pub struct SaveResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    /// With `sign: true`: who signed the file that was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignedSave>,
 }
 
 #[cfg(test)]

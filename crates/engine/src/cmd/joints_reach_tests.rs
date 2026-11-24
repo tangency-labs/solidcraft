@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use super::tests::{four_bar, meet, occ, part, pin, place, run};
+use super::tests::{cube_ring, four_bar, meet, occ, part, pin, place, run};
 use crate::Session;
 
 /// A planar arm about +Z on a grounded base: Shoulder at the origin, Upper 60 long, Elbow, Fore
@@ -125,6 +125,152 @@ fn out_of_reach_the_arm_points_at_the_target() {
     assert!(got(&r).dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6, "{r}");
 }
 
+/// A drag's frames settle where the full reach does, without working out what stopped it.
+#[test]
+fn drag_frames_settle_where_the_reach_does_and_leave_out_the_report() {
+    use solidcraft_doc::joints::{Reach, reach as full, reach_frame};
+    let mut s = arm(false, 10.0);
+    run(&mut s, "joint.limits", json!({"joint": "Elbow", "min": -30, "max": 30}));
+    let st = s.model.state();
+    let r = Reach { occurrence: occ(&s, "Fore"), point: Vec3::new(100.0, 0.0, 0.0), to: Vec3::new(50.0, 50.0, 0.0), axis: None, joints: None };
+    let told = full(&s.doc, &st, &r).unwrap();
+    assert!(!told.limits.is_empty(), "{told:?}");
+    let mut carry = solidcraft_doc::joints::FrameCarry::default();
+    let frame = reach_frame(&s.doc, &st, &r, &mut carry).unwrap();
+    assert!(frame.limits.is_empty() && frame.stopped_by_loop.is_none(), "{frame:?}");
+    let mut pose = (*s.doc).clone();
+    for _ in 0..30 {
+        super::reach_preview(&mut pose, &st, &r, &mut carry).unwrap();
+    }
+    let angle =
+        |doc: &solidcraft_doc::Document, joint: &str| doc.assembly.joints.iter().find(|j| j.name == joint).map_or(0.0, |j| j.values[0]).to_degrees();
+    let elbow = angle(&pose, "Elbow");
+    assert!((elbow - 30.0).abs() < 1e-3, "{elbow}");
+    // The whole pose, not the elbow alone: the frames end where the full reach puts the arm.
+    let mut full_pose = (*s.doc).clone();
+    for (id, q) in &told.values {
+        if let Some(j) = full_pose.assembly.joints.iter_mut().find(|j| j.id == *id) {
+            j.values.clone_from(q);
+        }
+    }
+    let (shown, reached) = (angle(&pose, "Shoulder"), angle(&full_pose, "Shoulder"));
+    assert!((shown - reached).abs() < 0.05, "the frames' shoulder {shown} against the reach's {reached}");
+}
+
+/// A lone hinge on a grounded base, its part reaching along +X, and the hinge's joint id.
+fn hinge() -> Session {
+    let mut s = Session::default();
+    part(&mut s, "Base", [-1.0, -1.0, -1.0]);
+    part(&mut s, "Upper", [30.0, -1.0, -1.0]);
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    pin(&mut s, "revolute", "Shoulder", "Base", "Upper", Vec3::ZERO, Vec3::Z);
+    s
+}
+
+/// A hinge dragged by a point near its axis with the pointer three times as far out follows the
+/// pointer frame by frame, and the release lands where the last frame showed it. Each frame's
+/// few damped tries used to start over from the least damping, which such a pose never steps
+/// with: the part stood still until it trailed the pointer by a whole capped step (5 degrees),
+/// then jumped.
+#[test]
+fn a_hinge_follows_a_pointer_far_from_its_axis_frame_by_frame() {
+    use solidcraft_doc::joints::{FrameCarry, Reach, reach as full};
+    let s = hinge();
+    let st = s.model.state();
+    let upper = occ(&s, "Upper");
+    let at = |degrees: f64| Reach {
+        occurrence: upper,
+        point: Vec3::new(20.0, 0.0, 0.0),
+        to: Vec3::new(60.0 * degrees.to_radians().cos(), 60.0 * degrees.to_radians().sin(), 0.0),
+        axis: None,
+        joints: None,
+    };
+    let angle = |doc: &solidcraft_doc::Document| doc.assembly.joints.iter().find(|j| j.name == "Shoulder").map_or(0.0, |j| j.values[0]).to_degrees();
+    let mut pose = (*s.doc).clone();
+    let mut carry = FrameCarry::default();
+    let (mut worst, mut before) = (0.0f64, pose.clone());
+    for k in 1..=45 {
+        before = pose.clone();
+        super::reach_preview(&mut pose, &st, &at(2.0 * f64::from(k)), &mut carry).unwrap();
+        // The first frames find the damping; from then on the part is under the pointer.
+        if k > 8 {
+            worst = worst.max((angle(&pose) - 2.0 * f64::from(k)).abs());
+        }
+    }
+    assert!(worst < 0.5, "the hinge trails the pointer by up to {worst} degrees");
+    // The release: the full reach from where the last frame started.
+    let told = full(&before, &st, &at(90.0)).unwrap();
+    let released = told.values.values().next().and_then(|q| q.first()).map_or(angle(&before), |q| q.to_degrees());
+    assert!((released - angle(&pose)).abs() < 0.5, "the release at {released} against the last frame at {}", angle(&pose));
+}
+
+/// Two sliders in series, the first limited to 0..300: a frame that pulls the first past its
+/// limit ends with it on the limit exactly, from wherever it started, and the second slider goes
+/// on following the pointer in the frames after. A value left a rounding short of its limit was
+/// not held there and left no room, which cut every later step of both to nothing.
+#[test]
+fn a_frame_cut_at_a_limit_ends_on_it_and_the_other_values_go_on() {
+    use solidcraft_doc::joints::{FrameCarry, Reach};
+    let mut s = Session::default();
+    part(&mut s, "Base", [-1.0, -1.0, -1.0]);
+    part(&mut s, "Cross", [-1.0, -1.0, 2.0]);
+    part(&mut s, "Table", [-1.0, -1.0, 5.0]);
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    pin(&mut s, "slider", "X", "Base", "Cross", Vec3::ZERO, Vec3::X);
+    pin(&mut s, "slider", "Y", "Cross", "Table", Vec3::ZERO, Vec3::Y);
+    run(&mut s, "joint.limits", json!({"joint": "X", "min": 0, "max": 300}));
+    let st = s.model.state();
+    let table = occ(&s, "Table");
+    let value = |doc: &solidcraft_doc::Document, joint: &str| doc.assembly.joints.iter().find(|j| j.name == joint).map_or(f64::NAN, |j| j.values[0]);
+    // Which way along X the slider's value falls toward its limit at 0: the way a reach to +10
+    // could not go.
+    let probe = Reach { occurrence: table, point: Vec3::ZERO, to: Vec3::new(10.0, 0.0, 0.0), axis: None, joints: None };
+    let rose = solidcraft_doc::joints::reach(&s.doc, &st, &probe).is_ok_and(|told| told.values.values().any(|q| q.first().is_some_and(|v| *v > 5.0)));
+    let toward_zero = if rose { -1.0 } else { 1.0 };
+    let (mut short, mut frozen) = (Vec::new(), Vec::new());
+    for k in 0..200u32 {
+        // X starts somewhere in its travel, each run elsewhere.
+        let start = 0.37 + 1.61 * f64::from(k);
+        let mut pose = (*s.doc).clone();
+        if let Some(j) = pose.assembly.joints.iter_mut().find(|j| j.name == "X") {
+            j.values = vec![start];
+        }
+        let mut carry = FrameCarry::default();
+        // Pulled past X's limit at 0 while Y goes to 40, then on to 80, a dozen frames each.
+        for frame in 0..24 {
+            let y = if frame < 12 { 40.0 } else { 80.0 };
+            let to = Vec3::new(toward_zero * (25.0 + 0.01 * f64::from(k)), y, 0.0);
+            let r = Reach { occurrence: table, point: Vec3::ZERO, to, axis: None, joints: None };
+            super::reach_preview(&mut pose, &st, &r, &mut carry).unwrap();
+        }
+        if value(&pose, "X") != 0.0 {
+            short.push((start, value(&pose, "X")));
+        }
+        if (value(&pose, "Y").abs() - 80.0).abs() > 1e-3 {
+            frozen.push((start, value(&pose, "Y")));
+        }
+    }
+    assert!(short.is_empty(), "X left off its limit (its start, where it ended): {short:?}");
+    assert!(frozen.is_empty(), "Y stopped following the pointer (X's start, where Y ended): {frozen:?}");
+}
+
+/// `from` with contact sets on is refused, and the design is left as it was: the jump to `from`
+/// would not be checked for parts passing into each other.
+#[test]
+fn a_reach_from_given_values_is_refused_with_contact_sets_on() {
+    let mut s = hinge();
+    let hinge = s.doc.assembly.joints.iter().find(|j| j.name == "Shoulder").map(|j| j.id).expect("the hinge");
+    run(&mut s, "contact.enable_sets", json!({"enabled": true}));
+    let doc = s.doc.clone();
+    let upper = occ(&s, "Upper");
+    let r = s.execute("joint.reach", &json!({"occurrence": upper, "point": [0, 60, 0], "from": [{"joint": hinge, "values": [0.5]}]}));
+    let error = r.expect_err("refused").to_string();
+    assert!(error.contains("contact sets"), "{error}");
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "the design is unchanged");
+}
+
 #[test]
 fn a_limited_elbow_stops_the_reach_and_says_so() {
     let tip = Vec3::new(100.0, 0.0, 0.0);
@@ -144,6 +290,33 @@ fn a_limited_elbow_stops_the_reach_and_says_so() {
     let span = (60f64.powi(2) + 40f64.powi(2) + 2.0 * 60.0 * 40.0 * 30f64.to_radians().cos()).sqrt();
     assert!(r["error_mm"].as_f64().is_some_and(|e| (e - (100.0 - span)).abs() < 1e-4), "{r}");
     assert!((value(&mut s, "Elbow") - 30.0).abs() < 1e-12, "{r}");
+}
+
+/// #19760: the folding cube toy (`cube_ring`) with one pin of hinge 8 taken out, a plate dragged
+/// past where its pins' limits let it go. Each step pushed the pins at their limits and was cut
+/// back to them, so the reach crept along a limit in steps that each gained a little, until its
+/// work ran out: about half a second for every frame of a drag. Solved with those pins held at
+/// their limits, it settles in a few steps where the limits leave it closest, and reaching again
+/// for the same point gets no closer.
+#[test]
+fn a_reach_held_at_a_limit_settles_quickly() {
+    let mut s = cube_ring(&[30, 31]);
+    let plate = occ(&s, "H4");
+    let at = Vec3::new(-36.672, -2.706, 14.855);
+    for k in [1.0, 2.0] {
+        let to = Vec3::new(at.x, at.y + 2.0 * k, at.z + 1.5 * k);
+        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None };
+        let st = s.model.state();
+        let first = solidcraft_doc::joints::reach(&s.doc, &st, &ask).unwrap_or_default();
+        // A tenth of the 200 000 placements one solve may spend; the crawl spent all of them.
+        assert!(first.work < 20_000, "frame {k}: {} placements", first.work);
+        let r = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let miss = r["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert_eq!(r["reached"], false, "frame {k}: {r}");
+        let again = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let closer = miss - again["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert!(closer < 1e-6, "frame {k}: a second reach got {closer} mm closer: {r} then {again}");
+    }
 }
 
 /// A linked elbow (elbow = −shoulder, so the forearm keeps pointing along +X) follows the
@@ -338,6 +511,13 @@ fn reach_refuses_bad_params_and_says_why_nothing_moves() {
         json!({"occurrence": "Fore", "point": [0, 0, 0], "joints": "Elbow"}),
         json!({"occurrence": "Fore", "point": [0, 0, 0], "joints": ["Nope"]}),
         json!({"occurrence": "Fore", "point": [0, 0, 0], "at": [f64::MAX, 0, 0]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": {"joint": "Elbow", "values": [10]}}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Nope", "values": [10]}]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": [10, 20]}]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": ["x"]}]}),
+        // A value that is no number beside one that is: not passed over to leave the number that fits.
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": [10, "x"]}]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": [1e9]}]}),
     ] {
         assert!(s.execute("joint.reach", &bad).is_err(), "{bad}");
     }
@@ -385,6 +565,108 @@ fn reach_preserves_full_diagnostics_without_repeating_dof_analysis() {
         for part in ["Crank", "Coupler", "Rocker"] {
             assert_eq!(full.dof.get(&occ(&s, part)), Some(&1), "{command}: {part}");
         }
+    }
+}
+
+/// A joint drag frame (a quiet, continuous reach) solves the joints once and does not walk every
+/// feature again to pin body names: the refresh after it keeps the reach's own solve, and the
+/// pinning pass finds the features and the model as it left them (#6325). A body made after the
+/// frames is still pinned, and so is a renamed one.
+#[test]
+fn reach_frames_solve_once_and_skip_body_name_pinning() {
+    let (mut s, _, q0) = four_bar();
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let passes = s.body_name_passes;
+    for angle in [-4.0_f64, -8.0, -12.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let evaluations = s.evaluations;
+        super::solve_counts::take();
+        let r = reach(&mut s, "Rocker", q0, json!({"point":pt(to), "continuous":true, "quiet":true}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
+        assert_eq!(s.evaluations, evaluations, "a placement change keeps the model");
+        assert_eq!(super::solve_counts::take(), (1, 0), "the refresh keeps the reach's solve");
+        assert_eq!(s.body_name_passes, passes, "nothing new to pin");
+        // The kept solve is the one a fresh solve gives.
+        let full = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        let mut next = (*s.doc).clone();
+        next.apply_joint_solution(&full);
+        for part in ["Crank", "Coupler", "Rocker"] {
+            let at = |d: &solidcraft_doc::Document| solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(d, occ(&s, part)), q0);
+            assert!(at(&s.doc).dist(at(&next)) < 1e-9, "{angle}°: {part} is where a new solve puts it");
+        }
+    }
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0], "name": "Late"}));
+    assert_eq!(s.body_name_passes, passes + 1);
+    let late = s.doc.find_feature("Late").map(|f| f.body_names.clone()).unwrap_or_default();
+    assert_eq!(late.len(), 1, "the new body's name is pinned: {late:?}");
+    assert!(s.doc.reserved_body_names.contains(&late[0]), "{late:?}");
+    run(&mut s, "body.rename", json!({"body": late[0].clone(), "name": "Renamed"}));
+    assert_eq!(s.doc.find_feature("Late").map(|f| f.body_names.clone()), Some(vec!["Renamed".to_string()]));
+    assert!(s.model.state().body("Renamed").is_some());
+}
+
+/// A drag's frame that jumps past a limit on a closed loop ends on the limit, not short of it:
+/// the part must show how far it goes while it is held.
+#[test]
+fn a_drag_frame_past_a_limit_on_a_closed_loop_ends_on_the_limit() {
+    let (mut s, _, q0) = four_bar();
+    run(&mut s, "joint.limits", json!({"joint": "Rocker", "min": -12, "max": 12}));
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let rocker = occ(&s, "Rocker");
+    let local = solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, rocker)).unwrap(), q0);
+    let st = s.model.state();
+    let mut pose = (*s.doc).clone();
+    let mut carry = solidcraft_doc::joints::FrameCarry::default();
+    for angle in [-6.0_f64, -40.0, -40.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        assert!(super::reach_preview(&mut pose, &st, &r, &mut carry).is_ok());
+    }
+    let value = pose.assembly.joints.iter().find(|j| j.name == "Rocker").map_or(0.0, |j| j.values[0]).to_degrees();
+    assert!((value.abs() - 12.0).abs() < 1e-3, "{value}");
+}
+
+/// #6325: a joint drag's frames reach on a copy of the design (`reach_preview`), and its release
+/// applies the last one as `joint.reach` from the values that frame started from: the design
+/// ends where the frames showed it, closed loop and all, in one undo step.
+#[test]
+fn a_reach_from_the_last_frames_start_ends_where_the_frames_showed() {
+    let (mut s, _, q0) = four_bar();
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let design = s.doc.clone();
+    let rocker = occ(&s, "Rocker");
+    let local = solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, rocker)).unwrap(), q0);
+    let mut pose = (*s.doc).clone();
+    let mut carry = solidcraft_doc::joints::FrameCarry::default();
+    let mut last = None;
+    for angle in [-6.0_f64, -12.0, -18.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let before = pose.assembly.joints.iter().map(|j| (j.id, j.values.clone())).collect();
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        assert!(super::reach_preview(&mut pose, &s.model.state(), &r, &mut carry).is_ok());
+        last = Some((before, to));
+    }
+    assert!(std::sync::Arc::ptr_eq(&design, &s.doc), "frames leave the design alone");
+    let (before, to) = last.unwrap();
+    let from = super::reach_from(&s.doc, &before);
+    assert!(from.as_array().is_some_and(|f| !f.is_empty()), "{from}");
+    let steps = s.undo.len();
+    let r = reach(&mut s, "Rocker", q0, json!({"point": pt(to), "quiet": true, "continuous": true, "from": from}));
+    assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
+    assert_eq!(s.undo.len(), steps + 1);
+    for part in ["Crank", "Coupler", "Rocker"] {
+        let at = |d: &solidcraft_doc::Document| solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(d, occ(&s, part)), q0);
+        assert!(at(&s.doc).dist(at(&pose)) < 1e-6, "{part}: {:?} vs the frame's {:?}", at(&s.doc), at(&pose));
+    }
+    for j in &s.doc.assembly.joints {
+        let shown = pose.assembly.joints.iter().find(|k| k.id == j.id).map(|k| k.values.clone()).unwrap_or_default();
+        assert!(j.values.iter().zip(&shown).all(|(a, b)| (a - b).abs() < 1e-6), "{}: {:?} vs {shown:?}", j.name, j.values);
     }
 }
 
@@ -475,4 +757,12 @@ fn a_reach_stops_where_a_contact_set_touches() {
     assert!(r["stopped_by_limit"].is_array(), "{r}");
     let x = place(&s, "B", near_face).x;
     assert!(x.abs() < 1e-6, "B's face at x = {x}, not at the limit, 0");
+}
+
+#[test]
+fn body_centre_uses_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let c = super::body_centre(&s, 0);
+    assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
 }

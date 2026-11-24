@@ -13,7 +13,6 @@ use solidcore::curve::composite_curve::OffsetCornerType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::{Result, SolidError};
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{
@@ -84,6 +83,7 @@ fn options(f: &[f64]) -> SweepOptions {
         orient_profile_perpendicular_to_path: f[3] != 0.,
         move_to_profile: f[4] != 0.,
         profile_at_path_start: false,
+        up: None,
     }
 }
 
@@ -148,7 +148,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
     let mut ends = Vec::new();
     let mut extra = Vec::new();
     if i.op == 9 {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut model = PrimitiveModel::new(&mut k, fixture_brep(false)?);
         let profile_count = d[4] as usize;
         let profiles = curves(&d[6..6 + 7 * profile_count])?;
@@ -182,7 +182,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
             f64::from(result.is_ok()),
         ]);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.)?);
     let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
     let result = match i.op {
@@ -508,5 +508,212 @@ impl UnitDiff for Runner {
             data,
         })
         .ok()
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the rows whose success became a refusal. On main every one
+/// of them except the bowtie built nothing (no face in the B-rep) and returned success;
+/// the bowtie built one open face. Each row is refused for a closed-form reason:
+/// - `Small`: a cone, sphere or pipe whose sizes are all within the B-rep's tolerance of
+///   zero (radius, or radius and height), so every face it would have is degenerate;
+/// - `NoArea`: a taper profile of zero signed area: its lines all lie on one line (a line
+///   and its reverse, or a "triangle" whose corners are collinear), or it is the bowtie,
+///   whose two lobes cancel and which crosses itself. Such a profile bounds no region, so
+///   it has no caps and the taper no solid;
+/// - `Open`: a taper profile that does not close, so it has no caps;
+/// - `WasRefused`: main refused it too (status to status).
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use solidcore::kernel::Kernel;
+
+    /// Why no requested body exists for the row.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Reason {
+        /// Every size of the cone, sphere or pipe is within the B-rep's tolerance of zero.
+        Small,
+        /// The taper profile is closed and its signed area is exactly zero with no two
+        /// lines crossing: its lines run back over each other, so it encloses nothing.
+        NoArea,
+        /// Two lines of the taper profile that do not share an end cross at a point
+        /// inside both: the loop is not simple, so no cap face has it as its boundary,
+        /// and its two lobes meet at that one point, so no closed capped solid exists.
+        SelfCrossing,
+        /// The taper profile does not close.
+        Open,
+        /// Main refused the row too; only the status differs.
+        WasRefused,
+    }
+
+    /// The parameters along `a` and `b` (2D segments `[x0, y0, x1, y1]`) where they cross,
+    /// if they are not parallel.
+    fn crossing(a: [f64; 4], b: [f64; 4]) -> Option<(f64, f64)> {
+        let (dx, dy) = (a[2] - a[0], a[3] - a[1]);
+        let (ex, ey) = (b[2] - b[0], b[3] - b[1]);
+        let det = dx * ey - dy * ex;
+        if det == 0.0 {
+            return None;
+        }
+        let (fx, fy) = (b[0] - a[0], b[1] - a[1]);
+        Some(((fx * ey - fy * ex) / det, (fx * dy - fy * dx) / det))
+    }
+
+    /// The row's primitive call as [`entry`] makes it, with its typed result and the
+    /// number of faces in the B-rep afterwards.
+    fn run(i: &Inputs) -> (Result<()>, usize, f64) {
+        let d = &i.data;
+        let b = BrepId::from_index(0);
+        let mut k = Kernel::default();
+        let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.).unwrap());
+        let tolerance = model.brep(b).unwrap().tolerance();
+        let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
+        let (mut starts, mut sides, mut ends) = (Vec::new(), Vec::new(), Vec::new());
+        let result = match i.op {
+            1 => primitive.create_partial_cone(
+                &mut model,
+                b,
+                d[1],
+                d[2],
+                d[3],
+                d[4],
+                d[5],
+                &frame(&d[6..15]),
+            ),
+            2 => primitive.create_partial_sphere(&mut model, b, d[1], d[2], d[3], &frame(&d[4..13])),
+            7 => primitive.create_pipe_sweep(
+                &mut model,
+                b,
+                d[1],
+                &curve(&d[5..12]).unwrap(),
+                d[2],
+                d[3] != 0.,
+                d[4] != 0.,
+                &mut starts,
+                &mut sides,
+                &mut ends,
+            ),
+            8 => {
+                let corner = match d[7] as i64 {
+                    0 => OffsetCornerType::LinearExtension,
+                    1 => OffsetCornerType::FilletCorner,
+                    _ => OffsetCornerType::LinearChamfer,
+                };
+                primitive.create_taper_extrude(
+                    &mut model,
+                    b,
+                    curves(&d[8..]).unwrap(),
+                    d[1],
+                    d[2],
+                    d[3] as i32,
+                    &mut Vec3::new(d[4], d[5], d[6]),
+                    corner,
+                )
+            }
+            op => panic!("{op}"),
+        };
+        let faces = solidcore::topology::brep::p1::faces(model.brep(b).unwrap(), None)
+            .unwrap()
+            .len();
+        (result, faces, tolerance)
+    }
+
+    /// The taper profile's line ends in the XY plane, in order.
+    fn ends(d: &[f64]) -> Vec<[f64; 4]> {
+        d[8..]
+            .as_chunks::<7>()
+            .0
+            .iter()
+            .map(|c| {
+                assert_eq!(c[0], 0.0, "lines only");
+                assert_eq!((c[3], c[6]), (0.0, 0.0), "in the XY plane");
+                [c[1], c[2], c[4], c[5]]
+            })
+            .collect()
+    }
+
+    fn reason(i: &Inputs, tolerance: f64) -> Reason {
+        let d = &i.data;
+        match i.op {
+            1 => {
+                assert!([d[1], d[2], d[3]].iter().all(|s| s.abs() <= tolerance));
+                Reason::Small
+            }
+            2 => {
+                assert!(d[1].abs() <= tolerance);
+                Reason::Small
+            }
+            7 => {
+                assert!(d[1].abs() <= tolerance, "radius");
+                Reason::Small
+            }
+            8 => {
+                let lines = ends(d);
+                let closed = lines.windows(2).all(|w| w[0][2] == w[1][0] && w[0][3] == w[1][1])
+                    && lines.last().unwrap()[2..] == lines.first().unwrap()[..2];
+                if !closed {
+                    return Reason::Open;
+                }
+                let n = lines.len();
+                for (x, &a) in lines.iter().enumerate() {
+                    for (y, &b) in lines.iter().enumerate().skip(x + 2) {
+                        if x == 0 && y == n - 1 {
+                            continue; // the closing pair shares the loop's start
+                        }
+                        if let Some((t, u)) = crossing(a, b) {
+                            if t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0 {
+                                return Reason::SelfCrossing;
+                            }
+                        }
+                    }
+                }
+                let area: f64 = lines.iter().map(|l| l[0] * l[3] - l[2] * l[1]).sum();
+                assert_eq!(area, 0.0, "a profile with area");
+                Reason::NoArea
+            }
+            op => panic!("{op}"),
+        }
+    }
+
+    /// (row, reason)
+    const ROWS: [(&str, Reason); 21] = [
+        ("gen0027", Reason::Small),
+        ("gen0041", Reason::WasRefused),
+        ("gen0046", Reason::Small),
+        ("gen0082", Reason::NoArea),
+        ("gen0105", Reason::Small),
+        ("gen0112", Reason::NoArea),
+        ("gen0119", Reason::NoArea),
+        ("gen0123", Reason::Small),
+        ("gen0134", Reason::NoArea),
+        ("gen0135", Reason::Small),
+        ("gen0158", Reason::WasRefused),
+        ("gen0175", Reason::Small),
+        ("gen0216", Reason::NoArea),
+        ("gen0230", Reason::Small),
+        ("gen0235", Reason::NoArea),
+        ("line_back_2_5e-5_off_the_last_mid_start_cap", Reason::NoArea),
+        ("review3_start_cap_bowtie", Reason::SelfCrossing),
+        ("ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing", Reason::NoArea),
+        ("ub50_taper_line_and_its_reverse", Reason::NoArea),
+        ("ub50_taper_line_back_through_the_last_mid", Reason::NoArea),
+        ("ub50_taper_two_identical_lines", Reason::Open),
+    ];
+
+    #[test]
+    fn each_moved_row_is_refused_for_its_reason() {
+        for (name, expected) in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (result, faces, tolerance) = run(&i);
+            result.expect_err(name);
+            if expected != Reason::WasRefused {
+                let found = reason(&i, tolerance);
+                assert_eq!(found, expected, "{name}: reason");
+            }
+            // Main built nothing for every row but the bowtie. There it returned one face
+            // (10 edges, level-2 clean, not a manifold solid): not the capped solid asked
+            // for, which cannot exist on a self-crossing loop. The refusal leaves no face.
+            assert_eq!(faces, 0, "{name}: the refusal leaves no face");
+        }
     }
 }

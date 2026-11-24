@@ -48,6 +48,7 @@ use super::section::{
 };
 use super::series::Trunc;
 use super::station::{as_b_spline, GnStation, Nurbs, STATION_STEP};
+use crate::error::blend::{BlendFailure, SectionInput, SectionLimit, SectionProof};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -122,10 +123,15 @@ fn sub_curve(pts: &[Hpt], lo: f64, hi: f64) -> Vec<Hpt> {
 /// recurrence `e_(k+1) <= Lambda e_k + gamma_4 Lambda^(k+1) M` the d steps are within
 /// `d gamma_4 Lambda^d M`.
 fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
-    let d = pts
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let d = pts.len().checked_sub(1).ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "a Bezier curve to re-express has no control point: the net's pieces \
+                          are cubic along s, of the section's width across",
+            },
+        )
+    })?;
     let mut out = Vec::new();
     for i in 0..=d {
         let mut level: Vec<Hpt> = pts.to_vec();
@@ -141,12 +147,15 @@ fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
                 })
                 .collect();
         }
-        out.push(
-            level
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?,
-        );
+        out.push(level.first().copied().ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "de Casteljau's steps left no point: d steps from d + 1 \
+                                  points leave one",
+                },
+            )
+        })?);
     }
     let size = pts
         .iter()
@@ -154,7 +163,15 @@ fn extrapolate_curve(pts: &[Hpt], lo: f64, hi: f64) -> Result<(Vec<Hpt>, f64)> {
     let lambda = [lo, hi]
         .iter()
         .fold(1.0_f64, |m, &tau| m.max((1.0 - tau).abs() + tau.abs()));
-    let exp = i32::try_from(d).map_err(|_| SolidError::sm_err(OP))?;
+    let exp = i32::try_from(d).map_err(|_| {
+        SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "a Bezier piece's degree does not fit an exponent: the net's pieces are \
+                      of the section's degree, a few",
+            },
+        )
+    })?;
     #[allow(clippy::cast_precision_loss)]
     let err = d as f64 * gamma(4) * lambda.powi(exp) * size;
     if err.is_finite() {
@@ -298,7 +315,12 @@ pub fn precision_floor(
     let g = w_hi / w_lo;
     let mut d = 0.0_f64;
     for s in supports {
-        let b = as_b_spline(k, s)?.ok_or_else(|| SolidError::sm_err(OP))?;
+        let b = as_b_spline(k, s)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionUnsupported(SectionLimit::FaceNotNurbs),
+            )
+        })?;
         let nf = Nurbs::of(&b)?;
         let (lu, lv) = derivative_bounds(&nf);
         let reach = |kv: &[f64]| kv.iter().fold(0.0_f64, |a, &x| a.max(x.abs()));
@@ -313,7 +335,10 @@ pub fn precision_floor(
     if floor.is_finite() {
         Ok(floor)
     } else {
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::BoundFinite),
+        ))
     }
 }
 
@@ -416,7 +441,13 @@ pub(crate) fn stored_net_distance(
 ) -> Result<f64> {
     let (nu, nv, stored) = net.control_points()?;
     if nv != ld || nu != 3 * spans.len() + 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "the net is not its spans' size: it is built from those spans, three \
+                      rows each and one more, of the section's width",
+            },
+        ));
     }
     let mut d = 0.0_f64;
     for (k, (h, w)) in spans.iter().enumerate() {
@@ -443,7 +474,14 @@ pub(crate) fn stored_net_distance(
 fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
     let not_its = || SolidError::invalid_input(OP, "the net is not of its definition's degrees");
     let d = pb.definition();
-    let nurb = pb.net().gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = pb.net().gw_nurb().ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "the definition's net has no NURBS data: a B-spline surface holds it",
+            },
+        )
+    })?;
     let patches = decompose_to_bez(nurb)?;
     let mut out = Vec::new();
     for row in &patches {
@@ -460,7 +498,13 @@ fn pieces(pb: &ProceduralBlend, ld: usize) -> Result<Vec<Piece>> {
                 patch.v_knots().first(),
                 patch.v_knots().last(),
             ) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "a Bezier patch of the net has no knots: each is split with its \
+                              own range",
+                    },
+                ));
             };
             let (ps, pt) = if d.swapped {
                 ([v0, v1], [u0, u1])
@@ -533,18 +577,55 @@ pub fn recertify_with_thumbweight(
     crate::profile::profile_scope!(k, "blend::certificate::recertify");
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
-    recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)
+    recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)?.ok_or_else(|| {
+        SolidError::invalid_input(OP, "the net is not within its bound of its definition")
+    })
+}
+
+/// The bound of a blend whose net was edited after it was built (#17015: a fillet's join
+/// at a corner sets an end row of it to its neighbour's), proved as [`recertify`] proves
+/// a net, against `ceiling` in place of its old bound: the largest over its spans of the
+/// certificate, the net's distance from its rows and the floor, plus two floors more, as
+/// `Build` stores its bound (rows computed again are within two floors of these). A later
+/// [`recertify`] against it takes each span's certificate no further than this one did,
+/// so it proves it again.
+///
+/// `None` where the edited net is not proved within `ceiling` of its definition.
+///
+/// # Errors
+///
+/// Those of [`recertify`] other than a net not proved within its bound (a net that is not
+/// one of its definition's stations, the station solves, the certificate); `InvalidInput`
+/// for a bound that is not finite.
+pub(crate) fn rebound(k: &Kernel, pb: &ProceduralBlend, ceiling: f64) -> Result<Option<f64>> {
+    let centre = frame_centre(pb.net())?;
+    let local = pb.translated(k, centre * -1.0)?;
+    let Some((achieved, _)) = recertify_in_frame(k, &local, ceiling, frame_rounding(pb.net())?)?
+    else {
+        return Ok(None);
+    };
+    let floor = precision_floor(k, local.supports(), local.definition().order, local.net())?;
+    let bound = achieved + 2.0 * floor;
+    if bound.is_finite() {
+        Ok(Some(bound))
+    } else {
+        Err(SolidError::invalid_input(
+            OP,
+            "the edited net's bound is not finite",
+        ))
+    }
 }
 
 /// [`recertify_with_thumbweight`] of a blend already in its own frame, against `bound`,
 /// its net's distance from its rows taken as at least `shift` more.
+/// `None` where the net is not proved within `bound`.
 #[allow(clippy::too_many_lines)]
 fn recertify_in_frame(
     k: &Kernel,
     pb: &ProceduralBlend,
     bound: f64,
     shift: f64,
-) -> Result<(f64, Option<[f64; 2]>)> {
+) -> Result<Option<(f64, Option<[f64; 2]>)>> {
     let d = pb.definition();
     let n = d.order as usize;
     let equal_area = n >= 2 && d.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
@@ -610,7 +691,13 @@ fn recertify_in_frame(
             .position(|w| matches!(w, [a, b] if *a <= mid && mid <= *b))
             .ok_or_else(|| SolidError::invalid_input(OP, "a piece of the net is past its seeds"))?;
         let (Some(&a), Some(&b)) = (sigma.get(span), sigma.get(span + 1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a piece's span has no station at an end: the span is the position of \
+                          a pair of stations",
+                },
+            ));
         };
         let room_s = |x: f64| map_rounding(d.map_a[0], d.map_b[0], (x - d.map_a[0]) / d.map_b[0]);
         let along = piece.s[0] >= a - room_s(a) && piece.s[1] <= b + room_s(b);
@@ -652,7 +739,13 @@ fn recertify_in_frame(
     for span in spans {
         k.check_cancelled(OP)?;
         let (Some(Some(a)), Some(Some(b))) = (stations.get(span), stations.get(span + 1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a span's station is not solved: the stations at both ends of every \
+                          piece's span are marked needed and solved",
+                },
+            ));
         };
         // a foot crossing a face's knot line inside the span: the construction puts a
         // station there, so this net is not its
@@ -770,10 +863,7 @@ fn recertify_in_frame(
             target = target.min(bound - delta_out.unwrap_or(0.0) - floor);
         }
         if target.partial_cmp(&0.0) != Some(Ordering::Greater) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "the net is not within its bound of its definition",
-            ));
+            return Ok(None);
         }
         // to the target: the bound was proved before, and the levels' halving guess must
         // not stop this run a level short of it where its rounding differs from that run's
@@ -820,15 +910,15 @@ fn recertify_in_frame(
             total.partial_cmp(&bound),
             Some(Ordering::Less | Ordering::Equal)
         ) {
-            return Err(SolidError::invalid_input(
-                OP,
-                "the net is not within its bound of its definition",
-            ));
+            return Ok(None);
         }
         achieved = achieved.max(total);
     }
     let [lo, hi] = vary.w;
-    Ok((achieved, (equal_area && lo <= hi).then_some([lo, hi])))
+    Ok(Some((
+        achieved,
+        (equal_area && lo <= hi).then_some([lo, hi]),
+    )))
 }
 
 /// The growth, past the section's `[0, 1]` over `ext`, of a distance from the continued
@@ -908,7 +998,14 @@ fn definition_stations(
             let right = sd.evaluate(s, 1, false, false)?;
             let left = sd.evaluate(s, 1, true, false)?;
             let (Some(dr), Some(dl)) = (right.get(1), left.get(1)) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "a seed's evaluation to first order returned no derivative: a \
+                              B-spline curve's evaluation returns every order up to the one \
+                              asked",
+                    },
+                ));
             };
             for (c, (x, (r1, l1))) in [(p.x, (dr.x, dl.x)), (p.y, (dr.y, dl.y))]
                 .into_iter()
@@ -1013,7 +1110,15 @@ pub(crate) fn span_of_definition(
     target: f64,
 ) -> Result<DefinitionSpan> {
     let (_, mut spans, certified, ld, stations) = spans_of_definition(k, pb, target, Some(first))?;
-    let (homog, weights) = spans.pop().ok_or_else(|| SolidError::sm_err(OP))?;
+    let (homog, weights) = spans.pop().ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "the definition's span has no rows: its two stations were solved, so \
+                      their span was built",
+            },
+        )
+    })?;
     Ok(DefinitionSpan {
         homog,
         weights,
@@ -1093,17 +1198,19 @@ fn spans_of_definition(
         .collect();
     let stations = definition_stations(k, &system, [seed0, seed1], &sigma, &needed)?;
     let solved: Vec<GnStation> = stations.into_iter().flatten().collect();
-    if solved.len() != needed.iter().filter(|&&x| x).count() || solved.len() < 2 {
-        return Err(SolidError::sm_err(OP));
+    // (every needed station is solved, or the solve's error is returned: fewer than two
+    // only where the span asked for starts at the last station)
+    if solved.len() < 2 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionInputInvalid(SectionInput::SpanPastLastStation),
+        ));
     }
     let mut vary = varying(n, r, &solved, equal_area);
     let mut spans = Vec::new();
     let mut certified = 0.0_f64;
-    for pair in solved.windows(2) {
+    for (a, b) in solved.iter().zip(solved.iter().skip(1)) {
         k.check_cancelled(OP)?;
-        let [a, b] = pair else {
-            return Err(SolidError::sm_err(OP));
-        };
         refuse_knot_crossing([&n0, &n1], a, b)?;
         let (ra, rb) = (net_form.station_rows(a)?, net_form.station_rows(b)?);
         spans.push(net_form.span(a, &ra, b, &rb));

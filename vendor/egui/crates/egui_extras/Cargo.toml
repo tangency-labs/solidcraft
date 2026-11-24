@@ -1,0 +1,113 @@
+[package]
+name = "egui_extras"
+version.workspace = true
+authors = [
+  "Dominik Rössler <dominik@freshx.de>",
+  "Emil Ernerfeldt <emil.ernerfeldt@gmail.com>",
+  "René Rössler <rene@freshx.de>",
+]
+description = "Extra functionality and widgets for the egui GUI library"
+edition.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/emilk/egui"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/emilk/egui"
+categories = ["gui", "game-development"]
+keywords = ["gui", "imgui", "immediate", "portable", "gamedev"]
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--generate-link-to-definition"]
+
+[lib]
+
+
+[features]
+default = ["dep:mime_guess2"]
+
+## Shorthand for enabling all the different types of image loaders.
+all_loaders = ["file", "http", "image", "svg", "gif", "webp"]
+
+## Enable [`DatePickerButton`] widget.
+datepicker = ["jiff"]
+
+## Add support for loading images from `file://` URIs.
+file = ["dep:mime_guess2"]
+
+## Support loading gif images.
+gif = ["image", "image/gif"]
+
+## Support loading webp images.
+webp = ["image", "image/webp"]
+
+## Add support for loading images via HTTP.
+http = ["dep:ehttp"]
+
+## Add support for loading images with the [`image`](https://docs.rs/image) crate.
+##
+## You also need to ALSO opt-in to the image formats you want to support, like so:
+## ```toml
+## image = { version = "0.25", features = ["jpeg", "png"] } # Add the types you want support for
+## ```
+image = ["dep:image"]
+
+## Derive serde Serialize/Deserialize on stateful structs
+serde = ["egui/serde", "enum-map/serde", "dep:serde"]
+
+## Support loading svg images.
+svg = ["resvg"]
+
+## Support rendering text in svg images.
+svg_text = ["svg", "resvg/text", "resvg/system-fonts"]
+
+## Support rendering inline raster images in svg images.
+svg_images = ["svg", "resvg/raster-images"]
+
+## Enable better syntax highlighting using [`syntect`](https://docs.rs/syntect).
+syntect = ["dep:syntect"]
+
+
+[dependencies]
+egui = { workspace = true, default-features = false }
+
+ahash.workspace = true
+enum-map.workspace = true
+itertools.workspace = true
+log.workspace = true
+profiling.workspace = true
+
+#! ### Optional dependencies
+
+# Serde for serializing state
+serde = { workspace = true, optional = true }
+
+# Date operations needed for datepicker widget
+jiff = { workspace = true, optional = true, features = ["std", "tz-system", "js"] }
+
+## Enable this when generating docs.
+document-features = { workspace = true, optional = true }
+
+image = { workspace = true, optional = true }
+
+# file feature
+mime_guess2 = { workspace = true, optional = true }
+
+# syntax highlighting
+syntect = { workspace = true, optional = true, features = ["default-fancy"] }
+
+# svg feature
+resvg = { workspace = true, optional = true }
+
+# http feature
+ehttp = { workspace = true, optional = true }
+
+[dev-dependencies]
+egui = { workspace = true, features = ["default_fonts"] }
+# Can't use a workspace dependency here since that adds a cyclic dep during publish
+egui_kittest = { path = "../egui_kittest", features = ["snapshot", "wgpu"] }
+tempfile.workspace = true

@@ -188,8 +188,16 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 base = base.into_iter().zip(new_n).map(|(o, n)| o - n * projection).collect();
             }
             let flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
-            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":format!("{} mm",if id=="offset"{scalar(value)?}else{old_offset}),
-                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}}))
+            // The plane at its offset along the normal shown, and the plane it moves of several:
+            // the one shown, the first on show.
+            let offset = if id == "offset" { scalar(value)? } else { old_offset };
+            let origin: Vec<f64> = base.iter().zip(new_n).map(|(o, n)| o + n * offset).collect();
+            let mut params = json!({"plane":{"origin":origin,"normal":new_n},
+                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}});
+            if let Some(plane) = app.session.section.first() {
+                params["replace"] = json!(plane.id);
+            }
+            Some(params)
         }
         StatusSetting::Continuity { .. } => {
             let rows = app.session.continuity_details();
@@ -305,6 +313,15 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
         descriptions.push(("continuity_legend", Details { key, ..Default::default() }));
     }
     let mut free = crate::shell::workspace_content(app, viewport);
+    if let Some(frame) = app.universal_panel_frame() {
+        let gap = solidcraft_theme::Tokens::get().space_8;
+        for section in &frame.layout.sections {
+            let bounds = crate::panel_runtime::egui_rect(section.outer);
+            if section.zone == solidcraft_engine::panels::Zone::Left && bounds.intersects(free) {
+                free.min.x = (bounds.right() + gap).clamp(free.left(), free.right());
+            }
+        }
+    }
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
             free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());

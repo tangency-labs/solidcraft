@@ -17,37 +17,49 @@
 // The range tests refuse NaN by negation (`!(x > y)`), kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::nonminimal_bool)]
 
+use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
 use solidcore::curve::arc::{self, ArcDefinition};
 use solidcore::curve::curve::{Curve as KCurve, CurveKind};
+use solidcore::curve::from_parameters::record_of;
 use solidcore::curve::line::Line;
 use solidcore::curve::path::{self, PathDoubt, PathPiece, PathShape, PathTolerances};
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::prism::profile as kp;
+use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::{
     create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
     CornerRefusal as KRefusal, OffsetCornerType, TaperExtrude,
 };
-use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::sweep::api_surfaces::{
+    create_skin_primitive, create_skin_primitive_with_ends, create_skin_primitive_with_sources,
+    SkinSources,
+};
 use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
 use solidcore::sweep::screw;
 use solidcore::sweep::segments::{
     build_faces, line_placements, sweep_along_segments, turn_placements,
 };
+use solidcore::sweep::skin_ends::SkinEnd;
 use solidcore::topology::brep::p1::ParallelProjectionOptions;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{
-    create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves, FaceBuildEnv,
+    create_face_from_surface, create_planar_face_with_3d_curves,
+    create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
@@ -65,7 +77,7 @@ pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{run, with_body};
+use crate::session::{read_body, run, with_body};
 use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
@@ -253,7 +265,7 @@ pub enum DraftCorner {
 }
 
 /// Which sweep a [`sweep_placed`] took.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepRoute {
     /// The linear sweep along a path proved straight: exact.
     Line,
@@ -264,18 +276,27 @@ pub enum SweepRoute {
     Segments,
     /// The kernel's curve sweep along the path joined into one curve, carried as the frame
     /// says. With [`SweepFrame::Translate`] it is exact for the joined curve; with
-    /// [`SweepFrame::Follow`] it is fitted to a tolerance and carries no certified bound (see
-    /// [`sweep_placed`]).
+    /// [`SweepFrame::Follow`] or [`SweepFrame::Upright`] it is fitted to a tolerance and
+    /// carries no certified bound (see [`sweep_placed`]).
     Curve(SweepFrame),
 }
 
 /// How the profile is carried along a [`sweep_placed`] path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepFrame {
-    /// It turns with the path, keeping its attitude to the path's tangent.
+    /// It turns with the path, keeping its attitude to the path's tangent: the path's
+    /// rotation-minimising frame (exact along lines and arcs; the kernel's projection-normal
+    /// frame along any other path, which the kernel brings back to its start round a closed
+    /// one, so the sheet closes).
     Follow,
     /// It only moves along the path, keeping its orientation.
     Translate,
+    /// It stays upright: square to the path, keeping the up direction (any length; the
+    /// kernel makes it unit) made square to the path's tangent, so it turns only about the up
+    /// direction as the path turns (a screen or a canopy along an outline). Drawn at the
+    /// path's start, it is swept as drawn there. A path running along the up direction is
+    /// refused.
+    Upright([f64; 3]),
 }
 
 /// How the ends of a [`sweep_stations`] close.
@@ -518,6 +539,15 @@ fn parse(k: &Kernel, curves: &[Curve]) -> Out<Made> {
         made.pieces.push(piece);
     }
     Ok(made)
+}
+
+/// The kernel's curves of a curve list, as [`parse`] makes them, for the families outside this
+/// module that take one (a face trimmed along curves on it, `crate::trim`).
+pub(crate) fn kernel_curves(
+    k: &Kernel,
+    curves: &[Curve],
+) -> std::result::Result<Vec<KCurve>, Error> {
+    parse(k, curves).map(|made| made.curves)
 }
 
 /// Runs a call that makes a new body.
@@ -765,6 +795,9 @@ fn unplaced() -> [Affine; 3] {
 /// piece. Any other path takes the kernel's curve sweep, once every join of the path is proved
 /// to meet (to the path gap).
 ///
+/// With [`SweepFrame::Upright`] a straight path is the linear sweep as with any frame, and any
+/// other path the kernel's curve sweep kept upright.
+///
 /// The curve sweep is exact for [`SweepFrame::Translate`] (for the path joined into one curve)
 /// but not for [`SweepFrame::Follow`]: there it samples the path and skins the sections it
 /// places, to a tolerance its own sampling can widen, and returns no bound (the kernel's curve
@@ -774,16 +807,23 @@ fn unplaced() -> [Affine; 3] {
 /// closed path), keeps the curve sweep until that issue is fixed.
 ///
 /// # Errors
-/// [`Error::Argument`] for a curve list refused; [`Error::PathUndecided`] for a `Follow` path
+/// [`Error::Argument`] for a curve list refused or an up direction not finite;
+/// [`Error::PathUndecided`] for a `Follow` path
 /// left undecided; [`Error::PathGap`] for a curve-sweep path whose join is not proved to meet,
 /// or whose ends neither meet to the path gap nor are proved apart (the closing join, the last);
-/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// the kernel's status (an upright path running along its up direction: [`Error::Unsupported`]);
+/// [`Error::Empty`], [`Error::NotSolid`].
 pub fn sweep_placed(
     profile: &[Curve],
     path: &[Curve],
     frame: SweepFrame,
     cap: bool,
 ) -> Result<(Body, [Affine; 3], SweepRoute)> {
+    if let SweepFrame::Upright(u) = frame {
+        if !u.iter().all(|x| x.is_finite()) {
+            return Err(Error::Argument);
+        }
+    }
     let mut placed = unplaced();
     let mut route = SweepRoute::Curve(frame);
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
@@ -884,6 +924,10 @@ pub fn sweep_placed(
             cap_ends: cap && !closed,
             translational_sweep: frame == SweepFrame::Translate,
             profile_at_path_start: true,
+            up: match frame {
+                SweepFrame::Upright(u) => Some(v3(u)),
+                SweepFrame::Follow | SweepFrame::Translate => None,
+            },
             ..SweepOptions::default()
         };
         let r = match create_curve_sweep_with_placements(
@@ -904,7 +948,9 @@ pub fn sweep_placed(
         if closed {
             let tol = b.tolerance();
             match stitch_faces(k, &mut b, tol, None, false) {
-                Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                // a solid asked for has no free edge left; a sheet (an open profile, or one
+                // not capped) keeps the profile's own ends free
+                Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                 Ok(_) => b.refresh_cached_topology(),
                 Err(e) => return Ok(Err(status(e))),
             }
@@ -912,6 +958,69 @@ pub fn sweep_placed(
         finish(k, b, expect)
     })?;
     Ok((body, placed, route))
+}
+
+/// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
+/// plane's coordinates, end to end.
+#[derive(Clone, Debug)]
+pub struct LoftSection {
+    /// The section's plane.
+    pub plane: solidcore_record::Plane,
+    /// The loop, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+}
+
+/// A section as a loft's walls are built through it ([`match_loft_sections`]): its segments,
+/// and for each the indices of the given section's segments it runs over (increasing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchedSection {
+    /// The segments, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+    /// For each segment, the given segments it runs over.
+    pub from: Vec<Vec<usize>>,
+}
+
+/// A loft's closed sections, in loft order, matched as its walls are built through them (the
+/// kernel's `sweep::loft_sections::match_loft_sections`): each wound the way the one before it
+/// is, cut to the vertices it shares with the others (a corner pairs with the corner it lines up
+/// with, a vertex only one section has splits the others' segments where it lands, a full circle
+/// splits at the directions of the section it follows), and started at the segment that joins the
+/// first segment of the section before it. `None` when the match would give a section more than
+/// `max_segments` segments, or the sections are too large to pair: valid sections the caller
+/// builds another way.
+///
+/// # Errors
+/// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
+/// plane axes that move its points by more than the zone tolerance (their skew from a frame of
+/// perpendicular unit vectors times the section's extent past 1e-5), or a circle whose centre,
+/// radius or angles are not finite; [`Error::Invariant`] when the pairing breaks down.
+pub fn match_loft_sections(
+    sections: &[LoftSection],
+    max_segments: usize,
+) -> Result<Option<Vec<MatchedSection>>> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<kl::LoftSection> = sections
+        .iter()
+        .map(|s| kl::LoftSection {
+            origin: convert::vec3(s.plane.origin),
+            x: convert::vec3(s.plane.x),
+            y: convert::vec3(s.plane.y),
+            segs: s.segs.iter().map(convert::seg2).collect(),
+        })
+        .collect();
+    let matched = match kl::match_loft_sections(&given, max_segments) {
+        Err(e) if kl::too_large(&e) => return Ok(None),
+        r => r.map_err(argument_or_status)?,
+    };
+    Ok(Some(
+        matched
+            .into_iter()
+            .map(|m| MatchedSection {
+                segs: m.segs.iter().map(convert::record_seg2).collect(),
+                from: m.from,
+            })
+            .collect(),
+    ))
 }
 
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
@@ -938,6 +1047,211 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             Err(e) => Ok(Err(status(e))),
         }
     })
+}
+
+/// Whether a loft section (its plane's normal and its middle) faces back from the section
+/// before it (its normal as turned along the loft, and its middle): the kernel's
+/// [`solidcore::geom::plane_height::faces_back`]. The application winds the section the other
+/// way round when it does.
+#[must_use]
+pub fn loft_section_faces_back(
+    before_normal: [f64; 3],
+    before_middle: [f64; 3],
+    normal: [f64; 3],
+    middle: [f64; 3],
+) -> bool {
+    solidcore::geom::plane_height::faces_back(
+        v3(before_normal),
+        v3(before_middle),
+        v3(normal),
+        v3(middle),
+    )
+}
+
+/// Where the polyline `points` leaves the plane through `origin` with unit normal `normal`
+/// (within `tol`), in order: the index of the segment and the point. The kernel's
+/// [`solidcore::geom::plane_height::plane_departures`]; a loft opens a closed guide rail at
+/// the first of them on its first section.
+#[must_use]
+pub fn polyline_plane_departures(
+    points: &[[f64; 3]],
+    origin: [f64; 3],
+    normal: [f64; 3],
+    tol: f64,
+) -> Vec<(usize, [f64; 3])> {
+    let points: Vec<Vec3> = points.iter().map(|p| v3(*p)).collect();
+    solidcore::geom::plane_height::plane_departures(&points, v3(origin), v3(normal), tol)
+        .into_iter()
+        .map(|(k, p)| (k, [p.x, p.y, p.z]))
+        .collect()
+}
+
+/// The kernel's trace of a skin: each side face with the curves it is skinned from, if traced.
+type Traced = Option<Vec<(FaceId, Vec<usize>)>>;
+
+/// A sheet skinned through `sections` as [`loft`] skins them, uncapped, and which curves each of
+/// its record faces (in order) is skinned from: indices, ascending, into the sections' curves
+/// taken section by section (curve `k` of section `s` is `s n + k`, for `n` curves a section);
+/// `None` when the kernel did not trace the skin. Every section has the same number of curves,
+/// joined end to end (open or closed). One skin takes its parameters across the sections from
+/// every column at once, so neighbouring faces share their seam; columns skinned each on its own
+/// take parameters of their own, and their seams part (tangency-labs/solidcraft#14048). The skin
+/// joins each section's curves into one, each over its own parameter span, so a line is first a
+/// NURBS line and every B-spline is reparameterised onto [0, 1] (the same curve): the sections
+/// then join at the same knots. The sources are the kernel's trace of the skin
+/// (`create_skin_primitive_with_sources`): a curve with a kink of its own runs along several
+/// faces, curves that continue each other at the same speed can share one, and a closed section
+/// the skin turns to match its neighbour gives a face other curves there than in the others.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections, sections of different counts of curves, a
+/// degree outside 1 to 3, more than [`MAX_CURVES`] curves in all or a curve refused; the
+/// kernel's status; [`Error::Empty`].
+pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<Vec<Vec<usize>>>)> {
+    let n = sections.first().map_or(0, Vec::len);
+    if sections.len() < 2
+        || !(1..=3).contains(&degree)
+        || n == 0
+        || sections.iter().any(|s| s.len() != n)
+    {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections.iter().flatten().map(nurbs_line).collect();
+    let made = run(
+        "loft_sheet",
+        |k| -> solidcore::Result<Out<(Brep, Traced)>> {
+            let mut made = parsed!(parse(k, &all));
+            let unit = Extent1d::from_min_max(0.0, 1.0);
+            for c in &mut made.curves {
+                if matches!(c.kind(), CurveKind::BSpline(_)) {
+                    c.edit_parameterization(k, &unit)?;
+                }
+            }
+            let counts = vec![n; sections.len()];
+            let (skin, sources) = match create_skin_primitive_with_sources(
+                k,
+                &counts,
+                &made.refs(),
+                degree as usize,
+                false,
+            ) {
+                Ok(r) => r,
+                Err(e) => return Ok(Err(status(e))),
+            };
+            let traced = match sources {
+                SkinSources::Traced(faces) => Some(faces),
+                SkinSources::NotTraced { .. } => None,
+            };
+            Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
+        },
+    )?;
+    let (brep, traced) = made?;
+    let body = Body::new(brep);
+    let Some(traced) = traced else {
+        return Ok((body, None));
+    };
+    let (_, order) = body.to_record()?;
+    let mut sources: BTreeMap<FaceId, Vec<usize>> = traced.into_iter().collect();
+    // every face of an uncapped skin is a side face, traced
+    let faces = order
+        .faces
+        .iter()
+        .map(|f| sources.remove(f))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((body, Some(faces)))
+}
+
+/// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.
+fn nurbs_line(c: &Curve) -> Curve {
+    match c {
+        Curve::Line { start, end } => Curve::Nurbs {
+            degree: 1,
+            points: vec![
+                [start[0], start[1], start[2], 1.0],
+                [end[0], end[1], end[2], 1.0],
+            ],
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+        },
+        _ => c.clone(),
+    }
+}
+
+/// How a [`loft_with_ends`] leaves its first section or arrives at its last.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LoftEnd {
+    /// As the skin through the sections runs: no condition.
+    #[default]
+    Free,
+    /// Square to the section's plane, towards the side the next section is on. Each point
+    /// of the section leaves with `weight` times the speed of its straight way to the point it
+    /// is joined to in the next section: 1 is that speed, less turns towards the next section
+    /// sooner, more runs on square to the plane for longer.
+    Square {
+        /// The weight, above 0.
+        weight: f64,
+    },
+}
+
+/// A capped skin through `sections` as [`loft`] makes it, cubic across them, with how it
+/// leaves its first section and arrives at its last (`ends`; at least one of them
+/// [`LoftEnd::Square`]). Two sections and one square end make a quadratic skin: three
+/// conditions.
+///
+/// # Errors
+/// [`Error::Argument`] for a section or number refused, both ends free, and a weight that is
+/// not a number above 0; the kernel's status (sections that are not closed planar loops, an
+/// end whose next section's centre lies in its plane); [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_with_ends(sections: &[Vec<Curve>], cap: bool, ends: [LoftEnd; 2]) -> Result<Body> {
+    if sections.len() < 2 || sections.len() > MAX_CURVES {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = sections.iter().flatten().cloned().collect();
+    making("loft_with_ends", |k| {
+        let made = parsed!(parse(k, &all));
+        if sections
+            .iter()
+            .any(|s| s.is_empty() || s.len() > MAX_CURVES)
+        {
+            return Ok(Err(Error::Argument));
+        }
+        let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
+        match skin_with_ends(k, &counts, &made.refs(), cap, ends) {
+            Ok(Ok(b)) => finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(Err(e)) => Ok(Err(e)),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })
+}
+
+/// The skin of [`loft_with_ends`] on the caller's kernel `k`, as the kernel made it (not yet
+/// checked for faces or closedness): the profiles of `curves`, `counts` curves each, cubic
+/// across them, `ends` as [`loft_with_ends`] takes them. One recipe for [`loft_with_ends`] and
+/// for an application that runs its sweeps on its own kernel.
+///
+/// # Errors
+/// The kernel's, as it reports them; inside, [`Error::Argument`] for both ends free and a
+/// weight that is not a number above 0.
+pub fn skin_with_ends(
+    k: &mut Kernel,
+    counts: &[usize],
+    curves: &[Option<&KCurve>],
+    cap: bool,
+    ends: [LoftEnd; 2],
+) -> solidcore::Result<std::result::Result<Brep, Error>> {
+    if ends == [LoftEnd::Free; 2] {
+        return Ok(Err(Error::Argument));
+    }
+    let mut kernel_ends = [SkinEnd::Free; 2];
+    for (to, end) in kernel_ends.iter_mut().zip(ends) {
+        if let LoftEnd::Square { weight } = end {
+            if !(weight > 0.0 && weight.is_finite()) {
+                return Ok(Err(Error::Argument));
+            }
+            *to = SkinEnd::Square { weight };
+        }
+    }
+    create_skin_primitive_with_ends(k, counts, curves, 3, cap, kernel_ends).map(|r| Ok(r.brep))
 }
 
 /// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the
@@ -994,6 +1308,134 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
                     .copied()
                     .unwrap_or(p);
                 face(b, fenv, &[p, q, top])?;
+            }
+            Ok(())
+        });
+        if let Err(e) = built {
+            return Ok(Err(e));
+        }
+        if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+            return Ok(Err(status(e)));
+        }
+        b.refresh_cached_topology();
+        finish(k, b, Expect::SOLID)
+    })
+}
+
+/// A loft from the planar first of `sections` (one closed loop of curves, in order) through the
+/// rest, its stations (each as many curves as the first, need not be planar), to `apex` (off the
+/// first's plane): the base on the first section's curves, and on each of its curves one wall
+/// skinned (cubic across, or as high as the rows allow) through that curve, the stations' curves
+/// in its column, and the curve shrunk onto the apex (the wall's pole), one face over the
+/// surface's whole box; stitched and oriented. `params` places each row along the loft, the
+/// sections' then the apex's (increasing, from 0 at the first section to 1 at the apex): every
+/// wall is skinned at those parameters, so neighbouring walls, whose curves share their ends,
+/// meet on the same boundary curves. They do as long as, at each corner, the weights of the two
+/// curves that meet there keep one ratio through the rows, as rows moved from one profile (its
+/// weights kept) do; walls that do not meet leave no solid, and the call is refused. A loft to a
+/// point that follows guide rails gives the stations and where they lie.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two sections or more than [`MAX_STATIONS`], sections of
+/// different counts, parameters that are not one a row increasing from 0 to 1, a curve list
+/// refused, a first section that is not one closed loop, or an apex not proved off its plane;
+/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_to_point_through(
+    sections: &[Vec<Curve>],
+    apex: [f64; 3],
+    params: &[f64],
+) -> Result<Body> {
+    if !coord_ok(&apex) || !(2..=MAX_STATIONS).contains(&sections.len()) {
+        return Err(Error::Argument);
+    }
+    if params.len() != sections.len() + 1
+        || params.first() != Some(&0.0)
+        || params.last() != Some(&1.0)
+        || params.windows(2).any(|w| !matches!(w, [a, b] if a < b))
+    {
+        return Err(Error::Argument);
+    }
+    let n = sections.first().map_or(0, Vec::len);
+    if n == 0
+        || sections.iter().any(|s| s.len() != n)
+        || sections.len().saturating_mul(n) > MAX_STATION_CURVES
+    {
+        return Err(Error::Argument);
+    }
+    making("loft_to_point_through", |k| {
+        let mut rows = Vec::with_capacity(sections.len() + 1);
+        for s in sections {
+            let made = parsed!(parse(k, s));
+            let mut row = Vec::with_capacity(n);
+            for c in &made.curves {
+                let Some(b) = bspline(c)? else {
+                    return Ok(Err(Error::Argument));
+                };
+                row.push(b);
+            }
+            rows.push((made.curves, row));
+        }
+        let Some((base, base_splines)) = rows.first() else {
+            return Ok(Err(Error::Argument));
+        };
+        if !path::closed_loop(k, base, 1e-6)?.is_yes() {
+            return Ok(Err(Error::Argument));
+        }
+        let top: Point3 = v3(apex);
+        match path::point_off_plane_of(k, base, top, 1e-9) {
+            Ok(v) if v.is_yes() => {}
+            _ => return Ok(Err(Error::Argument)),
+        }
+        // The apex row: each base curve with every control point on the apex (its own weights
+        // and knots).
+        let mut tip = Vec::with_capacity(n);
+        for b in base_splines {
+            let c = b.canonical()?;
+            let at_apex = vec![top; c.control_points.len()];
+            let data = CanonicalData {
+                dim: 3,
+                degree: c.degree,
+                control_points: &at_apex,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &c.knot_multiplicities,
+                knots: &c.knots,
+                knot_type: KnotType::Unspecified,
+                weights: (!c.weights.is_empty()).then_some(c.weights.as_slice()),
+                trim: None,
+            };
+            tip.push(BSplineCurve::create_canonical(&data)?);
+        }
+        let mut columns: Vec<Vec<BSplineCurve>> = vec![Vec::with_capacity(rows.len() + 1); n];
+        for (_, row) in &rows {
+            for (column, b) in columns.iter_mut().zip(row) {
+                column.push(b.clone());
+            }
+        }
+        for (column, b) in columns.iter_mut().zip(tip) {
+            column.push(b);
+        }
+        let degree = (params.len() - 1).min(3);
+        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+        let region = b.infinite_region();
+        let tol = 1e-6;
+        let built = build_faces(&mut b, |b, fenv| -> Out<()> {
+            called(create_planar_face_with_3d_curves(
+                k, b, region, base, tol, fenv,
+            ))?;
+            for column in &columns {
+                let wall = called(BSplineSurface::create_skinned_surface(
+                    k,
+                    column,
+                    SkinnedSurfaceOptions {
+                        deriv_surfs: Some([None, None]),
+                        degree,
+                        section_params: Some(params),
+                        ..Default::default()
+                    },
+                ))?;
+                let surface = Surface::from(wall);
+                let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+                called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
             }
             Ok(())
         });
@@ -1207,8 +1649,9 @@ fn face_of(b: &Brep, order: &Order, i: usize) -> Result<FaceId> {
     }
 }
 
-/// The curve tolerance of [`project_curves`] and [`face_section`].
-fn tolerance_ok(tolerance: f64) -> bool {
+/// The curve tolerance of [`project_curves`] and [`face_section`], and of the curves a face is
+/// trimmed along (`crate::trim`).
+pub(crate) fn tolerance_ok(tolerance: f64) -> bool {
     tolerance.is_finite() && (1e-9..1e3).contains(&tolerance)
 }
 
@@ -1336,6 +1779,133 @@ pub fn face_section(
             Ok(out)
         })
     })?
+}
+
+/// `curves` dropped onto record face `face` of `body` (through `order`, its record's [`Order`])
+/// square to its surface: the kernel's surface drop of a curve (`DropAndTrimCurve` over the
+/// face's parameter box, every piece kept, on a standalone copy of the face's surface: the face's
+/// trims do not cut it) lifted back to 3D (`LiftCurve`), each within
+/// `tolerance`, as NURBS with their intervals. A curve over the face lands on the foot of each of
+/// its points.
+///
+/// # Errors
+/// [`Error::Argument`] for a number or curve list refused, or an index past the record's faces
+/// or naming a face the body does not have; the kernel's status; [`Error::Empty`] when no curve
+/// lands on the face.
+pub fn drop_curves(
+    body: &Body,
+    order: &Order,
+    face: usize,
+    curves: &[Curve],
+    tolerance: f64,
+) -> Result<Vec<(Curve, [f64; 2])>> {
+    if !tolerance_ok(tolerance) {
+        return Err(Error::Argument);
+    }
+    read_body("drop_curves", body, |k, b| {
+        let given = parsed!(parse(k, curves));
+        let face = parsed!(face_of(b, order, face));
+        let dropped = parsed!(dropped_on(k, b, face, &given.curves, tolerance)?);
+        let mut out = Vec::new();
+        for c in dropped.iter().flatten() {
+            match put_curve(c)? {
+                Ok(x) => out.push(x),
+                Err(e) => return Ok(Err(e)),
+            }
+        }
+        Ok(if out.is_empty() {
+            Err(Error::Empty)
+        } else {
+            Ok(out)
+        })
+    })?
+}
+
+/// The kernel's curves of [`drop_curves`]: for each curve of `given`, in order, its pieces
+/// dropped square onto the surface of `face` of `b` over the face's parameter box and lifted
+/// back to 3D, each within `tolerance`; none for a curve that does not land on the box. For
+/// the families outside this module that cut a face along them (`crate::trim`).
+pub(crate) fn dropped_on(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    given: &[KCurve],
+    tolerance: f64,
+) -> solidcore::Result<Out<Vec<Vec<KCurve>>>> {
+    let domain = b.face(face)?.uv_domain;
+    let Some(owned) = b.face(face)?.surface.as_ref() else {
+        return Ok(Err(Error::Argument));
+    };
+    // A standalone copy (its owner not copied): the drop and lift work over the face's
+    // parameter box, and a face-owned surface's solves would ask for the face's trimmed
+    // cache, which they are not given here.
+    let surface = owned.copy(k)?;
+    let mut out = Vec::new();
+    for c in given {
+        let dropped = match surface.drop_and_trim_curve::<NoObject>(
+            k,
+            &domain,
+            c,
+            &c.natural_interval(),
+            tolerance,
+            true,
+            false,
+            None,
+        ) {
+            Ok(d) => d,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        let mut pieces = Vec::new();
+        for uv in &dropped.uv_curves {
+            match surface.lift_curve(k, &domain, uv, &uv.natural_interval(), tolerance, false) {
+                Ok(l) => pieces.push(l.curve),
+                Err(e) => return Ok(Err(status(e))),
+            }
+        }
+        out.push(pieces);
+    }
+    Ok(Ok(out))
+}
+
+/// A curve's record form ([`Curve::to_record`]): what it is, the NURBS form a circle's
+/// parameter is on, and its interval in the record's parameter.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordedCurve {
+    /// A line or circle label, or the spline (rational or not) itself.
+    pub curve: solidcore_record::brep::Curve,
+    /// The NURBS form of a circle, which `interval` is on.
+    pub nurbs: Option<solidcore_record::brep::Curve>,
+    /// The curve's interval in the record's parameter.
+    pub interval: [f64; 2],
+}
+
+impl Curve {
+    /// The record form of this curve over its natural range: the kernel's record of the curve it
+    /// makes ([`solidcore::curve::from_parameters::record_of`]: a line as itself, an arc as its
+    /// circle with that circle's NURBS form and the arc's interval, a NURBS as a spline, or as a
+    /// rational spline of homogeneous points when weighted), converted as the record holds it.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a curve refused (as the sweeps refuse it); [`Error::Record`] for a
+    /// curve the record cannot hold; the kernel's status.
+    pub fn to_record(&self) -> Result<RecordedCurve> {
+        let made = run("sweep::Curve::to_record", |k| {
+            let given = parsed!(parse(k, std::slice::from_ref(self)));
+            let Some(c) = given.curves.first() else {
+                return Ok(Err(Error::Argument));
+            };
+            Ok(match record_of(k, c, &c.natural_interval()) {
+                Ok(r) => Ok(r),
+                Err(e) => Err(status(e)),
+            })
+        })??;
+        let back = |c| convert::record_curve(c).map_err(|why| Error::Record(why.0.to_owned()));
+        Ok(RecordedCurve {
+            curve: back(made.curve)?,
+            nurbs: made.nurbs.map(back).transpose()?,
+            interval: made.interval,
+        })
+    }
 }
 
 #[cfg(test)]

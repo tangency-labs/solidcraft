@@ -1430,30 +1430,58 @@ mod tests {
         assert_ne!(model.k.context.current_mark(MarkType::Mark), old_mark);
         assert!(!model.k.context.is_mark_locked(MarkType::Mark));
         model.transform(b, Axis2Placement::default())?;
-        // HCR's scene transform is wired (topology::brep::p5::transform_with_notifications):
-        // the scene is built, then this fixture has no service to retain it in.
+        // HCR must propagate the scene copy's error for the bare face.
         let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
         assert!(
             matches!(
                 hcr,
                 Err(SolidError::InvalidInput {
-                    reason: "fixture has no retained HCR service",
-                    ..
+                    operation: "topology::brep::p3",
+                    reason: "face without face use",
                 })
             ),
             "{hcr:?}"
         );
         model.b[0].set_editing_enabled(false);
         model.k.context.set_doing_boolean(false);
-        // query.brep (CalculateBoundingBox) is ported: the stitch now fails later,
-        // in the B-rep merge, and still restores the caller's context.
+        // The stitch's bounding box of this fixture's face without surface fails;
+        // upstream ignores that status and the fork passes it on (WR-658), so the
+        // stitch fails there and still restores the caller's context.
         let stitched = model.stitch(b, &mut TopologySweep::default(), 0.125, false);
         assert!(
-            matches!(stitched, Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)),
+            matches!(
+                stitched,
+                Err(SolidError::InvalidInput {
+                    operation: "query::face::p1::calculate_bounding_box",
+                    reason: "face without surface",
+                })
+            ),
             "{stitched:?}"
         );
         assert!(!model.b[0].editing_enabled());
         assert!(!model.k.context.doing_boolean());
+        Ok(())
+    }
+
+    #[test]
+    fn hcr_reaches_scene_retention_for_a_complete_body() -> Result<()> {
+        use solidcore::geom::axis2_placement::Axis2Placement;
+        use solidcore::primitive::api_primitives::create_box;
+
+        let mut model = Model::new([1., 0., 0.])?;
+        let b = BrepId::from_index(0);
+        *model.brep_mut(b)? = create_box(&mut model.k, Point3::ZERO, 4., 3., 2.)?;
+        let hcr = model.hcr(b, Axis2Placement::default(), 0.001, 0.1, false, false, true);
+        assert!(
+            matches!(
+                hcr,
+                Err(SolidError::InvalidInput {
+                    operation: "sweep test model",
+                    reason: "fixture has no retained HCR service",
+                })
+            ),
+            "{hcr:?}"
+        );
         Ok(())
     }
 

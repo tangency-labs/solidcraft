@@ -44,6 +44,7 @@ use super::section::gn_equal_area_w;
 use super::series::{Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S};
 use super::station::{feet_on_knots, gn_solve_station_with, GnStation, StationOptions};
 use super::tay::{gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, Ring, Tay, TAY};
+use crate::error::blend::{BlendFailure, SectionDegeneracy};
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
@@ -213,9 +214,9 @@ impl<Z: Ring> T2Of<Z> {
 pub fn t2_pow<Z: T2Scalar>(x: &T2Of<Z>, p: f64) -> Result<T2Of<Z>> {
     let x0 = x.constant();
     if !x0.positive_finite() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the section degenerates at this point (a weight or a length is zero)",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::WeightOrLengthZero),
         ));
     }
     let mut z = x.scale(Z::lift(1.0) / x0);
@@ -471,21 +472,27 @@ pub fn evaluate_definition(
                 fact *= i as f64;
             }
             let di = d.get(i).ok_or_else(|| {
-                SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+                SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the radius law's evaluation returned fewer derivatives than \
+                              asked: a B-spline curve's evaluation returns every order up to \
+                              the one asked",
+                    },
+                )
             })?;
             law_ser.set(i, 0, di.x / fact);
         }
-        let d0 = d
-            .first()
-            .ok_or_else(|| SolidError::blend_failed(OP, "the radius law has no value"))?;
-        if d0.x.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        // the law's value: its series' constant term, the value divided by 0! = 1 (exact)
+        let d0 = law_ser.at(0, 0);
+        if d0.partial_cmp(&0.0) != Some(Ordering::Greater) {
             // "its radius law is not positive here"
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the radius law is not positive here",
+                BlendFailure::RadiusLawNotPositive { s, radius: d0 },
             ));
         }
-        r = [d0.x, d0.x];
+        r = [d0, d0];
         law = Some(&law_ser);
     }
 
@@ -524,16 +531,6 @@ pub fn evaluate_definition(
         } else {
             0
         };
-        let opts = StationOptions {
-            law,
-            top,
-            sides: None,
-            before,
-        };
-        let (solved, steps) =
-            gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
-        count_solve(k, steps);
-        let mut st = solved?.0;
         // a foot on a knot line of its support: the support's partials there on the
         // piece the foot moves into along s (comes from, `before`), as the stations'
         // series were taken; the way it moves is the seed's (the stations' feet and
@@ -541,10 +538,16 @@ pub fn evaluate_definition(
         let mut dir = [0.0_f64; 4];
         for (f, sd) in def.seeds.iter().enumerate() {
             let w = sd.evaluate(s, 1, !before, false)?;
-            let w1 = w
-                .get(1)
-                .copied()
-                .ok_or_else(|| SolidError::blend_failed(OP, "the seed has no derivative"))?;
+            let w1 = w.get(1).copied().ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the seed's evaluation to first order returned no derivative: \
+                                  a B-spline curve's evaluation returns every order up to the \
+                                  one asked",
+                    },
+                )
+            })?;
             if let Some(x) = dir.get_mut(2 * f) {
                 *x = w1.x;
             }
@@ -552,9 +555,28 @@ pub fn evaluate_definition(
                 *x = w1.y;
             }
         }
+        // a seed that stands on such a line (at one of the definition's stations, placed
+        // where a foot crosses the line) names its pieces before the solve: a support is
+        // only as smooth across the line as its knot allows, and where its normal differs
+        // on the two sides a solve that takes the piece each iterate's value is in has
+        // no fixed point on the line (each piece's foot lies on the other's side)
+        let (seeded, _) = feet_on_knots(k, faces, seed, dir, before, tr.s() + tr.e() + 1)?;
+        let pinned = seeded.iter().any(|&q| q != 0);
+        let opts = StationOptions {
+            law,
+            top,
+            sides: pinned.then_some(seeded),
+            before,
+        };
+        let (solved, steps) =
+            gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
+        count_solve(k, steps);
+        let mut st = solved?.0;
         let on = st.x.map(|x| x.at(0, 0));
         let (sides, other) = feet_on_knots(k, faces, on, dir, before, tr.s() + tr.e() + 1)?;
-        if other {
+        // (solved again where the feet's pieces are not the ones the solve took: the
+        // spans of their values without sides, the seed's with them)
+        if if pinned { sides != seeded } else { other } {
             let opts = StationOptions {
                 law,
                 top,
@@ -640,9 +662,9 @@ pub fn evaluate_definition(
             let d = gn_area_sum(n, Tay::of_terms(w0, 1.0));
             if d.at(1).partial_cmp(&0.0) != Some(Ordering::Less) {
                 // "the section's area does not fall with its thumbweight"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the section's area does not fall with its thumbweight",
+                    BlendFailure::SectionDegenerate(SectionDegeneracy::AreaDoesNotFall),
                 ));
             }
             let ws = gn_invert(&gn_target(&u), &d, w0);
@@ -810,9 +832,9 @@ mod tests {
         let error = t2_pow(&T2::new(1, 1, 0.0), 0.5).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(
+            SolidError::blend(
                 OP,
-                "the section degenerates at this point (a weight or a length is zero)"
+                BlendFailure::SectionDegenerate(SectionDegeneracy::WeightOrLengthZero)
             )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));

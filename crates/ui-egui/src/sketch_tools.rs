@@ -132,6 +132,28 @@ fn on_sketch_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
 }
 
+/// A piece is selected on the side of its boundary under the cursor. Drawing snaps can move
+/// a click across that boundary, so both hover and click use the pointer's plane position.
+pub(super) fn tool_point_at(app: &SolveApp, proj: &Proj, pos: Pos2, cmd: Option<&str>) -> Option<(Vec2, Option<String>)> {
+    if matches!(cmd, Some("sketch.break" | "sketch.trim")) {
+        on_sketch_plane(app, proj, pos).map(|p| (p, None))
+    } else {
+        sketch_point_at(app, proj, pos)
+    }
+}
+
+/// Clicking the selected curve's endpoint with Break can detach it from its neighbour.
+fn picked_shared_end(app: &SolveApp, curve: &str, hits: &[Hit]) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let at = hits.iter().find_map(|hit| match hit {
+        Hit::SketchPoint { sketch, at, .. } if *sketch == sid => Some(*at),
+        _ => None,
+    })?;
+    let solve = solved_sketch(app, sid)?;
+    let sk = &solve.sketch;
+    solidcraft_engine::cmd::break_shared_end(sk, sk.curve_index(curve)?, at).map(|_| at)
+}
+
 /// A press and drag with Trim draws a path from `press`; true when it started one. Each piece
 /// the path crosses is trimmed when it is let go (`sketch.trim.path`).
 pub fn trim_drag_start(app: &mut SolveApp, proj: &Proj, press: Pos2) -> bool {
@@ -193,7 +215,7 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, center_label(app, c))),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {}", crate::prefs::show_mm(app, r, 1)))),
     };
     if let Some(m) = mark {
@@ -201,6 +223,14 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// Mass Center's marker label: the centre's coordinates in the design's units, written as
+/// Design Properties writes them.
+fn center_label(app: &SolveApp, c: Vec3) -> String {
+    let at = |v: f64| crate::prefs::show_mm_bare(app, v);
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    format!("Center of mass ({}, {}, {}) {unit}", at(c.x), at(c.y), at(c.z))
 }
 
 /// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
@@ -276,7 +306,7 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Commands that start with a step of their own: Canvas and Decal ask for the image first,
 /// Edit Canvas opens the canvas panel. False when the command should not go on.
 pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
-    if id == "inspect.section" && app.preferences.viewport_section_status && app.session.section.is_some() {
+    if id == "inspect.section" && app.preferences.viewport_section_status && !app.session.section.is_empty() {
         let _ = app.run(id, json!({"clear":true}));
         return false;
     }
@@ -364,9 +394,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if id == "canvas.edit" {
-        // The browser's canvas panel (one panel for canvases).
-        if let Some(first) = app.session.doc.canvases.first().map(|c| c.id) {
-            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, first, false));
+        // The browser's canvas panel (one panel for canvases). A canvas picked in the Browser
+        // is the one to edit, not just the first one (#16518).
+        let picked = app.tree.picked_canvases.last().copied();
+        let target = picked.or_else(|| app.session.doc.canvases.first().map(|c| c.id));
+        if let Some(c) = target {
+            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, false));
         }
         return false;
     }
@@ -374,8 +407,9 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     let command = id.to_string();
-    // Offer the image types first: the default Open filter lists only designs and meshes.
-    app.pick_open_for(&["png", "jpg", "jpeg"], move |app, path| {
+    // Offer the image types first: the default Open filter lists only designs and meshes. An SVG
+    // is drawn into a PNG as the command inserts it.
+    app.pick_open_for(&["png", "jpg", "jpeg", "svg"], move |app, path| {
         if let Some(path) = path {
             start_image_placement(app, &command, path);
         }
@@ -619,10 +653,22 @@ pub fn refine_snap(
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
     // A model vertex under the cursor: drawing on it projects it into the sketch.
+    // A snap point of a model edge or another sketch's curve (#11229) is one too: an end of a
+    // body's edge is a vertex, projected and linked like one; a centre or a middle (and a point
+    // of another sketch) is no vertex to link, so the point goes where it projects to.
     for h in pick(app, proj, a) {
-        if let Hit::Vertex { point, .. } = h {
-            SNAP.with(|s| *s.borrow_mut() = Some(("Pt", plane.to_local(point))));
-            return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
+        if let Hit::Vertex { point, body } = h {
+            use solidcraft_engine::snap::SnapKind;
+            let vertex = Some(format!("vertex:{},{},{}", point.x, point.y, point.z));
+            let (label, arg) = match crate::snap_wake::woken_at(app, point).map(|p| p.kind) {
+                Some(SnapKind::Centre | SnapKind::FaceCentre) => ("Ctr", None),
+                Some(SnapKind::Middle) => ("Mid", None),
+                Some(SnapKind::End) if body.is_empty() => ("End", None),
+                Some(SnapKind::End) => ("End", vertex),
+                Some(SnapKind::Vertex) | None => ("Pt", vertex),
+            };
+            SNAP.with(|s| *s.borrow_mut() = Some((label, plane.to_local(point))));
+            return Some((plane.to_local(point), arg));
         }
     }
     let mid_only = crate::tool_modifiers::target_midpoint();
@@ -652,15 +698,18 @@ pub fn refine_snap(
             }
         }
     }
-    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
-    // stays a visual guide. Shift skips this.
+    // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch
+    // preferences ask for it. One reference stays a visual guide. Shift skips this. With
+    // `sketch_align_points` on, the point lines up with both references below, as it would
+    // without this snap (#20859); otherwise it is a free coordinate and adds no constraint.
+    let mut crossing = None;
     if !mid_only
         && app.preferences.sketch_recent_snap
         && best.is_none()
-        && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
+        && let Some(meeting) = app.viewport.tracking.meeting_of(sk, plane, proj, a)
     {
-        best = Some((at.dist(lp), "+", at));
+        best = Some((meeting.at.dist(lp), "+", meeting.at));
+        crossing = Some(meeting);
     }
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
@@ -727,13 +776,22 @@ pub fn refine_snap(
     };
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
     // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
-    // command makes on that line (#13413).
+    // command makes on that line (#13413). It comes first: `line_up` keeps the first of equally
+    // near points, so a free point that happens to share the coordinate does not take its place.
+    let mut targets: Vec<(Option<String>, Vec2)> = Vec::new();
     if app.preferences.sketch_align_points {
         targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+        targets.extend(align_targets(proj, sk, plane, &own));
     }
     let mut lined = Vec::new();
+    // Where two guides meet, the point lines up with the two references the guides come from:
+    // level with one and plumb with the other (#20859), never with another point that happens
+    // to share a coordinate.
+    if let Some(meeting) = crossing.filter(|_| app.preferences.sketch_align_points) {
+        lined.extend(meeting.level.map(|(id, at)| Lined { id: Some(id), at, horizontal: true }));
+        lined.extend(meeting.plumb.map(|(id, at)| Lined { id: Some(id), at, horizontal: false }));
+    }
     if !mid_only
         && best.is_none()
         && let Some(prev) = prev
@@ -901,6 +959,15 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
     }
 }
 
+/// Whether a tool places points on the sketch plane (and so takes snap points, #11229).
+pub fn places_points(t: &Tool) -> bool {
+    match t.kind {
+        Kind::Draw(_) => true,
+        Kind::Ext => matches!(mode(t.cmd), Some(Mode::Points(_))),
+        _ => false,
+    }
+}
+
 fn mode(id: &str) -> Option<Mode> {
     if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
         return Some(Mode::Construction);
@@ -927,6 +994,11 @@ fn mode(id: &str) -> Option<Mode> {
     })
 }
 
+/// Whether an extra sketch tool draws new geometry from clicks rather than picking existing entities.
+pub fn is_drawing_tool(id: &str) -> bool {
+    matches!(mode(id), Some(Mode::Points(_) | Mode::Construction))
+}
+
 /// A tool for one of the extra sketch commands.
 pub fn tool_for(id: &str) -> Option<Tool> {
     mode(id)?;
@@ -945,7 +1017,8 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
-        normal: false,
+        line_type: crate::sketch_construction::last_line_type(),
+        classic: false,
     })
 }
 
@@ -1008,6 +1081,47 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
 }
 
+/// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
+/// The centre of a hole is none of those — the opening has no triangles — so the ray is
+/// tested against hole openings and the rim's edges are projected. Anything else is said
+/// out loud: a miss used to return without running the command, so the click did nothing.
+fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
+    let picked = hits.iter().find_map(|h| match h {
+        Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. } => model_ref(app, h),
+        _ => None,
+    });
+    let refs = if let Some(r) = picked {
+        vec![r]
+    } else if let Some(rim) = hole_under_cursor(app, proj, pos) {
+        rim
+    } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
+        vec![r]
+    } else {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    };
+    if refs.is_empty() {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    }
+    // A command failure is already reported by `SolveApp::run`. A refusal that returns
+    // before that (a file operation in progress) is not, so surface it here.
+    if let Err(error) = app.run("sketch.project", json!({"refs": refs}))
+        && !app.status.as_ref().is_some_and(|(_, _, is_error)| *is_error)
+    {
+        app.set_status(error, true);
+    }
+}
+
+/// Edge references for the hole opening under the cursor, when the ray passes through one.
+fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
+    let (origin, dir) = proj.ray(pos);
+    let state = crate::open_meshing::shown_world(app);
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    (!refs.is_empty()).then_some(refs)
+}
+
 /// A model reference for a hit (for Project and friends).
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
@@ -1036,8 +1150,9 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
 /// side (the engine refuses it), and construction curves are ignored when more than two meet.
-/// Each side must be a line, or an arc for a fillet.
-pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
+/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open control
+/// point spline (#9178).
+pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, curves_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
         .curves
@@ -1051,7 +1166,12 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    let takes = |c: &solidcraft_engine::sketch::Curve| match c.kind {
+        CurveKind::Line { .. } => true,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => curves_ok,
+        _ => false,
+    };
+    if curves.iter().any(|(_, c)| !takes(c)) {
         return None;
     }
     match curves[..] {
@@ -1062,7 +1182,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
-pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
+pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, curves_ok: bool) -> Option<(Vec2, String)> {
     let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
@@ -1074,7 +1194,7 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, pi, arcs_ok)?;
+            corner_curves(sk, pi, curves_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1125,9 +1245,21 @@ pub(crate) fn two_tangent_default_radius(app: &SolveApp, tool: &Tool) -> f64 {
     }
 }
 
+/// The fewest distinct points a spline closed into a loop takes: 3 for a fit spline, and degree +
+/// 1 for a control spline (the engine's rule for a closed control spline).
+fn closed_loop_min_points(cmd: &str) -> Option<usize> {
+    match cmd {
+        "sketch.spline.fit_point" => Some(3),
+        "sketch.spline.control_point" => Some(4),
+        "sketch.spline.control_point_5" => Some(6),
+        _ => None,
+    }
+}
+
 /// A click with an extra tool.
 pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    if tool.cmd != "sketch.spline.fit_point" || tool.pts.len() < 3 || crate::drag_snap::suppressed() {
+    let least = closed_loop_min_points(tool.cmd)?;
+    if tool.pts.len() < least || crate::drag_snap::suppressed() {
         return None;
     }
     let first = tool.pts.first()?.0;
@@ -1136,11 +1268,11 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
         if !distinct.contains(&p.0) {
             distinct.push(p.0);
         }
-        if distinct.len() == 3 {
+        if distinct.len() == least {
             break;
         }
     }
-    if distinct.len() < 3 {
+    if distinct.len() < least {
         return None;
     }
     let state = crate::open_meshing::session_world(&app.session);
@@ -1149,11 +1281,13 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     (screen.distance(pos) <= 8.0).then_some(first)
 }
 
+/// A viewport click while a sketch tool is running: picks under `pos` and dispatches on the
+/// tool's mode. Sketch Project goes through `project_click`.
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
-    let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
+    let at = tool_point_at(app, proj, pos, Some(cmd));
     match m {
         Mode::Construction => crate::sketch_construction::on_click(app, tool, &hits, at),
         Mode::ModelRef if cmd == "inspect.curvature_comb" => {
@@ -1230,19 +1364,30 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 ))
             });
             let Some((plane, at)) = target else { return };
-            let p = if decal {
+            // On the plane of the sketch being edited, the image follows a construction rectangle
+            // drawn around it in that sketch (#18405), when the tool's option in the Sketch Palette
+            // asks for it (`sketch_palette`, "Frame the image in the sketch"). The engine
+            // decides whether the image lies on that plane ("auto"); off it, the image is free.
+            // With no sketch open, the image is framed in a new sketch on its own plane (true).
+            let frame = app.preferences.frame_images_in_sketch.then(|| if app.session.active_sketch.is_some() { json!("auto") } else { json!(true) });
+            let mut p = if decal {
                 json!({"path": path, "face": if plane.get("face").is_some() { plane } else { Value::Null }})
             } else {
                 json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
             };
+            if let (Some(frame), Some(o)) = (frame, p.as_object_mut()) {
+                o.insert("frame".into(), frame);
+            }
             if let Ok(v) = app.run(cmd, p) {
                 IMAGE.with(|i| *i.borrow_mut() = None);
                 app.tool = None;
-                if let Some(id) = v["canvas"].as_u64() {
+                // A framed image is placed and sized by its rectangle's constraints, not the card.
+                if let Some(id) = v["canvas"].as_u64().filter(|_| v.get("frame").is_none()) {
                     app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, id, false));
                 }
             }
         }
+        Mode::ModelRef if cmd == "sketch.project" => project_click(app, proj, pos, &hits),
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
@@ -1280,7 +1425,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         None => {
                             tool.picks.push(id);
                             tool.point_picks.push(xy(p));
-                            app.set_status("Extend: Shift-click the second curve", false);
+                            app.set_tool_hint("Extend: Shift-click the second curve");
                         }
                         Some(first) if first != id => {
                             let first_pt = tool.point_picks.first().cloned();
@@ -1297,6 +1442,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 } else {
                     tool.picks.clear();
                     tool.point_picks.clear();
+                    let p = if cmd == "sketch.break" { picked_shared_end(app, &id, &hits).unwrap_or(p) } else { p };
                     let _ = app.run(cmd, json!({"curve": id, "at": xy(p)}));
                 }
             }
@@ -1362,11 +1508,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
                         // Done: the hint asks for the next pair again (a failure keeps its error).
                         if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
-                            app.set_status(crate::tools::hint(cmd), false);
+                            app.set_tool_hint(crate::tools::hint(cmd));
                         }
                         tool.picks.clear();
                     } else {
-                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
+                        app.set_tool_hint(app.tr("ui.intersection_curve_second_pick").to_string());
                     }
                 }
             }
@@ -1539,7 +1685,7 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
         // Intersection Curve: the right-click starts the picks over (#11048).
         Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
             tool.picks.clear();
-            app.set_status(crate::tools::hint(tool.cmd), false);
+            app.set_tool_hint(crate::tools::hint(tool.cmd));
             true
         }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {

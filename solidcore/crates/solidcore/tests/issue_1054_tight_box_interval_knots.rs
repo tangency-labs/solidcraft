@@ -2,14 +2,12 @@
 //! tangent-discontinuous knots, and always its last knot, whatever the queried interval is,
 //! so the tight box of an edge on part of a NURBS curve reaches points the edge never does.
 //!
-//! The fix is opt-in, `Kernel::fixes.curve_tight_box_interval_knots`: with it on, only the
-//! knots strictly inside the interval are added; with it off (the default) the box keeps the
-//! pinned upstream result.
+//! solidcore adds only the knots strictly inside the interval.
 //!
 //! Credits: `half_quarter_circle_stops_at_its_own_45_degree_point` is `PapaEcho13`'s test
-//! from #1561, run both ways. The three tests from
-//! `interval_knot_fix_is_opt_in_and_tightens_a_rational_arc_subdomain` on are `ian691`'s,
-//! from #1110 (`tests/issue_1054_curve_tight_box.rs`), which proposed this flag; they are
+//! from #1561. The three tests from
+//! `interval_knots_tighten_a_rational_arc_subdomain` on are `ian691`'s,
+//! from #1110 (`tests/issue_1054_curve_tight_box.rs`), which proposed the fix; they are
 //! kept as written there.
 
 #![allow(
@@ -32,9 +30,9 @@ use solidcore::{Kernel, Vec3};
 
 // Unlike the curve-level regressions below, these call the public whole-body
 // query. The edge retains the whole curve, but represents only `interval`.
-fn wire_body_box(curve: Curve, interval: Extent1d, fixed: bool) -> Extent3d {
+fn wire_body_box(curve: Curve, interval: Extent1d) -> Extent3d {
     let natural = curve.natural_interval();
-    let mut k = kernel(fixed);
+    let mut k = Kernel::default();
     let mut body = new_brep(&mut k, 1.0, 1e6).unwrap();
     let edge = create_wire_edge_from_curve(&mut k, &mut body, curve, interval).unwrap();
     assert_eq!(body.face_list().len(), 0);
@@ -53,49 +51,35 @@ fn whole_body_box_of_a_wire_uses_its_arc_interval() {
     let interval = Extent1d::from_min_max(natural.min(), 0.5 * (natural.min() + natural.max()));
     assert!(interval.max() < natural.max());
     let radius_at_45 = 50.0 / 2.0_f64.sqrt();
-    let fixed = wire_body_box(curve.clone(), interval, true);
+    let fixed = wire_body_box(curve.clone(), interval);
     assert_box_close(
         &fixed,
         &Extent3d::from_bounds(radius_at_45, 0.0, 0.0, 50.0, radius_at_45, 0.0),
     );
-    let legacy = wire_body_box(curve.clone(), interval, false);
-    assert_box_close(
-        &legacy,
-        &Extent3d::from_bounds(0.0, 0.0, 0.0, 50.0, 50.0, 0.0),
-    );
-    assert!(legacy.v_max() > fixed.v_max());
 
     // The whole quarter circle is a control, not evidence that the guard runs.
     let expected = Extent3d::from_bounds(0.0, 0.0, 0.0, 50.0, 50.0, 0.0);
-    for enabled in [false, true] {
-        assert_box_close(&wire_body_box(curve.clone(), natural, enabled), &expected);
-    }
+    assert_box_close(&wire_body_box(curve.clone(), natural), &expected);
 }
 
 #[test]
 fn whole_body_box_keeps_an_interior_peak_but_not_outside_knots() {
     let curve = degree_one_peaks();
     let interval = Extent1d::from_min_max(2.5, 3.5);
-    let fixed = wire_body_box(curve.clone(), interval, true);
+    let fixed = wire_body_box(curve.clone(), interval);
     assert_eq!(fixed.min(), Point3::new(2.5, 2.0, 0.0));
     assert_eq!(fixed.max(), Point3::new(3.5, 4.0, 0.0));
-    // Both endpoints have y=2. The interior y=4 peak must not be lost.
-    let legacy = wire_body_box(curve.clone(), interval, false);
-    assert_eq!(legacy.min(), Point3::new(1.0, 0.0, 0.0));
-    assert_eq!(legacy.max(), Point3::new(6.0, 20.0, 0.0));
 
     // Complete-domain control: every peak belongs to the wire, including y=20.
-    for enabled in [false, true] {
-        let whole = wire_body_box(curve.clone(), curve.natural_interval(), enabled);
-        assert_eq!(whole.min(), Point3::new(0.0, 0.0, 0.0));
-        assert_eq!(whole.max(), Point3::new(6.0, 20.0, 0.0));
-    }
+    let whole = wire_body_box(curve.clone(), curve.natural_interval());
+    assert_eq!(whole.min(), Point3::new(0.0, 0.0, 0.0));
+    assert_eq!(whole.max(), Point3::new(6.0, 20.0, 0.0));
 }
 
 #[test]
 fn whole_body_box_keeps_knots_on_the_wire_interval_boundary() {
     let curve = degree_one_peaks();
-    let boundary = wire_body_box(curve, Extent1d::from_min_max(2.0, 4.0), true);
+    let boundary = wire_body_box(curve, Extent1d::from_min_max(2.0, 4.0));
     assert_eq!(boundary.min(), Point3::new(2.0, 0.0, 0.0));
     assert_eq!(boundary.max(), Point3::new(4.0, 4.0, 0.0));
 }
@@ -117,12 +101,6 @@ fn arc(x_axis: [f64; 3], y_axis: [f64; 3], start_deg: f64, end_deg: f64) -> Curv
         )
         .unwrap(),
     )
-}
-
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.curve_tight_box_interval_knots = fixed;
-    k
 }
 
 fn corners(bx: &Extent3d) -> [f64; 6] {
@@ -152,15 +130,9 @@ fn half_quarter_circle_stops_at_its_own_45_degree_point() {
     let r = 50.0 / 2.0_f64.sqrt();
 
     let fixed = c
-        .calculate_tight_bounding_box(&kernel(true), &half)
+        .calculate_tight_bounding_box(&Kernel::default(), &half)
         .unwrap();
     assert_close(corners(&fixed), [r, 0.0, 0.0, 50.0, r, 0.0]);
-
-    // Upstream (flag off) also adds the last knot, the 90 deg end (0, 50).
-    let pinned = c
-        .calculate_tight_bounding_box(&kernel(false), &half)
-        .unwrap();
-    assert_close(corners(&pinned), [0.0, 0.0, 0.0, 50.0, 50.0, 0.0]);
 }
 
 #[test]
@@ -169,7 +141,7 @@ fn sphere_cap_seam_box_stays_on_the_cap() {
     // is the first 30 deg of a quarter-circle NURBS in the xz-plane that runs from polar
     // angle -30 deg, (25, 0, 43.30), over the pole to polar angle 60 deg, (-43.30, 0, 25).
     let c = arc([0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], -30.0, 60.0);
-    let k = kernel(false);
+    let k = Kernel::default();
     let ivl = c.natural_interval();
     // The parameter of the pole (x = 0; x falls along the curve).
     let (mut lo, mut hi) = (ivl.min(), ivl.max());
@@ -190,13 +162,9 @@ fn sphere_cap_seam_box_stays_on_the_cap() {
     let z30 = 50.0 * 30.0_f64.to_radians().cos();
 
     let fixed = c
-        .calculate_tight_bounding_box(&kernel(true), &seam)
+        .calculate_tight_bounding_box(&Kernel::default(), &seam)
         .unwrap();
     assert_close(corners(&fixed), [0.0, 0.0, z30, 25.0, 0.0, 50.0]);
-
-    // Upstream takes in the last knot, (-43.30, 0, 25), which the seam never reaches.
-    let pinned = c.calculate_tight_bounding_box(&k, &seam).unwrap();
-    assert_close(corners(&pinned), [-z30, 0.0, 25.0, 25.0, 0.0, 50.0]);
 }
 
 // ---- From #1110 (ian691). ----
@@ -281,9 +249,8 @@ fn degree_one_peaks() -> Curve {
 }
 
 #[test]
-fn interval_knot_fix_is_opt_in_and_tightens_a_rational_arc_subdomain() {
-    let mut k = Kernel::default();
-    assert!(!k.fixes.curve_tight_box_interval_knots);
+fn interval_knots_tighten_a_rational_arc_subdomain() {
+    let k = Kernel::default();
     let curve = quarter_circle();
     let (knots, _) = curve.knots(&k, None).unwrap();
     let start = *knots.first().unwrap();
@@ -292,13 +259,6 @@ fn interval_knot_fix_is_opt_in_and_tightens_a_rational_arc_subdomain() {
     let interval = Extent1d::from_min_max(start, t30);
     let expected_x = (50.0_f64.powi(2) - 25.0_f64.powi(2)).sqrt();
 
-    let legacy = curve.calculate_tight_bounding_box(&k, &interval).unwrap();
-    assert_box_close(
-        &legacy,
-        &Extent3d::from_bounds(0.0, 0.0, 0.0, 50.0, 50.0, 0.0),
-    );
-
-    k.fixes.curve_tight_box_interval_knots = true;
     let tight = curve.calculate_tight_bounding_box(&k, &interval).unwrap();
     assert_box_close(
         &tight,
@@ -317,13 +277,8 @@ fn interval_knot_fix_is_opt_in_and_tightens_a_rational_arc_subdomain() {
 fn degree_one_interval_keeps_interior_extremum_and_excludes_outside_discontinuities() {
     let curve = degree_one_peaks();
     let interval = Extent1d::from_min_max(2.5, 3.5);
-    let mut k = Kernel::default();
+    let k = Kernel::default();
 
-    let legacy = curve.calculate_tight_bounding_box(&k, &interval).unwrap();
-    assert_eq!(legacy.min(), Point3::new(1.0, 0.0, 0.0));
-    assert_eq!(legacy.max(), Point3::new(6.0, 20.0, 0.0));
-
-    k.fixes.curve_tight_box_interval_knots = true;
     let tight = curve.calculate_tight_bounding_box(&k, &interval).unwrap();
     assert_eq!(tight.min(), Point3::new(2.5, 2.0, 0.0));
     assert_eq!(tight.max(), Point3::new(3.5, 4.0, 0.0));
@@ -332,11 +287,10 @@ fn degree_one_interval_keeps_interior_extremum_and_excludes_outside_discontinuit
 #[test]
 fn interval_end_knots_are_covered_by_endpoints_and_full_domain_is_unchanged() {
     let curve = degree_one_peaks();
-    let mut k = Kernel::default();
-    k.fixes.curve_tight_box_interval_knots = true;
+    let k = Kernel::default();
 
     // Knots at 2 and 4 are interval endpoints, so they must be included through
-    // endpoint evaluation even though the opt-in knot rule is strict.
+    // endpoint evaluation even though the knot rule is strict.
     let boundary = curve
         .calculate_tight_bounding_box(&k, &Extent1d::from_min_max(2.0, 4.0))
         .unwrap();
@@ -345,9 +299,6 @@ fn interval_end_knots_are_covered_by_endpoints_and_full_domain_is_unchanged() {
 
     let whole = Extent1d::from_min_max(0.0, 6.0);
     let fixed_full = curve.calculate_tight_bounding_box(&k, &whole).unwrap();
-    k.fixes.curve_tight_box_interval_knots = false;
-    let default_full = curve.calculate_tight_bounding_box(&k, &whole).unwrap();
-    assert_eq!(fixed_full, default_full);
     assert_eq!(fixed_full.min(), Point3::new(0.0, 0.0, 0.0));
     assert_eq!(fixed_full.max(), Point3::new(6.0, 20.0, 0.0));
 }

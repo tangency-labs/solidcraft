@@ -8,6 +8,11 @@ Each directory is one case:
 - `expected.json`: what the part must measure, and where those numbers come from.
 - `reference.stl` (optional): a fine triangulation of the expected part, used to check the
   shape itself (surface distance), not only its totals.
+- `sweep.json` (optional): parameter sweeps (issue #25). An array of entries, each with a
+  `name`, a `parameters` object (parameter name to a number in mm, or an expression string)
+  and an `expected` object with the same schema as `expected.json`. Each entry changes the
+  named parameters on the built part, lets the history rebuild, and compares the result with
+  the reference at those same values.
 
 Run every case with `cargo xtask oracle`; it writes `docs/oracle.md`.
 

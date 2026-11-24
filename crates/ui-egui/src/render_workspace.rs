@@ -163,6 +163,8 @@ pub struct State {
     /// This frame's existing canvas response, consumed once after result chrome
     /// publishes its real input shields. Never stored in document/tab state.
     result_navigation: Option<(egui::Rect, egui::Response, bool)>,
+    /// The last actual Render canvas in the current design's tiled layout.
+    tile_canvas: Option<(u64, u64, egui::Rect)>,
     revision: u64,
     design_camera: Option<(Camera, bool)>,
     entry_fit: Option<EntryFit>,
@@ -412,6 +414,7 @@ pub struct ViewState {
     pub name: String,
     pub selection: RenderSelection,
     pub(crate) stage: Stage,
+    pub(crate) browser_open: bool,
     pub(crate) by_look: bool,
     pub(crate) search_objects: bool,
     pub(crate) object_query: String,
@@ -419,7 +422,10 @@ pub struct ViewState {
     dirty: bool,
     live_paused: bool,
     /// Product framing retained across Design/Render visits, never a saved setting.
-    render_camera: Option<Camera>,
+    pub(crate) render_camera: Option<Camera>,
+    /// The working framing belongs to this view; authored shots and results stay shared.
+    framing_view: Option<u64>,
+    framings: std::collections::BTreeMap<u64, ViewFraming>,
     /// The CPU sampling choice was initialised or explicitly selected in this draft.
     cpu_sampling_initialized: bool,
     clean_setup: Option<RenderSetup>,
@@ -459,6 +465,40 @@ pub struct ViewState {
     /// Panel geometry is deliberately absent: moving chrome never reframes.
     result_domain: Option<(egui::Rect, [u32; 2], f32, ResultScale)>,
     result_job: Option<solidcraft_engine::render::job::JobId>,
+}
+
+/// Navigation is per view, including the flat camera used to inspect a completed image.
+#[derive(Clone, Copy, Debug)]
+struct ViewFraming {
+    product: Option<Camera>,
+    image: Camera,
+    scale: ResultScale,
+    domain: Option<(egui::Rect, [u32; 2], f32, ResultScale)>,
+    job: Option<solidcraft_engine::render::job::JobId>,
+}
+
+impl ViewFraming {
+    fn new(camera: Camera) -> Self {
+        Self {
+            product: Some(camera),
+            image: Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() },
+            scale: ResultScale::Fit,
+            domain: None,
+            job: None,
+        }
+    }
+
+    fn read(view: &ViewState) -> Self {
+        Self { product: view.render_camera, image: view.result_camera, scale: view.result_scale, domain: view.result_domain, job: view.result_job }
+    }
+
+    fn apply(self, view: &mut ViewState) {
+        view.render_camera = self.product;
+        view.result_camera = self.image;
+        view.result_scale = self.scale;
+        view.result_domain = self.domain;
+        view.result_job = self.job;
+    }
 }
 
 /// The engine retains terminal failures as metadata only. Keep the submitted handle while
@@ -511,6 +551,7 @@ impl Default for ViewState {
             name: "Studio".into(),
             selection: RenderSelection::Nothing,
             stage: Stage::Look,
+            browser_open: true,
             by_look: false,
             search_objects: false,
             object_query: String::new(),
@@ -518,6 +559,8 @@ impl Default for ViewState {
             dirty: false,
             live_paused: false,
             render_camera: None,
+            framing_view: None,
+            framings: Default::default(),
             cpu_sampling_initialized: false,
             clean_setup: None,
             clean_persisted: false,
@@ -574,6 +617,7 @@ impl Default for State {
             displayed: Default::default(),
             view: Default::default(),
             result_navigation: None,
+            tile_canvas: None,
             revision: u64::MAX,
             design_camera: None,
             entry_fit: None,
@@ -744,16 +788,136 @@ pub fn active(app: &SolveApp) -> bool {
     crate::workspace::render_tab(&app.ui.tab)
 }
 
+/// Whether a Render tile is visible even with the Design ribbon focused.
+pub(crate) fn tiled(app: &SolveApp) -> bool {
+    app.docs.views.is_tiled()
+        && app
+            .docs
+            .views
+            .views()
+            .iter()
+            .any(|view| view.kind == solidcraft_views::ViewKind::Render && app.docs.views.tiles().is_some_and(|tiles| tiles.contains(view.id)))
+}
+
+/// Borrow the Render workspace for a card without re-entering the workspace or replacing the
+/// window's Model camera. The caller scopes this view's transient navigation state separately.
+pub(crate) fn with_tile_camera<T>(app: &mut SolveApp, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
+    let id = app
+        .viewport
+        .compass_view
+        .filter(|id| crate::view_windows::layout_views(app).iter().any(|(_, view)| view.id == *id && view.kind == solidcraft_views::ViewKind::Render))
+        .or_else(|| (app.docs.views.active().kind == solidcraft_views::ViewKind::Render).then_some(app.docs.views.active().id))
+        .or_else(|| {
+            app.render_workspace
+                .tile_canvas
+                .filter(|(uid, id, _)| {
+                    *uid == app.session.uid
+                        && crate::view_windows::layout_views(app)
+                            .iter()
+                            .any(|(_, view)| view.id == *id && view.kind == solidcraft_views::ViewKind::Render)
+                })
+                .map(|(_, id, _)| id)
+        })
+        .or_else(|| app.docs.views.views().iter().find(|view| view.kind == solidcraft_views::ViewKind::Render).map(|view| view.id));
+    let Some(id) = id else { return draw(app) };
+    let outer = (app.render_workspace.view.framing_view, ViewFraming::read(&app.render_workspace.view));
+    let scoped = app.viewport.compass_view == Some(id);
+    let pending_navigation = app.render_workspace.result_navigation.take();
+    let saved = (app.cam, app.ui.perspective, app.ui.up_axis);
+    let camera = crate::view_windows::layout_views(app).into_iter().find(|(_, view)| view.id == id).and_then(|(_, view)| view.spec).map_or_else(
+        || {
+            app.render_workspace
+                .view
+                .framings
+                .get(&id)
+                .and_then(|framing| framing.product)
+                .or_else(|| (outer.0 == Some(id)).then_some(outer.1.product).flatten())
+                .unwrap_or(app.cam)
+        },
+        |spec| spec.camera,
+    );
+    focus_view_framing(app, id);
+    let tab = std::mem::replace(&mut app.ui.tab, "RENDER".into());
+    app.cam = camera;
+    if scoped {
+        // The view's runtime options may have changed since this camera was
+        // saved. Preserve its authored lens unless projection itself changed.
+        if app.ui.perspective != (app.cam.fov > 0.0) {
+            apply_camera_projection(app);
+        }
+        app.cam.up = app.ui.up_axis;
+    } else {
+        app.ui.perspective = camera.fov > 0.0;
+        app.ui.up_axis = camera.up;
+    }
+    let result = draw(app);
+    park_view_framing(app, id);
+    if outer.0 != Some(id) {
+        outer.1.apply(&mut app.render_workspace.view);
+        app.render_workspace.view.framing_view = outer.0;
+    }
+    if !scoped {
+        crate::view_windows::set_view_camera(app, id, app.cam);
+        (app.cam, app.ui.perspective, app.ui.up_axis) = saved;
+    }
+    app.render_workspace.result_navigation = pending_navigation;
+    app.ui.tab = tab;
+    result
+}
+
+/// A committed view focus selects its retained framing without re-entering a workspace.
+pub(crate) fn focus_view_framing(app: &mut SolveApp, id: u64) {
+    let open: Vec<_> = crate::view_windows::layout_views(app)
+        .into_iter()
+        .filter(|(_, view)| view.kind == solidcraft_views::ViewKind::Render)
+        .map(|(_, view)| view.id)
+        .collect();
+    if !open.contains(&id) {
+        return;
+    }
+    let view = &mut app.render_workspace.view;
+    view.framings.retain(|id, _| open.contains(id));
+    if view.framing_view == Some(id) {
+        return;
+    }
+    if let Some(previous) = view.framing_view.filter(|previous| open.contains(previous)) {
+        view.framings.insert(previous, ViewFraming::read(view));
+    }
+    let framing = view.framings.get(&id).copied().unwrap_or_else(|| {
+        if view.framing_view.is_none() && view.framings.is_empty() {
+            let mut first = ViewFraming::read(view);
+            first.product = first.product.or(Some(app.cam));
+            first
+        } else {
+            ViewFraming::new(app.cam)
+        }
+    });
+    framing.apply(view);
+    view.framing_view = Some(id);
+}
+
+/// Store only navigation; editing a shot or selecting a result remains design-wide.
+pub(crate) fn park_view_framing(app: &mut SolveApp, id: u64) {
+    let view = &mut app.render_workspace.view;
+    if view.framing_view == Some(id) {
+        view.render_camera = Some(app.cam);
+        view.framings.insert(id, ViewFraming::read(view));
+    }
+}
+
+/// Render paints with the authored lens; apply the navigation bar projection to that camera.
+pub(crate) fn apply_camera_projection(app: &mut SolveApp) {
+    if active(app) {
+        app.cam.fov = if app.ui.perspective { crate::prefs::perspective_fov(&app.preferences) } else { 0.0 };
+    }
+}
+
 pub(crate) fn result_active(app: &SolveApp) -> bool {
     active(app) && app.render_workspace.view.result
 }
 
 pub(crate) fn comparison_active(app: &SolveApp) -> bool {
     active(app) && app.render_workspace.view.compare.is_some()
-}
-
-pub(crate) fn comparison_drag_captured(app: &SolveApp) -> bool {
-    active(app) && app.render_workspace.view.compare.as_ref().is_some_and(|view| view.dragging)
 }
 
 pub(crate) fn fit_result(app: &mut SolveApp) {
@@ -868,10 +1032,6 @@ pub fn sync_backend(app: &mut SolveApp) {
 /// scheduling frames even after leaving Render so a browser job can finish in Design.
 pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     library::poll_import(app, ctx);
-    if !app.universal_panel_host_enabled() {
-        // Classic shell input and Fit run before the host overlay finalizer.
-        crate::shell::register_panel(app, "render:result-controls", None, None);
-    }
     if let Some(text) = app.render_workspace.clipboard_text.take() {
         ctx.copy_text(text);
     }
@@ -902,7 +1062,34 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         cache_render_images(app, ctx);
     }
     prepare::tick(app, ctx);
-    live::tick(app, ctx);
+    if active(app) || tiled(app) || !app.view_windows.has_render() {
+        tick_live(app, ctx);
+    }
+}
+
+pub(crate) fn tick_live(app: &mut SolveApp, ctx: &egui::Context) {
+    let canvas = app.render_workspace.tile_canvas.filter(|(uid, id, _)| {
+        *uid == app.session.uid
+            && app.docs.views.get(*id).is_some_and(|view| view.kind == solidcraft_views::ViewKind::Render)
+            && app.docs.views.tiles().is_some_and(|tiles| tiles.contains(*id))
+    });
+    if !app.home.open && tiled(app) && canvas.is_none() {
+        return;
+    }
+    if !app.home.open
+        && tiled(app)
+        && let Some((_, _, rect)) = canvas
+    {
+        let previous = app.viewport.rect.replace(rect);
+        if active(app) {
+            live::tick(app, ctx);
+        } else {
+            with_tile_camera(app, |app| live::tick(app, ctx));
+        }
+        app.viewport.rect = previous;
+    } else {
+        live::tick(app, ctx);
+    }
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -975,6 +1162,9 @@ pub(crate) fn entry_open(app: &SolveApp) -> bool {
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
+        if app.docs.views.active().kind == solidcraft_views::ViewKind::Render {
+            focus_view_framing(app, app.docs.views.active().id);
+        }
         if !entry_open(app) {
             return Err(solidcraft_ui_text::tr("render.error_finish_operation").into());
         }
@@ -991,14 +1181,12 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             app.render_workspace.displayed.clear();
             app.render_workspace.design_camera = Some((app.cam, app.ui.perspective));
             app.ui.tab = "RENDER".into();
-            let reveal = !crate::panel_runtime::production_active(app);
-            apply_stage(app, app.render_workspace.view.stage.key(), reveal);
-            if reveal && app.render_workspace.view.selection == RenderSelection::Nothing {
-                selection_editor(app, &RenderSelection::Nothing);
-            }
+            apply_stage(app, app.render_workspace.view.stage.key(), false);
         }
-        let remembered =
-            entering.then_some(app.render_workspace.view.render_camera).flatten().filter(|_| !app.preferences.render_legacy_image_defaults);
+        let remembered = entering
+            .then_some(app.render_workspace.view.render_camera)
+            .flatten()
+            .filter(|_| tiled(app) || !app.preferences.render_legacy_image_defaults);
         if let Some(camera) = remembered {
             app.run("render.camera.set", json!({"camera":camera}))?;
             app.follow_view_request(false);
@@ -1047,7 +1235,7 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
         app.render_workspace.displayed.clear();
         assign::stop(app);
         if active(app) {
-            app.render_workspace.view.render_camera = (!app.preferences.render_legacy_image_defaults).then_some(app.cam);
+            app.render_workspace.view.render_camera = (tiled(app) || !app.preferences.render_legacy_image_defaults).then_some(app.cam);
             setups::refresh_dirty(app);
         }
         if let Some((camera, perspective)) = app.render_workspace.design_camera.take() {
@@ -1218,9 +1406,7 @@ pub(crate) fn reveal_inspector(app: &mut SolveApp) {
 
 pub(crate) fn request_inspector_visibility(app: &mut SolveApp, visible: bool) {
     set_inspector_visible(app, visible);
-    if crate::panel_runtime::production_active(app) {
-        app.render_workspace.view.inspector_visibility_request = Some(visible);
-    }
+    app.render_workspace.view.inspector_visibility_request = Some(visible);
 }
 
 pub(crate) fn inspector_visible(app: &SolveApp) -> bool {
@@ -1231,11 +1417,26 @@ pub(crate) fn set_inspector_visible(app: &mut SolveApp, visible: bool) {
     app.render_workspace.view.inspector.hidden = !visible;
 }
 
-pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if crate::render_ui::focused(app) {
-        return;
-    }
-    inspector_panel::panel(app, ui);
+#[cfg(test)]
+fn test_panel<'a>(app: &'a SolveApp, instance: &str) -> Option<&'a crate::panel_runtime::HostSection> {
+    app.universal_panel_frame()?.layout.sections.iter().find(|section| section.instance.0 == instance)
+}
+
+#[cfg(test)]
+fn test_panel_header(app: &SolveApp, instance: &str) -> egui::Rect {
+    crate::panel_runtime::egui_rect(test_panel(app, instance).unwrap().header)
+}
+
+#[cfg(test)]
+fn resize_test_panel(h: &mut crate::scenario::Harness, instance: &str, width: f32) {
+    let height = test_panel(&h.app, instance).unwrap().outer.size.height;
+    h.app
+        .run_panel_command(
+            "panel.resize",
+            &json!({"target":{"type":"instance","id":instance},"size":{"width":width,"height":height},"thickness_only":true}),
+        )
+        .unwrap();
+    h.frames(3);
 }
 
 /// Interactive stage-panel review. Direct engine JSON calls remain dialog-free.
@@ -1277,11 +1478,6 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         });
     }
     false
-}
-
-/// Per-stage companion sharing the Browser's dock policy.
-pub(crate) fn appearances_card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
-    library::card(app, ui, bounds);
 }
 
 fn image_host(app: &SolveApp, method: ImageMethod) -> Result<&ImageHost, String> {
@@ -2350,39 +2546,24 @@ fn result_rect(camera: Camera, size: [u32; 2], canvas: egui::Rect) -> egui::Rect
 }
 
 fn result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.universal_panel_host_enabled() {
-        // The comparison picker contains scoped controls (including Swap). Give
-        // that compound widget its own row, then wrap actions at the original
-        // viewport width even if the picker needs horizontal scrolling.
-        let width = ui.available_width();
-        let layout = if ui.layout().prefer_right_to_left() {
-            egui::Layout::right_to_left(egui::Align::Center)
-        } else {
-            egui::Layout::left_to_right(egui::Align::Center)
-        };
-        ui.horizontal(|ui| compare::controls(app, ui));
-        ui.allocate_ui_with_layout(egui::vec2(width, Tokens::get().control_height), layout.with_main_wrap(true), |ui| {
-            result_action_controls(app, ui)
-        });
-        return;
-    }
-    classic_result_actions(app, ui);
+    // Give the comparison picker its own row before wrapping the remaining actions.
+    let width = ui.available_width();
+    let layout = if ui.layout().prefer_right_to_left() {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.horizontal(|ui| compare::controls(app, ui));
+    ui.allocate_ui_with_layout(egui::vec2(width, Tokens::get().control_height), layout.with_main_wrap(true), |ui| result_action_controls(app, ui));
 }
 
-/// Keep enabled state on the wrapping UI itself. Button::Enabled opens a child
-/// scope in the remaining row space, so its button cannot wrap in the parent.
-/// Classic retains the original kit path and widget identities.
-fn result_action_button(ui: &mut egui::Ui, label: &str, enabled: bool, host: bool) -> egui::Response {
-    if host {
-        ui.add_enabled(enabled, |ui: &mut egui::Ui| crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal))
-    } else {
-        crate::ui_kit::button(ui, label, crate::ui_kit::Button::Enabled(enabled))
-    }
+/// Keep enabled state on the wrapping UI so its buttons can wrap in the parent.
+fn result_action_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    ui.add_enabled(enabled, |ui: &mut egui::Ui| crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal))
 }
 
 fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_rect("render:result-actions-clip", ui.clip_rect());
-    let host = app.universal_panel_host_enabled();
     let results = app.render_workspace.view.retained.clone();
     if !results.is_empty() {
         let selected = results.iter().position(|result| Some(result.frame.job) == app.render_workspace.view.completed);
@@ -2407,13 +2588,9 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(index) = chosen {
             let _ = app.run("render.result.select", json!({"index":index}));
         }
-        let discard = if host {
-            ui.add_enabled(selected.is_some(), |ui: &mut egui::Ui| {
-                crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard"))
-            })
-        } else {
-            ui.add_enabled_ui(selected.is_some(), |ui| crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard"))).inner
-        };
+        let discard = ui.add_enabled(selected.is_some(), |ui: &mut egui::Ui| {
+            crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard"))
+        });
         crate::scenario::publish_target("render:result-discard", discard.rect);
         if discard.clicked()
             && let Some(index) = selected
@@ -2423,7 +2600,7 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     for (view, key) in [("model", "render.state_model"), ("fit", "render.output_fit"), ("actual", "render.result_actual")] {
         let enabled = view != "actual" || !reduced_display(app);
-        let response = result_action_button(ui, app.tr(key), enabled, host);
+        let response = result_action_button(ui, app.tr(key), enabled);
         crate::scenario::publish_target(&format!("render:result-{view}"), response.rect);
         crate::scenario::publish_target(&format!("render:result:view:{view}"), response.rect);
         if response.clicked() {
@@ -2431,12 +2608,12 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     quality::mask_view_controls(app, ui);
-    let copy = result_action_button(ui, app.tr("render.output_copy"), ribbon::action_ready(app, "render.result.copy").is_ok(), host);
+    let copy = result_action_button(ui, app.tr("render.output_copy"), ribbon::action_ready(app, "render.result.copy").is_ok());
     crate::scenario::publish_target("render:result-copy", copy.rect);
     if copy.clicked() {
         app.start("render.result.copy");
     }
-    let export = result_action_button(ui, studio::export_label(app), ribbon::action_ready(app, "render.export").is_ok(), host);
+    let export = result_action_button(ui, studio::export_label(app), ribbon::action_ready(app, "render.export").is_ok());
     crate::scenario::publish_target("render:result-export", export.rect);
     if export.clicked() {
         app.start("render.export");
@@ -2446,82 +2623,6 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if close.clicked() {
         app.start("render.result.close");
     }
-}
-
-fn classic_result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
-    // Each independently sized control group begins in the original free width.
-    // A ComboBox width is a minimum; placing it after the comparison strip in a
-    // wrapped row can otherwise move its entire hit target under the inspector.
-    ui.horizontal_wrapped(|ui| compare::controls(app, ui));
-    let results = app.render_workspace.view.retained.clone();
-    if !results.is_empty() {
-        ui.horizontal_wrapped(|ui| {
-            let selected = results.iter().position(|result| Some(result.frame.job) == app.render_workspace.view.completed);
-            let label =
-                selected.and_then(|index| results.get(index)).map(result_label).unwrap_or_else(|| app.tr("render.results_choose").to_string());
-            let mut chosen = None;
-            let t = Tokens::get();
-            let width = (ui.available_width() - t.control_height - ui.spacing().item_spacing.x).max(t.control_height);
-            let picker = crate::ui_kit::bounded_dropdown_menu(ui, "render_results", &label, width, |ui| {
-                for (index, result) in results.iter().enumerate().rev() {
-                    let label = result_label(result);
-                    let response = crate::ui_kit::list_picker(ui, &format!("result:{index}"), &label, selected == Some(index));
-                    crate::scenario::publish_target(&format!("render:result:select:{index}"), response.rect);
-                    if response.clicked() {
-                        chosen = Some(index);
-                        ui.close();
-                    }
-                    response.backing_on_hover_text(label);
-                }
-            });
-            let picker = picker.backing_on_hover_text(&label);
-            crate::scenario::publish_target("render:results", picker.rect);
-            if let Some(index) = chosen {
-                let _ = app.run("render.result.select", json!({"index":index}));
-            }
-            let discard = ui
-                .add_enabled_ui(selected.is_some(), |ui| crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard")))
-                .inner;
-            crate::scenario::publish_target("render:result-discard", discard.rect);
-            if discard.clicked()
-                && let Some(index) = selected
-            {
-                let _ = app.run("render.result.discard", json!({"index":index}));
-            }
-        });
-    }
-    ui.horizontal_wrapped(|ui| {
-        for (view, key) in [("model", "render.state_model"), ("fit", "render.output_fit"), ("actual", "render.result_actual")] {
-            let enabled = view != "actual" || !reduced_display(app);
-            let response = crate::ui_kit::button(ui, app.tr(key), crate::ui_kit::Button::Enabled(enabled));
-            crate::scenario::publish_target(&format!("render:result:view:{view}"), response.rect);
-            crate::scenario::publish_target(&format!("render:result-{view}"), response.rect);
-            if response.clicked() {
-                let _ = app.run("render.result.view", json!({"view":view}));
-            }
-        }
-        quality::mask_view_controls(app, ui);
-        let copy = crate::ui_kit::button(
-            ui,
-            app.tr("render.output_copy"),
-            crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.result.copy").is_ok()),
-        );
-        crate::scenario::publish_target("render:result-copy", copy.rect);
-        if copy.clicked() {
-            app.start("render.result.copy");
-        }
-        let export =
-            crate::ui_kit::button(ui, studio::export_label(app), crate::ui_kit::Button::Enabled(ribbon::action_ready(app, "render.export").is_ok()));
-        crate::scenario::publish_target("render:result-export", export.rect);
-        if export.clicked() {
-            app.start("render.export");
-        }
-        let close = crate::ui_kit::StageBar::icon_action(ui, "close", app.tr("cmd.render_result_close"));
-        crate::scenario::publish_target("render:result-close", close.rect);
-        if close.clicked() {
-            app.start("render.result.close");
-        }
-    });
 }
 
 fn result_label(result: &solidcraft_engine::render_jobs::RetainedResult) -> String {
@@ -2614,13 +2715,11 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// Result controls remain legacy chrome. Paint them after the shell, inside a
-/// real free contour piece, and record only the clipped card actually shown.
-/// No panel adapter, outer host or second navigation path is introduced.
+/// Paint result controls in the free canvas and record the clipped footprint.
 pub(crate) fn host_result_overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     use crate::panel_runtime::{egui_rect, logical_rect};
-    crate::shell::register_panel(app, "render:result-controls", None, None);
-    if !app.universal_panel_host_enabled() || !active(app) || (!result_active(app) && app.render_workspace.view.compare.is_none()) {
+    crate::shell::register_panel(app, "render:result-controls", None);
+    if !active(app) || (!result_active(app) && app.render_workspace.view.compare.is_none()) {
         return;
     }
     let Some(canvas) = app.viewport.rect.filter(|rect| rect.is_finite() && rect.is_positive()) else {
@@ -2640,13 +2739,18 @@ pub(crate) fn host_result_overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
             if bounds.is_finite() && bounds.width() >= t.control_height + t.space_8 && bounds.height() >= t.control_height + t.space_8 {
                 let painted = host_result_card(app, ui, bounds, canvas);
                 if ui.is_visible() && !ui.is_sizing_pass() && painted.is_positive() && usable.contains_rect(logical_rect(painted)) {
-                    crate::shell::register_panel(app, "render:result-controls", Some(painted), None);
+                    crate::shell::register_panel(app, "render:result-controls", Some(painted));
                     crate::scenario::publish_rect("render:result-controls", painted);
                 }
             }
         }
     }
     crate::viewport::refresh_layout(app, ui.ctx());
+    finish_result_navigation(app, ui, canvas);
+}
+
+/// Use the existing result camera and canvas response after the window's input shields are known.
+pub(crate) fn finish_result_navigation(app: &mut SolveApp, ui: &mut egui::Ui, canvas: egui::Rect) {
     if !result_active(app) && app.render_workspace.view.compare.is_none() {
         app.render_workspace.result_navigation = None;
         return;
@@ -2666,7 +2770,7 @@ pub(crate) fn host_result_overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// The existing legacy card, shared with bounded-widget regression fixtures.
+/// The result control card, shared with bounded-widget regression fixtures.
 /// The caller alone records its footprint and finalizes the canvas response.
 fn host_result_card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect, canvas: egui::Rect) -> egui::Rect {
     let t = Tokens::get();
@@ -2750,24 +2854,12 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
     cache_render_images(app, ui.ctx());
     let t = Tokens::get();
     ui.painter().rect_filled(ui.max_rect(), 0.0, t.viewport_bottom);
-    let host = app.universal_panel_host_enabled();
-    if !host {
-        // Classic framing and navigation cannot leave the host fit cache valid.
-        app.render_workspace.view.result_domain = None;
-    }
+    // Keep the full projection. Controls paint later in the free canvas.
     let viewport = ui.max_rect();
-    // The host image keeps its whole below-app-bar projection. Persistent
-    // controls paint later, after the legacy shell has registered real bounds.
-    let mut free = if host { viewport } else { crate::render_ui::canvas(app, viewport) };
-    if !host && ribbon::busy(app) {
-        free = crate::ui_kit::Container::below_navigation_row(free);
-    }
-    if host {
-        app.viewport.rect = Some(viewport);
-        crate::viewport::refresh_layout(app, ui.ctx());
-    }
-    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(free).id_salt("render_result_content"));
-    content.set_clip_rect(free.intersect(ui.clip_rect()));
+    app.viewport.rect = Some(viewport);
+    crate::viewport::refresh_layout(app, ui.ctx());
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(viewport).id_salt("render_result_content"));
+    content.set_clip_rect(viewport.intersect(ui.clip_rect()));
     let ui = &mut content;
     let Some(info) = displayed_image(app).map(|display| display.info.clone()) else {
         let cached = if quality::mask_active(app) { &app.render_workspace.denoise_mask_image } else { &app.render_workspace.image };
@@ -2776,9 +2868,6 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
             _ if ribbon::busy(app) => app.tr("render.state_in_progress").to_string(),
             _ => app.tr("render.result_empty").to_string(),
         };
-        if !host {
-            crate::ui_kit::Container::navigation_contents(ui, |ui| result_header(app, ui));
-        }
         let unavailable = app
             .render_workspace
             .view
@@ -2786,7 +2875,7 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
             .and_then(|job| app.session.render_job_handle(job).ok())
             .and_then(|handle| handle.status().ok())
             .and_then(|status| status.preview_unavailable_reason);
-        let canvas = ui.available_rect_before_wrap().intersect(free);
+        let canvas = ui.available_rect_before_wrap().intersect(viewport);
         ui.centered_and_justified(|ui| {
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_heading).color(t.text)).wrap());
@@ -2800,36 +2889,19 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.rect = Some(canvas);
         return;
     };
-    if !host {
-        crate::ui_kit::Container::navigation_contents(ui, |ui| result_header(app, ui));
-    }
     // Widget growth cannot enlarge the reserved image/navigation canvas.
-    let rect = ui.available_rect_before_wrap().intersect(free);
+    let rect = ui.available_rect_before_wrap().intersect(viewport);
     if rect.width() < 1.0 || rect.height() < 1.0 {
         return;
     }
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     app.viewport.rect = Some(rect);
     crate::viewport::refresh_layout(app, ui.ctx());
+    app.render_workspace.result_navigation = Some((rect, response, false));
     let size = [info.width, info.height];
-    let scale = app.render_workspace.view.result_scale;
-    if !host && scale != ResultScale::Free {
-        app.render_workspace.view.result_camera = result_camera(size, rect, ui.ctx().pixels_per_point(), scale);
-    }
-    if host {
-        app.render_workspace.result_navigation = Some((rect, response, false));
-    } else {
-        with_result_camera(app, |app| {
-            crate::navigation::handle(app, ui, rect, &response, crate::navigation::NavCaps { orbit: false, pick: false });
-        });
-    }
-    let after = app.render_workspace.view.result_scale;
-    if !host && after != scale && after != ResultScale::Free {
-        app.render_workspace.view.result_camera = result_camera(size, rect, ui.ctx().pixels_per_point(), after);
-    }
     let camera = app.render_workspace.view.result_camera;
     let mut image_rect = result_rect(camera, size, rect);
-    if after == ResultScale::Actual {
+    if app.render_workspace.view.result_scale == ResultScale::Actual {
         let dpi = ui.ctx().pixels_per_point();
         let min = egui::pos2((image_rect.min.x * dpi).round() / dpi, (image_rect.min.y * dpi).round() / dpi);
         image_rect = image_rect.translate(min - image_rect.min);
@@ -2860,19 +2932,6 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         painter.rect_stroke(image_rect, 0.0, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Outside);
     }
-    if !host {
-        let percent = f64::from(rect.height() * ui.ctx().pixels_per_point()) / (2.0 * camera.half_height()) * 100.0;
-        let label = painter.layout_no_wrap(format!("{percent:.1}%"), egui::FontId::proportional(t.font_label), t.text);
-        let badge = egui::Rect::from_min_size(
-            rect.left_bottom() + egui::vec2(t.space_8, -label.size().y - t.space_8 * 2.0),
-            label.size() + egui::vec2(t.space_8 * 2.0, t.space_8),
-        );
-        painter.rect_filled(badge, t.control_radius, t.panel);
-        painter.galley(badge.min + egui::vec2(t.space_8, t.space_8 * 0.5), label, t.text);
-    }
-    if !app.universal_panel_host_enabled() {
-        crate::navigation_bar_view::show(app, ui, rect);
-    }
 }
 
 /// What the product scene is extracted from: the document (appearances, the history marker),
@@ -2882,7 +2941,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
     let mut visibility = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.visibility;
-    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.sketching_view, crate::sketch_view::active_sketch(app))
+        .hash(&mut visibility);
     let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
     let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
     app.render_workspace.scene_sources = Some((doc, world));
@@ -2975,7 +3035,8 @@ impl State {
 /// on the user-selected background (which may have the opposite theme contrast).
 fn preview_error(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, error: &str) {
     let t = Tokens::get();
-    let bounded = crate::shell::workspace_content(app, crate::shell::panel_bounds(app, rect)).shrink(t.space_12);
+    let bounded = if app.viewport.tile.is_some() { rect } else { crate::shell::workspace_content(app, crate::shell::panel_bounds(app, rect)) };
+    let bounded = bounded.shrink(t.space_12);
     // At tiny window sizes the shell may leave no room for the shared error card.
     if !bounded.is_finite() || bounded.width() < t.control_height + 2.0 * t.space_8 || bounded.height() < t.control_height + 2.0 * t.space_8 {
         return;
@@ -3498,6 +3559,7 @@ pub fn gpu_scene_cached(
                 look,
                 levels: Vec::new(),
                 closed: true,
+                edges: None,
             });
             gpu.instanced.len() - 1
         });
@@ -3634,18 +3696,39 @@ fn preview_background(app: &SolveApp) -> Tokens {
     }
 }
 
+/// Paint the continuous backing of a focused Render tile behind the other views.
+pub(crate) fn tile_background(app: &SolveApp) -> [egui::Color32; 2] {
+    if app.render_workspace.view.result || app.render_workspace.view.compare.is_some() {
+        [Tokens::get().viewport_bottom; 2]
+    } else {
+        let background = preview_background(app);
+        [background.viewport_top, background.viewport_bottom]
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let painted = app.viewport.compass_view.unwrap_or_else(|| app.docs.views.active().id);
+    if app.viewport.tile.is_some() && (app.docs.views.active().kind != solidcraft_views::ViewKind::Render || painted == app.docs.views.active().id) {
+        app.render_workspace.tile_canvas = Some((app.session.uid, painted, ui.max_rect()));
+    }
+    focus_view_framing(app, painted);
     app.render_workspace.result_navigation = None;
     if app.render_workspace.view.compare.is_some() {
         app.render_workspace.view.environment_ring = environment::RingView::default();
         assign::stop(app);
         compare::show(app, ui);
+        if app.viewport.card {
+            finish_result_navigation(app, ui, ui.max_rect());
+        }
         return;
     }
     if app.render_workspace.view.result {
         app.render_workspace.view.environment_ring = environment::RingView::default();
         assign::stop(app);
         show_result(app, ui);
+        if app.viewport.card {
+            finish_result_navigation(app, ui, ui.max_rect());
+        }
         return;
     }
     let viewport = ui.max_rect();
@@ -3678,10 +3761,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             || app.viewport.axis_drag.is_some()
             || app.viewport.spin
             || app.cam_anim.is_some();
+        // A material dragged from the shelf is dropped on primary release without a canvas click.
+        let primary_released = ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
         let hits = input
             .hover
             .filter(|_| image_inside && !navigating && geometry_current)
-            .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
+            .map(|p| {
+                let proj = crate::viewport::projection(app, rect);
+                if input.primary_down || primary_released || response.clicked() || response.secondary_clicked() {
+                    crate::viewport::pick_cached(app, &proj, p)
+                } else {
+                    crate::viewport::pick_hover(app, &proj, p, ui.ctx())
+                }
+            })
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
         // The view moved under a still pointer: the highlight under it stays on the face
@@ -3713,7 +3805,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let background = preview_background(app);
     solidcraft_viewport_egui::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
-    if live::has_picture(app) {
+    if live::has_picture(app) && (!tiled(app) || live::picking_current(app)) {
         live::paint(app, ui, rect);
         if live::picking_current(app) {
             paint_product_feedback(app, ui, rect, app.cam);
@@ -3721,10 +3813,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         paint_product(app, ui, rect, app.cam, None);
     }
-    shot::overlay(app, ui, viewport);
-    if !app.universal_panel_host_enabled() {
-        crate::viewport::axis_view(app, ui, viewport);
-        crate::navigation_bar_view::show(app, ui, viewport);
+    if !app.viewport.card {
+        shot::overlay(app, ui, viewport);
     }
 }
 
@@ -3833,7 +3923,8 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             turned_depth: None,
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
+            clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -3844,6 +3935,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
             sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
@@ -3854,11 +3946,19 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
-        if feedback {
-            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame)));
-        } else {
-            crate::blur::viewport(ui.painter(), rect, ViewportCallback(frame), rect, [background.viewport_top, background.viewport_bottom]);
+        match (feedback, app.viewport.scene_slot()) {
+            (true, tile) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame, tile)));
+            }
+            (false, Some(slot)) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::TileCallback(slot, frame)));
+            }
+            (false, None) => {
+                ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, ViewportCallback(frame)));
+            }
         }
         Ok(())
     })();
@@ -3970,6 +4070,7 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 fit_result(app);
             }
             if matches!(view, "model") || id == "render.result.close" {
+                live::show_model_preview(app);
                 app.render_workspace.view.compare = None;
                 app.render_workspace.comparison_images.clear();
             }

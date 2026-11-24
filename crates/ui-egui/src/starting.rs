@@ -1,9 +1,14 @@
 //! The window while the app gets ready (#1210). The window stays hidden until its first frame is
-//! drawn, so the setup that is slow on some computers (fonts, the 3D view's shaders, the recovery
-//! scan, a design to open) runs in later frames, one step each, behind a light "Starting" page:
-//! the first frame only paints that page, and each later one runs the next step and names the one
-//! after it. A step can also wait for work on another thread (the 3D view's shader compile), so
-//! the window keeps drawing and answering (moving, minimizing) while it runs.
+//! drawn, so the setup that is slow on some computers (the recovery scan, a design to open) runs in
+//! later frames, one step each, behind a light "Starting" page: the first frame only paints that
+//! page, and each later one runs the next step and names the one after it. A step can also wait
+//! for work on another thread, so the window keeps drawing and answering (moving, minimizing)
+//! while it runs.
+//!
+//! Work the start page does not need (the 3D view's shader compile) runs beside the app instead
+//! ([`Starting::beside`]): it starts with the first step and goes on after the page is gone, so the
+//! start page is usable without waiting for it. A design opened meanwhile says, in its view, that
+//! the view is still being prepared.
 //!
 //! The slow work itself runs on a [`Worker`] where it can: the window keeps drawing and answering
 //! (moving, minimizing) meanwhile, and closing the app waits for it ([`Worker::wait`]).
@@ -19,7 +24,7 @@ use egui::{Align2, FontId, Id, Sense, Stroke, ViewportCommand, vec2};
 use crate::ui_kit::{Container, Surface};
 use solidcraft_theme::Tokens;
 
-/// How often the page is drawn while a step waits for its worker (see [`Starting::wait_frame`]).
+/// How often the page is drawn while a step waits for its worker.
 const WAIT_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// One step of the setup, run on its own frame with what it sets up (`T`, the app); `true` once it
@@ -32,12 +37,13 @@ pub struct Starting<T> {
     /// Whether a frame showed the page yet: no step runs before it has.
     shown: bool,
     total: usize,
-    wait_frame: std::time::Duration,
+    /// Work that runs beside the app, asked each logic call until it says it is done.
+    beside: Vec<Step<T>>,
 }
 
 impl<T> Default for Starting<T> {
     fn default() -> Self {
-        Self { steps: VecDeque::new(), shown: false, total: 0, wait_frame: WAIT_FRAME }
+        Self { steps: VecDeque::new(), shown: false, total: 0, beside: Vec::new() }
     }
 }
 
@@ -64,17 +70,23 @@ impl<T> Starting<T> {
         self
     }
 
-    /// How often the page is drawn while a step waits; longer where drawing takes the CPU the
-    /// waited-for work needs (a software renderer).
+    /// Work that runs beside the app rather than before it: asked first in the frame the first
+    /// step runs (after the page is up), then at each logic call, also once the page is gone,
+    /// until it says it is done. Nothing waits for it: the app draws as soon as the steps are done.
     #[must_use]
-    pub fn wait_frame(mut self, every: std::time::Duration) -> Self {
-        self.wait_frame = every;
+    pub fn beside(mut self, step: impl FnMut(&mut T, &egui::Context) -> bool + 'static) -> Self {
+        self.beside.push(Box::new(step));
         self
     }
 
-    /// Whether every step has run.
+    /// Whether every step has run: the app draws itself.
     pub fn done(&self) -> bool {
         self.steps.is_empty()
+    }
+
+    /// Whether the work beside the app is done too: startup is over.
+    pub fn settled(&self) -> bool {
+        self.done() && self.beside.is_empty()
     }
 
     /// The start of a frame: on the first one nothing runs (the page goes up first); on each
@@ -88,6 +100,7 @@ impl<T> Starting<T> {
             return !self.done();
         }
         self.shown = true;
+        self.beside.retain_mut(|step| !step(target, ctx));
         let mut waiting = false;
         while let Some((_, step)) = self.steps.front_mut() {
             if !step(target, ctx) {
@@ -105,7 +118,7 @@ impl<T> Starting<T> {
         if waiting {
             // A few frames a second keep the bar moving; drawing flat out would take the GPU (or a
             // software renderer's CPU) from the work being waited for. Input still draws at once.
-            ctx.request_repaint_after(self.wait_frame);
+            ctx.request_repaint_after(WAIT_FRAME);
         } else {
             ctx.request_repaint();
         }
@@ -215,7 +228,7 @@ mod tests {
     fn three_steps() -> Starting<Vec<&'static str>> {
         Starting::default()
             .then("", |log: &mut Vec<&'static str>, _| log.push("fonts"))
-            .then("starting.view", |log: &mut Vec<&'static str>, _| log.push("view"))
+            .then("starting.design", |log: &mut Vec<&'static str>, _| log.push("design"))
             .then("starting.recovery", |log: &mut Vec<&'static str>, _| log.push("recovery"))
     }
 
@@ -262,17 +275,17 @@ mod tests {
         let (still, painted) = frame(&ctx, &mut starting, &mut log);
         assert!(still);
         assert_eq!(log, ["fonts"]);
-        assert!(painted.iter().any(|t| t == "Preparing the 3D view…"), "the page names the step the next frame runs: {painted:?}");
+        assert!(painted.iter().any(|t| t == "Opening the design…"), "the page names the step the next frame runs: {painted:?}");
 
         let (still, painted) = frame(&ctx, &mut starting, &mut log);
         assert!(still);
-        assert_eq!(log, ["fonts", "view"]);
+        assert_eq!(log, ["fonts", "design"]);
         assert!(painted.iter().any(|t| t == "Checking for unsaved work…"), "{painted:?}");
 
         let (still, painted) = frame(&ctx, &mut starting, &mut log);
         assert!(!still, "the app draws this frame itself");
         assert!(starting.done());
-        assert_eq!(log, ["fonts", "view", "recovery"]);
+        assert_eq!(log, ["fonts", "design", "recovery"]);
         assert!(painted.is_empty(), "{painted:?}");
     }
 
@@ -296,14 +309,14 @@ mod tests {
             let mut starting = three_steps();
             let mut log = Vec::new();
             assert!(!logic_only(&ctx, &mut starting, &mut log, info.clone()));
-            assert_eq!(log, ["fonts", "view", "recovery"]);
+            assert_eq!(log, ["fonts", "design", "recovery"]);
             // … and after the page was shown, then the window minimized or covered.
             let mut starting = three_steps();
             let mut log = Vec::new();
             assert!(frame(&ctx, &mut starting, &mut log).0);
             assert!(log.is_empty());
             assert!(!logic_only(&ctx, &mut starting, &mut log, info));
-            assert_eq!(log, ["fonts", "view", "recovery"]);
+            assert_eq!(log, ["fonts", "design", "recovery"]);
             assert!(starting.done());
         }
     }
@@ -319,7 +332,7 @@ mod tests {
             calls += 1;
             assert!(calls < 10, "the setup never finished: {log:?}");
         }
-        assert_eq!(log, ["fonts", "view", "recovery"]);
+        assert_eq!(log, ["fonts", "design", "recovery"]);
     }
 
     /// A step that waits for a worker (the 3D view's shader compile) is asked each frame, and the
@@ -379,6 +392,56 @@ mod tests {
         assert_eq!(log, ["view", "recovery"]);
     }
 
+    /// The 3D view's shader compile runs beside the app (#1210): it starts with the first step,
+    /// the page never names it or waits for it, and the app draws its start page as soon as the
+    /// steps are done while the compile goes on; startup is over once it ends.
+    #[test]
+    fn work_beside_the_app_does_not_hold_the_start_page() {
+        let ctx = egui::Context::default();
+        let mut polls = 0;
+        let mut starting = three_steps().beside(move |log: &mut Vec<&'static str>, _| {
+            polls += 1;
+            log.push("view?");
+            polls == 6
+        });
+        let mut log = Vec::new();
+        let (still, painted) = frame(&ctx, &mut starting, &mut log);
+        assert!(still);
+        assert!(log.is_empty(), "nothing runs before the page is up: {log:?}");
+        assert!(!painted.iter().any(|t| t == "Preparing the 3D view…"), "{painted:?}");
+        let (_, painted) = frame(&ctx, &mut starting, &mut log);
+        assert_eq!(log, ["view?", "fonts"], "the work beside starts with the first step");
+        assert!(!painted.iter().any(|t| t == "Preparing the 3D view…"), "{painted:?}");
+        frame(&ctx, &mut starting, &mut log);
+        let (still, painted) = frame(&ctx, &mut starting, &mut log);
+        assert!(!still, "the app draws itself while the work beside still runs");
+        assert!(painted.is_empty(), "{painted:?}");
+        assert!(starting.done());
+        assert!(!starting.settled(), "startup is not over yet");
+        assert_eq!(log, ["view?", "fonts", "view?", "design", "view?", "recovery"]);
+        // Each later logic call asks it again, until it is done; then never again.
+        for _ in 0..4 {
+            assert!(!frame(&ctx, &mut starting, &mut log).0);
+        }
+        assert!(starting.settled());
+        assert_eq!(log.iter().filter(|l| **l == "view?").count(), 6);
+    }
+
+    /// Minimized from the launch, the steps and the work beside all run in the first logic call.
+    #[test]
+    fn a_window_nobody_sees_starts_the_work_beside_at_once() {
+        let ctx = egui::Context::default();
+        let mut starting = three_steps().beside(|log: &mut Vec<&'static str>, _| {
+            log.push("view");
+            true
+        });
+        let mut log = Vec::new();
+        let minimized = egui::ViewportInfo { minimized: Some(true), ..Default::default() };
+        assert!(!logic_only(&ctx, &mut starting, &mut log, minimized));
+        assert_eq!(log, ["view", "fonts", "design", "recovery"]);
+        assert!(starting.settled());
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_worker_hands_its_result_to_a_later_frame_and_asks_for_it() {
@@ -398,6 +461,9 @@ mod tests {
             polled = worker.poll();
         }
         assert_eq!(polled, Poll::Done(7));
+        // The thread still holds its sender while it asks for a frame after sending, so a poll
+        // straight after the result can see Running; once the thread has ended it must be Failed.
+        assert!(worker.wait(std::time::Duration::from_secs(10)), "the thread ends after handing over");
         assert_eq!(worker.poll(), Poll::Failed, "the result is taken once");
     }
 
@@ -442,6 +508,26 @@ mod tests {
             let painted = texts(&output);
             assert!(painted.iter().any(|t| t == expected), "{language}: {painted:?}");
         }
+    }
+
+    /// A design opened while the view's pipelines still compile (the start page no longer waits
+    /// for them) says, quietly, where the model will be that the view is being prepared; the
+    /// pipelines in use, or failed, it stops (#1210).
+    #[test]
+    fn a_view_whose_pipelines_still_compile_says_so() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let message = h.app.tr("starting.view").to_owned();
+        let painted = |h: &crate::scenario::Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == message));
+        h.frames(2);
+        assert!(!painted(&h), "a view with no device and nothing compiling (the harness) says nothing");
+        h.app.viewport.gpu_preparing = true;
+        h.frames(2);
+        assert!(painted(&h), "the view says it is being prepared");
+        h.app.gpu_unavailable();
+        h.frames(2);
+        assert!(!painted(&h), "a compile that failed says that instead");
+        assert!(!h.app.viewport.gpu_preparing);
     }
 
     /// A view whose pipelines could not be built says so where the model would be, instead of

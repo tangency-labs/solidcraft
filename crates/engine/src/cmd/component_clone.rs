@@ -221,7 +221,7 @@ pub(super) fn paste(
     params: &Value,
 ) -> Result<Value> {
     let (scratch, out) = build(s, &Source::of(s), component, source_occurrence, transform, parent, None, params)?;
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(out)
 }
 
@@ -325,6 +325,7 @@ pub(super) fn build(
         o.transform = transform;
         // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
         o.grounded = false;
+        o.bom_type = source_occurrence.as_ref().and_then(|o| o.bom_type);
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
@@ -339,6 +340,7 @@ pub(super) fn build(
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            o.bom_type = old.bom_type;
         }
         occurrences.insert(old.id, id);
     }
@@ -372,6 +374,7 @@ pub(super) fn build(
     }
     // Body assignment may put externally authored geometry into this graph. Freeze it explicitly.
     let owned_features: BTreeSet<_> = feats.iter().map(|f| f.id).collect();
+    let mut frozen_faces: BTreeMap<String, Option<String>> = BTreeMap::new();
     for body in state.bodies.iter().filter(|b| selected.contains(&source.model_body_component(b)) && !owned_features.contains(&b.feature)) {
         if body.body.is_mesh() {
             return Err(bad(CMD, "Paste New of a reassigned mesh body is not supported yet"));
@@ -396,7 +399,9 @@ pub(super) fn build(
         let base = entered.as_ref().and_then(|st| st.body(&body.name)).or_else(|| before.as_ref().and_then(|st| st.body(&body.name))).unwrap_or(body);
         let baseline_component = source.model_body_component(base);
         let geometry = solidcraft_kernel::transform_matrix(&base.body, offset)?;
-        let step = solidcraft_kernel::step_export(&[&geometry], "SolidCraft independent reassigned body")?;
+        let exported = solidcraft_kernel::step_export_with_face_ids(&[&geometry], "SolidCraft independent reassigned body")?;
+        let step: std::sync::Arc<str> = exported.text.into();
+        let imported = solidcraft_kernel::step_import_shared(&step)?;
         let new_name = unique(&body.name, &mut used_bodies, origin.other_design);
         bodies.insert(body.name.clone(), new_name.clone());
         // From another design it is named as what it is there, an imported body, numbered as
@@ -410,12 +415,49 @@ pub(super) fn build(
             unique(&format!("{} Base", body.name), &mut used_features, false)
         };
         let id = scratch.doc_mut().add_feature(
-            FeatureKind::Import { file: format!("{} independent base", body.name), step: step.into(), components: Vec::new(), skip: Vec::new() },
+            FeatureKind::Import { file: format!("{} independent base", body.name), step, components: Vec::new(), skip: Vec::new(), records: None },
             Some(&feature_name),
         )?;
         if let Some(f) = scratch.doc_mut().feature_mut(id) {
             f.component = *components.get(&baseline_component).ok_or_else(|| bad(CMD, "reassigned baseline is outside copied component graph"))?;
             f.body_names = vec![new_name];
+        }
+        // The writer identifies each source B-rep face, and the reader retains that STEP
+        // entity on each imported face. No face order or display-mesh correspondence is assumed.
+        let written_faces = exported.face_ids.first().map_or(&[][..], Vec::as_slice);
+        let mut read_faces = BTreeMap::new();
+        if let [body] = imported.bodies.as_slice() {
+            for (index, entity) in body.face_origin.iter().enumerate() {
+                // A STEP face split at a seam does not identify just one imported face.
+                read_faces.entry(*entity).and_modify(|previous| *previous = None).or_insert(Some(index));
+            }
+        }
+        let mut destinations = BTreeMap::new();
+        for (index, history) in geometry.history().into_iter().flat_map(|h| &h.faces).enumerate() {
+            if let [solidcraft_kernel::history::FaceOrigin::Face { operand: 0, face }] = history.origins.as_slice() {
+                let mapped = written_faces
+                    .get(index)
+                    .filter(|entity| **entity != 0)
+                    .and_then(|entity| read_faces.get(entity))
+                    .copied()
+                    .flatten()
+                    .map(|index| format!("F{id}:face:{index}"));
+                destinations.entry(*face).and_modify(|previous| *previous = None).or_insert(mapped);
+            }
+        }
+        for (index, name) in solidcraft_doc::naming::face_names(base).iter().enumerate() {
+            if name.is_empty() {
+                continue;
+            }
+            let mapped = if solidcraft_doc::naming::face_name_exact(base, index) { destinations.get(&index).cloned().flatten() } else { None };
+            frozen_faces
+                .entry(name.clone())
+                .and_modify(|previous| {
+                    if *previous != mapped {
+                        *previous = None;
+                    }
+                })
+                .or_insert(mapped);
         }
         new_ids.push(id);
         frozen.push(body.name.clone());
@@ -440,9 +482,8 @@ pub(super) fn build(
     // Constraint dimensions own independent generated parameters; public user parameters stay shared.
     for f in &feats {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-            for c in &sketch.constraints {
-                if let Some(name) = &c.param
-                    && !parameters.contains_key(name)
+            for name in sketch.dimension_params() {
+                if !parameters.contains_key(name)
                     && let Some(p) = source_parameters.get(name.as_str())
                     && p.model
                 {
@@ -487,6 +528,16 @@ pub(super) fn build(
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
         f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
+        if f.profile_frame.is_some()
+            && let Some(old_sketch) = old.kind.constructor_profile_sketch()
+            && features.contains_key(&old_sketch)
+            && source.feature(old_sketch).and_then(|g| components.get(&g.component)).copied() == Some(f.component)
+        {
+            f.profile_frame = None;
+        }
+        for (name, original) in f.face_names.iter_mut().chain(&mut f.edge_names).zip(old.face_names.iter().chain(&old.edge_names)) {
+            *name = solidcraft_doc::remap_topology_faces(original, &features, &bodies, &frozen_faces)?;
+        }
         transfer_into_copy(&mut f.kind, &components)?;
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.path.is_empty()
@@ -500,7 +551,12 @@ pub(super) fn build(
         {
             face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
-        if let (FeatureKind::Sketch { plane, .. }, FeatureKind::Sketch { plane: old_plane, .. }) = (&mut f.kind, &old.kind)
+        if let (
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::FramePlate { plane, .. },
+            FeatureKind::Sketch { plane: old_plane, .. }
+            | FeatureKind::ConstructionPlane { plane: old_plane }
+            | FeatureKind::FramePlate { plane: old_plane, .. },
+        ) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
         {
             if bodies.contains_key(&original.target.body) {
@@ -518,6 +574,19 @@ pub(super) fn build(
                     if bodies.contains_key(&original.target.body) {
                         anchor.component =
                             *components.get(&original.component).ok_or_else(|| bad(CMD, "end cap's member is outside the copied graph"))?;
+                        anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
+        }
+        if let (FeatureKind::FrameGusset { supports, .. }, FeatureKind::FrameGusset { supports: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (support, original) in supports.iter_mut().zip(originals) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut support.plane), super::sketch::face::anchor(&original.plane))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component = *components.get(&original.component).ok_or_else(|| bad(CMD, "gusset source outside copied graph"))?;
                         anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
                     }
                     anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
@@ -656,14 +725,22 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } = &feature.kind
-            && let Some(anchor) = super::sketch::face::anchor(plane)
-            && !bodies.contains_key(&anchor.target.body)
-        {
-            notices.push(format!(
-                "{} retains external exact face attachment to {} (producer {})",
-                feature.name, anchor.target.body, anchor.target.origin_feature
-            ));
+        let (sketch_plane, gusset_supports) = match &feature.kind {
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::FramePlate { plane, .. } => {
+                (Some(plane), &[][..])
+            }
+            FeatureKind::FrameGusset { supports, .. } => (None, supports.as_slice()),
+            _ => (None, &[][..]),
+        };
+        for plane in sketch_plane.into_iter().chain(gusset_supports.iter().map(|support| &support.plane)) {
+            if let Some(anchor) = super::sketch::face::anchor(plane)
+                && !bodies.contains_key(&anchor.target.body)
+            {
+                notices.push(format!(
+                    "{} retains external exact face attachment to {} (producer {})",
+                    feature.name, anchor.target.body, anchor.target.origin_feature
+                ));
+            }
         }
         // A cap closes the end of a member it does not copy: that member, and the face it was
         // picked on, stay outside.
@@ -681,6 +758,12 @@ pub(super) fn build(
                     ));
                 }
             }
+        }
+        // A turn rotates a member it does not copy.
+        if let FeatureKind::FrameMemberTurn { member, .. } = &feature.kind
+            && !features.contains_key(&member.feature.0)
+        {
+            notices.push(format!("{} retains external feature reference {}", feature.name, member.feature));
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {
@@ -850,6 +933,13 @@ fn transfer_into_copy(kind: &mut FeatureKind, components: &BTreeMap<u64, u64>) -
             *transform = solidcraft_doc::IDENTITY;
         }
     }
+    if let FeatureKind::Pattern { components: patterned, occurrences, .. } = kind {
+        for id in patterned.iter_mut() {
+            *id = *components.get(id).ok_or_else(|| bad(CMD, "patterned component is outside the copied graph"))?;
+        }
+        // Occurrence ids are of the source design; the copy's reconcile makes its own.
+        occurrences.clear();
+    }
     Ok(())
 }
 
@@ -868,12 +958,22 @@ fn outside_references(notices: &[String], feats: &[Feature], bodies: &BTreeMap<S
     out
 }
 
-/// The user parameters copied features use (their expressions and their dimensions'), and the
-/// ones those use, copied from `source` into `scratch`: named as they were where that name is
-/// free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
+/// The user parameters copied features use (their expressions, their dimensions' and those placing
+/// 3D sketch points), and the ones those use, copied from `source` into `scratch`: named as they
+/// were where that name is free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
 fn copy_user_parameters(scratch: &mut Session, source: &Document, feats: &[Feature], parameters: &mut BTreeMap<String, String>) -> Result<()> {
     let user: BTreeMap<&str, &solidcraft_doc::Param> = source.params.iter().filter(|p| !p.model).map(|p| (p.name.as_str(), p)).collect();
     let mut pending: Vec<String> = feats.iter().flat_map(|f| f.kind.expressions()).map(str::to_string).collect();
+    // The expressions placing 3D sketch points (#10608), which `remap_clone` renames with the rest.
+    pending.extend(
+        feats
+            .iter()
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => Some(sketch.wire_point_exprs().into_iter().map(|(_, e)| e.clone()).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten(),
+    );
     pending.extend(parameters.keys().filter_map(|old| source.params.iter().find(|p| p.model && p.name == *old)).map(|p| p.expr.clone()));
     let mut used: BTreeSet<&str> = BTreeSet::new();
     let mut work = 0usize;
