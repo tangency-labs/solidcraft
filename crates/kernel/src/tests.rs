@@ -2635,8 +2635,50 @@ fn raise_band_where_an_arc_meets_lines_at_sharp_corners() {
             // The shell's 11 faces less the rim, the rim's rest, 4 walls on each side and the top;
             // 4 new edges round the band's edge, 4 up from it and from the loop, 8 on the top.
             assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (20, 44, 28), "s {s}, outside {outside}");
+            // A groove's profile is the same band: its area, as a slab 1 thick.
+            let (plane, region) = rim_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, 0.0, outside).unwrap();
+            let slab = extrude(&plane, &[region], 0.0, 1.0).unwrap().pop().unwrap();
+            let want = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+            let got = measure(&slab).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "groove s {s}, outside {outside}: {got} vs {want}");
         }
     }
+}
+
+/// #21608: a shelled lens, two arcs of radius 25 about (±15, 0) meeting at sharp corners (0, ±20):
+/// the band's far edge closes where the two moved circles cross. Moved in by d, the lens is two
+/// segments of radius 25 − d on the chord x = 0. A band wider than 25 − 15 parts the circles
+/// at the corners, and is refused.
+#[test]
+fn raise_band_where_two_arcs_meet_at_sharp_corners() {
+    let (big, c, t, w, h) = (25.0f64, 15.0f64, 3.0, 1.5, 2.0);
+    let half = (20.0f64 / c).atan();
+    let lens = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(-c, 0.0), radius: big, start: -half, sweep: 2.0 * half },
+            Seg2::Arc { center: Vec2::new(c, 0.0), radius: big, start: PI - half, sweep: 2.0 * half },
+        ],
+    };
+    let b = extrude(&Plane::XY, &[Region2 { outer: lens, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&b, &[Vec3::new(0.0, 0.0, 15.0)], t).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    let area = |d: f64| {
+        let rho = big - d;
+        let theta = 2.0 * ((rho * rho - c * c).sqrt() / rho).asin();
+        rho * rho * (theta - theta.sin())
+    };
+    let at = Vec3::new(10.0 - 1.5, 0.0, 15.0);
+    for outside in [false, true] {
+        let lip = raise_band(&sh, at, w, h, outside).unwrap();
+        assert!(lip.validity().is_empty(), "outside {outside}: {:?}", lip.validity());
+        let band = if outside { area(0.0) - area(w) } else { area(t - w) - area(t) };
+        let v = measure(&lip).unwrap().volume;
+        assert!(rel(v, v0 + band * h) < 1e-6, "outside {outside}: {v} vs {}", v0 + band * h);
+        // The shell's 7 faces less the rim, the rim's rest, 2 walls on each side and the top.
+        assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (12, 22, 14), "outside {outside}");
+    }
+    let text = raise_band(&sh, at, 11.0, h, true).unwrap_err().to_string();
+    assert!(text.contains("can't go round"), "{text}");
 }
 
 #[test]

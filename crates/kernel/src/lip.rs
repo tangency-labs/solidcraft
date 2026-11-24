@@ -166,7 +166,8 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
         let tau = std::f64::consts::TAU;
         let mut sweep = n.dot(x.cross(y)).atan2(x.dot(y));
         sweep += ((arc.sweep - sweep) / tau).round() * tau;
-        if sweep * arc.sweep <= 0.0 {
+        // Turned the other way, or left shorter than the model's tolerance along the circle.
+        if sweep * arc.sweep <= 0.0 || sweep.abs() * x.len() <= tol {
             return Err(fail("the offset swallows an arc"));
         }
         arc.sweep = sweep;
@@ -202,7 +203,7 @@ fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3) -> Option<Vec3> {
             let apart = gap.len();
             let u = gap.normalized()?;
             // Along u from the first centre to the chord, then half the chord across it.
-            let along = (r1 * r1 - r2 * r2 + apart * apart) / (2.0 * apart);
+            let along = ((r1 - r2) * (r1 + r2) + apart * apart) / (2.0 * apart);
             let half2 = (r1 - along) * (r1 + along);
             if half2 < 0.0 {
                 return None;
