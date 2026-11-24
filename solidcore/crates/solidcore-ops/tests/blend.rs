@@ -20,7 +20,7 @@ use std::f64::consts::PI;
 use std::io::Read as _;
 
 use solidcore::blend::definition_check::surface_kind_name;
-use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
@@ -3855,12 +3855,13 @@ fn a_session_failure_says_what_its_session_noted() {
     let e = s.do_filleting(&mut k, None).unwrap_err();
     assert_eq!(
         blend::failure(&e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which)"
     );
     assert_eq!(
         blend::session_failure(&s, &e).unwrap().to_string(),
-        "the blend failed (status 1001): the fillet body has no faces: Fillet Surface \
-         Computation Failure: no fillet faces were made"
+        "the blend failed (status 1001): failed: a step of the fillet executive failed (the \
+         error info says which): Fillet Surface Computation Failure: no fillet faces were made"
     );
 }
 
@@ -4838,6 +4839,51 @@ fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() 
     );
 }
 
+/// #17016's exact pre-fillet body: the public report's six superellipse fit-point sections,
+/// lofted and joined to its radius-6 cylinder by the first 20 script commands. The fixture
+/// is the final SCBREP05 cache slice saved by SolidCraft 0.44.1 (e151d5ea6866), preserving
+/// the cyclic C2 spline sections and the Boolean's intersection curves without refitting.
+#[test]
+fn a_cylinder_foot_round_rolls_across_the_reported_six_section_loft() {
+    // The shipped preset holds these two fixes back; every other fix is enabled.
+    solidcore_ops::session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|name| {
+                !matches!(
+                    *name,
+                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
+                )
+            }),
+    )
+    .unwrap();
+    let saved = solidcore_record::native::decode(include_bytes!(
+        "data/issue_17016_six_section_loft_boss.brep"
+    ))
+    .unwrap();
+    let (body, _) = Body::from_record(&saved.solid, true).unwrap();
+    assert_eq!(body.counts().unwrap()[0], 16);
+    let input = body.check(CheckLevel::All).unwrap();
+    assert!(input.is_valid(), "the pre-fillet body is invalid: {input}");
+    // The report's pick is near the foot, rather than exactly on its curved edge.
+    let foot = nearest_edge(&body, [6.0, 0.0, 33.0]);
+    let before = volume(&body);
+    let made = blend(&body, Blend::Round, &[foot], &[1.0], &[], Corners::Filled)
+        .unwrap_or_else(|error| panic!("the reported cylinder foot does not round: {error:?}"));
+    assert!(!made.made.is_empty(), "the round made no blend faces");
+    assert!(body.counts().unwrap()[0] > 16);
+    // A concave foot round fills the space between the boss and the loft.
+    assert!(volume(&body) > before, "the foot round added no material");
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the rounded body is invalid: {report}");
+    let (record, _) = body.to_record().unwrap();
+    let (reopened, _) = Body::from_record(&record, true)
+        .unwrap_or_else(|error| panic!("the rounded body does not reopen: {error:?}"));
+    let report = reopened.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the reopened body is invalid: {report}");
+}
+
 /// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)
 /// standing through the top of a hull lofted through six elliptic sections, each the 12 fit
 /// pieces of [`fit_point_ellipse`] from 15 degrees, so no piece joint lies on the top. The
@@ -5789,7 +5835,7 @@ fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
 const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
 
 /// An unequal chamfer of the half capsule's whole outline, the first size along the cut face,
-/// was refused ("the chamfer size", status 1007). The chain is measured at its narrowest
+/// was refused (then reported as "the chamfer size", status 1007). The chain is measured at its narrowest
 /// wedge, a right angle all round, and lifted to where unequal sizes do not fold, from each
 /// edge's widest wedge, which is bounded by its faces' normals enclosed along it. On a quarter
 /// arc that ends at a sphere's pole the normal `S_u x S_v` vanishes there, so the piece of the
@@ -6093,4 +6139,272 @@ fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
             volume(&b)
         );
     }
+}
+
+/// The closed-form volume of a cylinder of radius 12.5 and height 50 on the origin, joined
+/// to a box 50 x 25 x 25 high that runs from the cylinder's axis along x, its side at
+/// y = 12.5 in the cylinder's tangent plane and its other side `d` inside the tangent plane
+/// at y = -12.5 (outside for a negative `d`), with a round of radius 2 on the edge between
+/// the box's top and the cylinder.
+///
+/// It is the cylinder plus the box, less what they share (half the cylinder's disc under
+/// the top, less half the segment the near side cuts off it), plus the round. The round
+/// fills, over the top, the spandrel between the cylinder, the top and the ball: at the
+/// radius `rho` from the axis, from `R` to `R + r`, its height is `r − sqrt(r² − (R + r −
+/// rho)²)`, over the angles the box's top holds there, `asin(R / rho)` towards the tangent
+/// side and `asin((R − d) / rho)` towards the other (a right angle where the side is past
+/// `rho`). With `rho = R + r − r sin(phi)` the integrand is smooth, and it is summed by
+/// Gauss–Legendre's 5-point rule on 400 panels of `phi` (800 panels move it by 1.4e-14).
+fn tangent_box_round_volume(d: f64) -> f64 {
+    let (big, r, height, top, length) = (12.5_f64, 2.0_f64, 50.0, 25.0, 50.0);
+    let lo = big - d;
+    let cylinder = PI * big * big * height;
+    let block = length * (2.0 * big - d) * top;
+    let segment = if d > 0.0 {
+        big * big * (lo / big).acos() - lo * (big * big - lo * lo).sqrt()
+    } else {
+        0.0
+    };
+    let shared = (PI * big * big / 2.0 - segment / 2.0) * top;
+    let spandrel = |phi: f64| {
+        let rho = big + r - r * phi.sin();
+        let angles = (big / rho).asin() + (lo / rho).min(1.0).asin();
+        angles * rho * r * (1.0 - phi.cos()) * r * phi.cos()
+    };
+    let nodes = [
+        (0.0, 0.568_888_888_888_888_9),
+        (0.538_469_310_105_683_1, 0.478_628_670_499_366_47),
+        (-0.538_469_310_105_683_1, 0.478_628_670_499_366_47),
+        (0.906_179_845_938_664, 0.236_926_885_056_189_08),
+        (-0.906_179_845_938_664, 0.236_926_885_056_189_08),
+    ];
+    let panels = 400_u32;
+    let h = PI / 2.0 / f64::from(panels);
+    let round: f64 = (0..panels)
+        .map(|i| {
+            let mid = (f64::from(i) + 0.5) * h;
+            nodes
+                .iter()
+                .map(|&(x, w)| w * spandrel(mid + 0.5 * h * x))
+                .sum::<f64>()
+        })
+        .sum::<f64>()
+        * 0.5
+        * h;
+    cylinder + block - shared + round
+}
+
+/// A round ending on a side a hair off its cylinder's tangent plane (#20421). The box of
+/// [`tangent_box_round_volume`] joined to its cylinder with one side `d` inside the
+/// cylinder's tangent plane, or outside it, up to what the join holds as one seam at the
+/// touch (the contact rule: 1e-5, and 1.1e-5 outside); the 2 mm round on the edge between
+/// the box's top and the cylinder ends on that side at a tangent end the side stands `d`
+/// off. The rib there is the rib of that standoff
+/// (`blend::fillet_geom::tangent_end_rib::Standoff`): against the surfaces as they are no
+/// curve from the tangent end is certified, and the round was refused as not certified
+/// from 1e-10 on (it built before its rib was certified, up to 1e-7, and failed with a bare
+/// status from 1e-6). Each row builds one closed, valid solid facing out with the closed-form
+/// volume within 1e-9 relative (the round's end moves by at most the standoff, 1e-5 over an
+/// end face under 15 mm²: 3e-9 of the volume at most, measured under 6e-11).
+#[test]
+fn a_round_ends_on_a_side_a_hair_off_its_cylinders_tangent_plane() {
+    rig_fixes();
+    for d in [
+        0.0, 1e-10, 1e-9, 1e-7, 1e-6, 9e-6, 1e-5, -1e-9, -1e-7, -1e-6, -9e-6, -1.1e-5,
+    ] {
+        let cylinder = make_cylinder([0.0; 3], 12.5, 50.0).unwrap();
+        let block = make_box([0.0, -(12.5 - d), 0.0], [50.0, 25.0 - d, 25.0]).unwrap();
+        let b = solidcore_ops::boolean::boolean(cylinder, block, solidcore_ops::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let e1 = nearest_edge(&b, [8.838_834_76, 8.838_834_76, 25.0]);
+        let e2 = nearest_edge(&b, [8.838_834_76, -8.838_834_76, 25.0]);
+        assert_ne!(e1, e2, "{d:e}");
+        blend(
+            &b,
+            Blend::Round,
+            &[e1, e2],
+            &[2.0, 2.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("{d:e}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{d:e}: {}", report.text);
+        assert!(b.is_manifold_solid().unwrap(), "{d:e}");
+        b.check_solid().unwrap();
+        let (v, want) = (b.volume(1e-10).unwrap(), tangent_box_round_volume(d));
+        assert!(rel(v, want) < 1e-9, "{d:e}: {v} {want}");
+    }
+}
+
+/// SolidCraft #19967, case 1: the 13 x 24 x 9 block from x = -1 inside the cylinder of radius
+/// R = 81.25 about the line x = R, y = 4, which alone bounds it towards x = 0 (no face of the
+/// block touches it); the cylinder's edge on the floor (z = 0) chamfered 2, which
+/// makes a cone of half-angle 45 degrees, rho = R - 2 + z about that line, then the edge
+/// between the end wall y = 24 and that cone chamfered 0.5. The second chamfer's ruled surface
+/// is exact but very uneven in speed across its rulings (its rails' weights differ about
+/// 58-fold), and the crossing of its end with the floor was not fitted (`sm_SurfacePlaneCurve`
+/// ran out of its 20 passes).
+///
+/// Expected: a valid body and one face made; the chamfered edge runs between two vertices where
+/// three faces meet, so the chamfer adds a face, three edges and two vertices: (8, 18, 12) after
+/// (7, 15, 10). The volume it takes off is its cross-section, the triangle of legs d = 0.5 at
+/// the dihedral angle alpha between the wall and the cone, times the length of the edge, the
+/// hyperbola x = R - sqrt((R - 2 + z)^2 - 400) on y = 24 for z in [0, 2]. The cone's
+/// outward normal has y-component 20 / rho / sqrt 2 there (0.174 to 0.179), so sin alpha is
+/// 0.984 within 1e-3 and the triangle is 0.123; the edge is 2.875 long within 1e-3. The ends
+/// cut the prism obliquely: the floor and the cylinder meet the edge at 44 to 46 degrees, and
+/// the triangle's centroid lies d sqrt 2 / 3 < 0.24 from the edge, so each end moves the
+/// prism's length at the centroid by less than 0.24 / sin 44 degrees = 0.35; the faces' radii
+/// (80 and more against d) move the triangle by under 1 %. So the volume taken off lies in
+/// 0.123 * (2.875 -/+ 0.7) * (1 -/+ 0.01), within [0.264, 0.445].
+#[test]
+fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
+    all_fixes();
+    let r = 81.25_f64;
+    let b = built(|k| {
+        let block = create_box(
+            k,
+            solidcore::math::Point3::new(-1.0, 0.0, 0.0),
+            13.0,
+            24.0,
+            9.0,
+        )?;
+        let cyl = create_cylinder(k, solidcore::math::Point3::new(r, 4.0, -1.0), r, 11.0)?;
+        boolean_intersection(k, block, cyl)
+    });
+    // on the floor, the cylinder at y = 12
+    let floor_edge = edge_at(&b, [r - (r * r - 64.0).sqrt(), 12.0, 0.0]);
+    blend(
+        &b,
+        Blend::Chamfer,
+        &[floor_edge],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(b.counts().unwrap(), [7, 15, 10]);
+    let before = b.volume(1e-10).unwrap();
+    // on the wall y = 24, the cone at z = 1 (rho = R - 1)
+    let wall_edge = edge_at(&b, [r - ((r - 1.0).powi(2) - 400.0).sqrt(), 24.0, 1.0]);
+    let made = blend(
+        &b,
+        Blend::Chamfer,
+        &[wall_edge],
+        &[0.5],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(made.made.len(), 1);
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.counts().unwrap(), [8, 18, 12]);
+    let off = before - b.volume(1e-10).unwrap();
+    assert!((0.264..=0.445).contains(&off), "the chamfer took off {off}");
+}
+
+/// #19724, the case #19789 did not cover. Rounding the 15° root together with a rib-end
+/// edge splits that round. The rib's cone is one 12° span. Read off its tangent leg, the
+/// centre misses the axis by more than the reload allows, the support was stored without
+/// its cone label, and the split round's net would not certify: the body could not be
+/// measured, and a later fillet of the unrelated rim was refused. The chord and the
+/// weight keep the cone label, so the body reads back and the rim fillet builds.
+#[test]
+fn a_round_meeting_a_short_rib_s_end_reads_back() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let read_back = |body: Body, step: &str| {
+        let (record, _) = body.to_record().unwrap();
+        Body::from_record(&record, true)
+            .unwrap_or_else(|e| panic!("{step} does not read back: {e}"))
+            .0
+    };
+    // The frustum (radius 24 at x = 0, 36 at x = 48) and the 12° rib. Each revolve is
+    // read back before the join, as a feature's result is.
+    let cone = read_back(
+        revolve(
+            &[
+                line([0.0, 0.0, 0.0], [0.0, 0.0, -24.0]),
+                line([0.0, 0.0, -24.0], [48.0, 0.0, -36.0]),
+                line([48.0, 0.0, -36.0], [48.0, 0.0, 0.0]),
+                line([48.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            2.0 * PI,
+            true,
+        )
+        .unwrap(),
+        "the frustum",
+    );
+    // The rib profile turned −6° about X, so a 12° revolve is centred on the seam.
+    let tri = [
+        [18.0, 28.343_874_018, -2.979_061_203],
+        [26.743_129, 33.170_913_336, -3.486_403_479],
+        [27.370_857, 30.673_754_386, -3.223_941_497],
+    ];
+    let rib = read_back(
+        revolve(
+            &[
+                line(tri[0], tri[1]),
+                line(tri[1], tri[2]),
+                line(tri[2], tri[0]),
+            ],
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            12.0_f64.to_radians(),
+            true,
+        )
+        .unwrap(),
+        "the rib",
+    );
+    let b = read_back(
+        boolean(cone, rib, BooleanOp::Union).unwrap().unwrap(),
+        "the join",
+    );
+    // The 15° root, and the two edges where the rib's ends meet the cone (their mids).
+    let root = nearest_edge(&b, [18.0, 28.5, 0.0]);
+    let end_a = nearest_edge(&b, [22.685_428_5, 29.508_814, -3.101_501]);
+    let end_b = nearest_edge(&b, [22.685_428_5, 29.508_814, 3.101_501]);
+    assert!(root != end_a && root != end_b && end_a != end_b);
+    blend(
+        &b,
+        Blend::Round,
+        &[root, end_a, end_b],
+        &[2.0, 2.0, 2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|e| panic!("the fillet builds: {e}"));
+    let (record, _) = b.to_record().unwrap();
+    for face in &record.faces {
+        let solidcore_record::brep::Surface::Blend { definition } = &face.surface else {
+            continue;
+        };
+        let solidcore_record::brep::blend::BlendDefinition::ExactRound(round) = definition.as_ref()
+        else {
+            continue;
+        };
+        for support in &round.supports {
+            let solidcore_record::brep::blend::SupportRecord::Nurbs { kind, .. } = support else {
+                continue;
+            };
+            assert!(
+                !matches!(kind, solidcore_record::brep::blend::SupportKindRecord::Free),
+                "a round support was stored without its cone label: {kind:?}"
+            );
+        }
+    }
+    let b = read_back(b, "the meeting fillet");
+    // (0, 0, −24) is also the cone's seam. A quarter turn away is only the sharp rim.
+    let rim = edge_at(&b, [0.0, 24.0, 0.0]);
+    blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rim fillet builds: {e}"));
+    read_back(b, "the rim fillet");
 }

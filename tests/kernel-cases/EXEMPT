@@ -24,6 +24,7 @@ assembly.bom.item.set             the bill of materials: its tests in crates/eng
 assembly.bom.renumber             the bill of materials: its tests in crates/engine/src/cmd/bom_tests.rs
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
+body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -79,6 +80,8 @@ doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents
 doc.recovery_list                 opening and recovering documents
+document.activate                 shows an open design: no geometry, tested in the UI's documents tests
+document.list                     lists the open designs: no geometry, tested in the engine's documents tests and the UI's documents tests
 document.metadata                 document metadata and revisions
 document.metadata.remove          document metadata and revisions
 document.metadata.set             document metadata and revisions
@@ -190,6 +193,7 @@ file.trash                       file guards and isolated trash: tested in crate
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.multi_trim                  sets one corner of a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
+frame.plate                       tested in crates/engine/src/cmd/frame_tests.rs and crates/ui-egui/src/dialogs_frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library
 frame.remove_member               removes a tube from a Frame Member; tested in crates/engine/src/cmd/frame_tests.rs
@@ -205,6 +209,7 @@ inspect.parameter_variants        inspect: independent rebuilds and regressions 
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
+layout.delete                     application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
 layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.save                       application panel layout; no geometry (engine/UI/MCP tests)
@@ -218,6 +223,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+mesh.reduce                       reduces a mesh without changing the source; tested in crates/engine/src/tests/mesh_convert.rs::reduction_persists_a_separate_mesh_for_conversion_and_undo
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
@@ -355,6 +361,7 @@ render.texture.remove             rendering image resources; crates/engine/src/c
 select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
+select.invert                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
 select.same_look                  the selection
 select.set                        the selection
@@ -372,6 +379,7 @@ sheet.convert                     every face a panel: crates/engine/src/cmd/shee
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
 sheet.rules                       a listing of sheet metal rules
+sheet.tab                         a sketch region joined to a panel: crates/engine/src/cmd/sheet_surface_tab_tests.rs
 sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.auto_constrain_from_datum  2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -423,6 +431,7 @@ sketch.edit_text                  2D sketch only (the sketch solver and engine t
 sketch.equation_curve             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.equation_curve.edit        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.export_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.export_svg                 writes a 2D sketch as SVG (the export_svg tests in crates/engine); no kernel operation
 sketch.extend                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.fillet                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.finish_auto_constrain      2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -457,6 +466,7 @@ sketch.slot.center_point          2D sketch only (the sketch solver and engine t
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.control_knots       2D sketch only (crates/engine/src/cmd/sketch_knots_tests.rs: the 33-point non-uniform example draws as exact Bezier spans and extrudes to a closed body); no new kernel operation
+sketch.spline.fit_tolerance       2D sketch only (crates/engine/src/cmd/sketch_fit_tolerance_tests.rs: the 800-point contour fits within the tolerance and a closed contour extrudes to its body); no new kernel operation
 sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -520,6 +530,7 @@ view.angle_readout                the view: camera, layout, display
 view.apply                        the view: camera, layout, display
 view.back                         the view: camera, layout, display
 view.bottom                       the view: camera, layout, display
+view.browser                      the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
 view.front                        the view: camera, layout, display
@@ -537,7 +548,9 @@ view.navigation_bar               the view: camera, layout, display
 view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
+view.orbit_mode                   the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
+view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.perspective                  the view: camera, layout, display
 view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
 view.previous_tab                 the view: camera, layout, display
@@ -560,8 +573,10 @@ view.status_details               the view: camera, layout, display
 view.status_items                 the view: camera, layout, display
 view.tool                         the view: camera, layout, display
 view.tool.zoom                    the view: camera, layout, display
+view.toolbar_reset_all            toolbar preferences: crates/ui-egui/src/toolbar_custom.rs::reset_tests::engine_execute_resets_every_tab_without_a_dialog
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
+view.zoom_mode                    the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the

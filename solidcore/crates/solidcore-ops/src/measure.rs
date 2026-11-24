@@ -11,8 +11,10 @@ use solidcore::geom::object::Shape;
 use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::mass::integrator::properties::{
-    brep_area_about, brep_mass_properties_estimated, edge_length, face_area, face_centroid,
-    region_material, AreaAbout, MassPropertyRequest, PropertyAttributes,
+    brep_area_about, brep_area_about_prepared, brep_mass_properties_estimated,
+    brep_mass_properties_estimated_prepared, edge_length, face_area, face_area_prepared,
+    face_centroid, face_centroid_prepared, region_material, AreaAbout, EstimatedMassProperties,
+    MassPropertyRequest, PropertyAttributes,
 };
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
@@ -35,7 +37,7 @@ use crate::blend::middle;
 use crate::body::Body;
 use crate::error::status;
 use crate::order::{self, Order};
-use crate::session::{answer, measure_body, read_body, run_on, with_body, Answer};
+use crate::session::{answer, measure_body, read_body, read_else_edit, run_on, with_body, Answer};
 use crate::split::copies_of;
 use crate::{Error, Result};
 
@@ -48,6 +50,44 @@ impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
 impl Answer for Vec<f64> {}
+
+/// A kernel measure that has a read-only form, under one lock of the body
+/// ([`read_else_edit`]): `read`, which leaves the body (and its proof) as it is; where the
+/// body lacks what the read needs (a UV trim curve, a trimmed cache's tree), which the kernel's
+/// read form finds before any work and answers `PreparationRequired`, `make` as [`with_body`]
+/// runs it, which makes them on the body as before. The two forms give the same answer where
+/// the body has them; the kernel's error is the measure's refusal ([`status`]) either way.
+///
+/// # Errors
+/// As [`with_body`].
+fn read_else_make<T>(
+    call: &'static str,
+    body: &Body,
+    read: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<T>,
+    make: impl FnOnce(&mut Kernel, &mut Brep) -> solidcore::Result<T>,
+) -> Result<Result<T>> {
+    read_else_edit(
+        call,
+        body,
+        |k, b| match read(k, b) {
+            Err(solidcore::SolidError::PreparationRequired { .. }) => Ok(None),
+            r => Ok(Some(r.map_err(status))),
+        },
+        |k, b| Ok(make(k, b).map_err(status)),
+    )
+}
+
+/// Unit density over every material region, with no per-entity mass attribute (the attribute
+/// store is empty): the request [`Body::mass_properties`] measures.
+fn centroidal_properties(
+    measure: impl FnOnce(&PropertyAttributes<'_>) -> solidcore::Result<EstimatedMassProperties>,
+) -> solidcore::Result<EstimatedMassProperties> {
+    let store = AttributeStore::default();
+    measure(&PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    })
+}
 
 /// A planar face square to a direction ([`Body::face_square_level`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -337,6 +377,17 @@ pub struct EdgeRayPoint {
     pub distance: f64,
 }
 
+/// A point where a ray meets a face ([`Body::face_hits_by_ray`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceHit {
+    /// The record face.
+    pub face: usize,
+    /// The point on the ray where it meets the face.
+    pub point: [f64; 3],
+    /// The distance from the ray's origin to the point, along the ray.
+    pub distance: f64,
+}
+
 /// The first face a ray meets ([`Body::face_hit_by_ray`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FaceRayHit {
@@ -455,6 +506,90 @@ pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
         .map_err(status)
 }
 
+/// Axis-aligned bounding box `(min, max)` of a 2D polyline.
+pub fn polyline_2d_bounds(points: &[[f64; 2]]) -> Result<Option<([f64; 2], [f64; 2])>> {
+    let pts: Vec<_> = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_bounds(&pts)
+        .map_err(status)?
+        .map(|(lo, hi)| (lo.to_array(), hi.to_array())))
+}
+
+/// Distance and closest point from `point` to a 2D polyline.
+pub fn polyline_2d_closest_point(
+    point: [f64; 2],
+    points: &[[f64; 2]],
+) -> Result<Option<(f64, [f64; 2])>> {
+    let p = point2(point)?;
+    let pts: Vec<_> = points
+        .iter()
+        .copied()
+        .map(point2)
+        .collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_closest_point(p, &pts)
+        .map_err(status)?
+        .map(|(d, q)| (d, q.to_array())))
+}
+
+/// Intersection point of two 2D segments within tolerance `tol`.
+pub fn segment_2d_intersection(
+    a1: [f64; 2],
+    a2: [f64; 2],
+    b1: [f64; 2],
+    b2: [f64; 2],
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::segment_2d_intersection(point2(a1)?, point2(a2)?, point2(b1)?, point2(b2)?, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
+/// All segment-segment intersections between two 2D polylines within tolerance `tol`.
+pub fn polyline_2d_crossings(a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>> {
+    let pa: Vec<_> = a.iter().copied().map(point2).collect::<Result<Vec<_>>>()?;
+    let pb: Vec<_> = b.iter().copied().map(point2).collect::<Result<Vec<_>>>()?;
+    Ok(q::polyline_2d_crossings(&pa, &pb, tol)
+        .map_err(status)?
+        .into_iter()
+        .map(solidcore::Point2::to_array)
+        .collect())
+}
+
+/// Analytic 2D tangent contact point between segment `[a, b]` and circle `(center, radius)`.
+pub fn tangent_contact_line_circle_2d(
+    a: [f64; 2],
+    b: [f64; 2],
+    center: [f64; 2],
+    radius: f64,
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::tangent_contact_line_circle_2d(point2(a)?, point2(b)?, point2(center)?, radius, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
+/// Analytic 2D tangent contact point between two circles `(c1, r1)` and `(c2, r2)`.
+pub fn tangent_contact_circle_circle_2d(
+    c1: [f64; 2],
+    r1: f64,
+    c2: [f64; 2],
+    r2: f64,
+    tol: f64,
+) -> Result<Option<[f64; 2]>> {
+    Ok(
+        q::tangent_contact_circle_circle_2d(point2(c1)?, r1, point2(c2)?, r2, tol)
+            .map_err(status)?
+            .map(solidcore::Point2::to_array),
+    )
+}
+
 /// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
 /// (`query::api_queries::box_max_distance_to_point`).
 ///
@@ -488,32 +623,36 @@ impl Body {
     /// an integrand that is not finite; [`Error::Unsupported`] for a span the integrator took
     /// no step over; [`Error::UnsureRegion`] for a region the kernel is unsure is material.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassPropertiesEstimate> {
-        with_body("mass_properties", self, |k, b| {
-            let store = AttributeStore::default();
-            let attrs = PropertyAttributes {
-                store: &store,
-                key_of: &|_| ObjectKey(0),
-            };
-            let r = match brep_mass_properties_estimated(
-                k,
-                b,
-                relative_accuracy,
-                &MassPropertyRequest::centroidal(),
-                &attrs,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            Ok(Ok(MassPropertiesEstimate {
-                requested_accuracy: r.requested_accuracy,
-                area: r.area,
-                volume: r.volume,
-                centroid: array(r.centroid),
-                moments: array(r.inertia),
-                products: array(r.products),
-                tensor: r.inertia_tensor(),
-            }))
-        })?
+        let request = MassPropertyRequest::centroidal();
+        let r = read_else_make(
+            "mass_properties",
+            self,
+            |k, b| {
+                centroidal_properties(|attrs| {
+                    brep_mass_properties_estimated_prepared(
+                        k,
+                        b,
+                        relative_accuracy,
+                        &request,
+                        attrs,
+                    )
+                })
+            },
+            |k, b| {
+                centroidal_properties(|attrs| {
+                    brep_mass_properties_estimated(k, b, relative_accuracy, &request, attrs)
+                })
+            },
+        )??;
+        Ok(MassPropertiesEstimate {
+            requested_accuracy: r.requested_accuracy,
+            area: r.area,
+            volume: r.volume,
+            centroid: array(r.centroid),
+            moments: array(r.inertia),
+            products: array(r.products),
+            tensor: r.inertia_tensor(),
+        })
     }
 
     /// Every face's area, each counted once (sheets, open shells and partitions between two
@@ -526,12 +665,13 @@ impl Body {
     /// [`Error::Refused`] for an accuracy the kernel refuses, in its words; [`Error::Status`]
     /// `SM_ERR_INVALID_INPUT` for an area that is not finite; the kernel's error.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
-        let a = with_body("area", self, |k, b| {
-            Ok(
-                brep_area_about(k, b, relative_accuracy, AreaAbout::Point(Point3::ZERO))
-                    .map_err(status),
-            )
-        })??;
+        let about = AreaAbout::Point(Point3::ZERO);
+        let a = read_else_make(
+            "area",
+            self,
+            |k, b| brep_area_about_prepared(k, b, relative_accuracy, about),
+            |k, b| brep_area_about(k, b, relative_accuracy, about),
+        )??;
         if !a.is_finite() {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
@@ -545,7 +685,7 @@ impl Body {
     /// The kernel's error; [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box (not finite, or
     /// its corners out of order).
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        let x = with_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
+        let x = read_body("bounds", self, |k, b| brep_bounding_box(k, b, true))?;
         let (lo, hi) = (array(x.min()), array(x.max()));
         let finite = lo.iter().chain(&hi).all(|v| v.is_finite());
         if !finite || lo.iter().zip(&hi).any(|(a, b)| a > b) {
@@ -569,7 +709,7 @@ impl Body {
         face: usize,
     ) -> Result<Vec<GapSample>> {
         let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
-        let samples = with_body("edge_face_gap_samples", self, |k, b| {
+        let samples = read_body("edge_face_gap_samples", self, |k, b| {
             edge_face_gap_samples(k, b, e, f)
         })?;
         Ok(samples
@@ -597,7 +737,7 @@ impl Body {
     /// the rule of the mass properties too); the kernel's status.
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
         point(p)?;
-        with_body("classify_point", self, |k, b| {
+        read_body("classify_point", self, |k, b| {
             Ok(point_class(one(locate_points(k, b, &[p]))))
         })?
     }
@@ -614,7 +754,7 @@ impl Body {
         if points.iter().all(|&p| point(p).is_err()) {
             return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
         }
-        with_body("classify_points", self, |k, b| {
+        read_body("classify_points", self, |k, b| {
             Ok(locate_points(k, b, points)
                 .into_iter()
                 .map(point_class)
@@ -627,7 +767,7 @@ impl Body {
     /// # Errors
     /// The kernel's error.
     pub fn is_manifold_solid(&self) -> Result<bool> {
-        with_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
+        read_body("is_manifold_solid", self, |_, b| brep_is_manifold_solid(b))
     }
 
     /// Whether the body is a closed solid facing out, as an operation's result must be when its
@@ -652,7 +792,7 @@ impl Body {
     /// # Errors
     /// The kernel's error.
     pub fn solid_count(&self) -> Result<usize> {
-        with_body("solid_count", self, |_, b| {
+        read_body("solid_count", self, |_, b| {
             brep_material_census(b).map(|(solids, _voids)| solids)
         })
     }
@@ -670,7 +810,7 @@ impl Body {
         p: [f64; 3],
     ) -> Result<Option<EdgePoint>> {
         let (e, p) = (order::edge(order, edge)?, point(p)?);
-        let c = with_body("edge_closest_point", self, |k, b| {
+        let c = read_body("edge_closest_point", self, |k, b| {
             answer(q::edge_closest_point(k, b, e, p))
         })?;
         Ok(c.map(|c| EdgePoint {
@@ -697,7 +837,7 @@ impl Body {
         direction: [f64; 3],
     ) -> Result<Option<EdgeRayPoint>> {
         let (e, o, d) = (order::edge(order, edge)?, point(origin)?, point(direction)?);
-        let c = with_body("edge_closest_to_ray", self, |k, b| {
+        let c = read_body("edge_closest_to_ray", self, |k, b| {
             solidcore::query::edge::closest_point_to_ray(k, b, e, o, d)
         })?;
         Ok(c.map(|c| EdgeRayPoint {
@@ -742,6 +882,42 @@ impl Body {
             uv: [hit.uv.x, hit.uv.y],
             distance: hit.distance,
         }))
+    }
+
+    /// Every point where the ray from `origin` along `direction` meets a face, nearest first
+    /// (the kernel's `query::brep::face_hits`): the face, the point and the distance. A face the
+    /// ray crosses twice gives two hits; a ray through an edge meets each face there at one
+    /// distance; a stretch along a face is no hit. Empty where the ray meets no face. The
+    /// kernel's solves may add UV trim curves to the body.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate that is not finite or a direction of no length;
+    /// [`Error::Exception`] for a hit face `order` does not list (an order of another body); any
+    /// other kernel error.
+    pub fn face_hits_by_ray(
+        &self,
+        order: &Order,
+        origin: [f64; 3],
+        direction: [f64; 3],
+    ) -> Result<Vec<FaceHit>> {
+        let ray = Ray::new(point(origin)?, point(direction)?).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_hits_by_ray", self, |k, b| {
+            solidcore::query::brep::face_hits(k, b, ray)
+        })?;
+        hits.into_iter()
+            .map(|hit| {
+                let face = order
+                    .faces
+                    .iter()
+                    .position(|&f| f == hit.face)
+                    .ok_or(Error::Exception)?;
+                Ok(FaceHit {
+                    face,
+                    point: array(hit.point),
+                    distance: hit.distance,
+                })
+            })
+            .collect()
     }
 
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
@@ -1101,7 +1277,7 @@ impl Body {
             .iter()
             .map(|&i| order::face(order, i))
             .collect::<Result<Vec<_>>>()?;
-        with_body("rim_edges", self, |_, b| {
+        read_body("rim_edges", self, |_, b| {
             let rims = match rim_edges(b, &set)? {
                 Ok(rims) => rims,
                 Err(e) => return Ok(Err(e)),
@@ -1151,7 +1327,7 @@ impl Body {
             .collect::<Result<Vec<_>>>()?;
         let (on, normal) = (point(point_on)?, point(normal)?);
         let record = solidcore_convert::curve(outline).map_err(|_| Error::Argument)?;
-        with_body("outline_cuts", self, |k, b| {
+        read_body("outline_cuts", self, |k, b| {
             let made = from_parameters::from_parameters(k, &record, interval)?;
             let rims = match rim_edges(b, &set)? {
                 Ok(rims) => rims,
@@ -1223,7 +1399,7 @@ impl Body {
     /// kernel's refusal of a distance that overflows.
     pub fn vertex_distance(&self, order: &Order, vertex: usize, p: [f64; 3]) -> Result<Distance> {
         let (v, p) = (order::vertex(order, vertex)?, point(p)?);
-        with_body("vertex_distance", self, |_, b| {
+        read_body("vertex_distance", self, |_, b| {
             q::vertex_distance(b, v, p).map(Distance::from)
         })
     }
@@ -1327,9 +1503,12 @@ impl Body {
     /// is not finite; the kernel's error.
     pub fn face_area(&self, order: &Order, face: usize, relative_accuracy: f64) -> Result<f64> {
         let f = order::face(order, face)?;
-        let a = with_body("face_area", self, |k, b| {
-            Ok(face_area(k, b, f, relative_accuracy).map_err(status))
-        })??;
+        let a = read_else_make(
+            "face_area",
+            self,
+            |k, b| face_area_prepared(k, b, f, relative_accuracy),
+            |k, b| face_area(k, b, f, relative_accuracy),
+        )??;
         if !a.is_finite() {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
@@ -1378,14 +1557,16 @@ impl Body {
         relative_accuracy: f64,
     ) -> Result<FaceCentroid> {
         let f = order::face(order, face)?;
-        let c = with_body("face_centroid", self, |k, b| {
-            Ok(face_centroid(k, b, f, relative_accuracy)
-                .map(|(area, centroid)| FaceCentroid {
-                    area,
-                    centroid: array(centroid),
-                })
-                .map_err(status))
-        })??;
+        let (area, centroid) = read_else_make(
+            "face_centroid",
+            self,
+            |k, b| face_centroid_prepared(k, b, f, relative_accuracy),
+            |k, b| face_centroid(k, b, f, relative_accuracy),
+        )??;
+        let c = FaceCentroid {
+            area,
+            centroid: array(centroid),
+        };
         if !c.area.is_finite() || !c.centroid.iter().all(|x| x.is_finite()) {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
@@ -1468,7 +1649,7 @@ impl Body {
         else {
             return Ok(None);
         };
-        let tolerance = with_body("face_tolerance", self, |_k, b| {
+        let tolerance = read_body("face_tolerance", self, |_k, b| {
             Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
         })??;
         Ok(Some(SquareFaceLevel { level, tolerance }))
@@ -1483,7 +1664,7 @@ impl Body {
     /// without a curve, an accuracy it refuses).
     pub fn edge_length(&self, order: &Order, edge: usize, relative_accuracy: f64) -> Result<f64> {
         let e = order::edge(order, edge)?;
-        let l = with_body("edge_length", self, |k, b| {
+        let l = read_body("edge_length", self, |k, b| {
             Ok(edge_length(k, b, e, relative_accuracy).map_err(status))
         })??;
         if !l.is_finite() {
@@ -1501,7 +1682,7 @@ impl Body {
     /// without a curve, an evaluation it refuses).
     pub fn edge_middle(&self, order: &Order, edge: usize) -> Result<[f64; 3]> {
         let e = order::edge(order, edge)?;
-        let p = with_body("edge_middle", self, |k, b| {
+        let p = read_body("edge_middle", self, |k, b| {
             let interval = edge::interval(b, e)?;
             let curve = edge::curve(b, e)?
                 .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_middle"))?;
@@ -1832,6 +2013,7 @@ pub(crate) mod tests {
     pub(crate) fn kernel_order(b: &Body) -> Order {
         let k = b.lock();
         Order {
+            split_edges: 0,
             faces: k.face_list().to_vec(),
             edges: k.edge_list().to_vec(),
             vertices: k.vertex_list().to_vec(),
@@ -2817,5 +2999,52 @@ pub(crate) mod tests {
         let ball_order = kernel_order(&ball);
         let whole = faces_on(&ball, &ball_order, |s| matches!(s, SurfaceKind::Sphere(_)));
         assert_eq!(ball.rim_edges(&ball_order, &whole), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn curve_arc_length_and_2d_polyline_ops_wrappers_round_trip() {
+        let line = solidcore_record::brep::Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [6.0, 8.0, 0.0],
+        };
+        let len = crate::curve::arc_length(&line, None).unwrap();
+        assert!((len - 10.0).abs() < 1e-9, "{len}");
+        let mid = crate::curve::point_at_arc_length(&line, None, false, 5.0).unwrap();
+        assert!((mid.point[0] - 3.0).abs() < 1e-9 && (mid.point[1] - 4.0).abs() < 1e-9);
+        let from_end = crate::curve::point_at_arc_length(&line, None, true, 2.0).unwrap();
+        assert!((from_end.point[0] - 4.8).abs() < 1e-9 && (from_end.point[1] - 6.4).abs() < 1e-9);
+
+        let poly = solidcore_record::brep::Curve::Polyline {
+            points: vec![[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [3.0, 4.0, 0.0]],
+        };
+        let (total, samples) =
+            crate::curve::samples_at_fractions(&poly, None, &[0.0, 0.5, 1.0]).unwrap();
+        assert!((total - 7.0).abs() < 1e-9);
+        assert_eq!(samples.len(), 3);
+        assert!(
+            (samples[1].point[0] - 3.0).abs() < 1e-6 && (samples[1].point[1] - 0.5).abs() < 1e-6
+        );
+
+        let b = polyline_2d_bounds(&[[1.0, 2.0], [4.0, -1.0]])
+            .unwrap()
+            .unwrap();
+        assert_eq!(b, ([1.0, -1.0], [4.0, 2.0]));
+        let (d, p) = polyline_2d_closest_point([2.0, 3.0], &[[0.0, 0.0], [4.0, 0.0]])
+            .unwrap()
+            .unwrap();
+        assert!((d - 3.0).abs() < 1e-9 && (p[0] - 2.0).abs() < 1e-9);
+        let cross =
+            polyline_2d_crossings(&[[0.0, 0.0], [10.0, 0.0]], &[[5.0, -2.0], [5.0, 2.0]], 1e-6)
+                .unwrap();
+        assert_eq!(cross.len(), 1);
+        assert!((cross[0][0] - 5.0).abs() < 1e-9 && cross[0][1].abs() < 1e-9);
+        let lc = tangent_contact_line_circle_2d([0.0, 0.0], [10.0, 0.0], [4.0, 3.0], 3.0, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert!((lc[0] - 4.0).abs() < 1e-9 && lc[1].abs() < 1e-9);
+        let cc = tangent_contact_circle_circle_2d([0.0, 0.0], 2.0, [5.0, 0.0], 3.0, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert!((cc[0] - 2.0).abs() < 1e-9 && cc[1].abs() < 1e-9);
     }
 }
