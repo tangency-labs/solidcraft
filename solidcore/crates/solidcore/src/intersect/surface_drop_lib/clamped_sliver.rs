@@ -164,6 +164,19 @@ pub(crate) fn is_clamped_sliver(
     Ok(diagonal.is_finite() && diagonal.mag() <= tol_3d)
 }
 
+/// The pole flag of a span's `end` for [`is_clamped_sliver`]: `saved`'s where `end` is
+/// the point restored from the trace's stack (same parameter and UV point and tangent),
+/// else `end`'s own. The restore takes only the parameter, the UV data and the knot-line
+/// flags, so the flag `end` carries is the last point dropped, which can be a midpoint
+/// off the pole while the restored point is on it.
+pub(crate) fn restored_pole(end: &DropPt, saved: &DropPt) -> Option<bool> {
+    if end.t == saved.t && end.uv_pd == saved.uv_pd {
+        saved.on_pole
+    } else {
+        end.on_pole
+    }
+}
+
 /// The Bezier polygon `sm_AddToCurve` makes of the span from `start` to `end`, before its
 /// clamp, made the same way; `None` for a span of no length.
 fn polygon(start: &DropPt, end: &DropPt, scale: f64) -> Option<[Point2; 4]> {
@@ -271,6 +284,9 @@ pub(crate) struct Span {
 /// regression test needs 3359 at its tolerance; past the cap the sliver is kept.
 pub(crate) const MAX_ENCLOSURE_PIECES: usize = 1 << 13;
 
+/// The operation [`gap_within`] names when it is cancelled.
+const GAP_OP: &str = "intersect::surface_drop_lib::clamped_sliver::gap_within";
+
 impl Span {
     /// The span from `start` to `end`.
     pub(crate) fn new(start: DropPt, end: DropPt) -> Self {
@@ -291,6 +307,11 @@ impl Span {
     /// within `tol_3d` of `curve` at every parameter ([`gap_within`]). `None` otherwise,
     /// including where a certified box fails: the proof is then not made, and the sliver
     /// is kept, so the drop builds the curve it builds without this rule.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Cancelled`](crate::error::SolidError::Cancelled) when the kernel's
+    /// token is cancelled during the proof.
     #[allow(clippy::too_many_arguments)] // the span, the geometry, the range and the tolerance
     pub(crate) fn stretch(
         &self,
@@ -302,15 +323,19 @@ impl Span {
         to: f64,
         uv_tol: (f64, f64),
         tol_3d: f64,
-    ) -> Option<Self> {
+    ) -> Result<Option<Self>> {
         let one_end_common = (from == self.start.t) != (to == self.end.t);
         let contains_own = from <= self.start.t && self.end.t <= to;
         if !one_end_common || !contains_own {
-            return None;
+            return Ok(None);
         }
-        let polygon = polygon_in_domain(uv_domain, &self.start, &self.end, self.tangent_scale)?;
+        let Some(polygon) =
+            polygon_in_domain(uv_domain, &self.start, &self.end, self.tangent_scale)
+        else {
+            return Ok(None);
+        };
         if straightened(&self.start, &self.end, polygon) {
-            return None;
+            return Ok(None);
         }
         let [p1, p2, p3, p4] = polygon;
         let (knot, ours) = if from == self.start.t {
@@ -319,21 +344,21 @@ impl Span {
             (p4, p3)
         };
         if fix_up_moves(uv_domain, knot, ours, uv_tol.0, uv_tol.1) {
-            return None;
+            return Ok(None);
         }
-        if !gap_within(k, surface, curve, uv_domain, polygon, from, to, tol_3d) {
-            return None;
+        if !gap_within(k, surface, curve, uv_domain, polygon, from, to, tol_3d)? {
+            return Ok(None);
         }
         let mut start = self.start;
         let mut end = self.end;
         start.t = from;
         end.t = to;
-        Some(Self {
+        Ok(Some(Self {
             start,
             end,
             tangent_scale: self.tangent_scale,
             stretched: true,
-        })
+        }))
     }
 }
 
@@ -605,8 +630,14 @@ fn cut(x: Ivl, lo: f64, hi: f64) -> Option<Ivl> {
 /// `surface` within `tol_3d` of `curve` at every parameter, proved with no sampling
 /// (module docs, the stretch enclosure). `false` where the surface or curve kind has no
 /// enclosure, a piece's partials are not proved, or the proof needs more than
-/// [`MAX_ENCLOSURE_PIECES`] pieces. Infallible: a box that is not proved (an
-/// enclosure's error, a NaN, a piece outside the domain) fails the proof instead.
+/// [`MAX_ENCLOSURE_PIECES`] pieces. A box that is not proved (an enclosure's error, a
+/// NaN, a piece outside the domain) fails the proof; the kernel's cancel token is polled
+/// at every piece.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`](crate::error::SolidError::Cancelled) when the token is
+/// cancelled.
 #[allow(clippy::too_many_arguments)] // the geometry, the polygon, the range and the tolerance
 pub(crate) fn gap_within(
     k: &Kernel,
@@ -617,22 +648,22 @@ pub(crate) fn gap_within(
     from: f64,
     to: f64,
     tol_3d: f64,
-) -> bool {
+) -> Result<bool> {
     if from.partial_cmp(&to) != Some(Ordering::Less)
         || !from.is_finite()
         || !to.is_finite()
         || tol_3d.partial_cmp(&0.0) != Some(Ordering::Greater)
     {
-        return false;
+        return Ok(false);
     }
     if !polygon.iter().all(|p| p.x.is_finite() && p.y.is_finite()) {
-        return false;
+        return Ok(false);
     }
     let Some(net) = SurfaceNet::of(k, surface) else {
-        return false;
+        return Ok(false);
     };
     let Some(cn) = CurveNet::of(curve) else {
-        return false;
+        return Ok(false);
     };
     let (d_lo, d_hi) = (uv_domain.min(), uv_domain.max());
     let length = Ivl::from(to) - Ivl::from(from);
@@ -661,21 +692,22 @@ pub(crate) fn gap_within(
     let mut stack = vec![(0.0_f64, 1.0_f64)];
     let mut pieces = 0usize;
     while let Some((a, b)) = stack.pop() {
+        k.check_cancelled(GAP_OP)?;
         pieces += 1;
         if pieces > MAX_ENCLOSURE_PIECES {
-            return false;
+            return Ok(false);
         }
         if gap_over(a, b).is_some_and(|g| g <= tol_3d) {
             continue;
         }
         let mid = 0.5 * (a + b);
         if !(a < mid && mid < b) {
-            return false;
+            return Ok(false);
         }
         stack.push((mid, b));
         stack.push((a, mid));
     }
-    true
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -779,6 +811,30 @@ mod tests {
 
     /// An end on a pole keeps the span (the dog-leg straightening owns it).
     #[test]
+    fn a_restored_end_takes_the_saved_pole_flag() {
+        let k = Kernel::default();
+        let h = 4.2e-8;
+        let start = pt(0.5 - h, Point2::new(0.25, -2.1e-8), Vec2::new(0.0, 0.5));
+        let mut saved = pt(0.5, Point2::new(0.25, 0.0), Vec2::new(0.0, 0.5));
+        saved.on_pole = Some(true);
+        let c = line(1.0e-6);
+        // the end restored from the stack, still carrying the flag of a midpoint dropped
+        // off the pole: that flag alone would make the span a sliver
+        let mut end = saved;
+        end.on_pole = Some(false);
+        assert!(is_clamped_sliver(&k, &c, &unit(), &start, &end, 1e-9, 1e-9, 1e-5).unwrap());
+        // the gate takes the saved point's flag, so the span on the pole is kept
+        assert_eq!(restored_pole(&end, &saved), Some(true));
+        let mut gate = end;
+        gate.on_pole = restored_pole(&end, &saved);
+        assert!(!is_clamped_sliver(&k, &c, &unit(), &start, &gate, 1e-9, 1e-9, 1e-5).unwrap());
+        // an end dropped again (or a knot-line crossing) keeps its own flag
+        let mut redropped = end;
+        redropped.uv_pd[0] = Point2::new(0.25, 1e-12);
+        assert_eq!(restored_pole(&redropped, &saved), Some(false));
+    }
+
+    #[test]
     fn a_span_on_a_pole_is_kept() {
         let k = Kernel::default();
         let h = 4.2e-8;
@@ -832,6 +888,7 @@ mod tests {
         let span = Span::new(start, end);
         let st = span
             .stretch(&k, &s, &c, &unit(), 0.5 - 4.2e-8, 0.75, (1e-9, 1e-9), 1e-5)
+            .unwrap()
             .unwrap();
         assert_eq!((st.start.t, st.end.t), (0.5 - 4.2e-8, 0.75));
         assert_eq!((st.start.uv_pd, st.end.uv_pd), (start.uv_pd, end.uv_pd));
@@ -851,6 +908,7 @@ mod tests {
                 (1e-9, 1e-9),
                 1e-5,
             )
+            .unwrap()
             .unwrap();
         assert_eq!(st2.tangent_scale, end.t - start.t);
     }
@@ -869,6 +927,7 @@ mod tests {
         let span = Span::new(start, end);
         let stretch = |sp: &Span, c: &Curve, from: f64, to: f64| {
             sp.stretch(&k, &s, c, &d, from, to, (1e-9, 1e-9), 1e-5)
+                .unwrap()
         };
         // both ends moved, or neither; a range inside the span's
         assert!(stretch(&span, &c, 0.4, 0.8).is_none());
@@ -893,9 +952,13 @@ mod tests {
         // the end in common within the tolerance band of a boundary, with the curve
         // running along it, where the flush's fix-up moves the polygon point next to it:
         // v = 0.175 within 0.2 of v = 0
-        let near = span.stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.2), 1e-5);
+        let near = span
+            .stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.2), 1e-5)
+            .unwrap();
         assert!(near.is_none());
-        let clear = span.stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.17), 1e-5);
+        let clear = span
+            .stretch(&k, &s, &c, &d, 0.5 - 4.2e-8, 0.75, (1e-9, 0.17), 1e-5)
+            .unwrap();
         assert!(clear.is_some());
     }
 
@@ -950,16 +1013,18 @@ mod tests {
             &b,
             polygon(&a, &b, span.tangent_scale).unwrap()
         ));
-        let st = span.stretch(
-            &k,
-            &unit_plane(),
-            &line_at(1e-7),
-            &unit(),
-            0.4,
-            0.75,
-            (1e-9, 1e-9),
-            1e-5,
-        );
+        let st = span
+            .stretch(
+                &k,
+                &unit_plane(),
+                &line_at(1e-7),
+                &unit(),
+                0.4,
+                0.75,
+                (1e-9, 1e-9),
+                1e-5,
+            )
+            .unwrap();
         assert!(st.is_none());
     }
 
@@ -989,8 +1054,8 @@ mod tests {
         let q = polygon(&start, &end, 1.0).unwrap();
         let c = line_at(0.0);
         let s = unit_plane();
-        assert!(gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-5));
-        assert!(!gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-300));
+        assert!(gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-5).unwrap());
+        assert!(!gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-300).unwrap());
     }
 
     /// The line's derivative enclosure holds its slope in every parameterisation

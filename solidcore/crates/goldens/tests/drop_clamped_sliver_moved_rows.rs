@@ -16,8 +16,9 @@
 //!    of it, or the record's control polygon of a failed trace) and in the deviations the
 //!    drop reports, each within the drop's tolerance;
 //! 3. the moved curve is main's with exactly one end span removed: every other control
-//!    point and knot is main's; the new end point is main's junction point; at most the
-//!    inner control point next to it moves (the stretched span's tangent);
+//!    point and knot is main's bit for bit, the inner control point next to the new end
+//!    included (the stretched span keeps its polygon), and the new end point is main's
+//!    junction point;
 //! 4. the removed span of main's curve folds back on itself (it is not monotone in a
 //!    coordinate), and every control point of the new curve lies in the domain.
 //!
@@ -253,7 +254,7 @@ fn one_span_removed(
                 assert_eq!(new_knots[1..], old_knots[2..]);
                 assert_eq!(new.len(), old.len() - 3);
                 assert_eq!(new[0], old[3], "the new start is main's junction point");
-                assert_eq!(new[2..], old[5..]);
+                assert_eq!(new[1..], old[4..], "the stretched span keeps its polygon");
             }
             &old[..4]
         }
@@ -264,7 +265,11 @@ fn one_span_removed(
             assert_eq!(new_knots[last - 1], old_knots[last]);
             assert_eq!(new.len(), old.len() - 3);
             let junction = 3 * (spans - 1);
-            assert_eq!(new[..junction - 1], old[..junction - 1]);
+            assert_eq!(
+                new[..junction],
+                old[..junction],
+                "the stretched span keeps its polygon"
+            );
             assert_eq!(
                 new[junction], old[junction],
                 "the new end is main's junction point"
