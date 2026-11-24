@@ -231,6 +231,19 @@ fn a_margin_that_is_negative_huge_or_without_whole_cells_is_refused() {
 }
 
 #[test]
+fn a_built_in_shape_still_needs_its_size() {
+    // The schema leaves `size` optional, since a sketched cell has none, so the handler is what
+    // refuses a built-in shape without one: each of the five shapes, with every other field given.
+    let mut s = plate(62.0, 3.0);
+    for shape in ["hexagon", "square", "triangle", "circle", "polygon"] {
+        let p = json!({"sketch": "Field", "shape": shape, "web": 2, "depth": 1.5});
+        let e = s.execute("solid.cell_grid", &p).unwrap_err().to_string();
+        assert!(e.contains("size"), "{shape}: {e}");
+    }
+    assert!((volume(&s) - 62.0 * 62.0 * 3.0).abs() < 1e-6, "a refused grid cuts nothing");
+}
+
+#[test]
 fn the_grid_is_rebuilt_when_the_sketch_changes() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"}));
