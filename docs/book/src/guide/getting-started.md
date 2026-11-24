@@ -375,6 +375,9 @@ feature's `error` in `timeline`, and then exits with status 1 for the same reaso
 failing features on stderr; `eval --allow-errors` exits with status 0, for a design you are
 inspecting because it fails.
 
+A mesh `--out` that cannot mesh one body still writes the others. Each body left out is named
+on its own line on stderr, with the reason, even with `--quiet`.
+
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
 1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`

@@ -289,6 +289,17 @@ impl Harness {
         }
     }
 
+    /// `n` frames, each drawn once the dialog's preview worker has answered: what they show does
+    /// not depend on how fast the worker ran. On a loaded machine a preview's result (an error
+    /// row, say) can otherwise land a frame later than on an idle one.
+    #[cfg(test)]
+    pub fn frames_after_preview(&mut self, n: usize) {
+        for _ in 0..n {
+            self.app.preview.wait_for_worker();
+            self.frame();
+        }
+    }
+
     /// One frame in which the platform drops `files`, the pointer last seen at `at` (a drop
     /// itself carries no position with winit 0.30).
     pub fn drop_files(&mut self, at: egui::Pos2, files: Vec<egui::DroppedFileHandle>) {

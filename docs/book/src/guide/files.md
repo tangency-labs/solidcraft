@@ -157,6 +157,11 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+If a body cannot be meshed, STL, OBJ and 3MF exports still write the other bodies. The toast
+names each body that was left out and stays until you dismiss it, and the command's reply lists
+them in `skipped`, with the reason for each in `warnings`. If no body can be meshed, the export
+fails.
+
 A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
 bed. Scripts and the control channel can keep each component together: `file.export` or
 `file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
@@ -412,6 +417,23 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
 
 ## Design properties
 

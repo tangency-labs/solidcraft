@@ -319,8 +319,17 @@ PNG size/header and hashes without resolving source blobs. The Home/Recent Files
 reader tries its local picture cache, then this portable picture, then its existing
 background reconstruction. PNG decoding also has dimension and allocation limits.
 Missing, mismatched, truncated or malformed pictures are misses and never prevent
-authoritative document opening. Embedding a PNG does not install an operating-system
-file-browser thumbnail provider.
+authoritative document opening.
+
+On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
+shows this picture as the design's icon, and Space shows the design's saved display meshes
+(see "Provisional saved display") in a 3D view turned by dragging and zoomed by scrolling or
+pinching, or this picture when the design has none. They read the container with
+`crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
+the container format, the PNG header and size and every mesh blob, but not the caches' keys or
+build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and
+Metal draws the meshes only when the view changes; nothing evaluates or tessellates the model.
+A design with neither cache keeps the generic icon and card.
 
 Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide
