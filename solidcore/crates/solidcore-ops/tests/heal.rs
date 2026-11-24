@@ -209,6 +209,34 @@ fn hair_step_box(step: f64, tols: Tols) -> Record {
     polyhedron(&corners, &cycles, tols)
 }
 
+/// A 50 mm block with a notch `depth` deep and 10 wide cut across its front face (y = 0) from
+/// x = 20 to 30, top to bottom: the notch's floor lies at y = `depth`, joined to the front by
+/// two walls `depth` wide.
+fn notched_block(depth: f64, tols: Tols) -> Record {
+    let outline = [
+        [0.0, 0.0],
+        [20.0, 0.0],
+        [20.0, depth],
+        [30.0, depth],
+        [30.0, 0.0],
+        [50.0, 0.0],
+        [50.0, 50.0],
+        [0.0, 50.0],
+    ];
+    // the outline at z = 0 (corners 0 to 7) and at z = 50 (8 to 15)
+    let corners: Vec<[f64; 3]> = [0.0, 50.0]
+        .iter()
+        .flat_map(|&z| outline.iter().map(move |&[x, y]| [x, y, z]))
+        .collect();
+    let walls: Vec<[usize; 4]> = (0..8)
+        .map(|i| [i, (i + 1) % 8, (i + 1) % 8 + 8, i + 8])
+        .collect();
+    let mut cycles: Vec<&[usize]> =
+        vec![&[0, 7, 6, 5, 4, 3, 2, 1], &[8, 9, 10, 11, 12, 13, 14, 15]];
+    cycles.extend(walls.iter().map(|w| &w[..]));
+    polyhedron(&corners, &cycles, tols)
+}
+
 /// [`hair_step_box`] whose step ends at the right face in a 45° triangular cap: the corner where
 /// the riser, the back half of the top and the right face would meet is cut by a triangle whose
 /// three sides, `step / 2` long or less, are all shorter than their tolerance, and whose area is
@@ -518,20 +546,36 @@ fn a_hair_step_heals_to_one_edge_between_its_two_tops() {
 /// as SMLib's healer does, and grows none.
 #[test]
 fn a_hair_step_heals_where_the_tolerance_covers_a_real_gap() {
-    let rec = with_vertex_gap(
-        hair_step_box(3e-4, TOLS),
-        [10.0, 0.0, 0.0],
-        [0.0, 0.0, 2e-4],
-    );
-    let (body, _) = Body::from_record(&rec, true).unwrap();
+    let gap = 2e-4;
+    let rec = with_vertex_gap(hair_step_box(3e-4, TOLS), [10.0, 0.0, 0.0], [0.0, 0.0, gap]);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
     assert_eq!(failed(&body), [7, 7, 11, 11, 11, 11, 34]);
     heals(&rec, [7, 15, 10]);
-    // SMLib's own healer on the same record: every tolerance reset small, the gap no longer
-    // covered
+    // `no_tolerance_grew` is one-sided; the heal shrinks none either: the gapped corner, which
+    // no squeeze moves, keeps the stated tolerance
+    let (healed, _) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    let (after, _) = healed.unwrap().body.to_record().unwrap();
+    let corner = after.vertices.iter().find(|v| v.point == [10.0, 0.0, gap]);
+    assert_eq!(corner.map(|v| v.tolerance), Some(TOLS.vertex));
+
+    // SMLib's own healer on the same record passes the check by shrinking: every tolerance is
+    // reset under the stated one, and the gapped corner keeps the gap gain times twice its gap
+    // as its zone (#17739), half the record tolerance; the check holds a gap to half the zone
     let (smlib_healed, _) = Body::from_record(&rec, false).unwrap();
     let healed = smlib_healed.check(CheckLevel::All).unwrap();
-    assert!(!healed.is_valid());
-    assert!(healed.failed_tests().iter().all(|&t| t <= 3), "{healed}");
+    assert!(healed.is_valid(), "{healed}");
+    let (after, _) = smlib_healed.to_record().unwrap();
+    for v in &after.vertices {
+        assert!(v.tolerance < TOLS.vertex, "{v:?}");
+        if v.point == [10.0, 0.0, gap] {
+            assert!(v.tolerance / 2.0 >= 2.0 * gap, "{v:?}");
+        }
+    }
+    assert!(
+        after.vertices.iter().any(|v| v.point == [10.0, 0.0, gap]),
+        "the gapped corner is kept"
+    );
+    assert!(after.edges.iter().all(|e| e.tolerance < TOLS.edge));
 }
 
 /// The hair step ending in a 45° cap at the right face: four short edges squeezed (the cap's
@@ -627,6 +671,42 @@ fn a_body_that_passes_is_not_healed() {
         Some("nothing the heal takes could be proved")
     );
     assert_eq!((report.before, report.after), (None, None));
+}
+
+/// A block notched twice the zone tolerance deep (2e-5 at the default 1e-5) through SMLib's own
+/// healer: on the bottom and the top face, the edges where the notch's two walls meet them,
+/// `depth` long, leave the faces' domain side y = 0 square to it. Their far ends stand `depth`
+/// off that side, past the tolerance within which two places coincide (the larger of the
+/// contact tolerance and the faces' zone tolerance, 1e-5; `geom::tol::coincidence_tol_3d`),
+/// so each edge leaves the side. The check read the side to upstream's intersection
+/// tolerance, 2e-5 inclusive, at which the whole edge lies on it, running square to the
+/// side's direction rather than along it, and refused the body (Loop test 2, "Bad Loop
+/// Orient"). It is a valid solid of the block less the notch, 50³ − 10 · 50 · `depth` (to
+/// 1e-6 of the notch's volume; measured within 1e-9 of it), as a notch past the band was
+/// (2.1e-5, 5e-5).
+#[test]
+fn a_block_notched_twice_the_tolerance_deep_is_valid() {
+    for tol in [1e-5, 1e-7] {
+        let tols = Tols {
+            body: 1e-5,
+            edge: tol,
+            vertex: tol,
+        };
+        for depth in [2e-5, 2.1e-5, 5e-5] {
+            let case = format!("tolerance {tol:e}, depth {depth:e}");
+            let (body, _) = Body::from_record(&notched_block(depth, tols), false)
+                .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            assert_eq!(failed(&body), [0_u32; 0], "{case}");
+            // the block's six faces and the notch's three, with the front face in two
+            assert_eq!(body.counts().unwrap(), [10, 24, 16], "{case}");
+            let notch = 50.0_f64.powi(3) - body.volume(1e-9).unwrap();
+            let want = 10.0 * 50.0 * depth;
+            assert!(
+                (notch - want).abs() <= 1e-6 * want,
+                "{case}: {notch} vs {want}"
+            );
+        }
+    }
 }
 
 /// A body the check fails for a defect the heal cannot prove away (a spline piece the check

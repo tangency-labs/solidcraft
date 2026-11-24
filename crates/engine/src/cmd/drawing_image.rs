@@ -22,7 +22,7 @@ const LOGO: &str = "drawing.title_block.logo";
 const LOGO_CONTRACT: TypedContract<LogoParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Image", crate::checked!("drawing.image.add", add))
+    CommandSpec::new(ADD, "Add Image", crate::checked!("drawing.image.add", add)).begins_edit()
         .icon("new")
         .in_drawing()
         .doc_only()

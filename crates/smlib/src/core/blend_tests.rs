@@ -911,10 +911,9 @@ fn a_setback_corner_left_open_returns_its_hole() {
 /// does, r² (cot(α/2) - (π - α)/2) per unit length on a wedge α (solidcore#2261): on a 40 x 30 x 20
 /// box with its top back edge chamfered 5, r 2 along the chamfer's top edge (α 135°) takes
 /// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call are
-/// refused: every edge takes the first one's thumbweight, so the other would take 17% too little
-/// or 21% too much (solidcore#2250's comment 6563419897), whichever order they come in.
+/// built, each with its own in either order and G2 to its faces (#13930); this corner is refused.
 #[test]
-fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() {
+fn a_curvature_round_takes_each_wedges_equal_area_in_one_call() {
     let r = 2.0;
     let cut = |alpha: f64| r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
     let chamfered =
@@ -930,11 +929,28 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
+    let want = 40.0 * cut(0.75 * PI) + 40.0 * cut(0.5 * PI);
     for both in [[a, b], [b, a]] {
-        let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
-        assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
-        assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
+        let round = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).unwrap();
+        let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
+        let removed = v0 - volume(&round, 1e-8).unwrap();
+        assert!(rel(removed, want) < 1e-6, "{both:?}: {removed} vs {want}");
+        let (_, order) = round.to_record().unwrap();
+        let tol = solidcore_ops::continuity::ContinuityTolerances {
+            gap_mm: 1e-3,
+            angle_rad: PI / 180.0,
+            curvature_per_mm: 1e-2,
+            curvature_change_per_mm2: 1e-3,
+            curvature_change_rate_per_mm3: 1e-4,
+        };
+        let report = round.continuity_report(&order, &[], 9, tol).unwrap();
+        let rails: Vec<_> = report.seams.iter().filter(|s| s.order_at_stations >= Some(1)).map(|s| s.order_at_stations).collect();
+        assert_eq!(rails.len(), 4, "{both:?}: {rails:?}");
+        assert!(rails.iter().all(|o| *o >= Some(2)), "{both:?}: every rail G2: {rails:?}");
     }
+    let corner = [a, [40.0, 27.5, 17.5]];
+    assert!(blend(&chamfered, Blend::Curvature, &corner, &[r], TOL, &[], &[], Corners::Filled).is_err());
     // Edges of one wedge go together.
     let two = blend(&chamfered, Blend::Curvature, &[b, [20.0, 0.0, 20.0]], &[r], TOL, &[], &[], Corners::Filled).unwrap();
     assert!(rel(v0 - volume(&two, 1e-8).unwrap(), 80.0 * cut(0.5 * PI)) < 1e-6);
@@ -1223,4 +1239,63 @@ mod history {
     fn tags_cross_a_chamfer() {
         check(Blend::Chamfer, 2.0);
     }
+}
+
+/// A ledge between two parabolas that thins to nothing at (−10, −10); its straight rim chamfered 1 mm
+/// runs off the ledge before the corner, where solidcore's Nx1 corner has no topology to make.
+#[test]
+fn a_chamfer_ending_where_its_face_comes_to_a_point_is_refused_with_a_reason() {
+    use super::sweep::extrude;
+    use crate::sweeps::{Curve, DraftCorner};
+    let para = |a: [f64; 2], c: [f64; 2], b: [f64; 2], t: f64| -> [f64; 2] {
+        let w = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        [a[0] * w[0] + c[0] * w[1] + b[0] * w[2], a[1] * w[0] + c[1] * w[1] + b[1] * w[2]]
+    };
+    let (a3, c3, b3) = ([-12.5, -12.5], [12.5, -12.5], [12.5, 12.5]);
+    // Where the outer parabola crosses y = -10 (t0) and, by symmetry, x = 10 (1 - t0).
+    let (mut lo, mut hi) = (0.0, 0.5);
+    for _ in 0..80 {
+        let m = 0.5 * (lo + hi);
+        if para(a3, c3, b3, m)[1] < -10.0 { lo = m } else { hi = m }
+    }
+    let (t0, t1) = (0.5 * (lo + hi), 1.0 - 0.5 * (lo + hi));
+    // The piece t0..t1 of the parabola as a quadratic Bezier: its end tangents meet at the control point.
+    let d = |t: f64| [2.0 * ((1.0 - t) * (c3[0] - a3[0]) + t * (b3[0] - c3[0])), 2.0 * ((1.0 - t) * (c3[1] - a3[1]) + t * (b3[1] - c3[1]))];
+    let (p0, p1, d0, d1) = (para(a3, c3, b3, t0), para(a3, c3, b3, t1), d(t0), d(t1));
+    let s = ((p1[0] - p0[0]) * d1[1] - (p1[1] - p0[1]) * d1[0]) / (d0[0] * d1[1] - d0[1] * d1[0]);
+    let ctrl = [p0[0] + d0[0] * s, p0[1] + d0[1] * s];
+    let z = 0.0;
+    let nurbs = |pts: [[f64; 2]; 3], z: f64| Curve::Nurbs {
+        degree: 2,
+        points: vec![[pts[0][0], pts[0][1], z, 1.0], [pts[1][0], pts[1][1], z, 1.0], [pts[2][0], pts[2][1], z, 1.0]],
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    };
+    let line = |a: [f64; 2], b: [f64; 2], z: f64| Curve::Line { start: [a[0], a[1], z], end: [b[0], b[1], z] };
+    let lower = vec![
+        line([-10.0, -10.0], p0, z),
+        nurbs([p0, ctrl, p1], z),
+        line(p1, [10.0, 10.0], z),
+        line([10.0, 10.0], [-10.0, 10.0], z),
+        line([-10.0, 10.0], [-10.0, -10.0], z),
+    ];
+    let upper = vec![
+        nurbs([[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0]], 10.0),
+        line([10.0, 10.0], [-10.0, 10.0], 10.0),
+        line([-10.0, 10.0], [-10.0, -10.0], 10.0),
+    ];
+    let base = extrude(&lower, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let top = extrude(&upper, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
+    let body = boolean(&base, &top, BooleanOp::Union).unwrap().unwrap();
+    // The ledge's straight rim: the side y = -10 from the corner to the outer parabola, at z = 10.
+    let side = [0.5 * (-10.0 + p0[0]), -10.0, 10.0];
+    let e = blend(&body, Blend::Chamfer, &[side], &[1.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err();
+    // No room, the rail leaving its face (main: Status(1001)); a chamfer's words name no rolling ball.
+    assert_eq!(e, Error::NoRoom);
+    assert!(!e.to_string().contains("ball"), "{e}");
+    // The wide part of the ledge takes the chamfer: one face more, 0.5 mm² along ~14 mm of parabola.
+    let mid = para(a3, c3, b3, 0.5);
+    let chamfered = blend(&body, Blend::Chamfer, &[[mid[0], mid[1], 10.0]], &[1.0], TOL, &[], &[], Corners::Filled).unwrap();
+    assert_eq!(counts(&chamfered).unwrap()[0], counts(&body).unwrap()[0] + 1);
+    let removed = volume(&body, 1e-7).unwrap() - volume(&chamfered, 1e-7).unwrap();
+    assert!(removed > 5.0 && removed < 9.0, "removed {removed}");
 }

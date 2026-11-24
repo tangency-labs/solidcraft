@@ -176,7 +176,7 @@ fn keywords(id: &str) -> &'static str {
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
-        "file.export_urdf" => "robot ros simulation",
+        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
         "file.export_sdf" => "gazebo model simulation world texture",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",
@@ -227,7 +227,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
             let (label, tab, panel) = (
-                solidcraft_ui_text::tr_label(info.label),
+                solidcraft_ui_text::tr_command(c.id, info.label),
                 solidcraft_ui_text::tr_label(crate::workspace::tab_label(home_tab)),
                 solidcraft_ui_text::tr_label(home_panel),
             );
@@ -339,7 +339,7 @@ fn closest(query: &str) -> Option<&'static str> {
     command_specs()
         .into_iter()
         .map(|c| {
-            let label = solidcraft_ui_text::tr_label(c.label);
+            let label = solidcraft_ui_text::tr_command(c.id, c.label);
             let mut prev: Vec<_> = (0..=q.len()).collect();
             for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
                 let mut next = vec![j + 1];

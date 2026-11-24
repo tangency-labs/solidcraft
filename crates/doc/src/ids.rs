@@ -16,6 +16,7 @@
 use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use solidcraft_geom::ids::{ID_CHARS, decode, deserialize, encode, serialize};
@@ -35,6 +36,45 @@ pub mod option {
         let read = |text: String| super::decode(&text).ok_or_else(|| D::Error::custom(format!("`{text}` is not an id")));
         Option::<String>::deserialize(d)?.map(read).transpose()
     }
+}
+
+/// One 128-bit process epoch, shared by document identities and history tokens.
+fn process_epoch() -> &'static str {
+    static RUN: OnceLock<String> = OnceLock::new();
+    RUN.get_or_init(|| {
+        let started = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let first = RandomState::new().hash_one(started);
+        let second = RandomState::new().hash_one((started, first));
+        format!("{first:016x}{second:016x}")
+    })
+}
+
+/// A design identity: one random run identity followed by a process-wide serial.
+/// Kept by the open session; opening a design again creates a fresh identity.
+pub fn new_document_id() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!("{}-{}", process_epoch(), NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+/// The shared revision allocator used by committed states and design observations.
+/// The counter is outside undo snapshots and document files. Its numeric values
+/// alone are process-local observations; opaque plugin tokens include the epoch.
+pub fn next_design_revision() -> u64 {
+    static NEXT: OnceLock<AtomicU64> = OnceLock::new();
+    NEXT.get_or_init(|| {
+        let seed = IdSource::from_entropy().seed();
+        // Keep revisions exactly representable by JSON clients, with another
+        // 2^52 increments available before reaching JavaScript's integer limit.
+        AtomicU64::new((seed & ((1_u64 << 52) - 1)).max(1))
+    })
+    .fetch_add(1, Ordering::Relaxed)
+}
+
+/// A committed state names both the process epoch and one generation from the
+/// existing shared allocator. The session keeps it outside authored documents
+/// and undo snapshots, including when generations overlap across runs.
+pub fn new_design_revision() -> String {
+    format!("{}:{}", process_epoch(), next_design_revision())
 }
 
 /// splitmix64's step: odd, so the state passes every `u64` before it comes round again.
@@ -95,6 +135,22 @@ mod tests {
 
     fn none() -> BTreeSet<u64> {
         BTreeSet::new()
+    }
+
+    /// Tracking uses one shared revision source without becoming authored data.
+    #[test]
+    fn design_tracking_tokens_are_unique_and_absent_from_documents() {
+        assert_ne!(new_document_id(), new_document_id());
+        let first = new_design_revision();
+        assert_ne!(first, new_design_revision());
+        let (epoch, generation) = first.split_once(':').unwrap();
+        assert_eq!(epoch.len(), 32);
+        assert!(epoch.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert!(generation.parse::<u64>().is_ok());
+        let document = crate::Document::new("Tracking");
+        let value: serde_json::Value = serde_json::from_str(&document.to_json()).unwrap();
+        assert!(value.get("document_id").is_none() && value.get("revision").is_none());
+        assert_eq!(crate::Document::from_json(&document.to_json()).unwrap(), document);
     }
 
     /// Every id a source gives is written and read back as itself.

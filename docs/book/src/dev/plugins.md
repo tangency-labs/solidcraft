@@ -6,7 +6,7 @@ manifest, the WIT interface, building the component, permissions, limits, checki
 installing.
 
 The reference for everything here is [Plugins](../../../plugins.md) (placement, dialogs, package
-limits, importers) and [the runtime reference](../../../plugin-runtime.md) (execution and file
+limits, importers, exporters) and [the runtime reference](../../../plugin-runtime.md) (execution and file
 scope). The design behind them is [RFC 0002](../../../rfcs/0002-plugins.md).
 
 ## What a plugin is
@@ -19,6 +19,9 @@ component. SolidCraft runs the component in a sandbox:
   nothing.
 - An **importer** reads a file of a format SolidCraft doesn't read and writes a SolidCraft design.
   The design opens as a new, unsaved design, with a report of what could not be carried over.
+- An **exporter** writes the open design as a file of a format SolidCraft doesn't write. It reads
+  the design through read-only commands and returns the file's bytes; SolidCraft writes them where
+  the user chose. See [Exporters](../../../plugins.md#exporters).
 
 A plugin has no network access, ever. It reads and writes files only in folders the user approved,
 and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
@@ -86,7 +89,7 @@ Create `plate-maker/plugin.json`:
 |---|---|
 | `id` | 1 to 64 lowercase letters, digits and dashes. The package folder has this name. |
 | `name`, `version`, `description` | What the user sees: at most 80, 32 and 240 characters. |
-| `capabilities` | The host interfaces the plugin uses: `commands@0.2` for a command plugin, `formats@0.2` for an importer, plus `evaluate@0.2` for an importer that checks its result. Plugins built for 0.1 still run. |
+| `capabilities` | The host interfaces the plugin uses: `commands@0.2` for a command plugin, `formats@0.2` for an importer or exporter, plus `evaluate@0.2` for an importer that checks its result. Plugins built for 0.1 still run. |
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
@@ -132,13 +135,16 @@ mkdir wit
 cp <SolidCraft source>/crates/craft-plugin/wit/plugin.wit wit/plugin.wit
 ```
 
-Its package is `craft:plugin@0.2.0`, and it has two worlds:
+Its package is `craft:plugin@0.2.0`, and it has three worlds:
 
 - `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
   cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
   SolidCraft calls with the entry's name and its parameters as JSON.
 - `importer-plugin` imports `source` (the file being opened), `design` (where the new design
   goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
+- `exporter-plugin` imports `commands` (only the read-only commands its manifest lists), `log`,
+  `control` and `clock`, and exports `formats-provider`, whose `export-file(slot, options)` returns
+  the file's bytes.
 
 Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
 `invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
@@ -312,9 +318,13 @@ it at install:
 - `command_groups`: commands that reach past the open design are grouped: `file` (save, export,
   import, libraries), `doc` (open, create or switch designs), `app` (settings, the window) and
   `plugin` (other plugins). A listed command of a group needs the group here, and the user's grant.
+  A `file` or `doc` command may name a file in a granted folder as `grant:<name>/<path>`, where
+  `<name>` is one of the `files` names below; any command but a known input reader (such as
+  `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
-  interface, by name and a relative path. The user picks each folder at install; the plugin never
-  sees where it is. Writes appear only when the run succeeds.
+  interface, by name and a relative path. The user picks each folder at install; the `files`
+  interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
+  can name the full path. Writes appear only when the run succeeds.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.

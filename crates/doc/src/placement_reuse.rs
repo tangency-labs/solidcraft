@@ -105,6 +105,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 direction: _,
                 distance2: _,
                 start_offset: _,
+                symmetric_offset: _,
                 through_all,
                 second_follows_first: _,
                 taper: _,
@@ -148,6 +149,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         plastic,
         parts,
         links,
+        // What a file keeps of its links; a design in memory holds their bodies either way.
+        linked_bodies_left_out: _,
         configs,
         favorites,
         canvases,
@@ -156,6 +159,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         materials,
         print_faces,
+        // Read only by robot exports: no feature's geometry depends on it.
+        collision_shapes: _,
         user_materials,
         appearances,
         body_components,
