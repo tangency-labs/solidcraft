@@ -59,12 +59,17 @@ impl Saving {
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`]. A browser host acknowledges its own write through the same tick.
 /// Returns true while the save is under way.
-pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+pub fn start(app: &mut SolveApp, command: &'static str, mut params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
         app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
+    }
+    // The window's saves keep the bodies' display meshes, so a file browser can show the model
+    // in 3D (Quick Look on macOS, #19328). An explicit `preview` wins.
+    if let Some(given) = params.as_object_mut() {
+        given.entry("preview").or_insert(Value::Bool(true));
     }
     if app.services.persist_design.is_some() {
         return match start_host(app, command, params, None, None) {
@@ -230,7 +235,9 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     let Some(Saving { command, .. }) = app.saving.take() else { return };
     let (r, cancelled) = match outcome {
         Some((copy, Ok(v), _)) => {
+            let previous = app.session.path.clone();
             app.session.adopt_save(&copy);
+            crate::control::post_design_saved(app, &copy.document_id, previous);
             (Ok(v), false)
         }
         Some((_, Err(e), cancelled)) => (Err(e), cancelled),
@@ -266,7 +273,7 @@ fn show_warning(app: &mut SolveApp, result: &Result<Value, String>) {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -331,6 +338,25 @@ mod tests {
         assert_eq!(owner.doc.features.len(), 2);
         assert!(owner.is_dirty() && super::protects_host_recovery(&h.app, owner));
         assert!(!h.app.session.is_dirty());
+    }
+
+    #[test]
+    fn browser_window_saves_respect_the_preview_option() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let writes = browser_writes(&mut h.app);
+        let with_preview = h.dir.join("With meshes.sc");
+        let without_preview = h.dir.join("Plain.sc");
+        for (params, expected) in [(json!({"path": with_preview}), true), (json!({"path": without_preview, "preview": false}), false)] {
+            assert!(super::start(&mut h.app, "file.save_as", params));
+            let (_, bytes, done) = writes.borrow_mut().pop().unwrap();
+            let entry = b"cache/preview.bin";
+            assert_eq!(bytes.windows(entry.len()).any(|name| name == entry), expected);
+            done.send(Ok(())).unwrap();
+            super::tick(&mut h.app, false);
+        }
     }
 
     #[test]
@@ -417,6 +443,29 @@ mod tests {
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
     }
 
+    /// #19328: the window's saves keep the bodies' display meshes for file browsers (Quick
+    /// Look's 3D view), deflated; a save that asks for no preview still leaves them out.
+    #[test]
+    fn saves_keep_display_meshes_for_file_browsers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let saved = |h: &mut crate::scenario::Harness, name: &str, extra: Value| {
+            let path = h.dir.join(name);
+            let mut params = json!({"path": path.to_string_lossy()});
+            if let (Some(params), Some(extra)) = (params.as_object_mut(), extra.as_object()) {
+                params.extend(extra.clone());
+            }
+            super::start(&mut h.app, "file.save_as", params);
+            super::tick(&mut h.app, true);
+            let bytes = std::fs::read(&path).unwrap();
+            bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin")
+        };
+        assert!(saved(&mut h, "With meshes.sc", json!({})));
+        assert!(!saved(&mut h, "Plain.sc", json!({"preview": false})));
+    }
+
     /// #6003: an agent's `engine.script` that arrives while the window's Save is being written
     /// waits for the save, as the other design-changing requests do, and runs after it: the
     /// file has the design as it was when Save was pressed, and the script's change is left
@@ -492,6 +541,28 @@ mod tests {
         super::start(&mut h.app, "file.save_as", json!({"path": bad.to_string_lossy()}));
         super::tick(&mut h.app, true);
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    }
+
+    /// A save written on a worker posts exactly one `design.saved` when it is taken up.
+    #[test]
+    fn a_worker_save_posts_one_design_saved() {
+        static WATCH: crate::control::DocumentWatch = crate::control::DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let sub = WATCH.join();
+        let cursor = sub.from();
+        let path = h.dir.join("Worker.solidcraft");
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()})), "under way on a worker");
+        h.frame();
+        h.settle();
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let next = WATCH.next(&(String::new(), 0), cursor, &stop, std::time::Duration::ZERO);
+        let saved: Vec<_> = next.events.iter().filter(|e| e["event"] == "design.saved").collect();
+        assert_eq!(saved.len(), 1, "{:?}", next.events);
+        assert_eq!(saved[0]["params"]["path"].as_str(), path.to_str(), "{}", saved[0]);
+        assert!(saved[0]["params"]["previous_path"].is_null(), "{}", saved[0]);
+        drop(sub);
     }
 
     #[test]

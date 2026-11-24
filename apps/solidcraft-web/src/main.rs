@@ -1226,9 +1226,10 @@ mod web {
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            // First: what the browser did with the last right-click (#20011). A browser may take
-            // a right-click for itself and open its own menu; the app then opens none of its own.
-            self.app.menu.browser_menu = self.mouse_buttons.borrow().menu();
+            // First: what the browser did with the last right-click (#20011, #21229). A browser may
+            // take a right-click for itself and open its own menu; the app then closes or skips
+            // its own menu once.
+            self.app.menu.browser_menu = self.mouse_buttons.borrow_mut().take_menu();
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);
@@ -1565,7 +1566,7 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    eprintln!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
+    solidcraft_engine::note!("solidcraft-web only runs in the browser: build it with `trunk build --release` in apps/solidcraft-web");
 }
 
 #[cfg(test)]

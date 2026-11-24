@@ -13,7 +13,8 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 2. Run `inspect_design {"measure":false,"sketches":false}`, even when you think the session is empty.
    - The SolidCraft server's instructions end with `Backend: connected to the SolidCraft app` when it drives the user's open app, and with `Backend: headless` otherwise.
    - If the design has timeline features, ask before calling `new_design` or `open`, because both discard unsaved work. You can also build into the open design.
-3. Write a plan:
+3. The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it. It is a text block at the end of a reply (`[Selected in SolidCraft right now: ...]`), left out when nothing is selected; faces and edges come with the names and indices the tools take.
+4. Write a plan:
    - the parameters
    - the placement: centre the part on the origin so patterns and mirrors can work from the planes
    - every feature, with the world point you will use for each edge or face pick

@@ -18,11 +18,11 @@ use crate::schema::edit::{
     TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
     TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult,
     TimelineReorderManyParams, TimelineReorderParams, TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams,
-    TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
+    TimelineStepParams, TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
-    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams,
+    SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
@@ -180,6 +180,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROLL_TO_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
+    CommandSpec::new("timeline.step_back", "Step History Back", crate::checked!("timeline.step_back", step_back))
+        .icon("rollback")
+        .contract(&STEP_BACK_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step back, the marker rolling one feature back (the features after it are rebuilt); at the start of the history the marker stays"),
+    CommandSpec::new("timeline.step_forward", "Step History Forward", crate::checked!("timeline.step_forward", step_forward))
+        .icon("rollback")
+        .contract(&STEP_FORWARD_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step forward, the marker rolling one feature forward; at the end of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_start", "Roll History to Start", crate::checked!("timeline.roll_to_start", roll_to_start))
+        .icon("rollback")
+        .contract(&ROLL_TO_START_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the start of the history, every feature rolled back; at the start of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_end", "Roll History to End", crate::checked!("timeline.roll_to_end", roll_to_end))
+        .icon("rollback")
+        .contract(&ROLL_TO_END_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the end of the history, every feature built; at the end of the history the marker stays"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
         .icon("reorder")
         .contract(&REORDER_CONTRACT)
@@ -245,6 +265,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
         .output(output_schema_for::<SelectClearResult>),
+    CommandSpec::new("select.invert", "Invert Selection", crate::checked!("select.invert", select_invert))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_INVERT_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("no parameters → in place of the selected faces, edges or bodies, the other faces or edges of their bodies, or the other shown bodies; a body selected with some of its faces or edges inverts inside it; other items stay selected"),
     CommandSpec::new("select.same_look", "Select Same Look", crate::checked!("select.same_look", select_same_look))
         .icon("select")
         .noundo()
@@ -282,6 +308,7 @@ const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new()
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
+const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
@@ -289,6 +316,10 @@ const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new(
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
 const ROLLBACK_CONTRACT: TypedContract<TimelineRollbackParams> = TypedContract::new();
 const ROLL_TO_CONTRACT: TypedContract<TimelineRollToParams> = TypedContract::new();
+const STEP_BACK_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const STEP_FORWARD_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_START_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_END_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
 const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContract::new();
 const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
@@ -1021,6 +1052,46 @@ fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn roll_to(s: &mut Session, p: &Value) -> Result<Value> {
     move_marker(s, p, "timeline.roll_to")
+}
+
+/// One step back: what the History bar's Back control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_back(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_back", -1)
+}
+
+/// One step forward: what the History bar's Forward control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_forward(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_forward", 1)
+}
+
+/// The history marker moved `direction` features from where it is now, bounded at either end of
+/// the history: one step of the History bar's Back and Forward controls, as a command. A step at
+/// an end leaves the marker where it is. Like `timeline.roll_to`, it clears the selection.
+fn step_marker(s: &mut Session, cmd: &str, direction: i32) -> Result<Value> {
+    let n = s.doc.features.len();
+    let at = s.doc.marker.unwrap_or(n);
+    let to = if direction < 0 { at.saturating_sub(1) } else { at.saturating_add(1).min(n) };
+    s.doc_mut().marker = match to {
+        k if k < n => Some(k),
+        _ => None,
+    };
+    s.selection.clear();
+    reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
+}
+
+/// To the start of the history: `timeline.roll_to` with `position: 0`, as a command of its own
+/// because a keybinding carries no parameters (the Keymap binds a command id to keys and nothing
+/// else), so no key could reach the start through `timeline.roll_to`.
+fn roll_to_start(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": 0}), "timeline.roll_to_start")
+}
+
+/// To the end of the history: `timeline.roll_to` with `position: "end"`, as a command of its own,
+/// for the same reason.
+fn roll_to_end(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": "end"}), "timeline.roll_to_end")
 }
 
 /// `timeline.rollback` and `timeline.roll_to`, refusing in the name of the one asked for (#4712).
@@ -2039,6 +2110,73 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
     PickMode::deserialize(v).map_err(|_| "mode must be faces, bodies, features, parts, components or sketch".to_string())
 }
 
+/// Invert Selection (#18107): each kind of item, faces, edges and bodies, is swapped for the items
+/// of that kind that are not selected. Faces and edges stay inside the bodies they belong to; a
+/// body selected together with faces or edges of it is the body they invert in, not a body to
+/// swap for the others. Bodies swap for the other shown bodies. Other items stay as they are.
+fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
+    const MAX: usize = 10_000;
+    let state = s.world_state()?;
+    let mut picked_faces: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut picked_edges: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut bodies: Vec<&str> = Vec::new();
+    let mut kept: Vec<Sel> = Vec::new();
+    for sel in &s.selection {
+        match sel {
+            Sel::Face { body, index, .. } => picked_faces.entry(body.as_str()).or_default().push(*index),
+            Sel::Edge { body, index, .. } => picked_edges.entry(body.as_str()).or_default().push(*index),
+            Sel::Body { name } => bodies.push(name.as_str()),
+            other => kept.push(other.clone()),
+        }
+    }
+    // A body with some of its faces or edges selected is where those invert (triage on #18107).
+    bodies.retain(|b| !picked_faces.contains_key(b) && !picked_edges.contains_key(b));
+    if picked_faces.is_empty() && picked_edges.is_empty() && bodies.is_empty() {
+        return Err(bad("select.invert", "select faces, edges or bodies to invert"));
+    }
+    let mut items: Vec<Value> = Vec::new();
+    for (picked, face) in [(&picked_faces, true), (&picked_edges, false)] {
+        for (name, indices) in picked {
+            let Some(b) = state.body(name) else { continue };
+            let count = if face { b.body.face_count() } else { b.body.edge_count() };
+            let kind = if face { "face" } else { "edge" };
+            for index in (0..count).filter(|i| !indices.contains(i)) {
+                if kept.len() + items.len() >= MAX {
+                    return Err(bad("select.invert", "too many items"));
+                }
+                items.push(json!({"type": kind, "body": name, "index": index}));
+            }
+        }
+    }
+    if !bodies.is_empty() {
+        // Not the bodies the faces or edges invert in, and only bodies the view shows (a hidden
+        // folder or occurrence hides its bodies too).
+        let inverted_in = |name: &str| picked_faces.contains_key(name) || picked_edges.contains_key(name);
+        for b in state.bodies.iter().filter(|b| !bodies.contains(&b.name.as_str()) && !inverted_in(&b.name) && s.body_visible(&b.name)) {
+            if kept.len() + items.len() >= MAX {
+                return Err(bad("select.invert", "too many items"));
+            }
+            items.push(json!({"type": "body", "name": b.name}));
+        }
+    }
+    let mut sel = kept;
+    for item in items {
+        // An item with no point to stand for it (a degenerate face or edge) is left out.
+        if let Ok(one) = selection_item(s, item)
+            && !sel.contains(&one)
+        {
+            sel.push(one);
+        }
+    }
+    // The kept items count too; refused, the selection stays as it was.
+    if sel.len() > MAX {
+        return Err(bad("select.invert", "too many items"));
+    }
+    s.selection = sel;
+    s.refresh_display();
+    reply("select.invert", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+}
+
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
@@ -2497,6 +2635,12 @@ fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own
 /// The name a frame member feature gives the member on `line` (its group's `body_name`); none:
 /// named after the profile.
 fn member_group_name(kind: &FeatureKind, line: &str) -> Option<String> {
+    // A continuous tube is one physical member; `$path` is not one of its sketch curves.
+    if let FeatureKind::FrameMember { continuous: true, body_name, .. } = kind
+        && line == "$path"
+    {
+        return body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    }
     let groups = solidcraft_doc::frame::member_groups(kind);
     let group = groups.iter().find(|g| g.lines.is_empty() || g.lines.iter().any(|l| l == line))?;
     group.body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
@@ -2514,6 +2658,7 @@ fn given_group_name(p: &serde_json::Map<String, Value>, line: &str) -> Option<St
     named.and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
 }
 
+/// Rebuild a feature in its original timeline slot and authoring context before accepting the edit.
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2547,7 +2692,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.rest"
                 | "frame.end_cap"
                 | "frame.rotate_member"
+                | "frame.gusset"
                 | "frame.member"
+                | "frame.trim"
                 | "frame.plate"
         );
     if !constructor {
@@ -2572,6 +2719,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    if let FeatureKind::SurfaceRevolve { faced, .. } = &old.kind
+        && cid == "surface.revolve"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"
@@ -2688,6 +2841,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
     }
+    if let FeatureKind::FrameGusset { supports, .. } = &old.kind
+        && let Some(anchor) = supports.first().and_then(|s| super::sketch::face::anchor(&s.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
@@ -2720,6 +2878,22 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
+        && !occurrences.is_empty()
+    {
+        let removed = match &mut new.kind {
+            FeatureKind::Pattern { components: after, occurrences: copies, .. } if after == components => {
+                // The constructor built a temporary pattern. Rebuild the edited feature with
+                // its original placements so a spacing or count edit keeps its surviving ids.
+                std::mem::replace(copies, occurrences.clone())
+            }
+            _ => occurrences.clone(),
+        };
+        trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
+    if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
+        after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path
@@ -2738,8 +2912,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         *profiles = picked.clone();
     }
     // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    // An edit that says otherwise (the dialog's choice) changes it. An edit that makes a Join
+    // To Object out of an extrude that had none takes the new rule (#19671): what the old
+    // extent had to say about the body it runs to was about nothing.
     if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
         && after.to.is_some()
+        && before.to.is_some()
+        && params.get("to_body_apart").is_none()
     {
         after.to_body_apart = before.to_body_apart;
     }
