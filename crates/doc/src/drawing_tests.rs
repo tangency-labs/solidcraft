@@ -462,7 +462,7 @@ fn a_sheets_title_block_outline() {
     assert_eq!(d.sheets[0].title_block_outline().unwrap(), None);
     Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
     let outline = d.sheets[0].title_block_outline().unwrap().unwrap();
-    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 59.0)));
+    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 71.0)));
 }
 
 /// The most a drawing's blocks can ask of every edit's check: 1000 sheets, each with a 64-cell block.
@@ -1395,8 +1395,10 @@ fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
 fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
     let current = file(&read(&view_sketch_file()).unwrap());
     let mut older = current.clone();
-    // `view-sketches` is format 5's only change, so a format-5 file that lists none of its changes
-    // was saved before it, whatever changes this build has pending.
+    // The drawing as an older build saved it: format 5, the one that holds the sheet-owner change
+    // (`drawing/format/v5/view-sketches.rs`), with an empty list of the changes it has, so that
+    // change runs as it opens. Not `DRAWING.current()` with `pending_names()` less this change:
+    // another pending change moves the current number past 5, and the change never ran.
     older["format"] = json!(DRAWING.format_string(5));
     older["format_pending"] = json!([]);
     let mut record = current["sketches"][1].clone();

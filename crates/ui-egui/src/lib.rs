@@ -60,6 +60,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
+pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
@@ -390,6 +391,7 @@ mod test_pictures;
 mod thin_extrude_tests;
 pub mod tickets;
 pub mod timeline;
+pub mod timeline_2d;
 mod timeline_fold;
 mod timeline_folders;
 pub mod timeline_left;
@@ -584,10 +586,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
+    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
+    /// Browse button and the text field still accepts a pasted path, the document library cannot
+    /// choose a folder, and Settings › Design hides the folder settings.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -4655,6 +4658,7 @@ impl SolveApp {
         self.view_windows.opening_host(opening_host);
     }
 
+    /// Renders the main CAD workspace UI including ribbon, sidebar browser, timeline, and 3D viewport.
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         if self.embedded {
             self.ui.layout = ui_kit::LayoutMode::Docked;
@@ -4793,6 +4797,7 @@ impl SolveApp {
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        library::drag_cursor(self, ui.ctx());
         if view_tiles::focus_pressed(self) {
             ui.ctx().request_repaint();
         }
