@@ -1861,8 +1861,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         if s.all_bodies_selected() {
             // Adding shown bodies to a whole-body selection changes nothing: the scope stays,
             // without listing its bodies. Anything else is added to the bodies it covers.
-            let hidden = &s.visibility.hidden_bodies;
-            if sel.iter().all(|x| matches!(x, Sel::Body { name } if !hidden.contains(name))) {
+            if sel.iter().all(|x| matches!(x, Sel::Body { name } if s.body_visible(name))) {
                 s.refresh_display();
                 return reply("select.set", SelectSetResult { selected: s.selected_count()?, param_warnings: Vec::new() });
             }

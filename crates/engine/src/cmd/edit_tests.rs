@@ -2776,6 +2776,19 @@ fn inverting_a_whole_body_selection_leaves_nothing_selected() {
 }
 
 #[test]
+fn delete_of_all_bodies_takes_the_shown_bodies_whatever_is_selected() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    let first = s.doc.features[0].id;
+    // A feature selected now is not what `all_bodies` names.
+    run(&mut s, "select.set", json!({"items": [{"type": "feature", "id": first}]}));
+    let done = run(&mut s, "selection.delete", json!({"all_bodies": true}));
+    assert_eq!(done["bodies"], json!(["Block", "Spare"]), "{done}");
+    assert_eq!(s.doc.features.iter().filter(|f| f.id == first).count(), 1, "the selected feature stays");
+}
+
+#[test]
 fn delete_of_a_whole_body_selection_keeps_locked_bodies() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));

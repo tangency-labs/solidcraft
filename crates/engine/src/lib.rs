@@ -2068,14 +2068,13 @@ impl Session {
         if !self.all_bodies_selected() {
             return Ok(self.selection.len());
         }
-        let hidden: std::collections::HashSet<&str> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
-        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(b.name.as_str())).count())
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).count())
     }
 
-    /// The bodies the whole-body scope covers: every body not hidden, in the world's order.
-    fn shown_body_names(&self) -> Result<Vec<String>> {
-        let hidden: std::collections::HashSet<&str> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
-        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(b.name.as_str())).map(|b| b.name.clone()).collect())
+    /// The bodies the whole-body scope covers: every body the view shows (not hidden itself, nor
+    /// through its occurrence or folder), in the world's order.
+    pub(crate) fn shown_body_names(&self) -> Result<Vec<String>> {
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).map(|b| b.name.clone()).collect())
     }
 
     /// The model placed in the world through component occurrences (and uncaptured moves): what
@@ -3609,10 +3608,12 @@ impl Session {
                 let undo = std::mem::take(&mut computed.undo);
                 let redo = std::mem::take(&mut computed.redo);
                 let selection = computed.selection.clone();
+                let all_bodies = computed.selection_all_bodies;
                 let reply = computed.execute("timeline.roll_to", &params)?;
                 computed.undo = undo;
                 computed.redo = redo;
                 computed.selection = selection;
+                computed.selection_all_bodies = all_bodies;
                 reply
             };
             let changed = !Arc::ptr_eq(&before, &computed.doc);
@@ -3749,6 +3750,7 @@ impl Session {
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
+        let all_bodies = self.selection_all_bodies;
         let redo_watch = self.redo_watch.clone();
         let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
@@ -3763,6 +3765,7 @@ impl Session {
         self.redo_watch = redo_watch;
         self.ids = ids;
         self.selection = selection;
+        self.selection_all_bodies = all_bodies;
         Ok(())
     }
 
