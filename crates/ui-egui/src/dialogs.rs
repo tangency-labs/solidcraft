@@ -1260,7 +1260,10 @@ impl Dialog {
         let preselection: Vec<Sel> = if matches!(d.kind, Kind::Text(_)) {
             Vec::new()
         } else if hole_points.is_empty() {
-            s.selection.clone()
+            // A whole-body selection is a scope (`Session::selection_all_bodies`): resolve it into
+            // the bodies, so Move and the other dialogs start with all of them (about 5 ms at
+            // 56,000 bodies, once when the dialog opens).
+            s.selected_items().unwrap_or_default()
         } else {
             hole_points
         };

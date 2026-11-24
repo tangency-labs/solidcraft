@@ -3080,3 +3080,16 @@ fn select_all_then_appearance_covers_every_shown_body() {
         assert!(app.session.doc.appearances.bodies.contains_key(name), "{name} took the appearance");
     }
 }
+
+#[test]
+fn select_all_preselects_every_shown_body_for_move() {
+    use crate::selection::SelectionExt;
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    app.run("select.all", json!({})).unwrap();
+    app.start("solid.move");
+    let d = app.dialog.as_ref().expect("the Move dialog opened");
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(d.inputs[0].items.body_names(), shown, "a whole-body selection preselects every shown body");
+}
