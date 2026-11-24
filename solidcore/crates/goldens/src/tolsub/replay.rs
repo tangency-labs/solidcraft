@@ -84,11 +84,12 @@
 //! `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4-r0.1/r0.5`, keep main's committed line
 //! to the bit, but with the cover's raises put back their edges hold #18166's lazily raised
 //! tolerances (lower, each a proved bound) instead of main's, so the put-back row is no
-//! longer main's: they are not replayed with the cover's raises put back. They are checked
-//! instead as rows that did not move ([`KEPT_MAIN_ROW`]): run as is, each is main's committed
-//! line to the bit (its hash, taken from main's expected file, which holds these four lines
-//! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
-//! were of an older main's run, not of the line main now commits.)
+//! longer main's: they are not replayed with the cover's raises put back. They were checked
+//! instead as rows that did not move (run as is, each was main's committed line to the bit
+//! and this branch's committed line), until the retirement of
+//! `fillet_cleanup_keeps_target_faces` (WR-459) moved all four (the clean-up keeps the
+//! target's own faces); that check is deleted, and the rows are checked in
+//! `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
 //! #20179 (the point test asks the face whether to test) adds five UV trims to the result
 //! body of six `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
@@ -648,61 +649,6 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
         }
     }
     wrong
-}
-
-/// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
-/// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
-/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
-/// hash is of the row with that change, from Linux CI.
-/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916).
-const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x9e43_eafe_0171_4c09,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe2ec_b89d_309a_54a8,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x9fc9_deff_361b_7066,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x5669_c3ab_dde7_2e76,
-    ),
-];
-
-/// Each [`KEPT_MAIN_ROW`] row, run as is, is main's committed line to the bit and this
-/// branch's committed line.
-#[test]
-fn rows_the_lazy_raise_keeps_are_main_s() {
-    for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
-        assert!(
-            !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
-                && !DATA.iter().any(|r| r.0 == unit_id && r.1 == name),
-            "{unit_id} {name}: replayed as well"
-        );
-        let u = unit(unit_id);
-        let all = cases(u.as_ref());
-        let golden = read(&default_dir(), unit_id).unwrap();
-        let case = all
-            .get(name)
-            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
-        let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
-    }
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:

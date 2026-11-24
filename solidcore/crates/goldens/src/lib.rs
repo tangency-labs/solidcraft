@@ -48,6 +48,8 @@ pub(crate) mod trim_hook;
 pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
+mod wr459_rows;
+#[cfg(test)]
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;

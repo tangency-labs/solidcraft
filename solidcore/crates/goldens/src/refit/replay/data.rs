@@ -8,7 +8,10 @@
 //! `own_reader_sphere_plane_uv_trim_f*_rebuild` rows of `topology.face_p3`, the 12
 //! `own_reader_sphere_plane_create_*` rows of `topology.edgeuse_p3`, `write_bytes0153`
 //! and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows (the last five
-//! recorded on Linux CI).
+//! recorded on Linux CI). The retirement of `fillet_cleanup_keeps_target_faces` (WR-459)
+//! changes those four rows' topology (the clean-up keeps the target's own faces), so they
+//! are no longer the refit run of main's line and their entries are deleted; their rows
+//! are checked in `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
@@ -1002,28 +1005,8 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x45841a9164d2602c,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe86c8a18238633fd,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
         0x405209a464313f0e,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x5ce7e9eb2f229d1e,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x03aaed98113a5d6f,
     ),
     (
         "blend.fillet_executive_p3",
