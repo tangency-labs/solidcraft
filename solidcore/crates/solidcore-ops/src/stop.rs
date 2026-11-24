@@ -17,7 +17,7 @@
 use std::collections::BTreeSet;
 
 use solidcore::query::api_queries::{
-    edgeuse_binormal_along, is_unit_direction, vertex_match_tolerance,
+    edgeuse_binormal_along, unit_direction, vertex_match_tolerance,
 };
 use solidcore::topology::{edge, face, EdgeId};
 use solidcore::{EntityRef, Vec3};
@@ -93,9 +93,9 @@ pub struct Stopped {
     pub from: Vec<usize>,
 }
 
-/// The walls of a surface extrude (`walls`, its record order `order`, swept along the unit
-/// direction `along`) cut where they first run into `bodies`: each body's faces exactly as they
-/// are, bounded where they end and never extended (the kernel's imprint of each body in turn).
+/// The walls of a surface extrude (`walls`, its record order `order`, swept along the
+/// direction `along`, of any length) cut where they first run into `bodies`: each body's faces
+/// exactly as they are, bounded where they end and never extended (the kernel's imprint of each body in turn).
 /// The pieces kept are those joined to the walls' start without crossing an edge a body cut:
 /// `starts` are corners of the walls at their start, one on each chain, matched to the vertices
 /// within ten times the largest tolerance (the record's, an edge's, or 1e-9 of the walls' size).
@@ -109,7 +109,7 @@ pub struct Stopped {
 ///
 /// # Errors
 /// - [`Error::Argument`]: no start, more than [`MAX_STARTS`] starts or [`MAX_BODIES`] bodies, a
-///   coordinate that is not finite, or `along` not of unit length (to 1e-9);
+///   coordinate that is not finite, or an `along` of no length;
 /// - [`Error::Unsupported`]: a kept piece that runs on past the side of a body in its way;
 /// - [`Error::Internal`]: a piece that comes from no face of the walls, or no piece holding a
 ///   start;
@@ -130,9 +130,8 @@ pub fn stop_at_bodies(
     {
         return Err(Error::Argument);
     }
-    if !is_unit_direction(Vec3::new(along[0], along[1], along[2])) {
-        return Err(Error::Argument);
-    }
+    let along =
+        unit_direction(Vec3::new(along[0], along[1], along[2])).map_err(|_| Error::Argument)?;
     provenance::take::<Piece>()?;
     let (mut cur, mapped) = walls.copy_with_order(order)?;
     {
@@ -300,13 +299,12 @@ fn runs_on_past(
     order: &Order,
     kept: &[usize],
     cut: &[EdgeId],
-    along: [f64; 3],
+    along: Vec3,
 ) -> Result<()> {
     let faces = kept
         .iter()
         .map(|&f| order::face(order, f))
         .collect::<Result<Vec<_>>>()?;
-    let along = Vec3::new(along[0], along[1], along[2]);
     with_body("stop_at_bodies", cur, |k, b| {
         for &f in &faces {
             for e in face::edges(b, f, None, false, None)? {
@@ -386,6 +384,12 @@ mod tests {
             "{:?}",
             s.from
         );
+        // A direction of another length is the same direction.
+        let s = stop_at_bodies(&wall, &order, &[&slab], &starts, [0.0, 0.0, 2.0])
+            .unwrap()
+            .unwrap();
+        let (area, top) = area_and_top(&s);
+        assert!(close(area, 200.0) && close(top, 20.0), "{area} {top}");
         // A surface body across it at z = 8 is nearer, whichever body comes first: 10 x 8.
         let lid = sheet([-1.0, -1.0, 8.0], [11.0, -1.0, 8.0], [0.0, 1.0, 0.0], 2.0);
         for bodies in [[&slab, &lid], [&lid, &slab]] {
@@ -423,7 +427,7 @@ mod tests {
         for (starts, along) in [
             (&[][..], up),
             (&starts[..], [0.0; 3]),
-            (&starts[..], [0.0, 0.0, 2.0]),
+            (&starts[..], [f64::INFINITY, 0.0, 1.0]),
             (&starts[..], [f64::NAN, 0.0, 1.0]),
             (&[[f64::NAN, 0.0, 0.0]][..], up),
         ] {

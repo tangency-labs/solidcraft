@@ -116,7 +116,6 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     let _span = solidcraft_profile::span("kernel", "stop_at_bodies");
     walls.require_brep("trim")?;
     TrimKeep::Regions(starts).check()?;
-    let along = along.normalized().filter(|a| a.is_finite()).ok_or_else(|| KernelError::Invalid("the walls' direction has no length".into()))?;
     let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
     let form = walls.ops_body().ok_or_else(no_form)?;
     let (ops, order) = (&form.0, &form.1);
