@@ -78,9 +78,6 @@ use crate::topology::{
 };
 use crate::EntityRef;
 
-#[cfg(feature = "wr469-replay")]
-pub mod replay;
-
 const OP: &str = "topology::brep::p9";
 
 /// A topology failure of p9 ([`SolidError::topology`]).
@@ -2058,31 +2055,8 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         let end_gap = curve_end
             .distance(vertex::point(b, end_vertex)?)
             .max(farthest_end_gap(k, b, end_vertex)?);
-        let start_tol = 2.0 * start_gap;
-        // (test-only seam of the WR-469 substitution replay, feature `wr469-replay`)
-        #[cfg(feature = "wr469-replay")]
-        let start_tol = replay::step(
-            k,
-            replay::VertexStep {
-                vertex: start_vertex,
-                before: vertex::tolerance(b, start_vertex)?,
-                gap: start_gap,
-                own: start_tol,
-            },
-        );
-        vertex::set_tolerance(b, start_vertex, start_tol, true, true)?;
-        let end_tol = 2.0 * end_gap;
-        #[cfg(feature = "wr469-replay")]
-        let end_tol = replay::step(
-            k,
-            replay::VertexStep {
-                vertex: end_vertex,
-                before: vertex::tolerance(b, end_vertex)?,
-                gap: end_gap,
-                own: end_tol,
-            },
-        );
-        vertex::set_tolerance(b, end_vertex, end_tol, true, true)?;
+        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
+        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
     }
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;

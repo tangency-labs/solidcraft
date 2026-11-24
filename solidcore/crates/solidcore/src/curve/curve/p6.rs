@@ -1570,56 +1570,87 @@ impl Curve {
         // curves come nearest, a point (fork 04b42b4, case 3e). A separation that changes sides
         // is left to the merged range (`contacts_seen_through_tolerance`, WR-647), and so is
         // one that vanishes to numeric zero (it has no side).
-        if k.fixes.simple_coincidence_crossing_is_point {
-            let this_a = self.evaluate_point(k, first.0)?;
-            let this_b = self.evaluate_point(k, last.0)?;
-            let other_a = other.evaluate_point(k, first.1)?;
-            let other_b = other.evaluate_point(k, last.1)?;
-            // The side is taken across this curve, its tangent's component removed. An end
-            // of one curve that runs past the other's end drops onto that end, and the
-            // pair's difference then points along the curves, forward at one end and back at
-            // the other, for two curves that lie on each other; upstream took that for a
-            // crossing.
-            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
-            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
-            let scaled_zero =
-                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
-            let changes_sides = separation_a.length() > scaled_zero
-                && separation_b.length() > scaled_zero
-                && separation_a.dot(separation_b) < 0.0;
-            if !changes_sides && distance_between > scaled_zero {
-                let (found, mut nearest) = self.local_curve_solve(
-                    k,
-                    &ivl_t1,
-                    other,
-                    &ivl_t2,
-                    SolverOperation::Minimize,
-                    tol,
-                    None,
-                    None,
-                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
-                    objects,
-                )?;
-                if !found {
-                    // curves within tolerance but no nearest point found
-                    return Err(SolidError::curve(
-                        "curve::simple_coincidence_checker (nearest)",
-                        CurveFailure::NearestNotFound,
-                    ));
-                }
-                nearest.num_variables = 2;
-                nearest.num_objects = 2;
-                nearest.solution_type = SolutionType::SingleValue;
-                nearest.objects[0] = objects[0];
-                nearest.objects[1] = objects[1];
-                return Ok(vec![nearest]);
+        if k.fixes.simple_coincidence_crossing_is_point
+            && self.approaches_without_crossing(
+                k,
+                other,
+                (first.0, first.1),
+                (last.0, last.1),
+                distance_between,
+            )?
+        {
+            let (found, mut nearest) = self.local_curve_solve(
+                k,
+                &ivl_t1,
+                other,
+                &ivl_t2,
+                SolverOperation::Minimize,
+                tol,
+                None,
+                None,
+                [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                objects,
+            )?;
+            if !found {
+                // curves within tolerance but no nearest point found
+                return Err(SolidError::curve(
+                    "curve::simple_coincidence_checker (nearest)",
+                    CurveFailure::NearestNotFound,
+                ));
             }
+            nearest.num_variables = 2;
+            nearest.num_objects = 2;
+            nearest.solution_type = SolutionType::SingleValue;
+            nearest.objects[0] = objects[0];
+            nearest.objects[1] = objects[1];
+            return Ok(vec![nearest]);
         }
 
         // add 1 coincident intersection to solution array (whether a range found here is a
         // crossing seen through the tolerance is decided on the merged range, in
         // `GlobalCurveIntersect`: one span pair cannot tell, see WR-647 in the header)
         Ok(vec![pair_solution(objects, first, Some(last))])
+    }
+
+    /// Not upstream (case 3e, WR-647): whether a stretch of this curve over which `other`
+    /// stays within tolerance is an approach rather than a coincidence. The stretch runs
+    /// from the parameter pair `first` to `last` (this curve's, then `other`'s), and
+    /// `distance_between` is the largest distance between the curves over it. An approach
+    /// keeps one side without vanishing: the separation across this curve does not change
+    /// sides between the two ends, and the largest distance is above numeric zero. A
+    /// separation that changes sides is a crossing seen through the tolerance, and one that
+    /// vanishes has no side. The side is taken across this curve, with its tangent's
+    /// component removed. Where an end of one curve runs past the other's end, it drops
+    /// onto that end. The pair's difference then points along the curves, forward at one
+    /// end and back at the other, for two curves that lie on each other, and upstream took
+    /// that for a crossing.
+    ///
+    /// [`Curve::simple_coincidence_checker`] asks this under
+    /// `Kernel::fixes.simple_coincidence_crossing_is_point`. The face/face tangency witness
+    /// ([`crate::intersect::curve_class::witness`]) asks it of a merged range's own ends.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    pub(crate) fn approaches_without_crossing(
+        &self,
+        k: &Kernel,
+        other: &Self,
+        first: (f64, f64),
+        last: (f64, f64),
+        distance_between: f64,
+    ) -> Result<bool> {
+        let this_a = self.evaluate_point(k, first.0)?;
+        let this_b = self.evaluate_point(k, last.0)?;
+        let other_a = other.evaluate_point(k, first.1)?;
+        let other_b = other.evaluate_point(k, last.1)?;
+        let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+        let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
+        let scaled_zero = EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+        let changes_sides = separation_a.length() > scaled_zero
+            && separation_b.length() > scaled_zero
+            && separation_a.dot(separation_b) < 0.0;
+        Ok(!changes_sides && distance_between > scaled_zero)
     }
 
     /// `v` without its component along this curve's tangent at `t`; `v` itself where the
