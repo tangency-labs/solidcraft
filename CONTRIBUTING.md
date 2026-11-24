@@ -404,8 +404,9 @@ and a fresh CI run:
 2. Branch from `main` and keep the PR to one topic.
 3. Run `cargo xtask fast` before pushing: it checks what your change touches (for a kernel change
    in `solidcore/`, add `--units <id,...>` from your PR's `Units:` line to run their goldens). CI
-   runs the rest of `cargo xtask ci` (fmt, the asset, licence and layer checks, clippy
-   `-D warnings`, the tests and the wasm build check), so you need not run that locally. The pull
+   runs the rest of `cargo xtask ci` (fmt, the asset, licence and layer checks, the i18n catalog
+   check, the kernel-case coverage check, clippy `-D warnings`, the tests and the wasm build
+   check), so you need not run that locally. The pull
    request runs the tests of the packages your change affects; the wasm build, the doc tests and
    the heavy tests run in the merge queue, so a green pull request run does not show that they pass.
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
