@@ -111,15 +111,11 @@ pub(crate) fn invalidate(app: &mut SolveApp) {
     app.plugin_menu.loaded = false;
 }
 
-/// What tells one discovered set of plugins from another: each plugin's id, folder and package hash.
-fn packages(inventory: &Inventory) -> Vec<(&str, &str, &str)> {
-    inventory.plugins.iter().map(|p| (p.id.as_str(), p.path.as_str(), p.approval.as_str())).collect()
-}
-
 fn discovered(app: &mut SolveApp, inventory: Inventory) {
-    // A plugin added, removed or changed on disk since the last scan: the Plugins menu and the
-    // Model tab's Plugins group read the installed plugins again (#21594).
-    if app.plugin_slots.inventory.as_ref().is_some_and(|old| old.root != inventory.root || packages(old) != packages(&inventory)) {
+    // The plugins on disk are not the ones the Plugins menu and the Model tab's Plugins group last
+    // read (one was added, removed or changed, also while that read and this scan overlapped):
+    // they read them again (#21594).
+    if app.plugin_menu.loaded && app.plugin_menu.read.as_ref().is_some_and(|read| *read != crate::plugin_menu::packages(&inventory.plugins)) {
         app.plugin_menu.loaded = false;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -414,8 +410,9 @@ mod tests {
     }
 
     /// A plugin copied into the plugins folder behind the app's back: the discovery scan notices,
-    /// and the Model tab's Plugins group reads the plugins again on its next frame. A scan that
-    /// finds the same plugins makes it read nothing (#21594).
+    /// also when the Model tab read the plugins before the first scan was done, and the Model tab's
+    /// Plugins group reads the plugins again on its next frame. A scan that finds the plugins the
+    /// Model tab holds makes it read nothing (#21594).
     #[test]
     fn a_plugin_added_on_disk_makes_the_model_tab_read_the_plugins_again() {
         let mut h = crate::scenario::Harness::new();
@@ -430,26 +427,30 @@ mod tests {
             });
             std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         };
-        install("first");
-        h.app.session.plugin_state.plugins_dir = Some(root.clone());
-        invalidate(&mut h.app);
-        refresh(&mut h.app);
-        wait_for_discovery(&mut h.app);
-        crate::plugin_menu::ensure_listed(&mut h.app);
-        assert!(h.app.plugin_menu.loaded);
         let scan = |h: &mut crate::scenario::Harness| {
             h.app.plugin_slots.scanned = None;
             refresh(&mut h.app);
             wait_for_discovery(&mut h.app);
         };
+        let ids = |h: &crate::scenario::Harness| h.app.plugin_menu.listed.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+        install("first");
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        invalidate(&mut h.app);
+        // The Model tab reads the plugins before the first scan is done, and a plugin comes in.
+        crate::plugin_menu::ensure_listed(&mut h.app);
+        assert!(h.app.plugin_menu.loaded);
+        install("second");
+        scan(&mut h);
+        assert!(!h.app.plugin_menu.loaded, "the first scan finds a plugin the Model tab has not read");
+        crate::plugin_menu::ensure_listed(&mut h.app);
+        assert_eq!(ids(&h), ["first", "second"]);
         scan(&mut h);
         assert!(h.app.plugin_menu.loaded, "the same plugins: nothing is read again");
-        install("second");
+        install("third");
         scan(&mut h);
         assert!(!h.app.plugin_menu.loaded, "a new plugin on disk: the plugins are read again");
         crate::plugin_menu::ensure_listed(&mut h.app);
-        let ids: Vec<&str> = h.app.plugin_menu.listed.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids, ["first", "second"]);
+        assert_eq!(ids(&h), ["first", "second", "third"]);
     }
 
     #[test]

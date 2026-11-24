@@ -56,6 +56,9 @@ pub(crate) struct State {
     /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
     /// once rather than every frame).
     pub(crate) loaded: bool,
+    /// The packages the menu last read from disk into `listed` (`packages`): the plugin discovery
+    /// scan compares what it finds with them. `None` until the menu reads.
+    pub(crate) read: Option<Vec<(String, String, String)>>,
     /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
     /// title and field values, so several can be open at once.
     pub(crate) dialogs: Vec<EntryDialog>,
@@ -929,10 +932,16 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 pub(crate) fn refresh(app: &mut SolveApp) {
     solidcraft_engine::plugin::sync_panels(&mut app.session);
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
+    app.plugin_menu.read = Some(packages(&app.plugin_menu.listed));
     // The Model tab's Plugins group reads them again only once they change (`plugin_slots::invalidate`
     // or a discovery scan that finds other packages): reading them hashes each plugin's component,
     // and reading them every frame made the Model tab crawl with a large plugin (#21594).
     app.plugin_menu.loaded = true;
+}
+
+/// What tells one set of plugins from another: each plugin's id, folder and package hash.
+pub(crate) fn packages(plugins: &[Listed]) -> Vec<(String, String, String)> {
+    plugins.iter().map(|p| (p.id.clone(), p.path.clone(), p.approval.clone())).collect()
 }
 
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).
