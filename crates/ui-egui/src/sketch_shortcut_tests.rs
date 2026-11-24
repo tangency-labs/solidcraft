@@ -273,6 +273,11 @@ fn move_key_opens_sketch_move_by_default_and_honors_a_cleared_binding() {
     assert!(crate::dialogs_move::moving(&h.app).is_none(), "M must not open component Move while editing its sketch");
 
     crate::dialogs::cancel(&mut h.app);
+    // Closing the dialog clears its selection. Re-select to verify that an
+    // unbound key leaves the current sketch selection alone.
+    h.app.session.selection = selection.clone();
+    // Without mode isolation, M can still invoke the model's Move command.
+    h.app.preferences.sketch_keys_only = true;
     h.app.keymap.custom.insert("sketch.move".into(), Vec::new());
     assert_eq!(crate::keymap::effective(&h.app, "sketch.move"), None, "a cleared user binding overrides the new default");
     assert_eq!(crate::keymap::display_for(&h.app, "sketch.move"), None, "the menu follows the user's cleared key");

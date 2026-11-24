@@ -1865,7 +1865,9 @@ mod tests {
         let e = bind(&mut a, "solid.revolve", "M", false).unwrap_err();
         assert!(e.contains("already used by Move/Copy"), "{e}");
         bind(&mut a, "solid.revolve", "M", true).unwrap();
-        assert_eq!(commands_for(&a, "M"), vec!["solid.revolve"]);
+        // Sketch Move retains M: its sketch scope does not clash with model Revolve.
+        assert_eq!(commands_for(&a, "M"), vec!["sketch.move", "solid.revolve"]);
+        assert_eq!(command_for(&a, "M"), Some("solid.revolve"));
         assert_eq!(effective(&a, "solid.move"), None);
         assert!(bind(&mut a, "solid.revolve", "Ctrl+Z", false).is_err(), "reserved");
         // Kept between runs.
