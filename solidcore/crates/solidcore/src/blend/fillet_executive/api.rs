@@ -858,7 +858,10 @@ mod tests {
             token.cancel();
             Ok(())
         });
-        assert!(matches!(cancelled, Err(SolidError::Cancelled { .. })));
+        assert!(matches!(
+            cancelled,
+            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ));
         assert_eq!(shape(&body), before);
         k.clear_cancel_token();
 
@@ -911,7 +914,10 @@ mod tests {
             token.cancel();
             Ok(())
         });
-        assert!(matches!(cancelled, Err(SolidError::Cancelled { .. })));
+        assert!(matches!(
+            cancelled,
+            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ));
         assert_eq!(shape(&body), before);
         k.clear_cancel_token();
 

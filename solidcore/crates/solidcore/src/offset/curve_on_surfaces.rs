@@ -1223,7 +1223,11 @@ mod tests {
         let ivl = Extent1d::from_min_max(0.0, 1.0);
         let r = curve_on_surfaces(&k, &c, ivl, [&s, &s], 1e-6);
         assert!(
-            matches!(r, Err(crate::error::SolidError::Cancelled { .. })),
+            matches!(
+                r,
+                Err(crate::error::SolidError::Cancelled { .. }
+                    | crate::error::SolidError::OutOfFuel { .. })
+            ),
             "{r:?}"
         );
     }

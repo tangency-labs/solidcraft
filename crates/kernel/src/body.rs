@@ -1083,7 +1083,8 @@ impl Body {
     /// makes it again). A refusal of the record is kept too, as `smlib`'s is: the same
     /// record is refused the same way again. A refusal of the moment is not kept, so a later
     /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
-    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    /// callback ([`solidcore_ops::Error::Reentered`]), a cancelled one, or one that ran out of
+    /// the fuel its caller gave it. None for a mesh body.
     pub(crate) fn ops_body(&self) -> Option<OpsForm> {
         if self.is_mesh() || self.ops.refusal().is_some() {
             return None;
@@ -1097,7 +1098,7 @@ impl Body {
         // Converted outside the cell, and without taking the turn to make it: a failure callback
         // that asked about this body again would otherwise wait for the form it is part of making.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
-            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled | solidcore_ops::Error::OutOfFuel { .. }) => None,
             Err(_) => {
                 self.ops.refuse(());
                 None

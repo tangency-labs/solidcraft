@@ -150,7 +150,7 @@ pub fn face_surface(
             });
             match loop_on.then(|| BallPatch::create_certified(&net, centre, *radius)) {
                 Some(Ok(b)) => Surface::from(b),
-                Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. }))) => {
+                Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }))) => {
                     return Err(e)
                 }
                 // owner 22254: a label its form or its loop does not prove is dropped; the
@@ -244,7 +244,11 @@ fn recognised(k: &Kernel, net: BSplineSurface, kinds: &[SupportKind]) -> Result<
         };
         match support.build(k, net.copy()) {
             Ok(s) => return Ok(s),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
     }
@@ -268,7 +272,11 @@ fn labelled(k: &Kernel, label: &Record, net: BSplineSurface) -> Result<Surface> 
     };
     match support.build(k, net.copy()) {
         Ok(s) => Ok(s),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(Surface::from(net)),
     }
 }
@@ -433,9 +441,11 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
             let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;
             let proved = match own.build(k, form.into_owned()) {
                 Ok(_) => Some(own),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => None,
             };
             proved.map(support_record).transpose()?
@@ -447,9 +457,11 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                     center: [c.x, c.y, c.z],
                     radius: bp.radius(),
                 }),
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(_) => None,
             }
         }
@@ -566,12 +578,20 @@ pub fn analytic_label(k: &Kernel, nurbs: &Record, domain: [[f64; 2]; 2]) -> Resu
     ] {
         let support = match AnalyticSupport::derive(k, kind, &net) {
             Ok(support) => support,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => continue,
         };
         match support.build(k, net.copy()) {
             Ok(_) => return support_record(support).map(Some),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
     }

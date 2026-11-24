@@ -485,7 +485,11 @@ fn iso_curve(
 ) -> Result<std::result::Result<BSplineCurve, SolidError>> {
     match s.create_iso_parametric_curve(k, sweep, knot, IsoCurveOptions::default()) {
         Ok(iso) => Ok(Ok(iso.curve)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(e) => Ok(Err(e)),
     }
 }

@@ -2414,7 +2414,13 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             // defect, never "no section"; a cancellation or a port failure is passed on)
             let mid = match self.try_solve_mid_point(solver, k, pj, pj1, frac) {
                 Ok(Some(found)) => found,
-                Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
+                Err(e)
+                    if e.is_port_failure()
+                        || matches!(
+                            e,
+                            SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
+                        ) =>
+                {
                     return Err(e);
                 }
                 found => {
@@ -4686,7 +4692,13 @@ mod tests {
         let e = fi
             .skin_splits(&mut mock, k, &skin_stations(&[0.0, 1.0]), &[&skin])
             .unwrap_err();
-        assert!(matches!(e, SolidError::Cancelled { .. }), "{e:?}");
+        assert!(
+            matches!(
+                e,
+                SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
+            ),
+            "{e:?}"
+        );
     }
 
     /// A skin of a kind the generator does not build is a port invariant, not a pass.

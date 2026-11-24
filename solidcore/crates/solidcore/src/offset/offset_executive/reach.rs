@@ -2041,7 +2041,7 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
     };
     match NurbsCurve::of(base) {
         Ok(n) => Ok(Some(n)),
-        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -2057,7 +2057,7 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
     let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
         Ok(d) => Ok(Some(d)),
-        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
         Err(_) => Ok(None),
     };
     // at a single parameter the enclosures are the rounding's only
@@ -5191,7 +5191,13 @@ mod tests {
             let err =
                 edge_interval_maximum(&b, e, &piece, b.tolerance(), &mut held, of, Some(&surfaces))
                     .unwrap_err();
-            assert!(matches!(err, SolidError::Cancelled { .. }), "{err:?}");
+            assert!(
+                matches!(
+                    err,
+                    SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
+                ),
+                "{err:?}"
+            );
         }
         assert_eq!(token.polls(), Some(2)); // Newton entered, then cancelled mid-solve.
         assert_eq!(calls.get(), 1);

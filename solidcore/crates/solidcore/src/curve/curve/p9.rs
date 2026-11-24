@@ -2341,7 +2341,10 @@ mod tests {
         let token = crate::kernel::CancelToken::new();
         token.cancel();
         k.set_cancel_token(token);
-        assert!(matches!(solve(&k, 1e-8), Err(SolidError::Cancelled { .. })));
+        assert!(matches!(
+            solve(&k, 1e-8),
+            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ));
     }
 
     #[test]

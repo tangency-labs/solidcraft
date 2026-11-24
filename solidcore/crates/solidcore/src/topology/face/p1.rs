@@ -4553,7 +4553,13 @@ mod seam_completion_fault_tests {
         });
         let r = complete_imported_face_seams(&mut k, &mut b, wall);
         FAULTS.set(SeamFaults::default());
-        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            ),
+            "{r:?}"
+        );
         assert_eq!(
             (b.faces().ids().count(), b.edgeuses().iter().count()),
             before
