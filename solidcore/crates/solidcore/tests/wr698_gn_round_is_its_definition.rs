@@ -690,9 +690,25 @@ fn tilted_pipe(k: &mut Kernel) -> Brep {
 /// `continuity` and `thumbweight` (`fillet_edges`'s).
 fn tilted_pipe_rounded(k: &mut Kernel, xsect: u32, continuity: u32, thumbweight: f64) -> Brep {
     use solidcore::boolean::api_brep::boolean_union;
-    use solidcore::geom::axis2_placement::Axis2Placement;
-    use solidcore::primitive::api_primitives::create_cylinder;
     let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+    let pipe = placed_tilted_pipe(k);
+    let mut b = boolean_union(k, plate, pipe).unwrap();
+    round_root_nearest(
+        k,
+        &mut b,
+        Point3::new(30.0, 29.2, 10.0),
+        xsect,
+        continuity,
+        thumbweight,
+    );
+    b
+}
+
+/// The pipe of radius 10 and length 60, its axis from (0, 20, 16) 4 degrees down along x.
+fn placed_tilted_pipe(k: &mut Kernel) -> Brep {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::math::Vec3;
+    use solidcore::primitive::api_primitives::create_cylinder;
     let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
     let phi = 4.0_f64.to_radians();
     let place = Axis2Placement::new(
@@ -701,19 +717,63 @@ fn tilted_pipe_rounded(k: &mut Kernel, xsect: u32, continuity: u32, thumbweight:
         Vec3::new(0.0, 1.0, 0.0),
     );
     solidcore::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
-    let mut b = boolean_union(k, plate, pipe).unwrap();
-    // the root edge nearest (30, 29.2, 10)
-    let q = Point3::new(30.0, 29.2, 10.0);
+    pipe
+}
+
+/// Rounds `b`'s edge nearest `q` r 2 by the cross-section `xsect` of `continuity` and
+/// `thumbweight` (`fillet_edges`'s).
+fn round_root_nearest(
+    k: &mut Kernel,
+    b: &mut Brep,
+    q: Point3,
+    xsect: u32,
+    continuity: u32,
+    thumbweight: f64,
+) {
     let mut best = (1.0_f64, None);
     for &e in b.edge_list() {
-        if let Ok(c) = edge_closest_point(k, &b, e, q) {
+        if let Ok(c) = edge_closest_point(k, b, e, q) {
             if c.closest.distance <= best.0 {
                 best = (c.closest.distance, Some(e));
             }
         }
     }
     let e = best.1.expect("the root edge");
-    fillet_edges(k, &mut b, &[e], 2.0, xsect, continuity, thumbweight).unwrap();
+    fillet_edges(k, b, &[e], 2.0, xsect, continuity, thumbweight).unwrap();
+}
+
+/// The tilted pipe ([`placed_tilted_pipe`]) on a drum instead of the plate: a cylinder of
+/// radius 100 and length 60 whose axis runs along x through (0, 23, -90), so its top is
+/// at z = 10 over y = 23. Its root edge on the far side (nearest (30, 29.2, 9.8)) rounded
+/// r 2 by the cross-section `xsect` of `continuity` and `thumbweight`.
+///
+/// The two cylinders' axes are skew (the pipe's lies in y = 20, the drum's in y = 23) and
+/// their offsets by the ball's radius (12 and 102) cross without touching, so the ball's
+/// centre runs on no line, circle, point, conic, conic pair or nodal quartic: no exact
+/// round class reads the pair and the circular round is traced, a procedural blend by its
+/// GN definition, on supports whose offsets are cylinders again.
+fn drum_pipe_rounded(k: &mut Kernel, xsect: u32, continuity: u32, thumbweight: f64) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::math::Vec3;
+    use solidcore::primitive::api_primitives::create_cylinder;
+    let mut drum = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 100.0, 60.0).unwrap();
+    let place = Axis2Placement::new(
+        Point3::new(0.0, 23.0, -90.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+    );
+    solidcore::topology::brep::p5::transform(k, &mut drum, &place, None, false).unwrap();
+    let pipe = placed_tilted_pipe(k);
+    let mut b = boolean_union(k, drum, pipe).unwrap();
+    round_root_nearest(
+        k,
+        &mut b,
+        Point3::new(30.0, 29.2, 9.8),
+        xsect,
+        continuity,
+        thumbweight,
+    );
     b
 }
 
@@ -975,11 +1035,19 @@ fn a_query_below_the_bound_takes_s_and_one_at_it_the_net() {
 
 // ---- #2487: the offset of a round built from its definition S ----------------------------
 
-/// The tilted pipe's root rounded r 2 by the ball's exact circle (every circular round's
-/// section): a procedural blend of order 1 on the plate's plane and
-/// the pipe's cylinder. Its surface.
+/// The tilted pipe on the drum ([`drum_pipe_rounded`]), its root rounded r 2 by the ball's
+/// exact circle (every circular round's section): a procedural blend of order 1 on the
+/// drum's cylinder and the pipe's. Its surface.
+///
+/// On the drum, not the plate: the plate's round (a plane and a cylinder at 4 degrees) is
+/// the exact conic class's since the exact round classes are the only path (#18913), the
+/// canal surface on the conic
+/// ([`the_circular_tilted_pipe_s_circle_round_is_its_exact_conic_class`]), so it is no
+/// definition by its GN. The drum keeps both supports cylinders, whose offsets are
+/// cylinders, which the round of r - d on the offset supports needs (`procedural_offset`
+/// certifies NURBS supports only).
 fn circle_root(k: &mut Kernel) -> (Brep, Surface) {
-    let b = tilted_pipe_rounded(k, 1, 1, 1.0);
+    let b = drum_pipe_rounded(k, 1, 1, 1.0);
     let s = rounds_of(&b)
         .into_iter()
         .map(|(_, s)| s)
@@ -1160,4 +1228,32 @@ fn a_blend_read_from_the_database_is_certified_again() {
     let moved = Surface::from(from_record(&k, &bad).unwrap());
     let e = read(&k, &moved).unwrap_err();
     assert!(e.to_string().contains("not proved within its bound"), "{e}");
+}
+
+/// #18913: the circular tilted pipe's root rounded r 2 by the ball's circle is the round of
+/// the exact conic class (a plane and a cylinder at 4 degrees: the ball's centre runs on
+/// the conic the offset plane cuts from the offset cylinder), kept as its definition and
+/// certified: its supports read again are of that class and its net lies on the class's
+/// surface (`ExactRound::recertify`).
+#[test]
+fn the_circular_tilted_pipe_s_circle_round_is_its_exact_conic_class() {
+    use solidcore::surface::procedural_blend::exact::ExactClass;
+    use solidcore::surface::procedural_blend::BlendRef;
+    let mut k = kernel();
+    let b = tilted_pipe_rounded(&mut k, 1, 1, 1.0);
+    assert!(rounds_of(&b).is_empty(), "no round by its GN definition");
+    let exact: Vec<_> = b
+        .face_list()
+        .iter()
+        .filter_map(|&f| b.face(f).unwrap().surface.clone())
+        .filter(|s| matches!(s.procedural_blend(), Some(BlendRef::Exact { .. })))
+        .collect();
+    assert_eq!(exact.len(), 1, "the root round by its exact class");
+    let Some(BlendRef::Exact { round, .. }) = exact[0].procedural_blend() else {
+        unreachable!()
+    };
+    assert_eq!(round.class(), ExactClass::Conic);
+    assert_eq!(round.radius(), 2.0);
+    // the supports read again are of the conic class and the net lies on its surface
+    round.recertify(&k, &exact[0]).unwrap();
 }

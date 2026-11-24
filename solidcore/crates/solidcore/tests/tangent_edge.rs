@@ -404,14 +404,28 @@ fn walls_three_tenths_of_a_degree_apart() {
     assert!(t.min() < place && place < t.max(), "{place} not on {t:?}");
 }
 
-/// A procedural round whose definition is enclosed (the ball's circle of one radius between
-/// NURBS faces, `gn_def_face_of`): `wr698_gn_round_is_its_definition`'s `circle_root`, a
-/// 60 x 40 x 10 plate with a pipe of radius 10 lying along it 4 degrees off x, sunk into
-/// it, the root edge rounded r 2 by the ball's exact circle. The round's edges along the
+/// The pipe of radius 10 lying along x 4 degrees off it, sunk into its base, the root edge
+/// rounded r 2 by the ball's exact circle. The base is `wr698_gn_round_is_its_definition`'s
+/// `circle_root`'s drum (`on_drum`: a cylinder of radius 100 along x, its top at z = 10,
+/// whose axis is skew to the pipe's, so no exact round class reads the pair and the round is
+/// a procedural blend whose definition is enclosed, the ball's circle of one radius between
+/// NURBS faces, `gn_def_face_of`) or a 60 x 40 x 10 plate (a plane and a cylinder at 4
+/// degrees: the round of the exact conic class since #18913). The round's edges along the
 /// root.
-fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
+fn procedural_round(k: &mut Kernel, on_drum: bool) -> (Brep, Vec<EdgeId>) {
     use solidcore::boolean::api_brep::boolean_union;
-    let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+    let base = if on_drum {
+        let mut drum = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 100.0, 60.0).unwrap();
+        let drum_place = Axis2Placement::new(
+            Point3::new(0.0, 23.0, -90.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        solidcore::topology::brep::p5::transform(k, &mut drum, &drum_place, None, false).unwrap();
+        drum
+    } else {
+        create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap()
+    };
     let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
     let phi = 4.0_f64.to_radians();
     let place = Axis2Placement::new(
@@ -420,9 +434,9 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
         Vec3::new(0.0, 1.0, 0.0),
     );
     solidcore::topology::brep::p5::transform(k, &mut pipe, &place, None, false).unwrap();
-    let mut b = boolean_union(k, plate, pipe).unwrap();
-    // the root edge nearest (30, 29.2, 10), as `circle_root` takes it
-    let q = Point3::new(30.0, 29.2, 10.0);
+    let mut b = boolean_union(k, base, pipe).unwrap();
+    // the root edge nearest (30, 29.2, 10) (9.8 on the drum), as `circle_root` takes it
+    let q = Point3::new(30.0, 29.2, if on_drum { 9.8 } else { 10.0 });
     let root = get_edges(&b)
         .unwrap()
         .into_iter()
@@ -447,7 +461,7 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
         .collect();
     assert!(!rounds.is_empty(), "the round is a definition");
     // the pipe lies along x (its axis 4 degrees off it), so the root runs along x and the
-    // round ends in cross-sections at the plate's sides: the edges there (spanning little in
+    // round ends in cross-sections at the base's sides: the edges there (spanning little in
     // x) meet those faces square, not tangentially; the rest run along the root, into the
     // plate's top and the pipe
     let mut edges: Vec<EdgeId> = Vec::new();
@@ -474,21 +488,22 @@ fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
 #[test]
 fn a_procedural_round_builds_the_short_way_round() {
     let mut k = Kernel::default();
-    let (_, edges) = procedural_round(&mut k);
+    let (_, edges) = procedural_round(&mut k, false);
     assert_eq!(edges.len(), 2, "{edges:?}");
 }
 
-/// The procedural round's edges along the root, decided on its net with its definition's
-/// margin: Tangent on each. Where the pipe's foot crosses its net's C1 quarter knot (u =
+/// The procedural round on the drum's edges along the root, decided on its net with its
+/// definition's margin: Tangent on each. (On the plate, before #18913 made its round the
+/// exact conic class's: where the pipe's foot crosses its net's C1 quarter knot (u =
 /// 15.708, multiplicity 2) the definition's feet box is taken cell by cell
 /// (tangency-labs/solidcraft#14284's C1-knot follow-up, and #15183 where the foot sits on the
 /// knot just outside the guesses' box); before them both edges were Undecided (pi, pi) at
-/// `s` = 87.04 (#15005). The module's unit test `a_procedural_round_s_edges_carry_its_margin`
+/// `s` = 87.04 (#15005).) The module's unit test `a_procedural_round_s_edges_carry_its_margin`
 /// checks every piece.
 #[test]
 fn a_procedural_round_is_smooth() {
     let mut k = Kernel::default();
-    let (mut b, edges) = procedural_round(&mut k);
+    let (mut b, edges) = procedural_round(&mut k, true);
     // every edge measured before anything is asserted, so a failure names them all
     let seen: Vec<_> = edges
         .into_iter()
