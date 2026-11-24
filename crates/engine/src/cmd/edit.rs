@@ -1672,44 +1672,46 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "edit sketch geometry with the sketch commands"));
     }
-    // New edges for a blend: remember where they sit now (in the model before the feature).
+    // New edges for a blend (or edge points sent by an edit even at the same coordinates, as for
+    // broken references re-picked via #16661): remember where they sit now (in the model before
+    // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
         FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, .. } | FeatureKind::Chamfer { edges: b, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
-        && a != b
+        && (a != b || body != was || sets_path(set, "edges"))
     {
         let before = s.model.state_before(id);
         nf.edge_refs = solidcraft_doc::edge_refs(&before, body, &solidcraft_doc::plain(a));
         nf.edge_names = solidcraft_doc::edge_names_for(&before, body, &solidcraft_doc::plain(a));
     }
-    // New or reordered flange edges: their names now, so each edge's own angle and height stay
-    // with the edge they were given for.
+    // New or reordered flange edges (or edges re-sent at the same coordinates): their names now, so
+    // each edge's own angle and height stay with the edge they were given for.
     if let (FeatureKind::SheetFlange { edges: a, .. }, FeatureKind::SheetFlange { edges: b, .. }) = (&nf.kind, &f.kind) {
         let points = |e: &[solidcraft_doc::FlangeEdge]| e.iter().map(|x| x.point).collect::<Vec<_>>();
-        if points(a) != points(b) {
+        if points(a) != points(b) || sets_path(set, "edges") {
             nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &solidcraft_doc::plain(&points(a)));
         }
     }
-    // New reference edges for a hole (#37): the names of the edges there now.
+    // New reference edges for a hole (#37), or reference edges re-sent: the names of the edges there now.
     if let (FeatureKind::Hole { references: a, position, .. }, FeatureKind::Hole { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
-        if edges(a) != edges(b) {
+        if edges(a) != edges(b) || sets_path(set, "references") {
             nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
         }
     }
-    // New reference edges for a cylinder (#6380): likewise.
+    // New reference edges for a cylinder (#6380), or reference edges re-sent: likewise.
     if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
-        if edges(a) != edges(b) {
+        if edges(a) != edges(b) || sets_path(set, "references") {
             nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
         }
     }
-    // New bend edges for a conversion: the names of the body's edges there now.
+    // New bend edges for a conversion (or bends re-sent): the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. })
     | (FeatureKind::SheetSurfaceConvert { bends: a, body, .. }, FeatureKind::SheetSurfaceConvert { bends: b, body: was, .. })
     | (FeatureKind::SheetRecognize { bends: a, body, .. }, FeatureKind::SheetRecognize { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
-        && (a != b || body != was)
+        && (a != b || body != was || sets_path(set, "bends"))
     {
         nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
     }
