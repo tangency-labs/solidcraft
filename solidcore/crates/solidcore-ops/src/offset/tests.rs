@@ -1973,6 +1973,229 @@ fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
     }
 }
 
+/// The rounded rectangle `x` in [x0, x1], `z` in [z0, z1] with corners of radius 8 on the plane
+/// y = `y`, counter-clockwise about -y from its bottom side's start, as SolidCraft places a
+/// sketch on x = (1, 0, 0), y = (0, 0, 1).
+fn rounded_section(x0: f64, x1: f64, z0: f64, z1: f64, y: f64) -> Vec<crate::sweep::Curve> {
+    use crate::sweep::Curve;
+    let r = 8.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], y, a[1]],
+        end: [b[0], y, b[1]],
+    };
+    let arc = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], y, c[1]],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    vec![
+        line([x0 + r, z0], [x1 - r, z0]),
+        arc([x1 - r, z0 + r], -PI / 2.0),
+        line([x1, z0 + r], [x1, z1 - r]),
+        arc([x1 - r, z1 - r], 0.0),
+        line([x1 - r, z1], [x0 + r, z1]),
+        arc([x0 + r, z1 - r], PI / 2.0),
+        line([x0, z1 - r], [x0, z0 + r]),
+        arc([x0 + r, z0 + r], PI),
+    ]
+}
+
+/// #21215's sections: the tube's, x in [0, 100], z in [0, 100], and the flare's far end,
+/// x in [-28, 100], z in [0, 128], both with corners of radius 8.
+const TUBE: [f64; 4] = [0.0, 100.0, 0.0, 100.0];
+const FLARE: [f64; 4] = [-28.0, 100.0, 0.0, 128.0];
+
+/// #21215's flare: the ruled loft from [`TUBE`]'s section at y = -80 to [`FLARE`]'s at y = -150.
+fn flare() -> Body {
+    let [a, b, c, d] = TUBE;
+    let [e, f, g, h] = FLARE;
+    crate::sweep::loft(
+        &[
+            rounded_section(a, b, c, d, -80.0),
+            rounded_section(e, f, g, h, -150.0),
+        ],
+        1,
+        true,
+    )
+    .unwrap()
+}
+
+/// #21215: [`TUBE`]'s section extruded from y = 0 to y = -80, joined to [`flare`]: one body,
+/// the round corners of the tube and the flare meeting at the crease y = -80.
+fn tube_joined_to_a_flare() -> Body {
+    let [a, b, c, d] = TUBE;
+    let tube = crate::sweep::extrude(
+        &rounded_section(a, b, c, d, 0.0),
+        [0.0, -1.0, 0.0],
+        80.0,
+        0.0,
+        crate::sweep::DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    crate::boolean::boolean(tube, flare(), crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The volume of the part of the tube's erosion by `t` (its inset section, swept along y) past
+/// y = -80 that lies outside the flare's erosion: per slice y, the inset section's area outside
+/// the flare's erosion section, integrated by Simpson's rule from y = -80 to y = -80 - 0.4 t
+/// (past every crease's wedge, t tan(lean / 2) deep: under 0.27 t for the steepest lean,
+/// atan(0.4 sqrt 2), where the round between the two flared sides leans both ways). Both
+/// are convex: a section of an erosion is the intersection of the half-planes the supporting
+/// planes moved in by t cut from it, here those at the outward normals of 65 angles a quarter
+/// turn (each straight side's among them). A ruling of the flare joins its sections' points of
+/// one outward normal angle phi, and its supporting plane's normal is (cos phi, a, sin phi),
+/// square to the ruling.
+#[allow(clippy::disallowed_methods)] // the oracle's own arithmetic, not ops geometry
+fn erosion_wedge(t: f64) -> f64 {
+    const STEPS: usize = 64;
+    const SLICES: usize = 64;
+    // the point of section `s` (x0, x1, z0, z1) whose outward normal is at angle phi
+    let support = |s: [f64; 4], phi: f64| -> [f64; 2] {
+        let (sin, cos) = phi.sin_cos();
+        let pick = |c: f64, lo: f64, hi: f64| {
+            if c > 1e-12 {
+                hi - 8.0
+            } else if c < -1e-12 {
+                lo + 8.0
+            } else {
+                (lo + hi) / 2.0
+            }
+        };
+        [
+            pick(cos, s[0], s[1]) + 8.0 * cos,
+            pick(sin, s[2], s[3]) + 8.0 * sin,
+        ]
+    };
+    let angles: Vec<f64> = (0..4)
+        .flat_map(|q| (0..=STEPS).map(move |i| (q * STEPS + i) as f64 * PI / (2 * STEPS) as f64))
+        .collect();
+    // the half-planes a x + b z <= c
+    let tube: Vec<[f64; 3]> = angles
+        .iter()
+        .map(|&phi| {
+            let p = support(TUBE, phi);
+            [
+                phi.cos(),
+                phi.sin(),
+                phi.cos() * p[0] + phi.sin() * p[1] - t,
+            ]
+        })
+        .collect();
+    let flare_at = |y: f64| -> Vec<[f64; 3]> {
+        angles
+            .iter()
+            .map(|&phi| {
+                let (p, q) = (support(TUBE, phi), support(FLARE, phi));
+                let (cos, sin) = (phi.cos(), phi.sin());
+                let a = (cos * (q[0] - p[0]) + sin * (q[1] - p[1])) / 70.0;
+                let n = (1.0 + a * a).sqrt();
+                let at = (cos * p[0] + a * -80.0 + sin * p[1]) / n - t - a / n * y;
+                [cos / n, sin / n, at]
+            })
+            .collect()
+    };
+    let clip = |poly: Vec<[f64; 2]>, [a, b, c]: [f64; 3]| -> Vec<[f64; 2]> {
+        let mut out = Vec::new();
+        for (k, &p) in poly.iter().enumerate() {
+            let q = poly[(k + 1) % poly.len()];
+            let (fp, fq) = (a * p[0] + b * p[1] - c, a * q[0] + b * q[1] - c);
+            if fp <= 0.0 {
+                out.push(p);
+            }
+            if (fp < 0.0 && fq > 0.0) || (fq < 0.0 && fp > 0.0) {
+                let u = fp / (fp - fq);
+                out.push([p[0] + u * (q[0] - p[0]), p[1] + u * (q[1] - p[1])]);
+            }
+        }
+        out
+    };
+    let shoelace = |poly: &[[f64; 2]]| -> f64 {
+        (0..poly.len())
+            .map(|k| {
+                let (p, q) = (poly[k], poly[(k + 1) % poly.len()]);
+                p[0] * q[1] - q[0] * p[1]
+            })
+            .sum::<f64>()
+            / 2.0
+    };
+    let big = vec![[-1e3, -1e3], [1e3, -1e3], [1e3, 1e3], [-1e3, 1e3]];
+    let inset = tube.iter().fold(big, |poly, &h| clip(poly, h));
+    let outside = |y: f64| {
+        let both = flare_at(y).into_iter().fold(inset.clone(), |poly, h| {
+            if poly.is_empty() {
+                poly
+            } else {
+                clip(poly, h)
+            }
+        });
+        shoelace(&inset) - shoelace(&both)
+    };
+    let h = 0.4 * t / SLICES as f64;
+    (0..=SLICES)
+        .map(|k| {
+            let weight = if k == 0 || k == SLICES {
+                1.0
+            } else if k % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            weight * outside(-80.0 - k as f64 * h)
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// #21215: [`tube_joined_to_a_flare`] shelled t inward, open at both ends (y = 0 and
+/// y = -150), is a valid solid. At the crease the flare's top and its side x = 0 lean out
+/// atan 0.4 from the tube's, and the round between them runs along (-28, -70, 28): the
+/// offsets of the tube's round and side and of the flare's round and side, each pair tangent,
+/// cross the tube's side's offset at two points, the flare's round's offset meeting it along
+/// a curve between them. Each wall is convex, so its inward offset is its erosion, and the
+/// cavity at the crease, which is concave from outside, is the union of the two. The
+/// material is then the tube's shell (open at y = 0, with a wall t thick at y = -80) and the
+/// flare's (open at both ends), less that wall (t times the tube's inset section) and less
+/// the part of the tube's erosion past y = -80 outside the flare's ([`erosion_wedge`]).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_tube_joined_to_a_flared_loft_shells_open_at_both_ends() {
+    all_fixes();
+    let inset = |t: f64| (100.0 - 2.0 * t).powi(2) - (4.0 - PI) * (8.0 - t).powi(2);
+    for t in [2.0, 6.0] {
+        let b = tube_joined_to_a_flare();
+        let o = order(&b);
+        let ends = [
+            through(&b, &o, [50.0, 0.0, 50.0]),
+            through(&b, &o, [50.0, -150.0, 50.0]),
+        ];
+        shell(&b, &o, &ends, -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+
+        let alone = flare();
+        let fo = order(&alone);
+        let flare_ends = [
+            through(&alone, &fo, [50.0, -80.0, 50.0]),
+            through(&alone, &fo, [50.0, -150.0, 50.0]),
+        ];
+        shell(&alone, &fo, &flare_ends, -t).unwrap();
+        let tube = 80.0 * inset(0.0) - (80.0 - t) * inset(t);
+        let want = tube + volume(&alone) - t * inset(t) - erosion_wedge(t);
+        assert!(
+            rel(volume(&b), want) < 1e-7,
+            "t {t}: {} vs {want}",
+            volume(&b)
+        );
+    }
+}
+
 /// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
 /// neutral plane's, and the refusals.
 mod drafts {
