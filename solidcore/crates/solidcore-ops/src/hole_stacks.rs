@@ -119,7 +119,10 @@ pub fn hole_stacks(records: &[&Brep], o: &Options) -> crate::Result<Stacks> {
         }
         count += bores.len();
         if count > MAX_HOLES {
-            return Err(Error::Argument);
+            return Err(Error::Refused {
+                operation: "hole_stacks",
+                reason: "more than 100000 holes: pass fewer bodies or diameter ranges",
+            });
         }
         bodies.push(bores);
     }

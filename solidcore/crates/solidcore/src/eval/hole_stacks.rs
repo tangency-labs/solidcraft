@@ -16,10 +16,13 @@
 //! an edge's points are.
 //!
 //! Within one body the slot ends are paired by comparing each pair (bounded by
-//! [`MAX_FACES`]). Across bodies the round holes join through buckets of their lines' feet, so
-//! a design of many parallel holes compares only neighbours; every comparison the stacks pass
-//! makes counts against [`MAX_CROSSES`], and past it the call refuses rather than go quiet for
-//! a long time.
+//! [`MAX_FACES`]). Across bodies the round holes join through buckets of their lines' feet
+//! (each line's nearest point to the origin, taken with its own holes' axis: the axes one
+//! feature produces agree exactly, so such lines' feet land in the same or a neighbouring
+//! bucket; axes that differ by more than rounding can, far along them, land further apart, and
+//! such a pair is at the edge of the tolerance anyway), so a design of many parallel holes
+//! compares only neighbours; every comparison the stacks pass makes counts against
+//! [`MAX_CROSSES`], and past it the call refuses rather than go quiet for a long time.
 //!
 //! Not upstream: SolidCraft's hole stacks (tangency-labs/solidcraft#2073, MIT OR Apache-2.0),
 //! reworked from the display tessellation onto the exact record.
@@ -357,34 +360,42 @@ fn frame_extent(f: &Face) -> Option<[f64; 2]> {
     }
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
+    // A control point the hull cannot take (not finite, or a weight the convex-hull property
+    // needs positive) leaves the loops' bound to the domain alone.
+    let mut whole = true;
     for l in &f.loops {
         let Loop::Edges(edges) = l else { continue };
         for u in edges {
-            let vs: Vec<f64> = match &u.pcurve {
-                Curve2::Spline { points, .. } => points.iter().map(|p| p[1]).collect(),
+            let vs: Vec<Option<f64>> = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.iter().map(|p| Some(p[1])).collect(),
                 Curve2::RationalSpline { homogeneous, .. } => homogeneous
                     .iter()
-                    .filter(|h| h[2].is_finite() && h[2] > 0.0)
-                    .map(|h| h[1] / h[2])
+                    .map(|h| (h[2].is_finite() && h[2] > 0.0).then(|| h[1] / h[2]))
                     .collect(),
             };
             for v in vs {
-                if v.is_finite() {
-                    let v = if v < d0 {
-                        d0
-                    } else if v > d1 {
-                        d1
-                    } else {
-                        v
-                    };
-                    lo = lo.min(v);
-                    hi = hi.max(v);
-                }
+                let v = match v {
+                    Some(v) if v.is_finite() => v,
+                    _ => {
+                        whole = false;
+                        continue;
+                    }
+                };
+                let v = if v < d0 {
+                    d0
+                } else if v > d1 {
+                    d1
+                } else {
+                    v
+                };
+                lo = lo.min(v);
+                hi = hi.max(v);
             }
         }
     }
-    // No loops at all: the domain is all the face says about its extent.
-    let (lo, hi) = if lo < hi {
+    // No loops at all, or one the hull cannot bound: the domain is all the face says about
+    // its extent.
+    let (lo, hi) = if whole && lo < hi {
         (d0.max(lo), d1.min(hi))
     } else {
         (d0, d1)
