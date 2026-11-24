@@ -10524,9 +10524,9 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let hidden = (sk.view.hide_points && i != 0) || (sk.view.hide_projected && p.link.is_some());
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)).filter(|_| !hidden) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
-        // Projected points take their curves' colour, so a reference point is never mistaken
-        // for a fixed one of the sketch's own.
-        let link = p.link.as_deref().and_then(|l| sk.link(l));
+        // Project's opt-in gives reference points their curves' colour. Off keeps main's
+        // determined/free point colours, including for saved projections.
+        let link = p.link.as_deref().and_then(|l| sk.link(l)).filter(|_| app.ui.project_link_tools);
         let c = if conflict.point(i) {
             t.sketch_conflict
         } else if let Some(link) = link {
