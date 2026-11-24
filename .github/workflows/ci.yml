@@ -673,6 +673,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -821,6 +826,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
