@@ -392,10 +392,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // a cut) would go with them and take its dependents along, so refuse instead.
     let (was_g, was_ext) = spec(&saved_values(&was), cmd)?;
     if ids.len() != own_feature_count(s, &was_g, &was_ext, cmd)? {
-        return Err(bad(
-            cmd,
-            "this gear's component holds features that are not the gear's own; edit it by hand, or insert a new gear",
-        ));
+        return Err(bad(cmd, "this gear's component holds features that are not the gear's own; edit it by hand, or insert a new gear"));
     }
     s.refresh();
     let before: Vec<(u64, String)> = s.model.results.iter().filter_map(|r| r.error.clone().map(|e| (r.id, e))).collect();
