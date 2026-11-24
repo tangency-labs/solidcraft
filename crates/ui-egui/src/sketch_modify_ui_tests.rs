@@ -1286,3 +1286,29 @@ fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
         "{start:?} {end:?}"
     );
 }
+
+/// #18448: X (and the menu's Normal / Construction) switches a selected point to construction,
+/// and again back; the point is drawn and saved as such, and the sketch origin is left alone.
+#[test]
+fn construction_switches_a_selected_point_and_the_menu_offers_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [5, 5], "id": "guide"})).unwrap();
+    h.settle();
+    let is_construction = |h: &Harness, id: &str| {
+        let sid = h.app.session.active_sketch.unwrap();
+        let st = h.app.session.model.state();
+        st.sketch(sid).unwrap().sketch.points.iter().find(|p| p.id == id).unwrap().construction
+    };
+    h.app.session.selection = vec![Sel::SketchPoint { id: "guide".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(items.iter().any(|i| i.id == "sketch.construction"), "{:?}", items.iter().map(|i| i.id.clone()).collect::<Vec<_>>());
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(is_construction(&h, "guide"));
+    // The same key turns it back, and the origin alone is not a selection it acts on.
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(!is_construction(&h, "guide"));
+    h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
+}
