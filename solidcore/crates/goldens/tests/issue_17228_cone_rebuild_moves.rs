@@ -49,6 +49,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::PI;
 use solidcore::nurbs::math::{gamma, CPoint, NOW};
 use solidcore::surface::cone::Cone;
+use solidcore::surface::implicit;
 use std::fmt::Write as _;
 
 /// `(case, main's status, the new status)`.
@@ -227,10 +228,10 @@ fn issue_17228_moved_row_is_off_every_cylinder_the_rebuild_tries() {
     println!("{report}");
 }
 
-/// `(case, the status before, the new status)` of rows the centre-line fallback rebuilds.
+/// `(case, the status before, the new status)` of rows the rebuild now records on the centre line.
 const ACCEPTED: &[(&str, f64, f64)] = &[("gen0152", 1001.0, 1000.0)];
 
-/// #17228, the centre-line fallback: `gen0152` is a canonical cylinder of radius 2.8 whose
+/// #17228, the centre-line axis: `gen0152` is a canonical cylinder of radius 2.8 whose
 /// net reaches 1e6 from the origin, its top row moved by about 0.49 (and turned by
 /// 1.4e-8 degrees about the world `z` axis). The top circle is then off the cylinder about
 /// the bottom circle's normal by far more than rounding, and the rebuild refused it since
@@ -283,6 +284,23 @@ fn issue_17228_rigidly_moved_rows_rebuild_on_the_centre_line() {
         );
         let radius = cone.base_radius();
         let axis_after = cone.rev().position().z_axis();
+        // the edited net is off the cylinder about the end circle's normal (the #17228
+        // certificate's `NetOffCylinder` had the rebuild kept that axis) and the rebuilt
+        // net is certified about the recorded centre line
+        let about = |axis: Vec3| implicit::Implicit::Cone {
+            origin: cone.rev().position().origin(),
+            axis,
+            radius,
+            tan_angle: 0.0,
+        };
+        assert!(
+            !implicit::lies_on(edited.rev().base(), &about(axis_before)).unwrap(),
+            "{name}: on the cylinder about the bottom normal"
+        );
+        assert!(
+            implicit::lies_on(cone.rev().base(), &about(axis_after)).unwrap(),
+            "{name}: not certified about the recorded axis"
+        );
         // the tilt of both circles from the recorded centre line, up to its sign
         let tilt = axis_before.cross(axis_after).length();
         let a = angle.abs() * PI / 180.0;

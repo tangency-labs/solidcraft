@@ -1647,6 +1647,54 @@ impl Cone {
         Ok(moved)
     }
 
+    /// Not upstream (#17228): how far the net is off the frustum between the end circles
+    /// about the axis through `centre` along the unit `z` (`radii.0` at height 0,
+    /// `radii.1` at `height`), as the largest `|w rho - here|` over the control points:
+    /// `rho` a point's distance from the axis, `w` its weight and `here` the frustum's
+    /// radius at its height. A rational quadratic arc's control points lie `r / w` from
+    /// its centre (`w` the cosine of the half span, `1` at the ends) and a cylinder's
+    /// generator direction has weight 1, so the measure is zero, up to rounding, for a
+    /// net of end circles coaxial about that axis, and grows with a circle's offset or
+    /// tilt from it. The rebuild uses it to choose the axis before building a cylinder.
+    ///
+    /// # Errors
+    ///
+    /// Those of the control point access.
+    fn net_off_frustum(
+        &self,
+        centre: Point3,
+        z: Vec3,
+        height: f64,
+        radii: (f64, f64),
+    ) -> Result<f64> {
+        use crate::nurbs::b_spline_curve::ControlPointForm::EuclideanRational;
+        let (bot_radius, top_radius) = radii;
+        let (nu, nv) = (
+            self.rev.base.number_control_points(SurfParamType::U),
+            self.rev.base.number_control_points(SurfParamType::V),
+        );
+        let mut largest: f64 = 0.0;
+        for i in 0..nu {
+            for j in 0..nv {
+                let (p, w) = self.rev.base.control_point(EuclideanRational, i, j)?;
+                let d = p - centre;
+                let h = d.dot(z);
+                let here = bot_radius + (top_radius - bot_radius) * (h / height);
+                let off = (w * (d - z * h).length() - here).abs();
+                // a NaN measure is never nearer
+                largest = if off.is_nan() {
+                    f64::INFINITY
+                } else {
+                    largest.max(off)
+                };
+                if largest == f64::INFINITY {
+                    return Ok(largest);
+                }
+            }
+        }
+        Ok(largest)
+    }
+
     /// Not upstream (WR-385, #16982 review): a copy of the NURB with the control points
     /// [`Self::cylinder_net`] computed, kept only when [`implicit::lies_on`] certifies it
     /// on the cylinder of `radius` about the axis through `centre` along `z`, up to the
@@ -1749,9 +1797,10 @@ impl Cone {
     /// describe one surface (WR-385, #713; see [`Self::cylinder_net`]). Radii within
     /// `EFF_ZERO * (1 + bottom_radius)` take the bottom radius, and the net is kept
     /// when certified on that cylinder as it is, else moved onto it and certified
-    /// (#17228). When neither works about the end circle's normal, the same is tried about
-    /// the centre line through both circles' centres, and a net that passes is recorded
-    /// with that axis (a rigid move of one end within the angle checks). Not upstream (#16982 review): the top circle's plane must be
+    /// (#17228). The axis is the end circle's normal, or the centre line through both
+    /// circles' centres when the net's end circles are nearer coaxial about it
+    /// ([`Self::net_off_frustum`], chosen before any cylinder is built; a rigid move of
+    /// one end within the angle checks). Not upstream (#16982 review): the top circle's plane must be
     /// perpendicular to the axis too.
     ///
     /// # Errors
@@ -1943,11 +1992,10 @@ impl Cone {
         // share one axis and radius (heights along it run from the placement's end
         // circle to the other one). Computed before any state changes, so a refused net
         // leaves the cone as it was. The placement's axis is its end circle's normal
-        // (upstream); when the net is on no cylinder about it, the cylinder about the
-        // centre line through both end circles' centres is tried (#17228): a net whose
-        // end circles were moved rigidly against each other by a little (within the angle
-        // checks) is on that one, up to rounding, and is recorded with it rather than
-        // refused
+        // (upstream) or, when the net's end circles are nearer coaxial about it, the
+        // centre line through both circles' centres (#17228): a net whose end circles
+        // were moved rigidly against each other by a little (within the angle checks) is
+        // on that cylinder, up to rounding, and is recorded with it rather than refused
         let mut refit_position = None;
         let moved_net = match net_onto_cylinder {
             Some((bot_radius, top_radius, keep_if_on)) => {
@@ -1968,29 +2016,19 @@ impl Cone {
                 // distance from the cylinder only by O(t^2)
                 let refit_y = centre_z.cross(frame.x_axis());
                 let refit = Axis2Placement::new(frame.origin(), refit_y.cross(centre_z), refit_y);
-                match self.net_on_axis(frame, height, radii, bot.radius, keep_if_on) {
-                    Ok(net) => net,
-                    // only a net off the end circle's axis retries on the centre line;
-                    // any other failure is not about the axis and stands
-                    Err(off)
-                        if refit != *frame
-                            && matches!(
-                                off.surface_failure(),
-                                Some(SurfaceFailure::NurbNotAnalytic {
-                                    check: AnalyticCheck::NetOffCylinder
-                                        | AnalyticCheck::NetRadiusNotPositive
-                                })
-                            ) =>
-                    {
-                        match self.net_on_axis(&refit, height, radii, bot.radius, keep_if_on) {
-                            Ok(net) => {
-                                refit_position = Some(refit);
-                                net
-                            }
-                            Err(_) => return Err(off),
-                        }
-                    }
-                    Err(off) => return Err(off),
+                // The axis is chosen from the net before any construction: the one the
+                // net's end circles are nearer coaxial about (`Self::net_off_frustum`);
+                // a tie keeps the end circle's normal (upstream). Only the chosen
+                // cylinder is then built and certified
+                let centre_nearer = refit != *frame
+                    && self.net_off_frustum(refit.origin(), refit.z_axis(), height, radii)?
+                        < self.net_off_frustum(frame.origin(), frame.z_axis(), height, radii)?;
+                if centre_nearer {
+                    let net = self.net_on_axis(&refit, height, radii, bot.radius, keep_if_on)?;
+                    refit_position = Some(refit);
+                    net
+                } else {
+                    self.net_on_axis(frame, height, radii, bot.radius, keep_if_on)?
                 }
             }
             None => None,
