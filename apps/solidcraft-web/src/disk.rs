@@ -666,14 +666,7 @@ mod tests {
 
     #[test]
     fn memory_only_and_unknown_disk_paths_cannot_claim_a_durable_save() {
-        for path in [
-            "/x/y.sc",
-            "/upload/part.sc",
-            "/tmp/script.sc",
-            "/disk/unknown/plate.sc",
-            "/opfs/folder/part.sc",
-            "/opfs/",
-        ] {
+        for path in ["/x/y.sc", "/upload/part.sc", "/tmp/script.sc", "/disk/unknown/plate.sc", "/opfs/folder/part.sc", "/opfs/"] {
             assert!(!can_keep_design(path, |_| false), "{path} is not durable");
         }
         for path in ["/opfs/plate.sc", "/downloads/part.sc"] {

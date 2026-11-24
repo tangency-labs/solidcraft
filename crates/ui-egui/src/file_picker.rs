@@ -338,10 +338,7 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         let original = h.app.session.doc.to_json();
         h.app.services.can_persist_design = Some(Box::new(|path| path != "/x/part.sc"));
-        for (id, params) in [
-            ("file.save_as", json!({"path":"/x/part.sc"})),
-            ("file.save", json!({"path":"/x/part.sc"})),
-        ] {
+        for (id, params) in [("file.save_as", json!({"path":"/x/part.sc"})), ("file.save", json!({"path":"/x/part.sc"}))] {
             let error = h.app.run(id, params).unwrap_err();
             assert!(error.contains("cannot keep a design"), "{error}");
             assert_eq!(h.app.session.doc.to_json(), original, "a rejected save leaves the design alone");
