@@ -1061,7 +1061,9 @@ impl FilletSession<'_> {
         let mut status = Ok(());
         for handle in std::mem::take(&mut self.objects.cleanup_face_marks) {
             if self.objects.attributes.get(handle).is_some() {
-                status = status.and(self.objects.attributes.destroy(handle));
+                // (destroyed even after an earlier failure; the first error is kept)
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
             }
         }
         // then the copies the splits and merges made, found on the target's faces
@@ -1078,7 +1080,8 @@ impl FilletSession<'_> {
         }
         for handle in found {
             if self.objects.attributes.get(handle).is_some() {
-                status = status.and(self.objects.attributes.destroy(handle));
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
             }
         }
         status
