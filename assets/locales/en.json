@@ -3433,7 +3433,7 @@
   "prefs.export_name.design": "Design name",
   "prefs.export_name_hint": "e.g. {design}-{body}",
   "prefs.export_name_sample": "Exporting this design offers: {name}",
-  "prefs.export_name_tip": "The file name File › Export and Save As Mesh offer. These placeholders are replaced:\n{placeholders}\nA design property that is not set is left out. Leave the field empty to offer the design's name, or the body's for a mesh.",
+  "prefs.export_name_tip": "The file name File › Export and Save As Mesh offer. These placeholders are replaced:\n{placeholders}\nA design property that is not set is left out. Leave the field empty to use the design's name for whole-design exports, or a body's name when exporting only that body from a design with several bodies. The body placeholder restores the previous mesh-export naming.",
   "prefs.extend": "Extend",
   "prefs.extrude_arrow_face_stops": "Extrude arrow stops at faces",
   "prefs.extrude_arrow_face_stops_note": "Dragging Extrude's distance arrow stops at flat faces parallel to the profile, such as the far side of a block being cut, and outlines the face. Off: the arrow moves in round steps only.",
