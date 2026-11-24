@@ -812,3 +812,55 @@ fn renaming_a_body_opened_from_its_saved_model_keeps_its_face_names() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "{errors:?} (body by {hole:?})");
 }
+
+/// A 40 x 20 x 20 block with a slot 4 wide (x 10…14) through its height from y = `sy` to 6, and a
+/// round of radius 2 on the edge picked at `at`. With `sy` below 0 the slot splits the front
+/// face (y = 0) into two pieces, told apart by their neighbours. Returns the round's index.
+fn block_with_a_slot(s: &mut Session, at: [f64; 3]) -> usize {
+    run(s, "parameters.add", json!({"name": "sy", "expression": "-1 mm"}));
+    run(s, "solid.box", json!({"length": 40, "width": 20, "height": 20, "name": "Block", "body_name": "Body1"}));
+    run(s, "solid.box", json!({"length": 4, "width": "6 mm - sy", "height": 22, "corner": [10, "sy", -1], "operation": "cut", "name": "Slot"}));
+    run(s, "solid.fillet", json!({"edges": [at], "radius": 2, "name": "Round"}));
+    s.doc.features.iter().position(|f| f.name == "Round").unwrap()
+}
+
+/// #21555: a round on the edge between the block's right side and the piece of its front face
+/// right of the slot is saved under the piece's name, told apart by the right side and the slot's
+/// wall. Once the slot no longer reaches the front, the front is whole again and no longer touches
+/// the slot's wall. The piece's qualifier names the right side, so no other piece touched it: the
+/// edge between them was never split, and the round is found at its pick as before.
+#[test]
+fn a_round_beside_a_piece_whole_again_is_found_when_its_qualifier_names_the_other_face() {
+    let mut s = Session::default();
+    let round = block_with_a_slot(&mut s, [40.0, 0.0, 10.0]);
+    assert_eq!(s.doc.features[round].edge_names, vec!["F1:+x|F1:-y#[F1:+x,F2:+x]".to_string()]);
+    // The block less the slot inside it (4 x 6 x 20, y 0…6) less the round's section
+    // (1 - pi/4) r^2 along its 20.
+    let round_volume = (1.0 - PI / 4.0) * 4.0 * 20.0;
+    let want = 40.0 * 20.0 * 20.0 - 4.0 * 6.0 * 20.0 - round_volume;
+    assert!((volume(&mut s, "Body1") - want).abs() < 1e-6, "{}", volume(&mut s, "Body1"));
+
+    // From y = 1 the slot (4 x 5 x 20) is clear of the front, and the round is still there.
+    run(&mut s, "parameters.change", json!({"name": "sy", "expression": "1 mm"}));
+    let result = s.model.result(s.doc.features[round].id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let want = 40.0 * 20.0 * 20.0 - 4.0 * 5.0 * 20.0 - round_volume;
+    assert!((volume(&mut s, "Body1") - want).abs() < 1e-6, "{}", volume(&mut s, "Body1"));
+    let rounded = faces(&mut s, "Body1");
+    assert!(rounded.iter().any(|f| f["name"].as_str().is_some_and(|n| n.starts_with("F3:blend"))), "{rounded:?}");
+}
+
+/// The front's top edge right of the slot runs the whole width once the front is whole again.
+/// The top was never split, but the piece's qualifier does not name it: the other piece touched
+/// the top too, so the name still asks for the edge again rather than rounding the longer one
+/// (#11731).
+#[test]
+fn a_round_on_a_piece_of_an_edge_whole_again_still_asks_for_it() {
+    let mut s = Session::default();
+    let round = block_with_a_slot(&mut s, [30.0, 0.0, 20.0]);
+    let name = s.doc.features[round].edge_names.first().cloned().unwrap_or_default();
+    assert_eq!(name, "F1:+z|F1:-y#[F1:+x,F2:+x]");
+    run(&mut s, "parameters.change", json!({"name": "sy", "expression": "1 mm"}));
+    let result = s.model.result(s.doc.features[round].id).unwrap();
+    assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{name}: {:?}", result.error);
+}

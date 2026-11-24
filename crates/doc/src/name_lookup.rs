@@ -804,7 +804,9 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 /// qualifier lists only faces named by their index and the face borders such a face that is not
 /// verified (those tell no piece apart now, so the piece has no qualifier), at least one
 /// side of them by a qualifier that is not that face's own (a piece of the named face split since
-/// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
+/// is not a renamed face: the edge split with it and the name asks again). A face whole again is
+/// a candidate too where the name's qualifier lists the edge's other face and that face answers
+/// exactly: no other piece touched it, so the edge was never split (#21555). Of those, the one edge
 /// whose exact curve the reference's point `near` lies on (within the pick reach, as
 /// [`solidcraft_kernel::edge_distance`] measures it) is taken; none or several, and the name finds
 /// nothing. The point must be the reference's own pick, as for [`renamed_edge`].
@@ -828,12 +830,24 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
         (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece())).then_some(true)
     };
+    // A piece whole again, answering by its stem, whose qualifier names the edge's other face,
+    // itself found exactly: no other piece touched that face, so the edge between them was never
+    // split and is the same edge now (#21555). Not a piece told apart from the far side only,
+    // whose edge may have grown along its whole face (#11731).
+    let whole_again = |f: usize, x: &str, other: usize, y: &str| -> bool {
+        crate::history_names::matches(faces, f, x) == Some(Match::Stem)
+            && crate::history_names::matches(faces, other, y).is_some_and(exactly)
+            && crate::piece_names::piece_parts(x).is_some_and(|(stem, around)| faces.faces.get(f).is_some_and(|n| n == stem) && around.contains(&y))
+    };
     let mut cands: Vec<usize> = Vec::new();
     for (i, fs) in m.edge_faces.iter().enumerate() {
         let [fa, fb] = fs.as_slice() else { continue };
         let answers = wanted.match_indices('|').any(|(k, _)| {
             let (Some(x), Some(y)) = (wanted.get(..k), wanted.get(k + 1..)) else { return false };
-            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| side(p as usize, x).zip(side(q as usize, y)).is_some_and(|(sx, sy)| sx || sy))
+            [(*fa, *fb), (*fb, *fa)].into_iter().any(|(p, q)| {
+                let (p, q) = (p as usize, q as usize);
+                side(p, x).zip(side(q, y)).is_some_and(|(sx, sy)| sx || sy) || whole_again(p, x, q, y) || whole_again(q, y, p, x)
+            })
         });
         if answers {
             cands.push(i);

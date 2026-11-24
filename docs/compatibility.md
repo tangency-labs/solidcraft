@@ -174,10 +174,17 @@ two such cases, and only where that point decides exactly one edge:
   the one candidate whose exact curve passes through the saved point, within the pick tolerance.
   If no candidate passes through the point, or several do, the reference asks to be picked again.
   A named face that was split into pieces is not renamed: an edge that split with it still asks.
+- A face named as a piece (`F1:-y#[F1:+x,F2:+x]`) is whole again, after an edit upstream took
+  away what split it, and the piece's neighbour list names the edge's other face, which the name
+  finds exactly. No other piece touched that face, so the edge was never split, and the same
+  candidate rule decides (#21555). A piece whose list does not name the other face may have
+  bordered it only in part: its edge has grown along the whole face, and it still asks (#11731).
 
 Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
 `a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
-`a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).
+`a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again`,
+`a_round_beside_a_piece_whole_again_is_found_when_its_qualifier_names_the_other_face`,
+`a_round_on_a_piece_of_an_edge_whole_again_still_asks_for_it` (`crates/engine/src/face_name_tests.rs`).
 
 Numbered round faces (#16602): 0.30.1 split a cylinder's or cone's round side into numbered pieces
 (`F1:side#2`) and built a round tool's wall in several pieces (`F4:bore:side:1`, now
