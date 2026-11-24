@@ -1334,6 +1334,52 @@ pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2) -> bool {
     !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.expand(REACH).contains(at)))
 }
 
+/// Overlay pending sketch picks, with the order in which the constraint will consume them.
+/// The geometry stays in the sketch; only the viewport paint changes.
+fn pending_constraint_picks(
+    tool: &Tool,
+    sketch: &solidcraft_engine::sketch::Sketch,
+    plane: &solidcore_record::Plane,
+    painter: &egui::Painter,
+    proj: &Proj,
+    tokens: solidcraft_theme::Tokens,
+) {
+    let Kind::Pick(n) = tool.kind else { return };
+    if n < 2 || tool.picks.is_empty() {
+        return;
+    }
+    let mut budget = solidcraft_engine::render::SamplingBudget::new(4096, 65_536);
+    for (i, id) in tool.picks.iter().take(n).enumerate() {
+        let anchor = if let Some(index) = sketch.curve_index(id) {
+            let mut anchor = None;
+            for part in crate::sketch_display::curve_with_budget(sketch, index, plane, proj, painter.ctx().pixels_per_point(), &mut budget).parts {
+                if anchor.is_none() {
+                    anchor = part.get(part.len() / 2).and_then(|p| proj.to_screen(*p));
+                }
+                // Solid overlay even for construction lines, to distinguish a pending pick.
+                paint_sketch_path(&part, 0, painter, proj, Stroke::new(3.0, tokens.accent));
+            }
+            anchor
+        } else {
+            sketch.resolve_point(id).and_then(|point| sketch.point(point)).and_then(|point| proj.to_screen(plane.to_world(point))).inspect(|at| {
+                painter.circle_stroke(*at, 6.0, Stroke::new(2.5, tokens.accent));
+            })
+        };
+        if let Some(at) = anchor {
+            let badge = at + egui::vec2(10.0, -10.0);
+            painter.circle_filled(badge, 9.0, tokens.accent);
+            let rect = painter.text(
+                badge,
+                egui::Align2::CENTER_CENTER,
+                (i + 1).to_string(),
+                egui::FontId::proportional(tokens.font_small),
+                tokens.on_accent,
+            );
+            crate::scenario::publish_rect(&format!("viewport:constraint_pick:{}", i + 1), rect);
+        }
+    }
+}
+
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if crate::sketch3d::preview(app, t, painter, proj) {
         return;
@@ -1348,6 +1394,9 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     // Drawn straight onto the view: its side's colours (#4146).
     let tk = solidcraft_theme::Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
+    // Keep the first and second picks visible while a multi-pick constraint waits for
+    // another entity. Labels retain the order even if the next hover is elsewhere (#18474).
+    pending_constraint_picks(t, &ss.sketch, &ss.plane, painter, proj, tk);
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
