@@ -196,6 +196,31 @@ fn bspline_part<'a>(k: &Kernel, surface: &'a Surface) -> Result<Option<&'a BSpli
     })
 }
 
+/// Not the fork (#18913): `uv` clamped into `surface`'s natural domain, or `uv` itself
+/// when it lies inside. A traced section may sit on a support's extension past the
+/// domain (a rail run on past its face, WR-609/610). There a B-spline's `EvaluatePoint`
+/// extrapolates its end span while `EvaluateNormal` reads the derivatives of the end
+/// knot, so the two disagree. The quadric a surface lies on, and the side its normal
+/// points to, is the same at every point of its domain, so it is read inside it. A
+/// plane (evaluated exactly everywhere) and a surface of no built domain keep `uv`.
+///
+/// # Errors
+///
+/// Those of making the surface's NURB.
+fn in_natural_domain(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Point2> {
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        return Ok(uv);
+    }
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    Ok(
+        if domain.min.x <= domain.max.x && domain.min.y <= domain.max.y {
+            domain.clamp_point(uv)
+        } else {
+            uv
+        },
+    )
+}
+
 /// `pSurface->EvaluatePoint(crUV)` and `EvaluateNormal(crUV, TRUE, TRUE)`.
 fn point_and_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(Point3, Vec3)> {
     let p = surface.evaluate_point(k, uv)?;
@@ -451,6 +476,7 @@ impl TorusData {
 fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Result<BlendQuadric> {
     let mut q = BlendQuadric::default();
 
+    let uv = in_natural_domain(k, surface, uv)?;
     let (p, n) = point_and_normal(k, surface, uv)?;
 
     let Some(bss) = bspline_part(k, surface)? else {
@@ -613,7 +639,8 @@ impl BlendQuadric {
             return Ok(Self::default());
         }
 
-        // the offset there, along the base's normal
+        // the offset there, along the base's normal (#18913: inside the base's domain)
+        let uv = in_natural_domain(k, base, uv)?;
         let (p, n) = point_and_normal(k, base, uv)?;
         let q = surface.evaluate_point(k, uv)?;
         Ok(base_q.offset((q - p).dot(n), tol))
