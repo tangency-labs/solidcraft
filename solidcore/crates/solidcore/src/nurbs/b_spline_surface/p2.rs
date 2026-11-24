@@ -420,61 +420,21 @@ impl BSplineSurface {
     ///
     /// Those of the recognisers ([`Plane::is_nurb_surface_plane`],
     /// [`crate::surface::cone::Cone::is_nurb_surface_cone`], ...);
-    /// [`SolidError::Unported`] from the still-unwired recognised sphere conversion.
+    /// [`SolidError::Unported`] from the still-unwired recognised sphere conversion; with the
+    /// test-only feature `wr57-replay`, the replay seam's.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
-        // SmPlane
-        if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
-            return self.analytic_or_exact_copy(k, Surface::from(plane));
-        }
-        // SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
-        if let Some(analytic) = recognise_analytic(k, self)? {
-            return self.analytic_or_exact_copy(k, analytic);
-        }
-        // arrive here - make sure it's a copy
-        Ok(Surface::from(self.copy()))
-    }
-
-    /// The recognised analytic `analytic`, or an exact copy when `analytic` does not
-    /// give this surface's points at the same parameters (the fork's
-    /// `sm_SameParameterization`, WR-450, #387): a face split with
-    /// `MakeEdgeInFaceWithVU` keeps its UV domain and trims on the copy.
-    ///
-    /// # Errors
-    ///
-    /// Only the test-only replay seam's (feature `wr57-replay`).
-    fn analytic_or_exact_copy(&self, k: &Kernel, analytic: Surface) -> Result<Surface> {
-        let domain = self.natural_uv_domain();
-        let steps = 6.0;
-        let mut pairs = Vec::with_capacity(49);
-        let mut bbox = crate::geom::extent3d::Extent3d::default();
-        // (the points come from a copy: an analytic makes its NURB on first evaluation,
-        // and the analytic returned is the one recognised, untouched by the check)
-        let probe = analytic.clone();
-        for i in 0..=6u8 {
-            for j in 0..=6u8 {
-                let uv = domain.evaluate(f64::from(i) / steps, f64::from(j) / steps);
-                let (Ok(a), Ok(b)) = (self.evaluate_point(uv), probe.evaluate_point(k, uv)) else {
-                    return self.analytic_or_exact(k, analytic, true);
-                };
-                bbox.add_point(a);
-                pairs.push((a, b));
-            }
-        }
-        let tol = k.tolerances.zone_tol_3d.max(1.0e-9 * bbox.size().length());
-        // (`!(d <= tol)`: a NaN distance is a mismatch)
-        let exact = !pairs.iter().all(|&(a, b)| a.distance(b) <= tol);
-        self.analytic_or_exact(k, analytic, exact)
-    }
-
-    /// `analytic`, or an exact copy when `exact`.
-    ///
-    /// # Errors
-    ///
-    /// Only the test-only replay seam's (feature `wr57-replay`).
-    fn analytic_or_exact(&self, k: &Kernel, analytic: Surface, exact: bool) -> Result<Surface> {
-        #[cfg(not(feature = "wr57-replay"))]
-        let _ = k;
+        // SmPlane, then SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
+        let analytic = if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
+            Some(Surface::from(plane))
+        } else {
+            recognise_analytic(k, self)?
+        };
+        let Some(analytic) = analytic else {
+            // arrive here - make sure it's a copy
+            return Ok(Surface::from(self.copy()));
+        };
+        let exact = !self.same_parameterization(k, &analytic);
         // (test-only seam of the WR-450 replay, feature `wr57-replay`: the goldens put
         // upstream's choice, the analytic, in place to show which rows the copy moved)
         #[cfg(feature = "wr57-replay")]
@@ -490,6 +450,34 @@ impl BSplineSurface {
         } else {
             Ok(analytic)
         }
+    }
+
+    /// Whether the recognised analytic `analytic` gives this surface's points at the same
+    /// parameters (the fork's `sm_SameParameterization`, WR-450, #387): where it does not,
+    /// [`Self::copy_and_add_analytics`] keeps an exact copy, so a face split with
+    /// `MakeEdgeInFaceWithVU` keeps its UV domain and trims on the copy. A point that
+    /// fails to evaluate, or a NaN distance, is a mismatch.
+    fn same_parameterization(&self, k: &Kernel, analytic: &Surface) -> bool {
+        let domain = self.natural_uv_domain();
+        let steps = 6.0;
+        let mut pairs = Vec::with_capacity(49);
+        let mut bbox = crate::geom::extent3d::Extent3d::default();
+        // (the points come from a copy: an analytic makes its NURB on first evaluation,
+        // and the analytic returned is the one recognised, untouched by the check)
+        let probe = analytic.clone();
+        for i in 0..=6u8 {
+            for j in 0..=6u8 {
+                let uv = domain.evaluate(f64::from(i) / steps, f64::from(j) / steps);
+                let (Ok(a), Ok(b)) = (self.evaluate_point(uv), probe.evaluate_point(k, uv)) else {
+                    return false;
+                };
+                bbox.add_point(a);
+                pairs.push((a, b));
+            }
+        }
+        let tol = k.tolerances.zone_tol_3d.max(1.0e-9 * bbox.size().length());
+        // (`!(d <= tol)`: a NaN distance is a mismatch)
+        pairs.iter().all(|&(a, b)| a.distance(b) <= tol)
     }
 
     /// The 3D iso-parametric curve at `iso_parameter` (`CreateIsoParametricCurve`):

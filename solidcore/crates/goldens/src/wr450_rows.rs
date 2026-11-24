@@ -44,6 +44,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -69,8 +70,10 @@ fn main_line(unit_id: &str, case: &str) -> Value {
         .lines()
         .map(|l| serde_json::from_str::<Value>(l).unwrap())
         .find(|v| v["unit"] == unit_id && v["line"]["case"] == case)
-        .map(|v| v["line"].clone())
-        .unwrap_or_else(|| panic!("{unit_id}: no main line of {case}"))
+        .map_or_else(
+            || panic!("{unit_id}: no main line of {case}"),
+            |v| v["line"].clone(),
+        )
 }
 
 /// How many calls of each seam the substituted run changed.
@@ -271,7 +274,7 @@ fn record() {
         let all = cases(u.as_ref());
         for (name, line) in moved {
             let (_, flips) = with_mains_choices(u.as_ref(), &all[name.as_str()]);
-            out += &format!("    ({id:?}, {name:?}, {:?}),\n", flips.class());
+            writeln!(out, "    ({id:?}, {name:?}, {:?}),", flips.class()).unwrap();
             lines += &serde_json::json!({ "unit": id, "line": line }).to_string();
             lines.push('\n');
         }
