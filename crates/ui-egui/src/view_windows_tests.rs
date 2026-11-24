@@ -320,6 +320,7 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     frame(&mut h, Vec::new());
     assert!(h.app.viewport.context_menu.is_none(), "the pick closes the menu");
     assert!(history_shown(&h), "Find in Timeline brings the History tab to the front");
+}
 
 #[test]
 fn a_macos_pop_out_window_keeps_its_native_frame_in_both_top_bar_modes_and_hides_the_traffic_lights_with_the_bar() {
