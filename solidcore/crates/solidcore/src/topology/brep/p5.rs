@@ -2651,11 +2651,39 @@ pub fn remove_topological_with_notifications(
             remove_topological_with_notifications(k, b, keep_edges, keep_vertices, Some(env))
         });
     };
+    remove_topological_in(k, b, keep_edges, keep_vertices, None, env)
+}
+
+/// Removes only the named redundant joins and their vertices. A local extension
+/// must leave the trims and isolated loop vertices of unrelated faces in place.
+pub(crate) fn remove_topological_joins(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    vertices: &[VertexId],
+) -> Result<()> {
+    plain_edit(k, b, |k, b, env| {
+        remove_topological_in(k, b, None, None, Some((edges, vertices)), env)
+    })
+}
+
+fn remove_topological_in(
+    k: &mut Kernel,
+    b: &mut Brep,
+    keep_edges: Option<&[EdgeId]>,
+    keep_vertices: Option<&[VertexId]>,
+    joins: Option<(&[EdgeId], &[VertexId])>,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<()> {
     let mut notifications = Some(env);
     let previous = set_editing_enabled(b, true);
     let mut joined = Vec::new();
     let result = (|| {
-        for edge in brep_edges(b)? {
+        let edges = match joins {
+            Some((edges, _)) => edges.to_vec(),
+            None => brep_edges(b)?,
+        };
+        for edge in edges {
             // An edge of the list a seam completion below removed is gone.
             if b.edge(edge).is_err() {
                 continue;
@@ -2669,9 +2697,14 @@ pub fn remove_topological_with_notifications(
             if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
                 continue;
             }
-            let Some(topological) =
-                crate::error::ignored(crate::topology::edge::is_topological(k, b, edge, 1.0))?
-            else {
+            // A constructed join already lies on its support. Keep the two faces
+            // separate if covering them would require either tolerance to grow.
+            let topological = if joins.is_some() {
+                crate::topology::edge::is_topological_without_growth(k, b, edge)
+            } else {
+                crate::topology::edge::is_topological(k, b, edge, 1.0)
+            };
+            let Some(topological) = crate::error::ignored(topological)? else {
                 continue;
             };
             if !topological.is_topological {
@@ -2721,7 +2754,7 @@ pub fn remove_topological_with_notifications(
                     .natural_uv_domain_with_nurb(k)?;
                 crate::topology::face::p2::set_uv_domain(b, keep, &domain)?;
                 let tolerance = b.face(keep)?.tolerance;
-                if topological.dist_between > tolerance / 10.0 {
+                if joins.is_none() && topological.dist_between > tolerance / 10.0 {
                     set_face_tolerance(b, keep, tolerance + topological.dist_between, true, true)?;
                 }
             }
@@ -2743,7 +2776,14 @@ pub fn remove_topological_with_notifications(
                 current_face,
             )?;
         }
-        for vertex in brep_vertices(b)? {
+        let vertices = match joins {
+            Some((_, vertices)) => vertices.to_vec(),
+            None => brep_vertices(b)?,
+        };
+        for vertex in vertices {
+            if b.vertex(vertex).is_err() {
+                continue;
+            }
             if vertex::is_loop_vertex(b, vertex)? {
                 delete_vertex(k, b, vertex, notifications.as_deref_mut())?;
                 continue;
