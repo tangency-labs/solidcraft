@@ -849,12 +849,26 @@ impl Document {
                 // the face moves by `d` along its normal, so the pick point is `|d|`
                 // away from the current plane. Verify geometric continuity: this face
                 // is the offset's output only if a recorded pick point lies at that
-                // distance from its plane.
+                // distance from its plane, AND the projected point falls inside the
+                // face (its normal is parallel to the offset face's normal).
                 for face_pick in faces {
                     let pick_point: solidcore_record::Vec3 = (*face_pick).into();
                     let signed_dist = (pick_point - plane.origin).dot(plane.normal());
-                    if (signed_dist.abs() - d.abs()).abs() <= tolerance {
-                        return Some(FaceCertificate::Lineage);
+                    if (signed_dist.abs() - d.abs()).abs() > tolerance {
+                        continue;
+                    }
+                    // Project the pick point onto the face plane and check it lies
+                    // inside the face's 2D bounds (bounding circle from area/centroid).
+                    let local = pick_point - plane.origin - plane.normal() * signed_dist;
+                    let local_2d = solidcore_record::Vec2::new(local.dot(plane.x), local.dot(plane.y));
+                    if let Ok(face_infos) = body.body.faces(tolerance)
+                        && let Some(info) = face_infos.iter().find(|f| f.index == index)
+                    {
+                        let centroid_2d = solidcore_record::Vec2::new(info.centroid.dot(plane.x), info.centroid.dot(plane.y));
+                        let radius = (info.area / std::f64::consts::PI).sqrt();
+                        if (local_2d - centroid_2d).len() <= radius + tolerance {
+                            return Some(FaceCertificate::Lineage);
+                        }
                     }
                 }
             }
@@ -1241,11 +1255,12 @@ mod tests {
         let mut offset_idx = None;
         if let Ok(faces) = body.body.faces(tolerance) {
             for (i, _) in faces.iter().enumerate() {
-                if let Some(plane) = body.body.planar_face(i) {
-                    if plane.origin.y < -4.0 && plane.origin.y > -6.0 {
-                        offset_idx = Some(i);
-                        break;
-                    }
+                if let Some(plane) = body.body.planar_face(i)
+                    && plane.origin.y < -4.0
+                    && plane.origin.y > -6.0
+                {
+                    offset_idx = Some(i);
+                    break;
                 }
             }
         }
@@ -1308,11 +1323,12 @@ mod tests {
         let mut offset_idx = None;
         if let Ok(faces) = body.body.faces(tolerance) {
             for (i, _) in faces.iter().enumerate() {
-                if let Some(plane) = body.body.planar_face(i) {
-                    if plane.origin.y < -4.0 && plane.origin.y > -6.0 {
-                        offset_idx = Some(i);
-                        break;
-                    }
+                if let Some(plane) = body.body.planar_face(i)
+                    && plane.origin.y < -4.0
+                    && plane.origin.y > -6.0
+                {
+                    offset_idx = Some(i);
+                    break;
                 }
             }
         }
@@ -1395,11 +1411,12 @@ mod tests {
         let mut other_idx = None;
         if let Ok(faces) = body.body.faces(tolerance) {
             for (i, _) in faces.iter().enumerate() {
-                if let Some(plane) = body.body.planar_face(i) {
-                    if plane.origin.y > 39.0 && plane.origin.y < 41.0 {
-                        other_idx = Some(i);
-                        break;
-                    }
+                if let Some(plane) = body.body.planar_face(i)
+                    && plane.origin.y > 39.0
+                    && plane.origin.y < 41.0
+                {
+                    other_idx = Some(i);
+                    break;
                 }
             }
         }
