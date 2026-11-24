@@ -179,6 +179,16 @@ pub use crate::piece_names::parent_piece;
 /// Deeper chains than this are named by position only (bounded work and stack).
 const MAX_DEPTH: usize = 400;
 
+/// How deep the bodies a feature makes on `before` are in the chain of features that named them.
+pub(crate) fn depth_after(before: &ModelState) -> usize {
+    before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1
+}
+
+/// Whether the bodies a feature makes on `before` are past [`MAX_DEPTH`], named by position.
+pub(crate) fn past_limit(before: &ModelState) -> bool {
+    depth_after(before) >= MAX_DEPTH
+}
+
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
 

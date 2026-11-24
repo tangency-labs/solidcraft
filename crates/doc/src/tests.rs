@@ -910,6 +910,243 @@ fn a_stored_name_taken_by_a_body_before_it_is_not_reused() {
     assert!(fresh.state().bodies.iter().any(|b| b.name == "C post" && b.component == d), "D's body has the name C's post stores");
 }
 
+/// What an evaluation shows: each feature's outcome with the bodies after it, the last bodies in
+/// full and the body counter.
+type Shown = (Vec<(u64, Option<String>, Option<String>, Vec<(String, u64)>)>, Vec<(String, u64, i64, Vec<String>)>, usize);
+
+fn shown(m: &Model) -> Shown {
+    let bodies = |st: &ModelState| st.bodies.iter().map(|b| (b.name.clone(), b.component)).collect();
+    // A failed cut's hint at a body of another component follows where that is placed, which the
+    // key of a failure does not hold.
+    let error = |r: &FeatureResult| r.error.as_ref().map(|e| e.split(" in component '").next().unwrap_or_default().to_string());
+    let results = m.results.iter().map(|r| (r.id, error(r), r.warning.clone(), bodies(&r.state))).collect();
+    (results, summary(&m.state()), m.state().body_counter)
+}
+
+/// The session's model is what opening the design's file and evaluating it afresh gives.
+fn same_as_opened(m: &Model, doc: &Document, what: &str) {
+    let mut opened = Model::new();
+    opened.no_cache = true;
+    opened.evaluate(&crate::format::read(&doc.to_json()).unwrap());
+    let (kept, fresh) = (shown(m), shown(&opened));
+    for (f, (kept, fresh)) in doc.features.iter().zip(kept.0.iter().zip(&fresh.0)) {
+        assert_eq!(kept, fresh, "{what}: feature {} `{}`", f.id, f.name);
+    }
+    assert_eq!(kept, fresh, "{what}");
+}
+
+fn boxed(doc: &mut Document, component: u64, name: &str, x: f64, body_names: &[&str]) -> u64 {
+    let kind = serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+    add_in(doc, component, name, kind);
+    let id = doc.find_feature(name).unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = body_names.iter().map(|n| n.to_string()).collect();
+    id
+}
+
+/// A cut that names another component's body is refused once a body of its own component was asked
+/// to be called that (#12141): the cut that ran before that body was there is not kept.
+#[test]
+fn a_cut_is_not_kept_once_its_target_s_name_is_ambiguous() {
+    let mut doc = Document::new("ambiguous target");
+    let [a, c] = ["A", "C"].map(|n| doc.add_component(Some(n), 0).unwrap());
+    boxed(&mut doc, a, "A box", 0.0, &["X"]);
+    add_in(
+        &mut doc,
+        c,
+        "C cut",
+        serde_json::json!({"type": "cylinder", "base": [5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "20", "operation": "cut"}),
+    );
+    let cut = doc.find_feature("C cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // An added body that makes nothing ambiguous keeps the cut.
+    let mut other = doc.clone();
+    boxed(&mut other, c, "C other", 100.0, &["Y"]);
+    other.features[1..].rotate_right(1);
+    m.evaluate(&other);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 1, "the added box alone");
+    same_as_opened(&m, &other, "an unrelated body added");
+    let mut taken = doc.clone();
+    boxed(&mut taken, c, "C box", 100.0, &["X"]);
+    taken.features[1..].rotate_right(1);
+    m.evaluate(&taken);
+    assert!(m.result(cut).unwrap().error.as_ref().is_some_and(|e| e.contains("ambiguous")), "{:?}", m.result(cut).unwrap().error);
+    same_as_opened(&m, &taken, "the target's name asked for in the cut's component");
+}
+
+/// A New Body that names a body fails once that body is gone, as it does evaluated afresh.
+#[test]
+fn a_new_body_is_not_kept_once_a_body_it_names_is_gone() {
+    let mut doc = Document::new("named by a new body");
+    let x = boxed(&mut doc, 0, "X box", 0.0, &["X"]);
+    let new = boxed(&mut doc, 0, "New", 20.0, &["New"]);
+    doc.feature_mut(new).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    doc.delete_feature(x).unwrap();
+    m.evaluate(&doc);
+    assert!(m.result(new).unwrap().error.is_some());
+    same_as_opened(&m, &doc, "the named body deleted");
+}
+
+/// A body numbered from the counter is not a stored one for a name stored in another slot: what
+/// it is numbered follows the bodies before it (found by the edits below).
+#[test]
+fn a_numbered_body_is_not_kept_for_a_name_stored_in_another_slot() {
+    let mut doc = Document::new("slots");
+    boxed(&mut doc, 0, "Seventh", 0.0, &["Body7"]);
+    boxed(&mut doc, 0, "Numbered", 20.0, &["", "Body8"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body8").is_some());
+    let seventh = doc.find_feature("Seventh").unwrap().id;
+    doc.delete_feature(seventh).unwrap();
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "the body that counted to seven deleted");
+    assert!(m.state().body("Body1").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body made under a stored `BodyN` counts up to N wherever it is made: kept on a model that has
+/// counted less than it had, it still does, so the next body is numbered as in a fresh evaluation.
+#[test]
+fn a_kept_body_of_a_stored_number_still_counts() {
+    let mut doc = Document::new("counted");
+    boxed(&mut doc, 0, "Tenth", 0.0, &["Body10"]);
+    boxed(&mut doc, 0, "Fifth", 20.0, &["Body5"]);
+    boxed(&mut doc, 0, "Next", 40.0, &[]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body11").is_some());
+    let tenth = doc.find_feature("Tenth").unwrap().id;
+    doc.delete_feature(tenth).unwrap();
+    m.evaluate(&doc);
+    no_errors(&m);
+    same_as_opened(&m, &doc, "the body that counted to ten deleted");
+    assert!(m.state().body("Body6").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// `n` separate boxes, each with one edge rounded, the edge named and recorded as the Fillet
+/// command stores it when it is picked.
+fn rounded_boxes(n: usize) -> Document {
+    let mut doc = Document::new("rounded boxes");
+    for i in 0..n {
+        let (x, name) = (20.0 * i as f64, format!("Block {}", i + 1));
+        boxed(&mut doc, 0, &name, x, &[&name]);
+        add_in(
+            &mut doc,
+            0,
+            &format!("Round {}", i + 1),
+            serde_json::json!({"type": "fillet", "edges": [[x + 10.0, 5.0, 10.0]], "radius": "1", "body": name}),
+        );
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    for f in &mut doc.features {
+        if let FeatureKind::Fillet { edges, body, .. } = &f.kind {
+            let st = m.state_before(f.id);
+            f.edge_refs = crate::edge_refs(&st, body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&st, body, &plain(edges));
+        }
+    }
+    doc
+}
+
+/// A face of a tool without roles (a coil's end) is named after whatever body it lies on, read or
+/// not: a bevel of its edge, stored by that name, is not kept once another body names the face.
+#[test]
+fn a_bevel_is_not_kept_once_another_body_names_its_face() {
+    let mut doc = Document::new("named from geometry");
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    boxed(&mut doc, 0, "Block", 0.0, &["Block"]);
+    let coil = serde_json::json!({"type": "coil", "base": [5.0, 5.0, 10.5], "axis": [0.0, 0.0, 1.0], "diameter": "6", "pitch": "4", "turns": "1", "section_size": "2", "section": "square", "operation": "join"});
+    add_in(&mut doc, 0, "Coil", coil);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A pick a little off its edge, as one kept from before an edit is: the point alone finds nothing.
+    let edge = Vec3::new(8.0, 4.6, 11.8);
+    let body = Some(BodyName("Block".into()));
+    let (refs, names) = (crate::edge_refs(&m.state(), &body, &[edge]), crate::edge_names_for(&m.state(), &body, &[edge]));
+    add_in(&mut doc, 0, "Bevel", serde_json::json!({"type": "chamfer", "edges": [[8.0, 4.6, 11.8]], "distance": "0.2", "body": "Block"}));
+    let bevel = doc.find_feature("Bevel").unwrap().id;
+    let f = doc.feature_mut(bevel).unwrap();
+    (f.edge_refs, f.edge_names) = (refs, names);
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A block whose side lies on the coil's end.
+    let other = serde_json::json!({"type": "box", "corner": [6.0, 0.0, 8.0], "length": "10", "width": "5", "height": "10", "operation": "new_body"});
+    add_in(&mut doc, b, "Other", other);
+    let id = doc.find_feature("Other").unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = vec!["Other".into()];
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a block on the coil's end");
+}
+
+/// A pick off its edge lies on every body with an edge up to twice as far, and the round says so:
+/// a body added there, beyond the reach the bodies near the pick are looked for in, is named too.
+#[test]
+fn a_round_is_not_kept_without_the_note_of_a_body_added_by_its_pick() {
+    let long = |doc: &mut Document, component: u64, name: &str, x: f64| {
+        let kind =
+            serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "1000", "height": "10", "operation": "new_body"});
+        add_in(doc, component, name, kind);
+        let id = doc.find_feature(name).unwrap().id;
+        doc.feature_mut(id).unwrap().body_names = vec![name.into()];
+    };
+    let mut doc = Document::new("a pick off its edge");
+    long(&mut doc, 0, "Rail", 0.0);
+    add_in(&mut doc, 0, "Round", serde_json::json!({"type": "fillet", "edges": [[10.8, 500.0, 10.0]], "radius": "1"}));
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    long(&mut doc, b, "Other", 12.3);
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a rail added by the pick");
+}
+
+/// Boxes with one rounded edge each, past the 400 features a body's names are worked out from
+/// history for: the bodies after that name their faces by place. Deleting a box, or adding one,
+/// moves bodies across that limit, and a round whose edge was named on the other side of it does
+/// what it does in the design opened afresh: it fails there, so what it did before is not kept
+/// (#20956). What stays on its side is kept: an undo evaluates nothing again.
+#[test]
+fn rounds_past_the_naming_limit_are_as_in_the_design_opened_afresh() {
+    let boxes = 205;
+    let doc = rounded_boxes(boxes);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let without = |boxes: &[usize]| {
+        let mut d = doc.clone();
+        for name in boxes.iter().flat_map(|i| [format!("Block {i}"), format!("Round {i}")]) {
+            let id = d.find_feature(&name).unwrap().id;
+            d.delete_feature(id).unwrap();
+        }
+        d
+    };
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -20.0, &["Added"]);
+    added.features.rotate_right(1);
+    for (what, d, failed) in [("first deleted", without(&[1]), 0), ("middle deleted", without(&[boxes / 2]), 0), ("one added first", added, 1)] {
+        m.evaluate(&d);
+        assert_eq!(m.results.iter().filter(|r| r.error.is_some()).count(), failed, "{what}");
+        same_as_opened(&m, &d, what);
+        m.evaluate(&doc);
+        assert_eq!(m.last_recomputed, 0, "{what}, undone");
+    }
+    same_as_opened(&m, &doc, "all undone");
+}
+
 /// A construction plane's edit recomputes only the features that use it: a sketch on it and what
 /// is made from that sketch, wherever they are in the timeline, and nothing else.
 #[test]

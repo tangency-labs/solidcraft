@@ -1328,7 +1328,7 @@ impl ModelState {
     /// `f` must have gone through [`naming_feature`]: face naming reads no parameter values.
     fn stamp(&mut self, doc: &Document, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
-        let depth = before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1;
+        let depth = crate::naming::depth_after(before);
         let origin = Arc::new(crate::naming::NamingOrigin { feature: f.clone(), before: before.clone(), depth, mats });
         // Pieces a cut left are named after their faces, not the kernel's shell order (unless
         // the feature was saved when they were named in that order).
@@ -2829,7 +2829,8 @@ impl EvalKey {
         let local = fingerprint(doc, 0, f, vals, false, steps)
             ^ placement_digest(doc, f, Some(st))
             ^ construct_digest(doc, vals, f, Some(st))
-            ^ turns_digest(doc, vals, f).unwrap_or(0);
+            ^ turns_digest(doc, vals, f).unwrap_or(0)
+            ^ depth_digest(st);
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2893,6 +2894,19 @@ impl EvalKey {
         });
         EvalKey { whole, reads, relative }
     }
+}
+
+/// What the naming depth adds to a feature's keys: nothing up to the limit, past which the bodies
+/// it makes name their faces by position. Every body before it counts, so features it reads
+/// nothing of put it past the limit: a result named one way is not kept where the design
+/// evaluated afresh names it the other, and the references to it find other faces or none (#20956).
+fn depth_digest(st: &ModelState) -> u64 {
+    if !crate::naming::past_limit(st) {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "past the naming limit".hash(&mut h);
+    h.finish()
 }
 
 /// A feature's own inputs, for the keys of what it reads ([`EvalKey`]): its definition and
@@ -3014,7 +3028,9 @@ fn blend_candidates(st: &ModelState, edges: &[Vec3]) -> Option<Vec<usize>> {
                 return None;
             }
             let tol = (b.body.size() * 2e-3).max(1e-3);
-            hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if d <= BLEND_REACH);
+            // A note names every body with an edge within twice this distance
+            // ([`body_on_edge_noted`]): those too are among the bodies near.
+            hit |= matches!(b.body.nearest_edge(p, tol), Ok(Some((_, d))) if 2.0 * d + 1e-3 <= BLEND_REACH);
         }
         if !hit {
             return None;
@@ -3076,13 +3092,17 @@ impl Feature {
             if names.iter().any(|n| n == "*") {
                 return None;
             }
-            names.iter().map(|n| st.bodies.iter().position(|b| &b.name == n)).collect()
+            // A name evaluation may refuse as ambiguous, for other bodies of this component
+            // ([`named_target`]): what it finds is not all that is read.
+            names.iter().map(|n| named_target(doc, st, self, n).ok()).collect()
         };
         // The bodies a tool operates on, as `apply_traced` picks them.
         let operated = |(op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
             let targets = if targets.is_empty() { &self.participants } else { &targets };
             match op {
-                Operation::NewBody => Some(Vec::new()),
+                // A new body reads none of the bodies it names, but fails without them.
+                Operation::NewBody if targets.is_empty() || targets.iter().all(|n| n == "*") => Some(Vec::new()),
+                Operation::NewBody => named(targets).map(|_| Vec::new()),
                 _ if targets.is_empty() => Some(
                     st.bodies.iter().enumerate().filter(|(_, b)| b.component == self.component || b.feature == self.id).map(|(i, _)| i).collect(),
                 ),
@@ -3257,19 +3277,72 @@ impl Relative {
             fates.push((x.name.clone(), fate));
         }
         let made: Vec<ModelBody> = next.cloned().collect();
-        let stored = |b: &ModelBody| f.body_names.contains(&b.name) && !names.contains(b.name.as_str());
-        if !made.is_empty() && (changed || !made.iter().all(stored)) {
+        // Each in its own slot: a body numbered from the counter can come out with a name stored
+        // in another.
+        let stored = |(k, b): (usize, &ModelBody)| f.body_names.get(k) == Some(&b.name) && !names.contains(b.name.as_str());
+        if !made.is_empty() && (changed || !made.iter().enumerate().all(stored)) {
+            return None;
+        }
+        // Nor is it one that bodies it did not read have a say in.
+        let changes = fates.iter().filter_map(|(_, fate)| match fate {
+            Fate::Changed(b) => Some(b.as_ref()),
+            Fate::Kept | Fate::Removed => None,
+        });
+        if unnamed_edges(f) || !made.iter().chain(changes).all(|b| names_alone(b, f)) {
             return None;
         }
         // Counted only by a stored `BodyN` name: a body numbered from the counter is named by
         // every body before it.
-        let counter = match after.body_counter {
-            c if c == before.body_counter => 0,
-            c if made.iter().any(|b| b.name == format!("Body{c}")) => c,
-            _ => return None,
+        let number = |b: &ModelBody| b.name.strip_prefix("Body").filter(|_| crate::is_counted_body_name(&b.name))?.parse::<usize>().ok();
+        let counter = match (after.body_counter, made.iter().filter_map(number).max()) {
+            (c, Some(n)) if c == n && n > before.body_counter => n,
+            (c, _) if c != before.body_counter => return None,
+            (c, Some(n)) if n <= c => {
+                // Counted already here, but maybe not where it is made again: only a tool's new
+                // body is known to count ([`new_name`]).
+                if !independent_solid(f) {
+                    return None;
+                }
+                n
+            }
+            _ => 0,
         };
         Some(Relative { read: fates, made, counter })
     }
+}
+
+/// Whether blend `f` finds its edges by name on any body ([`named_body`]), not on one it names.
+fn unnamed_edges(f: &Feature) -> bool {
+    matches!(&f.kind, FeatureKind::Fillet { body: None, .. } | FeatureKind::Chamfer { body: None, .. }) && f.edge_names.iter().any(|n| !n.is_empty())
+}
+
+/// A solid of its own: its faces are never named after the bodies it lies on.
+fn independent_solid(f: &Feature) -> bool {
+    let kind = &f.kind;
+    let solid =
+        numeric_tool(kind) && !matches!(kind, FeatureKind::Coil { .. }) || matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. });
+    solid && feature_operation(f) == Some(Operation::NewBody)
+}
+
+/// Whether body `b`, as feature `f` made or changed it, names its faces from its own history: a
+/// face named from geometry is named after whatever bodies it lies on
+/// ([`crate::naming::geometric_names`]), also ones the feature did not read. The names a saved
+/// model kept were worked out when it was made.
+fn names_alone(b: &ModelBody, f: &Feature) -> bool {
+    use crate::lineage::{Lineage, Operand};
+    fn exact(l: &Lineage) -> bool {
+        l.history.faces.iter().all(|face| !face.origins.is_empty())
+            && l.operands.iter().all(|operand| match operand.as_ref() {
+                Operand::Made(roles) | Operand::CopiedTool { roles, .. } | Operand::Rebuilt { roles, .. } => roles.iter().all(|r| !r.is_empty()),
+                Operand::Grown { faces, .. } => faces.iter().all(Option::is_some),
+                Operand::Stage(stage) => exact(&stage.lineage),
+                Operand::Body(_) | Operand::Copy { .. } | Operand::Inner(_) => true,
+            })
+    }
+    if matches!(f.kind, FeatureKind::Move { .. }) || independent_solid(f) {
+        return true;
+    }
+    b.lineage().map_or(b.names.is_saved(), |l| exact(&l))
 }
 
 impl ModelState {
