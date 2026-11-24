@@ -9170,7 +9170,7 @@ mod tests {
         assert!(drop_is_loose(f64::INFINITY, 1e-4));
     }
 
-    /// WR-495 (shell_file_problemShell4_face2_extend): a range of values that covers the
+    /// WR-495 (`shell_file_problemShell4_face2_extend`): a range of values that covers the
     /// whole curve, ends to within `EFF_ZERO` relative, either way round, is a curve lying
     /// on the neighbour surface; a range that stops short of either end is not.
     #[test]
@@ -9185,7 +9185,7 @@ mod tests {
         assert!(!covers_curve(f64::NAN, 360.0, &ivl));
     }
 
-    /// WR-495 (shell_file_problemShell4_face2_extend): a closed exact circle running the
+    /// WR-495 (`shell_file_problemShell4_face2_extend`): a closed exact circle running the
     /// other way round from the marched curve it replaces is reversed, so its arcs run as
     /// the edge's did; one running the same way is kept.
     #[test]
