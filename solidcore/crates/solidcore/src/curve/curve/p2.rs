@@ -2077,10 +2077,7 @@ impl Curve {
         self.memo = CurveMemo::new();
         match &mut self.kind {
             CurveKind::BSpline(c) => c.trim_with_zone_tol(trim_interval, mode, zone_tol_3d),
-            CurveKind::Hyperbola(c) => {
-                c.base
-                    .trim_with_zone_tol(trim_interval, mode, zone_tol_3d)
-            }
+            CurveKind::Hyperbola(c) => c.base.trim_with_zone_tol(trim_interval, mode, zone_tol_3d),
             CurveKind::Ellipse(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
             CurveKind::Parabola(c) => {
                 c.base_mut()

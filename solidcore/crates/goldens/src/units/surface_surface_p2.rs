@@ -3250,7 +3250,6 @@ mod tests {
     /// Hausdorff bound between `C` and `S(W)`. The moved curves are listed by their control
     /// point counts, the ones the row records.
     #[test]
-    #[ignore = "certifies intersection curves; see crate::bstuv_trim_rows"]
     fn bstuv_intersection_kept_spans_lie_on_their_curves() {
         let name = "ssi_adv_ssi_clasic_ruled_f0_f0";
         let case = crate::case::regression_case(&Runner, name);

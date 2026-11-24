@@ -4782,9 +4782,8 @@ mod tests {
     /// eighth of the tolerance). These are the only trims of the bodies whose certificates
     /// differ from upstream's cleanup (measured when the PR retiring the flag was written).
     #[test]
-    #[ignore = "replays two offsets; see crate::bstuv_trim_rows"]
     fn bstuv_offset_moved_trims_lie_on_their_edges() {
-        for (name, eu) in [("gen0074", 15), ("gen0400", 23)] {
+        for (name, eu, cps) in [("gen0074", 15, 5), ("gen0400", 23, 51)] {
             let case = crate::case::regression_case(&Runner, name);
             crate::certify::watch_written();
             let _ = Runner.run_rust(&case).unwrap();
@@ -4797,7 +4796,13 @@ mod tests {
                 let cert =
                     crate::trims_on_edges::certify_edgeuse(&Kernel::default(), b, x, 0.125 * tol)
                         .unwrap();
-                eprintln!("BSTUV {name}: {cert:?}");
+                let trim = b.edgeuse(x).unwrap().uv_trim_curve.as_ref().unwrap();
+                let CurveKind::BSpline(bs) = trim.kind() else {
+                    panic!("{name}: the trim is not a B-spline")
+                };
+                let n = bs.gw_nurb().unwrap().n();
+                eprintln!("BSTUV {name}: {n} control points, {cert:?}");
+                assert_eq!(n, cps, "{name}: the row's moved trim");
                 assert!(
                     cert.holds(),
                     "{name}: edge use {x:?}'s trim is {:e} off edge {e:?} (tolerance {tol:e})",

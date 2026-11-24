@@ -1541,7 +1541,6 @@ mod tests {
     /// `S(W)`. The moved curves are listed by their control point counts, the ones the row
     /// records.
     #[test]
-    #[ignore = "certifies traced curves; see crate::bstuv_trim_rows"]
     fn bstuv_silhouette_kept_spans_lie_on_their_curves() {
         let moved: [(&str, &[(usize, usize)]); 2] = [
             ("sil0048", &[(4, 1389)]),

@@ -202,7 +202,6 @@ mod tests {
     /// the UV span lengths against the 3D zone tolerance. That trim had points 7.8 off its
     /// edge, past the 3.67 tolerance (measured when the PR retiring the flag was written).
     #[test]
-    #[ignore = "certifies the body's trims; see crate::bstuv_trim_rows"]
     fn bstuv_mouse_two_struts_trims_lie_on_their_edges() {
         let mut k = Kernel::default();
         let mut b = mouse(&mut k);
@@ -235,6 +234,9 @@ mod tests {
                 _ => 0,
             };
             eprintln!("BSTUV mouse two struts: {spans} spans, {cert:?}");
+            if x == solidcore::topology::EdgeuseId::from_index(23) {
+                assert_eq!(spans, 77, "the joined edge's trim keeps its spans");
+            }
             assert!(
                 cert.holds(),
                 "edge use {x:?}'s trim is {:e} off edge {e:?} (tolerance {tol:e})",

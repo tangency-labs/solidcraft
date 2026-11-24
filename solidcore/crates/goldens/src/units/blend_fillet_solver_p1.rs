@@ -2367,7 +2367,6 @@ mod bstuv {
     /// a rounded-interval Hausdorff bound between `C` and `S(W)`, over the whole interval
     /// and over each end span.
     #[test]
-    #[ignore = "certifies the rail's trim; see crate::bstuv_trim_rows"]
     fn bstuv_trim_rail_keeps_its_rail_on_the_edge() {
         use solidcore::curve::curve::CurveKind;
         use solidcore::query::curve_surface_gap::trim_image_gap_bound;

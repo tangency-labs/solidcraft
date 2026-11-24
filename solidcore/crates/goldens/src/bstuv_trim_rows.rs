@@ -27,9 +27,9 @@
 //!
 //! This module checks that each moved row's replay reproduces its blessed row.
 //!
-//! Run (the certificates bisect long curves, so they are `#[ignore]`d; the goldens job
-//! checks the rows themselves):
-//! `cargo test --profile goldens -p goldens --lib bstuv_ -- --include-ignored --nocapture`.
+//! The certificates and the replays run with the goldens library tests (about 16 s on four
+//! threads); `--nocapture` prints each bound:
+//! `cargo test --profile goldens -p goldens --lib bstuv_ -- --nocapture`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -100,7 +100,6 @@ pub(crate) fn trim_end_spans(k: &Kernel, surface: &Surface, c: &Curve, w: &Curve
 /// Every moved row's replay reproduces its blessed row, so the certificates in the
 /// runners' modules measure the bodies and curves the rows record.
 #[test]
-#[ignore = "replays the fillet and offset rows (minutes); see the module docs"]
 fn bstuv_moved_rows_replay_their_rows() {
     let dir = crate::golden::default_dir();
     for (unit, name) in ROWS {
@@ -109,7 +108,8 @@ fn bstuv_moved_rows_replay_their_rows() {
             "blend.fillet_solver_p1" => &blend_fillet_solver_p1::Runner,
             "offset.offset_geometry_creation" => &offset_offset_geometry_creation::Runner,
             "surface.surface_p1" => &surface_surface_p1::Runner,
-            _ => &surface_surface_p2::Runner,
+            "surface.surface_p2" => &surface_surface_p2::Runner,
+            _ => panic!("{unit}: no runner"),
         };
         let case = crate::case::regression_case(runner, name);
         let out = runner.run_rust(&case).unwrap();
