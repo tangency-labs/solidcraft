@@ -2587,7 +2587,7 @@ fn edit_joint_from_drive_joints_keeps_its_two_sides() {
     let commands = apply_commands(&h.app, &d).unwrap();
     assert_eq!(commands[0].0, "joint.edit");
     assert_eq!(commands[0].1["joint"], json!(glue));
-    assert_eq!(commands[0].1["offset_x"], json!(20.0));
+    assert_eq!(commands[0].1["offset_x"], json!("20 mm"));
     // The two sides are the first two inputs; the Joint dialog holds the alignment references
     // after them, so the sides are read by their place and not by the count of the inputs.
     assert!(d.inputs.len() >= 2, "the Edit Joint dialog keeps its two sides");
