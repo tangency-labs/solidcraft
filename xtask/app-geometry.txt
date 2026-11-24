@@ -92,7 +92,6 @@ crates/doc/src/eval.rs:feature_json triangles
 crates/doc/src/eval.rs:feature_tools_with_constructor atan2,cross,dot,normalized
 crates/doc/src/eval.rs:flat_to_end dot
 crates/doc/src/eval.rs:from_slope_height dot
-crates/doc/src/eval.rs:has_a_new_surface cross,dot
 crates/doc/src/eval.rs:height_at raycast
 crates/doc/src/eval.rs:hole_depth_to dot,raycast
 crates/doc/src/eval.rs:hole_dir_into_face dot,normalized
@@ -110,6 +109,7 @@ crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
+crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
 crates/doc/src/eval.rs:parallel_tapped_wall dot
@@ -639,7 +639,6 @@ crates/engine/src/mesh_lines/coincide.rs:disk dot
 crates/engine/src/mesh_lines/coincide.rs:within dot
 crates/engine/src/mesh_lines/meshes.rs:Scene::triangle_count triangles
 crates/engine/src/mesh_lines/meshes.rs:buffer_bytes triangles
-crates/engine/src/mesh_lines/meshes.rs:prepare triangles
 crates/engine/src/mesh_lines/meshes.rs:rigid cross,dot
 crates/engine/src/mesh_lines/projection.rs:View::project dot
 crates/engine/src/mesh_lines/projection.rs:merge_lines dot

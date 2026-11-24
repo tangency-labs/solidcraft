@@ -514,6 +514,17 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
+
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
+
 ### pattern instance
 
 One copy that a pattern makes of its features, bodies or sketch entities.

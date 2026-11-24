@@ -550,10 +550,21 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 /// Read a design file's JSON, upgrading older formats.
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+    let drawings = if v.get("drawings").is_some() {
+        #[derive(serde::Deserialize)]
+        struct Inline<'a> {
+            #[serde(borrow)]
+            drawings: &'a serde_json::value::RawValue,
+        }
+        let raw: Inline<'_> = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.drawings.get()).ok()
+    } else {
+        None
+    };
     let (version, applied) = DESIGN.take_version(&mut v)?;
     match DESIGN.newer(version, applied.as_deref()) {
-        Some(newer) => crate::newer_file::read(v, version, applied, newer),
-        None => decode(v, version, applied.as_deref()),
+        Some(newer) => crate::newer_file::read(v, version, applied, newer, drawings.as_deref()),
+        None => decode(v, version, applied.as_deref(), drawings.as_deref()),
     }
 }
 
@@ -589,7 +600,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    take_drawings(&mut v)?;
+    take_drawings(&mut v, None)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -597,9 +608,14 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 }
 
 /// A design's JSON, its format taken out, as the document it holds.
-pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+pub(crate) fn decode(
+    mut v: Value,
+    version: u32,
+    applied: Option<&[String]>,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
+) -> Result<Document> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    let drawings = take_drawings(&mut v)?;
+    let drawings = take_drawings(&mut v, drawing_text)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
@@ -751,12 +767,17 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
 
 /// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
 /// rules see anything: a drawing this build can't read refuses the design, never dropped.
-fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+fn take_drawings(v: &mut Value, text: Option<&[&serde_json::value::RawValue]>) -> Result<Vec<crate::drawing::Drawing>> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
     let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
     crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
-    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
-    list.into_iter().enumerate().map(read).collect()
+    list.into_iter()
+        .enumerate()
+        .map(|(i, drawing)| {
+            let text = text.and_then(|records| records.get(i)).map(|raw| raw.get());
+            crate::drawing::Drawing::read_value(drawing, text).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)))
+        })
+        .collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {

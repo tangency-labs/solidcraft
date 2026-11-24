@@ -780,9 +780,10 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
             })
             .cloned();
         let value = match dimension.as_ref().map(|c| &c.kind) {
-            Some(ConstraintKind::OffsetDistance { value, .. }) => *value,
+            Some(ConstraintKind::OffsetDistance { value, .. }) => value.abs(),
             _ => record.distance.abs(),
         };
+        let kept_param = dimension.as_ref().filter(|c| c.kind.value().is_none_or(|v| v >= 0.0)).and_then(|c| c.param.clone());
         sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
         for output in &record.outputs {
             let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
@@ -815,12 +816,13 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
                 }
                 _ => return Err(bad(cmd, "only offset lines, circles and arcs can be released")),
             };
-            let id = sk.add_constraint(kind.clone(), dimension.as_ref().and_then(|c| c.param.clone()))?;
+            let id = sk.add_constraint(kind.clone(), kept_param.clone())?;
             if let Some(dimension) = &dimension
                 && let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id)
             {
                 let mut kept = dimension.clone();
                 kept.id = if index == 0 { dimension.id.clone() } else { id };
+                kept.param = kept_param.clone();
                 kept.kind = kind;
                 *added = kept;
             }

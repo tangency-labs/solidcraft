@@ -1286,6 +1286,43 @@ pub fn plane_crossings(
     })?
 }
 
+/// Isolated plane intersections of ordered curve pieces, retaining the first hit
+/// when pieces meet within the kernel's zone tolerance. This is the same
+/// tolerance and inclusive comparison used by the kernel's single-curve
+/// [`api_intersectors::curve_plane_crossings`]. Distances are measured by the kernel.
+///
+/// # Errors
+/// The errors of [`plane_crossings`] for any piece.
+pub fn piece_plane_crossings(
+    pieces: &[(&Curve, [f64; 2])],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<Vec2>> {
+    let tolerance = run("curve::piece_plane_crossings_tolerance", |k| {
+        Ok(solidcore::geom::tol::zone_tol3d(
+            k,
+            solidcore::geom::tol::USE_DEFAULT,
+        ))
+    })?;
+    let mut points: Vec<Vec2> = Vec::new();
+    for (curve, interval) in pieces {
+        for hit in plane_crossings(curve, *interval, plane)? {
+            let mut duplicate = false;
+            for point in &points {
+                let distance =
+                    crate::measure::point_distance([point.x, point.y, 0.0], [hit.x, hit.y, 0.0])?;
+                if distance.value <= tolerance {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if !duplicate {
+                points.push(hit);
+            }
+        }
+    }
+    Ok(points)
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -1403,6 +1440,77 @@ mod tests {
             biarc(Vec2::ZERO, Vec2::Y, Vec2::X, Vec2::Y, 0.5),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn piece_plane_crossings_keep_shared_endpoints_once() {
+        use solidcore_record::Plane;
+
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        let c = Curve::Line {
+            start: [2.0, -1.0, 0.0],
+            end: [2.0, 1.0, 0.0],
+        };
+        let hits = piece_plane_crossings(
+            &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+            &Plane::XZ,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].x.abs() < 1e-7 && hits[0].y.abs() < 1e-7);
+        assert!((hits[1].x - 2.0).abs() < 1e-7 && hits[1].y.abs() < 1e-7);
+        assert!(piece_plane_crossings(&[], &Plane::XZ).unwrap().is_empty());
+    }
+
+    #[test]
+    fn piece_plane_crossings_follow_the_kernel_zone_boundary() {
+        use solidcore_record::Plane;
+
+        let tolerance = run("test::plane_crossing_tolerance", |k| {
+            Ok(solidcore::geom::tol::zone_tol3d(
+                k,
+                solidcore::geom::tol::USE_DEFAULT,
+            ))
+        })
+        .unwrap();
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        // The first two pieces share an endpoint. The third crosses at a
+        // known distance below, on, or above the kernel's coincidence boundary.
+        for (factor, expected) in [(0.5, 1), (1.0, 1), (1.5, 2)] {
+            let offset = factor * tolerance;
+            let c = Curve::Line {
+                start: [offset, -1.0, 0.0],
+                end: [offset, 1.0, 0.0],
+            };
+            let hits = piece_plane_crossings(
+                &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+                &Plane::XZ,
+            )
+            .unwrap();
+            assert_eq!(
+                hits.len(),
+                expected,
+                "distance = {factor} times zone tolerance"
+            );
+            assert_eq!(hits[0], Vec2::ZERO);
+            if expected == 2 {
+                assert_eq!(hits[1], Vec2::new(offset, 0.0));
+            }
+        }
     }
 
     #[test]

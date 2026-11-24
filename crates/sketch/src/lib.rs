@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 mod biarc;
+pub mod cancel;
 mod construct;
 mod curves;
 mod decompose;
@@ -43,6 +44,7 @@ mod profiles3d;
 pub mod profiling;
 mod shape;
 mod solver;
+mod sparse;
 mod spline_points;
 mod text;
 mod thin;
