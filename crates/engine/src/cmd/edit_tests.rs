@@ -2861,3 +2861,82 @@ fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
     }
     assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
 }
+
+/// #19163: an extrude of a design saved by 0.30.1 (format 48) picks profile 1 of the rim by index,
+/// in the numbering builds before 0.42.0 gave it. Edits keep the lens it builds:
+/// - `timeline.edit` of its distance keeps the pick and its numbering, and one that gives new
+///   `profiles` is read in this build's numbering;
+/// - an edit while its sketch is suppressed is refused, and the pick keeps its numbering;
+/// - Edit Feature (`timeline.redefine`) sends the profile as this build numbers it (as its window
+///   shows it, `picked_indices`), and the pick is then saved in this build's numbering.
+///
+/// Which lens profile 1 is depends on the round-off in the lenses' areas, so the lens is read
+/// from the design as it opens, not written down.
+#[test]
+fn editing_an_index_pick_saved_before_0_42_keeps_its_region() {
+    use crate::cmd::features::patterns_tests::{bodies_at, rim_lens_design};
+    let lens = |s: &Session| bodies_at(s).into_iter().find(|b| b.0 == "R").map(|b| (b.1, b.2)).unwrap();
+    let same = |(v, c): (f64, [f64; 3]), (w, d): (f64, [f64; 3]), thickness: f64| {
+        (v / thickness - w).abs() < 1e-6 * w && (c[0] - d[0]).abs() < 1e-6 && (c[1] - d[1]).abs() < 1e-6
+    };
+    let order = |s: &Session| match &s.doc.features[1].kind {
+        solidcraft_doc::FeatureKind::Extrude { profiles: solidcraft_doc::ProfileSel::Indices { indices, order }, .. } => (indices.clone(), *order),
+        other => panic!("an index pick: {other:?}"),
+    };
+    let open = || {
+        let mut s = Session::new(rim_lens_design(48, 1));
+        s.refresh();
+        s
+    };
+    let mut s = open();
+    let saved = lens(&s);
+    assert!((saved.0 - 52.6548).abs() < 1e-3, "profile 1 is an inner lens: {saved:?}");
+    assert_eq!(order(&s), (vec![1], solidcraft_doc::sketch::ProfileOrder::ExactCrossings));
+    run(&mut s, "timeline.edit", json!({"feature": "Lens", "set": {"extent": {"distance": "2"}}}));
+    assert!(same(lens(&s), saved, 2.0), "after timeline.edit: {:?} vs {saved:?}", lens(&s));
+    assert_eq!(order(&s), (vec![1], solidcraft_doc::sketch::ProfileOrder::ExactCrossings));
+
+    let mut s = open();
+    run(&mut s, "timeline.suppress", json!({"feature": "Sketch1", "suppressed": true}));
+    // The edit is refused while the sketch is away; the pick keeps its numbering for when it is back.
+    assert!(s.execute("timeline.edit", &json!({"feature": "Lens", "set": {"extent": {"distance": "3"}}})).is_err());
+    assert_eq!(order(&s), (vec![1], solidcraft_doc::sketch::ProfileOrder::ExactCrossings));
+    run(&mut s, "timeline.suppress", json!({"feature": "Sketch1", "suppressed": false}));
+    assert!(same(lens(&s), saved, 1.0), "after its sketch was suppressed and back: {:?} vs {saved:?}", lens(&s));
+
+    // A pick given anew by `timeline.edit` is in this build's numbering: profile `other` as this
+    // build numbers it, another lens than the one the stored pick builds, and no mark is kept.
+    for given in [json!([0]), json!({"type": "indices", "indices": [0]})] {
+        let mut s = open();
+        let (other, want) = {
+            let st = s.model.state();
+            let ss = st.sketch(1).unwrap();
+            let older = |k: usize| solidcraft_doc::picked_indices(ss, &[k], solidcraft_doc::sketch::ProfileOrder::ExactCrossings).unwrap()[0];
+            // An inner lens the two numberings give different numbers, where there is one (on
+            // Windows and Linux there is), so reading it in the wrong numbering would show.
+            let lenses = (1..ss.profiles.len()).filter(|i| *i != older(1) && (ss.profiles[*i].area - 52.6548).abs() < 1e-3);
+            let other = lenses.clone().find(|i| older(*i) != *i).or_else(|| lenses.clone().next()).unwrap();
+            (other, ss.profiles[other].centroid)
+        };
+        let set = if given.is_array() { json!([other]) } else { json!({"type": "indices", "indices": [other]}) };
+        run(&mut s, "timeline.edit", json!({"feature": "Lens", "set": {"profiles": set}}));
+        let (volume, c) = lens(&s);
+        assert!((volume - 52.6548).abs() < 1e-3 && (c[0] - want.x).abs() < 1e-2 && (c[1] - want.y).abs() < 1e-2, "{given}: {c:?} vs {want:?}");
+        assert_eq!(order(&s), (vec![other], solidcraft_doc::sketch::ProfileOrder::Current), "{given}");
+    }
+
+    let mut s = open();
+    let index = {
+        let st = s.model.state();
+        let ss = st.sketch(1).unwrap();
+        solidcraft_doc::picked_indices(ss, &[1], solidcraft_doc::sketch::ProfileOrder::ExactCrossings).unwrap()[0]
+    };
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Lens", "command": "solid.extrude",
+        "params": {"sketch": 1, "profiles": [index], "distance": 4, "operation": "new_body", "exact_regions": true}}),
+    );
+    assert!(same(lens(&s), saved, 4.0), "after timeline.redefine: {:?} vs {saved:?}", lens(&s));
+    assert_eq!(order(&s), (vec![index], solidcraft_doc::sketch::ProfileOrder::Current));
+}

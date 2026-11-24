@@ -2551,3 +2551,188 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     model.evaluate(&reopened);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }
+
+/// The design of #19163 as a build of format `format` saves it: a circle of radius 200 at the
+/// origin crossed by eight circles of radius 4.3 at (±80, ±180) and (±180, ±80), and each of its
+/// 17 regions extruded 1 mm as its own body `R0`..`R16`, picked by index (as `solid.extrude
+/// {profiles: [k]}` saves a pick its curves can't name: both lenses at a small circle are bounded
+/// by pieces of the same two circles).
+fn rim_regions_design(format: u32) -> String {
+    use serde_json::json;
+    let centres = [(80, 180), (180, 80), (-80, 180), (-180, 80), (80, -180), (180, -80), (-80, -180), (-180, -80)];
+    let mut points = vec![json!({"fixed": true, "id": "origin", "pos": [0.0, 0.0]}), json!({"id": "c1.center", "pos": [0.0, 0.0]})];
+    let mut curves = vec![json!({"c": 1, "id": "c1", "r": 200.0, "type": "circle"})];
+    for (k, (x, y)) in centres.iter().enumerate() {
+        points.push(json!({"id": format!("c{}.center", k + 2), "pos": [f64::from(*x), f64::from(*y)]}));
+        curves.push(json!({"c": k + 2, "id": format!("c{}", k + 2), "r": 4.3, "type": "circle"}));
+    }
+    let mut features = vec![json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch",
+        "sketch": {"constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}], "curves": curves, "points": points}})];
+    for k in 0..17u64 {
+        features.push(json!({"id": k + 2, "name": format!("Extrude{}", k + 1), "type": "extrude", "sketch": 1,
+            "profiles": {"type": "indices", "indices": [k]}, "operation": "new_body", "body_names": [format!("R{k}")],
+            "extent": {"convention": "total_distance", "direction": "positive", "distance": "1"}}));
+    }
+    json!({"format": crate::format::format_string(format), "name": "rim", "units": "mm", "next_id": 19, "params": [], "features": features})
+        .to_string()
+}
+
+/// A region of the rim sketch (`None`: the disc; else the lens at the small circle centred at
+/// (x, y), inside the large circle or not), as closed forms: its area and centroid. With R = 200,
+/// r = 4.3 and a small circle's centre d = sqrt(80² + 180²) = 196.977 from the origin, the inner
+/// lens has area r² acos((d² + r² − R²)/(2dr)) + R² acos((d² + R² − r²)/(2dR))
+/// − ½ sqrt((−d+r+R)(d+r−R)(d−r+R)(d+r+R)) = 52.6548 mm², the outer lens πr² minus that,
+/// 5.4333 mm², and the disc πR² − 8 × 52.6548 = 125242.468 mm². The chord through the two
+/// crossings, x0 = (d² + R² − r²)/(2d) from the origin, cuts the inner lens into a segment of each
+/// circle, so its centroid lies on the line to the small circle's centre, 196.612 from the
+/// origin; the outer lens's lies 200.513 out.
+fn rim_region(which: Option<(i32, i32, bool)>) -> (f64, Vec2) {
+    use std::f64::consts::PI;
+    let (big, small) = (200.0f64, 4.3f64);
+    let d = (80.0f64 * 80.0 + 180.0 * 180.0).sqrt();
+    let inner = small * small * ((d * d + small * small - big * big) / (2.0 * d * small)).acos()
+        + big * big * ((d * d + big * big - small * small) / (2.0 * d * big)).acos()
+        - 0.5 * ((-d + small + big) * (d + small - big) * (d - small + big) * (d + small + big)).sqrt();
+    // A circular segment of a circle of radius `a` cut off by a chord `h` from its centre: its
+    // area a²(θ − sin θ)/2 and its centroid's distance from the centre 4a sin³(θ/2)/(3(θ − sin θ)),
+    // for θ = 2 acos(h/a).
+    let segment = |a: f64, h: f64| {
+        let t = 2.0 * (h / a).acos();
+        (a * a / 2.0 * (t - t.sin()), 4.0 * a * (t / 2.0).sin().powi(3) / (3.0 * (t - t.sin())))
+    };
+    let x0 = (d * d + big * big - small * small) / (2.0 * d);
+    let ((a1, c1), (a2, c2)) = (segment(big, x0), segment(small, d - x0));
+    let moment = a1 * c1 + a2 * (d - c2);
+    let disc = PI * small * small;
+    match which {
+        None => (PI * big * big - 8.0 * inner, Vec2::new(0.0, 0.0)),
+        Some((x, y, inside)) => {
+            let towards = Vec2::new(f64::from(x), f64::from(y)) / d;
+            if inside { (inner, towards * (moment / (a1 + a2))) } else { (disc - inner, towards * ((disc * d - moment) / (disc - (a1 + a2)))) }
+        }
+    }
+}
+
+/// Each body `R0`..`R16` a rim design builds: its volume (its area, 1 mm thick) and the x and y
+/// of its centre of mass.
+fn rim_bodies(json: &str) -> (Document, Vec<(f64, Vec2)>) {
+    let doc = Document::from_json(json).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let st = model.state();
+    let bodies = (0..17)
+        .map(|k| {
+            let m = measure(&st.body(&format!("R{k}")).unwrap().body).unwrap();
+            (m.volume, Vec2::new(m.centroid.x, m.centroid.y))
+        })
+        .collect();
+    (doc, bodies)
+}
+
+/// The rim's 17 regions: the disc, then at each small circle its inner and its outer lens.
+fn every_rim_region() -> Vec<Option<(i32, i32, bool)>> {
+    let mut all = vec![None];
+    for (x, y) in [(80, 180), (180, 80), (-80, 180), (-180, 80), (80, -180), (180, -80), (-80, -180), (-180, -80)] {
+        all.extend([Some((x, y, true)), Some((x, y, false))]);
+    }
+    all
+}
+
+/// How far apart two points of the plane are.
+fn gap(a: Vec2, b: Vec2) -> f64 {
+    (a.x - b.x).hypot(a.y - b.y)
+}
+
+fn is_rim_region(body: (f64, Vec2), which: Option<(i32, i32, bool)>) -> bool {
+    let (area, centre) = rim_region(which);
+    rel(body.0, area) < 1e-6 && gap(body.1, centre) < 1e-3
+}
+
+/// The profiles of the rim design's sketch as this build finds them.
+fn rim_profiles(doc: &Document) -> Vec<solidcraft_sketch::Profile> {
+    let FeatureKind::Sketch { sketch, .. } = &doc.features[0].kind else { panic!("the rim sketch") };
+    solidcraft_sketch::find_profiles(sketch)
+}
+
+fn assert_body_is_profile(k: usize, (volume, at): (f64, Vec2), p: &solidcraft_sketch::Profile) {
+    assert!(
+        rel(volume, p.area) < 1e-6 && gap(at, p.centroid) < 1e-2,
+        "R{k} is {volume} mm³ at {at:?}, the profile is {} at {:?}",
+        p.area,
+        p.centroid
+    );
+}
+
+/// #19163: a design saved by 0.30.1 (format 48) whose extrudes pick the 17 regions of a sketch by
+/// index opens with each pick marked as numbered by the builds before 0.42.0, and body `Rk` is
+/// the region those builds numbered k (the lenses of each kind are congruent, so which is which is
+/// the round-off in their areas), which is the region 0.30.1 built (checked against 0.30.1's
+/// bodies). Every region is built once, and a save and reopen keeps the marks.
+#[test]
+fn index_picks_saved_before_0_42_build_the_regions_they_were_saved_with() {
+    let json = rim_regions_design(48);
+    let (doc, got) = rim_bodies(&json);
+    let older = |f: &Feature| matches!(&f.kind, FeatureKind::Extrude { profiles: ProfileSel::Indices { order, .. }, .. } if !order.is_current());
+    assert!(doc.features[1..].iter().all(older), "every index pick of the older design is marked");
+    let profiles = rim_profiles(&doc);
+    let FeatureKind::Sketch { sketch, .. } = &doc.features[0].kind else { panic!("the rim sketch") };
+    let numbered = solidcraft_sketch::profiles_in_order(sketch, &profiles, solidcraft_sketch::ProfileOrder::ExactCrossings);
+    assert_eq!(numbered.len(), 17);
+    for (k, body) in got.iter().enumerate() {
+        assert_body_is_profile(k, *body, &profiles[numbered[k].unwrap()]);
+    }
+    for which in every_rim_region() {
+        assert_eq!(got.iter().filter(|body| is_rim_region(**body, which)).count(), 1, "{which:?}");
+    }
+    // The issue's ground truth: the regions 0.30.1 built from this design (the centres of mass of
+    // its bodies, R0 to R16), which the older numbering gives on Windows and on Linux. The lenses'
+    // order is their round-off, so a system whose maths library rounds them otherwise could
+    // differ here; this build's own numbering differs at 16 of the 17 places on both.
+    let inner = |x, y| Some((x, y, true));
+    let outer = |x, y| Some((x, y, false));
+    let built_by_0_30_1 = [
+        None,
+        inner(180, -80),
+        inner(-180, 80),
+        inner(-180, -80),
+        inner(180, 80),
+        inner(80, 180),
+        inner(80, -180),
+        inner(-80, 180),
+        inner(-80, -180),
+        outer(-80, -180),
+        outer(-80, 180),
+        outer(80, -180),
+        outer(80, 180),
+        outer(180, 80),
+        outer(-180, 80),
+        outer(-180, -80),
+        outer(180, -80),
+    ];
+    for (k, (body, which)) in got.iter().zip(built_by_0_30_1).enumerate() {
+        assert!(is_rim_region(*body, which), "R{k} is {} mm³ at {:?}, 0.30.1 built {which:?}", body.0, body.1);
+    }
+    let reopened = Document::from_json(&doc.to_json()).unwrap();
+    assert!(reopened.features[1..].iter().all(older), "saved and opened again, the picks keep their numbering");
+    let (_, again) = rim_bodies(&doc.to_json());
+    for (k, (a, b)) in got.iter().zip(&again).enumerate() {
+        assert!(rel(a.0, b.0) < 1e-9 && gap(a.1, b.1) < 1e-9, "R{k} after a save: {a:?} vs {b:?}");
+    }
+}
+
+/// #19163: the same design saved by a build from 0.42.0 on (format 63, 0.45.0) opens with no
+/// mark, and body `Rk` is the sketch's profile k as this build numbers them, as it was.
+#[test]
+fn index_picks_saved_from_0_42_on_keep_the_numbering_they_were_saved_with() {
+    let (doc, got) = rim_bodies(&rim_regions_design(63));
+    assert!(!doc.to_json().contains("exact_crossings"));
+    let profiles = rim_profiles(&doc);
+    assert_eq!(profiles.len(), 17);
+    for (k, body) in got.iter().enumerate() {
+        assert_body_is_profile(k, *body, &profiles[k]);
+    }
+    for which in every_rim_region() {
+        assert_eq!(got.iter().filter(|body| is_rim_region(**body, which)).count(), 1, "{which:?}");
+    }
+}

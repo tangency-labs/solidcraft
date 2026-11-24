@@ -491,7 +491,9 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
     let ps = &ss.profiles;
     let q = match profiles(p, "Extrude").ok()? {
         ProfileSel::All => ps.first()?.region.interior_point(),
-        ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
+        ProfileSel::Indices { indices, order } => {
+            ps.get(*solidcraft_doc::picked_indices(ss, &indices, order).ok()?.first()?)?.region.interior_point()
+        }
         ProfileSel::Points { points } => *points.first()?,
         selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
@@ -729,11 +731,11 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
         let Some(ss) = st.sketch(sketch) else { continue };
         // An empty selection (a patch asked for only the sketch's 3D loops, #741) has nothing to
         // capture: it stays empty.
-        if matches!(sel, ProfileSel::Indices { indices } if indices.is_empty()) {
+        if matches!(sel, ProfileSel::Indices { indices, .. } if indices.is_empty()) {
             continue;
         }
         let indices = match sel {
-            ProfileSel::Indices { indices } => {
+            ProfileSel::Indices { indices, .. } => {
                 let have = ss.profiles.len();
                 if indices.len() > have {
                     return Err(EngineError::Other(format!("{} profiles are listed, but {} has {have}", indices.len(), ss.name)));
@@ -942,7 +944,9 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
             Ok(ProfileSel::OffsetBoundaries { associations })
         }
         Value::String(s) if s.eq_ignore_ascii_case("all") => Ok(ProfileSel::All),
-        Value::Number(n) => Ok(ProfileSel::Indices { indices: vec![n.as_u64().ok_or_else(|| bad(cmd, "profile index"))? as usize] }),
+        Value::Number(n) => {
+            Ok(ProfileSel::Indices { indices: vec![n.as_u64().ok_or_else(|| bad(cmd, "profile index"))? as usize], order: Default::default() })
+        }
         Value::Array(a) if a.is_empty() => Err(bad(cmd, "`profiles` is empty")),
         Value::Array(a) if a.len() > 10_000 => Err(bad(cmd, "too many profiles")),
         Value::Array(a) => {
@@ -957,7 +961,7 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
                     }
                     indices.push(i);
                 }
-                return Ok(ProfileSel::Indices { indices });
+                return Ok(ProfileSel::Indices { indices, order: Default::default() });
             }
             if a.iter().all(|x| x.get("point").is_some()) {
                 let pts =
@@ -1539,7 +1543,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     let same = ps.len() == ss.profiles.len() && ps.iter().zip(&ss.profiles).all(|(a, b)| a.outer_curves == b.outer_curves);
     let sel = if same {
         let indices = ps.iter().enumerate().filter(|(_, p)| material.iter().any(|m| std::ptr::eq(*m, *p))).map(|(i, _)| i).collect();
-        ProfileSel::Indices { indices }
+        ProfileSel::Indices { indices, order: Default::default() }
     } else {
         ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect() }
     };
@@ -5508,7 +5512,7 @@ fn offset_face(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 #[path = "patterns_tests.rs"]
-mod patterns_tests;
+pub(crate) mod patterns_tests;
 
 #[cfg(test)]
 #[path = "model_axis_tests.rs"]

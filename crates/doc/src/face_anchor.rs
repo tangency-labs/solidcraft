@@ -862,7 +862,7 @@ mod tests {
                 FeatureKind::Extrude {
                     thin: None,
                     sketch: crate::SketchId(source),
-                    profiles: crate::ProfileSel::Indices { indices: vec![0, 1] },
+                    profiles: crate::ProfileSel::Indices { indices: vec![0, 1], order: Default::default() },
                     extent,
                     operation: crate::Operation::NewBody,
                     targets: vec![],
@@ -901,7 +901,7 @@ mod tests {
         let FeatureKind::Extrude { profiles, .. } = &mut doc.feature_mut(producer).unwrap().kind else {
             panic!("fixture must retain its extrude feature")
         };
-        *profiles = crate::ProfileSel::Indices { indices: vec![1, 0] };
+        *profiles = crate::ProfileSel::Indices { indices: vec![1, 0], order: Default::default() };
         model.evaluate(&doc);
         let changed = model.state();
         assert_eq!(changed.bodies.len(), 2);

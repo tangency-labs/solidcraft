@@ -7941,7 +7941,9 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let ps = &ss.profiles;
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
-        ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
+        ProfileSel::Indices { indices, order } => {
+            solidcraft_engine::doc::picked_indices(ss, indices, *order).unwrap_or_default().into_iter().filter(|i| *i < ps.len()).collect()
+        }
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
@@ -9707,6 +9709,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
     d.editing = Some((id, marker));
     d.active = 0;
     d.error = None;
+    // A pick in the numbering of builds before 0.42.0 that this sketch has no profile for shows
+    // no profile above; say why (#19163).
+    for (sketch, sel) in f.kind.profile_sels() {
+        if let (ProfileSel::Indices { indices, order }, Some(ss)) = (sel, st.sketch(sketch))
+            && let Err(e) = solidcraft_engine::doc::picked_indices(ss, indices, *order)
+        {
+            d.error = Some(e.to_string());
+        }
+    }
     Some(d)
 }
 

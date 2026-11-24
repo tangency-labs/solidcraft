@@ -181,8 +181,11 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let sketch = feature_sketch(s, p, cmd)?;
         // With only 3D loops asked for, the sketch's own-plane profiles stay untouched.
-        let profiles =
-            if !profiles_3d.is_empty() && p.get("profiles").is_none() { ProfileSel::Indices { indices: Vec::new() } } else { profiles(p, cmd)? };
+        let profiles = if !profiles_3d.is_empty() && p.get("profiles").is_none() {
+            ProfileSel::Indices { indices: Vec::new(), order: Default::default() }
+        } else {
+            profiles(p, cmd)?
+        };
         let kind = FeatureKind::Patch {
             sketch: Some(SketchId(sketch)),
             profiles,

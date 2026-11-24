@@ -1680,6 +1680,12 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = &set;
     let mut v = before.clone();
     merge(&mut v, set, 0);
+    // A pick given anew replaces the stored one whole: merged into it, a stored pick's numbering
+    // (`order`, #19163) would stay and read the new indices in the older numbering. (`sections`
+    // is a list, which `merge` replaces whole already.)
+    if let (Some(given), Some(o)) = (set.get("profiles"), v.as_object_mut()) {
+        o.insert("profiles".into(), given.clone());
+    }
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;

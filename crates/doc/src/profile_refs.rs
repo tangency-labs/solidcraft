@@ -326,7 +326,7 @@ fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, St
 fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Option<&mut Vec<String>>) -> Result<Vec<usize>> {
     let indices = match selection {
         ProfileSel::All => (0..ss.profiles.len()).collect(),
-        ProfileSel::Indices { indices } => indices.clone(),
+        ProfileSel::Indices { indices, order } => crate::eval::picked_indices(ss, indices, *order)?,
         ProfileSel::Curves { loops } => {
             let boundaries = reserved_boundaries(ss)?;
             let mut indices = Vec::with_capacity(loops.len());
@@ -410,9 +410,9 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
 /// Persist selected complete offset boundaries by association identity. Mixed selections
 /// retain exact ordinary loops and the complete reserved role set of each offset boundary.
 pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result<ProfileSel> {
-    let checked = profile_selection_indices(ss, &ProfileSel::Indices { indices: indices.to_vec() })?;
+    let checked = profile_selection_indices(ss, &ProfileSel::Indices { indices: indices.to_vec(), order: Default::default() })?;
     if checked.is_empty() || checked.iter().collect::<BTreeSet<_>>().len() != checked.len() {
-        return Ok(ProfileSel::Indices { indices: indices.to_vec() });
+        return Ok(ProfileSel::Indices { indices: indices.to_vec(), order: Default::default() });
     }
     // Capture adaptive free-form boundaries only with complete source provenance,
     // including every hole. Ordinary analytic captures keep their historical form.
@@ -444,7 +444,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
     for index in checked {
         let curves = &ss.profiles.get(index).ok_or_else(|| DocError::Invalid("profile index changed during capture".into()))?.outer_curves;
         if curves.is_empty() {
-            return Ok(ProfileSel::Indices { indices: indices.to_vec() });
+            return Ok(ProfileSel::Indices { indices: indices.to_vec(), order: Default::default() });
         }
         // Ordinary free-form loops retain one curve ID per exact span. That
         // historical multiset is valid profile identity, but is not a candidate
@@ -464,7 +464,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
             associations.push(id);
         } else {
             if ss.profiles.iter().filter(|profile| same_ids(curves, &profile.outer_curves)).count() != 1 {
-                return Ok(ProfileSel::Indices { indices: indices.to_vec() });
+                return Ok(ProfileSel::Indices { indices: indices.to_vec(), order: Default::default() });
             }
             loops.push(curves.clone());
         }
@@ -639,7 +639,7 @@ mod tests {
         };
         assert_eq!(ss.profiles.len(), 1);
         let indices = vec![0; 600];
-        let selection = ProfileSel::Indices { indices: indices.clone() };
+        let selection = ProfileSel::Indices { indices: indices.clone(), order: Default::default() };
         assert_eq!(profile_selection_indices(&ss, &selection).unwrap(), indices);
         assert_eq!(capture_profile_selection(&ss, &indices).unwrap(), selection);
         let points = ProfileSel::Points { points: vec![Vec2::new(0., 0.); 600] };
@@ -648,7 +648,7 @@ mod tests {
         let regions = crate::select_profiles(&ss, &curves).unwrap();
         assert_eq!(regions.len(), 600);
         assert!(regions.iter().all(|region| (region.area() - std::f64::consts::PI * 9.).abs() < 1e-9));
-        assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1] }).is_err());
+        assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1], order: Default::default() }).is_err());
     }
 
     /// An SVG-traced sketch can have hundreds of spline-bounded holes. The total curve

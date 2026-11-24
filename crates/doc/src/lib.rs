@@ -209,6 +209,7 @@ pub use eval::object_height;
 pub use eval::parse_metric_thread;
 pub use eval::pattern_matrices;
 pub use eval::pattern_row;
+pub use eval::picked_indices;
 pub use eval::reconcile_component_patterns;
 pub use eval::revolve_extent;
 pub use eval::revolve_extent_for_handle;

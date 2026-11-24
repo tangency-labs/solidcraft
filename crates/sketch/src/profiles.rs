@@ -502,7 +502,19 @@ fn set_start(s: Seg2, p: Vec2) -> Seg2 {
     with_end(s.reversed(), p).reversed()
 }
 
-fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
+/// Where [`close_graph_joints`] puts the corner between two arcs of different circles whose
+/// computed ends lie a hair apart.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArcCorner {
+    /// On the first arc's circle by the two ends' midpoint, when that lies on both circles
+    /// (#16607), otherwise the circles' intersection nearest to it.
+    OnBoth,
+    /// The circles' intersection nearest to the ends' midpoint, as builds before 0.42.0 put it:
+    /// only to number the profiles as they did ([`ProfileOrder::ExactCrossings`]).
+    Intersection,
+}
+
+fn join_point(a: Seg2, b: Seg2, tol: f64, corner: ArcCorner) -> Option<Vec2> {
     match (a, b) {
         (Seg2::Line { .. }, Seg2::Line { .. }) => Some((a.end() + b.start()) * 0.5),
         (Seg2::Line { .. }, Seg2::Arc { center, radius, .. }) | (Seg2::Arc { center, radius, .. }, Seg2::Line { .. }) => {
@@ -521,7 +533,7 @@ fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
             // sqrt(2 * radius * gap) for a gap between them, 3e-5 mm for a 1e-9 mm round-off, and
             // trimming both arcs there moved the outline's corner off the sketch's point.
             let on_a = center + Vec2::from_angle((mid - center).angle()) * radius;
-            if (on_a.dist(c2) - r2).abs() <= ON_CARRIER_TOL && on_a.dist(mid) <= ON_CARRIER_TOL {
+            if corner == ArcCorner::OnBoth && (on_a.dist(c2) - r2).abs() <= ON_CARRIER_TOL && on_a.dist(mid) <= ON_CARRIER_TOL {
                 return Some(on_a);
             }
             intersections_within(
@@ -537,7 +549,7 @@ fn join_point(a: Seg2, b: Seg2, tol: f64) -> Option<Vec2> {
     }
 }
 
-fn close_graph_joints(mut segs: Vec<Seg2>, edge_nodes: &[(usize, usize)], edge_analytic: &[bool], tol: f64) -> Vec<Seg2> {
+fn close_graph_joints(mut segs: Vec<Seg2>, edge_nodes: &[(usize, usize)], edge_analytic: &[bool], tol: f64, corner: ArcCorner) -> Vec<Seg2> {
     let n = segs.len();
     for i in 0..n {
         let j = (i + 1) % n;
@@ -549,7 +561,7 @@ fn close_graph_joints(mut segs: Vec<Seg2>, edge_nodes: &[(usize, usize)], edge_a
         if a.end().dist(b.start()) <= 1e-12 || a.end().dist(b.start()) > tol {
             continue;
         }
-        let Some(point) = join_point(a, b, tol) else { continue };
+        let Some(point) = join_point(a, b, tol, corner) else { continue };
         let (a, b) = match (a, b) {
             (Seg2::Line { .. }, Seg2::Line { .. }) => (with_end(a, point), set_start(b, point)),
             (Seg2::Line { .. }, Seg2::Arc { .. }) => (with_end(a, b.start()), b),
@@ -1127,6 +1139,112 @@ pub fn find_profiles_checked(sk: &Sketch) -> ProfileSearch {
     search(sk, MAX_EDGES, true, true)
 }
 
+/// Which numbering of a sketch's profiles a pick by index means (#19163). Profiles are numbered by
+/// the first of their outer curves in sketch order, then from the largest to the smallest area;
+/// profiles of the same size (congruent regions, such as the lenses where equal circles cross a
+/// larger one) come in the order of the round-off in their areas. 0.42.0 changed that round-off
+/// where two arcs of different circles meet (#16607), so the same index named another of them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileOrder {
+    /// The order [`find_profiles`] gives them.
+    #[default]
+    Current,
+    /// The order of builds before 0.42.0: the same rule, with the areas computed as they closed
+    /// the corners where two arcs of different circles meet with their computed ends a hair
+    /// apart (on the circles' nearest intersection, where later builds keep the ends' midpoint
+    /// when it lies on both circles). Only that change (#16607) is undone; the regions are the
+    /// same.
+    ExactCrossings,
+}
+
+impl ProfileOrder {
+    pub fn is_current(&self) -> bool {
+        *self == ProfileOrder::Current
+    }
+}
+
+/// For each profile number `k` in `order`, its index into `profiles`, the profiles of `sk` as
+/// [`find_profiles`] gives them; `None` past the profiles, or where a profile of the other
+/// numbering has no match. [`ProfileOrder::ExactCrossings`] searches the sketch again with the
+/// older corners and matches each profile found to the one with the same outer curves and number
+/// of holes (the distance between centroids plus the difference in area only breaks ties among
+/// those); the result is kept once per sketch, by a fingerprint of all its curves.
+pub fn profiles_in_order(sk: &Sketch, profiles: &[Profile], order: ProfileOrder) -> Vec<Option<usize>> {
+    match order {
+        ProfileOrder::Current => (0..profiles.len()).map(Some).collect(),
+        ProfileOrder::ExactCrossings => {
+            // Kept once per sketch: every evaluation of every pick in the older numbering asks.
+            let all: Vec<usize> = (0..sk.curves.len()).collect();
+            let key = fingerprint(sk, &all, MAX_EDGES) ^ 0x1916_3000_0000_0000_0000_0000_0000_0002;
+            if let Some(hit) = numbering_cache::get(key).filter(|n| n.len() == profiles.len()) {
+                return hit.as_ref().clone();
+            }
+            let numbered = older_numbering(sk, profiles);
+            numbering_cache::put(key, &numbered);
+            numbered
+        }
+    }
+}
+
+/// The older numbering's search and match ([`profiles_in_order`]), uncached.
+fn older_numbering(sk: &Sketch, profiles: &[Profile]) -> Vec<Option<usize>> {
+    let older = search_with(sk, MAX_EDGES, true, true, ArcCorner::Intersection).profiles;
+    let key = |p: &Profile| {
+        let mut ids = p.outer_curves.clone();
+        ids.sort();
+        (ids, p.region.holes.len())
+    };
+    let mut by_key: std::collections::HashMap<(Vec<String>, usize), Vec<usize>> = std::collections::HashMap::new();
+    for (i, p) in profiles.iter().enumerate() {
+        by_key.entry(key(p)).or_default().push(i);
+    }
+    let mut taken = vec![false; profiles.len()];
+    older
+        .iter()
+        .map(|o| {
+            let best = by_key
+                .get(&key(o))
+                .into_iter()
+                .flatten()
+                .filter(|i| !taken.get(**i).copied().unwrap_or(true))
+                .filter_map(|&i| profiles.get(i).map(|p| (i, p.centroid.dist(o.centroid) + (p.area - o.area).abs())))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i);
+            if let Some(slot) = best.and_then(|i| taken.get_mut(i)) {
+                *slot = true;
+            }
+            best
+        })
+        .collect()
+}
+
+/// [`profiles_in_order`]'s older numberings by a fingerprint of the whole sketch, bounded like
+/// the island cache.
+mod numbering_cache {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    const MAX_ENTRIES: usize = 256;
+
+    fn cache() -> &'static Mutex<HashMap<u128, Arc<Vec<Option<usize>>>>> {
+        static CACHE: OnceLock<Mutex<HashMap<u128, Arc<Vec<Option<usize>>>>>> = OnceLock::new();
+        CACHE.get_or_init(Mutex::default)
+    }
+
+    pub(super) fn get(key: u128) -> Option<Arc<Vec<Option<usize>>>> {
+        cache().lock().ok()?.get(&key).cloned()
+    }
+
+    pub(super) fn put(key: u128, numbered: &[Option<usize>]) {
+        let Ok(mut c) = cache().lock() else { return };
+        if c.len() >= MAX_ENTRIES {
+            c.clear();
+        }
+        c.insert(key, Arc::new(numbered.to_vec()));
+    }
+}
+
 #[cfg(test)]
 fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
     search(sk, max_edges, true, true).profiles
@@ -1157,6 +1275,11 @@ fn bezier_definition(sk: &Sketch, kind: &CurveKind) -> Option<BezierDefinition> 
 }
 
 fn search(sk: &Sketch, max_edges: usize, split: bool, cached: bool) -> ProfileSearch {
+    search_with(sk, max_edges, split, cached, ArcCorner::OnBoth)
+}
+
+/// [`search`], closing arc corners by `corner`.
+fn search_with(sk: &Sketch, max_edges: usize, split: bool, cached: bool, corner: ArcCorner) -> ProfileSearch {
     // Repeated SVG outlines contribute one graph boundary. Keep the first curve's identity,
     // and retain all source curves in the sketch so editing a duplicate can separate it again.
     let mut definitions = HashSet::new();
@@ -1173,13 +1296,17 @@ fn search(sk: &Sketch, max_edges: usize, split: bool, cached: bool) -> ProfileSe
         .iter()
         .map(|group| {
             if !cached {
-                return Arc::new(island_loops(sk, group, max_edges));
+                return Arc::new(island_loops(sk, group, max_edges, corner));
             }
-            let key = fingerprint(sk, group, max_edges);
+            // The older corners are another island: their own key.
+            let key = match corner {
+                ArcCorner::OnBoth => fingerprint(sk, group, max_edges),
+                ArcCorner::Intersection => fingerprint(sk, group, max_edges).rotate_left(1) ^ 0x1916_3000_0000_0000_0000_0000_0000_0001,
+            };
             if let Some(hit) = island_cache::get(key) {
                 return hit;
             }
-            let island = Arc::new(island_loops(sk, group, max_edges));
+            let island = Arc::new(island_loops(sk, group, max_edges, corner));
             island_cache::put(key, &island);
             island
         })
@@ -1542,7 +1669,7 @@ mod island_cache {
 /// The closed loops of one island of profile curves (`curves`, in sketch order), before they
 /// are nested into profiles. Everything here only looks at curves of the island: curves of other
 /// islands are too far away to cut, join or overlap any of them (see [`islands`]).
-fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
+fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize, corner: ArcCorner) -> Island {
     let tol = MERGE_TOL * 10.0;
     let mut incomplete = false;
     let mut endpoint_groups: Vec<usize> = (0..sk.points.len()).collect();
@@ -2277,7 +2404,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 kept(&mut ptags, &keep);
                 kept(&mut coverage_tags, &keep);
             }
-            let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
+            let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL, corner);
             let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
             let area = lp.signed_area();
             let perimeter: f64 = lp.segs.iter().map(Seg2::length).sum();
