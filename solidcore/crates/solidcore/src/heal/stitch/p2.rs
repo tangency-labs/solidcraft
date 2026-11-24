@@ -2152,9 +2152,13 @@ mod tests {
             .unwrap();
             add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
             add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
-            let r = crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false)
-                .unwrap();
-            assert_eq!((r.stitched_edges, r.lamina_edges), (24, 0), "inward {inward}");
+            let r =
+                crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false).unwrap();
+            assert_eq!(
+                (r.stitched_edges, r.lamina_edges),
+                (24, 0),
+                "inward {inward}"
+            );
             assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "inward {inward}");
             let infinite = b.infinite_region().unwrap();
             let mut regions: Vec<(bool, i32, usize)> = bp1::regions(&b, None)
