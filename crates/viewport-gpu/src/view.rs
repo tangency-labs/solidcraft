@@ -1508,6 +1508,13 @@ pub struct Frame {
     /// Every shown body is selected (a whole-body `select.all`): `fs_solid` colours each body
     /// with [`Frame::selection_tint`] instead of its own, so one uniform covers the whole model
     /// without a highlight entry per body.
+    ///
+    /// It matches one body's selection tint to a mean of 5.6 of 255 (`6ed8b279a4`), with the
+    /// residual on the silhouette: about half of the differing pixels lie within 2 px of it,
+    /// where the highlight pass biases toward the eye (`highlight_depth`) while the model pass
+    /// biases away by `FACE_BIAS`, so the two win slightly different samples. Making them
+    /// identical would mean drawing the selection as a second biased pass, which is the per-body
+    /// geometry this flag exists to avoid.
     pub selection_all: bool,
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
