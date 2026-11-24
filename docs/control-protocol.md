@@ -670,6 +670,7 @@ a menu (neither describes the open one).
 | `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, `document.activate`, and `file.new` or `doc.open` with `new_tab: true`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
+| `document.selection` | — | `{selection}`: what the user has selected, as the block of text the chat's Attach selection sends (faces and edges with the names and indices the tools take, features and bodies by name, at most 64 items with the rest counted); `null` when nothing is selected. The MCP server adds it to every tool reply |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
 | `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false), `timeline?`: `true` (default), `"summary"` (each feature as `id`, `name`, `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when set) or `false` (left out), `bodies?`: `true` (default), `"names"` (only the body names, nothing measured) or `false` (left out) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
 | `mcp.options` | — | `{"compact": bool}`: the output the MCP server bridged to this app should give its agents (Preferences › AI › Agents through MCP, `ui.prefs` `mcp_compact`, default false; [MCP](mcp.md#compact-output)) |
@@ -1243,6 +1244,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
 - `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` and `plugin.revoke` delete the record. The app also keeps the records in the plugins folder's grant store, shared with the command line and headless MCP when they run with `--keep-plugin-approvals` ([Headless use](plugins.md#headless-use)). Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
+- `preview_reselect_modifier` (`primary_at_least` (default: Command on macOS or Control elsewhere, with extra modifiers allowed), `control` (physical Control alone), `primary` (Command on macOS or Control elsewhere, alone), `alt`, `shift`, or `disabled`: temporarily hide the feature preview for geometry reselect; see Preview Reselect Modifier below)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `region_pick_takes_holes` (default false: a click inside a closed profile for the Entities of Sketch Transform, Move/Copy, Scale, Mirror and the sketch patterns picks the curves of its outline, and a shape inside it is picked by a click inside that shape, #14496; true also picks the curves of its holes, as before)
@@ -1288,6 +1290,10 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
+- `timeline_2d` (default false: the History at the bottom is the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false keeps the 1D timeline)
+- `timeline_2d_cell_dots` (default true: empty cells in the 2D Timeline show a small alignment dot)
+- `timeline_2d_component_activation` (default true: a click on a component's row label or radio dot in the 2D Timeline makes that component active)
+- `timeline_2d_unsuppress_mode` (`restore_state` (default), `unsuppress_all`: unsuppressing a feature in the 2D Timeline keeps the dependents suppressed separately there in this session suppressed, or unsuppresses all dependents)
 - `timeline_origin_bodies` (default false: the History on the left or under the browser starts with the active component's Bodies folder and the Origin, the browser's rows with their eyes, folds and menus; the bottom History is unchanged)
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
@@ -1392,6 +1398,24 @@ Pan and orbit take `delta: [dx,dy]` in screen points (each within ±10000); pan 
 viewport size. Zoom takes `factor` (0.05..20, below 1 zooms in) and an optional world-space
 `anchor`. The returned `camera` is applied immediately by the UI, without animation,
 document edits, undo steps or a success-log entry per movement.
+
+### Preview Reselect Modifier
+
+Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
+The default keeps the old platform-primary behaviour: Command on macOS or Control elsewhere
+hides the preview even when extra modifiers are held. The modifier temporarily hides an active
+feature preview so obscured geometry can be selected; it does not suppress the saved feature.
+Manipulator drags prevent rollback for every choice.
+
+`ui.prefs {"preview_reselect_modifier":"primary_at_least"}` selects the default, labelled
+**Cmd + modifiers** or **Ctrl + modifiers**. It retains the old interaction with macOS
+screenshot chords. To avoid that interaction, select `control` (physical Control alone),
+`primary` (Command on macOS or Control elsewhere, alone), `alt` (Option on macOS), `shift`,
+or `disabled`. These opt-in key choices require an exact match: extra modifiers, including
+physical Control with Command on macOS, prevent rollback.
+
+The setting follows Apply/OK/Cancel, the per-row Reset button and Restore page defaults, and
+is included in shortcut exports. Older settings without it retain `primary_at_least`.
 
 ## MCP
 

@@ -72,7 +72,12 @@ or a law r(t).
   tangent chain are one chamfer, so their rails meet: measured at the wedge of its edges between
   planes, where the sizes then hold all along, else at the narrowest wedge of their middles, moved
   up as far as unequal sizes need so that no station folds at the widest wedge, enclosed along
-  each edge. Where the wedge varies the sizes hold only where it was measured.
+  each edge. Where the wedge varies, those sizes hold at the reference wedge.
+  A smooth chain can also connect planar edges with different wedges. Each planar strip keeps
+  its requested setbacks. For equal setbacks the curved strips solve for the rolling radius
+  at each pair of support feet. The local tangent planes give the radius from their wedge and
+  the requested distance. As the normals approach those of an adjacent planar strip, both
+  constructions give the same radius and the same end chord.
   A second chamfer kind, setbacks held at every station (each foot a straight line of its size
   from the edge, in the plane square to it), is defined but not built: its record
   (`ChamferKindRecord::Setbacks`, its radius `RadiusRecord::Edge`, the edge as its leader) is

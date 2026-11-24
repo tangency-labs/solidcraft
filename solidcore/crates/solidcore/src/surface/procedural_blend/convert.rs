@@ -78,6 +78,13 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
     let supports = [support_record(k, s0, depth)?, support_record(k, s1, depth)?];
     let radius = match &d.law {
         Some(law) => RadiusRecord::Law(curve_record(law)?),
+        None if d
+            .chamfer
+            .and_then(ChamferDefinition::constant_setback)
+            .is_some() =>
+        {
+            RadiusRecord::EqualSetback
+        }
         None => RadiusRecord::Constant { offsets: d.offsets },
     };
     let [seed0, seed1] = &d.seeds;
@@ -435,12 +442,21 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     };
     let [r0, r1] = &d.supports;
     let supports = [support_of(0, r0)?, support_of(1, r1)?];
+    let mut chamfer = d.chamfer.as_ref().map(chamfer_of).transpose()?;
     let (law, offsets) = match &d.radius {
         RadiusRecord::Constant { offsets } => (None, *offsets),
         RadiusRecord::Law(law) => (Some(curve_of(law)?), [0.0, 0.0]),
         RadiusRecord::Edge => return Err(setbacks_not_built()),
+        RadiusRecord::EqualSetback => {
+            let sizes = chamfer
+                .ok_or_else(|| {
+                    SolidError::invalid_input(OP_FROM, "a local wedge needs the chamfer's setbacks")
+                })?
+                .at_every_station()?;
+            chamfer = Some(sizes);
+            (None, sizes.offsets()?)
+        }
     };
-    let chamfer = d.chamfer.as_ref().map(chamfer_of).transpose()?;
     let leader = curve_of(&d.leader)?;
     let [seed0, seed1] = &d.seeds;
     let seeds = [curve_of(seed0)?, curve_of(seed1)?];
@@ -1149,6 +1165,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
                 tol: fill.tol,
                 convex: fill.convex,
                 containment: fill.containment,
+                certified: fill.certified,
                 patch: to_u32(d.patch)?,
                 net: surface_record(&form)?,
             })
@@ -1259,6 +1276,7 @@ pub fn corner_from_record(k: &Kernel, rec: &CornerRecord) -> Result<Surface> {
                 r.tol,
                 r.convex,
                 r.containment,
+                r.certified,
             )?;
             let mut net = Surface::from(surface_of(&r.net)?);
             net.set_corner_definition(CornerDefinition::setback(

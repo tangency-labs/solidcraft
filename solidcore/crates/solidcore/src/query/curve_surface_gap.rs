@@ -1400,6 +1400,59 @@ pub(crate) fn curve_face_gap_bound_within_counted(
     Ok((gap, pieces.get()))
 }
 
+/// Not upstream (tangency-labs/solidcraft#21215 review): [`curve_face_gap_bound_within`]
+/// against a surface held by no face, `surface` with its nearest points dropped in `domain`
+/// (a face's surface as extended past its boundary, which no B-rep face carries yet): the
+/// same plane bound first, then the same bisection, with the same meaning of `floor`,
+/// `enough` and `over`. `None` where the gap is not enclosed, as there.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn curve_surface_gap_bound_within(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    curve: &BSplineCurve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+) -> Result<Option<f64>> {
+    let [lo, hi] = range;
+    let valid = lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0;
+    if !valid {
+        return Ok(None);
+    }
+    k.check_cancelled(OP)?;
+    let surface = surface.clone_for_evaluation()?;
+    if enough.is_finite() {
+        if let Ok(cn) = NurbsCurve::of(curve) {
+            let inside = matches!(
+                (cn.u.get(cn.p), cn.u.get(cn.n)),
+                (Some(&d0), Some(&d1)) if d0 <= lo && hi <= d1
+            );
+            if inside {
+                if let Some(g) = plane_face_gap_bound(k, &surface, &cn, range)? {
+                    if g <= enough && g <= over {
+                        return Ok(Some(g));
+                    }
+                }
+            }
+        }
+    }
+    let pieces = std::cell::Cell::new(0_usize);
+    bisected_surface_gap_bound(
+        k,
+        &surface,
+        domain,
+        curve,
+        range,
+        floor,
+        [enough, over],
+        &pieces,
+    )
+}
+
 /// Not upstream (#20373): [`plane_gap_bound`] of the curve data `cn` over `range` against the
 /// net of `surface`, for a plane or a B-spline surface (whose net is the surface, as
 /// [`NetSurface::of`] takes it) whose net agrees with the surface at its four corners. `None`
@@ -2088,10 +2141,6 @@ fn bisected_face_gap_bound(
     [enough, over]: [f64; 2],
     pieces: &std::cell::Cell<usize>,
 ) -> Result<Option<f64>> {
-    use crate::error::ignored;
-    use crate::surface::surface::p4::NoObject;
-    use crate::surface::surface::p5::DropPointOptions;
-
     let [lo, hi] = range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
         return Ok(None);
@@ -2101,7 +2150,43 @@ fn bisected_face_gap_bound(
         return Ok(None);
     };
     let surface = surface.clone_for_evaluation()?;
-    let domain = &rec.uv_domain;
+    bisected_surface_gap_bound(
+        k,
+        &surface,
+        &rec.uv_domain,
+        curve,
+        range,
+        floor,
+        [enough, over],
+        pieces,
+    )
+}
+
+/// The bisection of [`bisected_face_gap_bound`] against `surface` (a copy for evaluation)
+/// with its nearest points dropped in `domain`.
+///
+/// # Errors
+///
+/// Those of [`curve_face_gap_bound_within`] but for the face lookup.
+#[allow(clippy::too_many_arguments)]
+fn bisected_surface_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &crate::geom::extent2d::Extent2d,
+    curve: &BSplineCurve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    pieces: &std::cell::Cell<usize>,
+) -> Result<Option<f64>> {
+    use crate::error::ignored;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
     let Ok(cn) = NurbsCurve::of(curve) else {
         return Ok(None);
     };
@@ -2160,7 +2245,7 @@ fn bisected_face_gap_bound(
         }
     }
     let feet: Vec<Point2> = feet.into_iter().flatten().collect();
-    let Some(net) = NetSurface::of(k, &surface, &feet)? else {
+    let Some(net) = NetSurface::of(k, surface, &feet)? else {
         return Ok(None);
     };
     // (the bound of the curve data `cn` against the net `net`, with the pieces closing at
@@ -2229,7 +2314,7 @@ fn bisected_face_gap_bound(
     // (#20373 review r4: the pieces bound the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is taken off `enough` and added to the bound, rounded
     // up, so a bound past the net's is not taken for the surface's)
-    let Some(to_surface) = bisection_residual(&surface, &net) else {
+    let Some(to_surface) = bisection_residual(surface, &net) else {
         return Ok(None);
     };
     let net_enough = if to_surface > 0.0 {

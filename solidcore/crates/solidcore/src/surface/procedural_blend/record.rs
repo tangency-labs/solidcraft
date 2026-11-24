@@ -127,6 +127,8 @@ pub enum RadiusRecord {
     /// ([`ChamferKindRecord::Setbacks`]). The leader is the edge itself, extended past its
     /// ends and stored as written; the seeds are the feet's (u, v) on each support.
     Edge,
+    /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
+    EqualSetback,
 }
 
 /// How a chamfer's size was asked for (#2486).
@@ -476,6 +478,18 @@ impl ProceduralBlendRecord {
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
             RadiusRecord::Edge => {}
+            RadiusRecord::EqualSetback => {
+                if d.order != 0
+                    || !matches!(d.chamfer.as_ref().map(|c| (c.size, c.kind)),
+                    Some((ChamferSizeRecord::Distances([a, b]), ChamferKindRecord::Offsets))
+                        if a == b && a > 0.0)
+                {
+                    return Err(refuse(
+                        "definition.radius",
+                        "a local wedge needs an equal-setback chamfer",
+                    ));
+                }
+            }
         }
         d.leader.validate("definition.leader")?;
         for seed in &d.seeds {
@@ -848,6 +862,10 @@ pub struct SetbackCornerRecord {
     pub convex: bool,
     /// The most the fill stands past a face, certified (at most `tol`).
     pub containment: f64,
+    /// Whether the fill was built with the convexity certificate (#13775). Defaults in
+    /// records saved before the field: their fills were not certified.
+    #[serde(default)]
+    pub certified: bool,
     /// The patch's index: setback patches first, then the interior parts.
     pub patch: u32,
     /// The net, the patch.

@@ -371,7 +371,7 @@ fn a_chamfer_of_setbacks_is_a_record_kind_refused_when_read() {
         r#""Edge""#
     );
 
-    // the database: codes 0 to 2 as before, 3 and 5 setbacks, 4 reserved
+    // the database: codes 0 to 3 as before, 4 and 6 setbacks, 5 reserved
     for (record, code) in [
         (offsets, 0),
         (
@@ -396,30 +396,39 @@ fn a_chamfer_of_setbacks_is_a_record_kind_refused_when_read() {
                 size: ChamferSizeRecord::Distances([1.0, 2.0]),
                 ..setbacks
             },
-            3,
+            4,
         ),
-        (setbacks, 5),
+        (setbacks, 6),
     ] {
         let (c, numbers) = chamfer_record_to_db(&record);
         assert_eq!(c, code, "{record:?}");
         assert_eq!(chamfer_record_of_db(c, numbers).unwrap(), record);
     }
-    assert!(chamfer_record_of_db(4, [1.0, 0.5, 0.0]).is_err());
+    // code 3, an equal setback in the local wedge, is a record of equal offsets (its radius
+    // names the local wedge)
+    assert_eq!(
+        chamfer_record_of_db(3, [1.0, 0.0, 1.5]).unwrap(),
+        ChamferRecord {
+            size: ChamferSizeRecord::Distances([1.0, 1.0]),
+            ..offsets
+        }
+    );
+    assert!(chamfer_record_of_db(5, [1.0, 0.5, 0.0]).is_err());
     assert!(
-        chamfer_record_of_db(3, [1.0, 2.0, 1.5]).is_err(),
+        chamfer_record_of_db(4, [1.0, 2.0, 1.5]).is_err(),
         "a setbacks wedge"
     );
     assert!(
-        chamfer_record_of_db(5, [1.5, 1.0, 0.0]).is_err(),
+        chamfer_record_of_db(6, [1.5, 1.0, 0.0]).is_err(),
         "a chord's second size"
     );
-    assert!(chamfer_record_of_db(6, [1.0, 2.0, 0.0]).is_err());
+    assert!(chamfer_record_of_db(7, [1.0, 2.0, 0.0]).is_err());
     assert!(
-        chamfer_record_of_db(3, [1.0, 0.0, 0.0]).is_err(),
+        chamfer_record_of_db(4, [1.0, 0.0, 0.0]).is_err(),
         "a setback of 0"
     );
     assert!(
-        chamfer_record_of_db(5, [-1.5, 0.0, 0.0]).is_err(),
+        chamfer_record_of_db(6, [-1.5, 0.0, 0.0]).is_err(),
         "a negative chord"
     );
 
