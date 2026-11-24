@@ -110,8 +110,12 @@ pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
     let galley = painter.layout_no_wrap(text, FontId::proportional(t.font_body), t.text);
     let size = galley.size() + vec2(16.0, 8.0);
     let r = Rect::from_min_size(pos2(free.left() + t.space_12, free.bottom() - t.space_12 - size.y), size);
-    // Above the navigation bar where they meet, as in a narrow window or beside a panel.
-    let r = match app.viewport.layout.as_ref().map(|l| l.navigation).filter(|n| n.is_positive() && n.intersects(r.expand(4.0))) {
+    // Above the navigation bar where they meet, as in a narrow window or beside a panel. Whether
+    // they meet is judged on room for a long total, not on this text, so the readout keeps one
+    // height as edges are added to the selection.
+    let room = painter.layout_no_wrap(format_readout(app, 9999.999, 99), FontId::proportional(t.font_body), t.text).size().x + 16.0;
+    let band = Rect::from_min_size(r.min, vec2(r.width().max(room), r.height()));
+    let r = match app.viewport.layout.as_ref().map(|l| l.navigation).filter(|n| n.is_positive() && n.intersects(band.expand(4.0))) {
         Some(nav) => r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom())),
         None => r,
     };

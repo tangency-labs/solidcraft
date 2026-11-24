@@ -3125,6 +3125,32 @@ fn the_selection_length_stays_clear_of_the_navigation_bar_in_a_narrow_view() {
 }
 
 #[test]
+fn the_selection_length_keeps_one_height_whatever_the_selection() {
+    // One edge or two: the readout stays at one height for a given layout, never on the
+    // navigation bar, so it doesn't jump when an edge is added.
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let x = edge_between(&h, Vec3::ZERO, Vec3::new(40.0, 0.0, 0.0));
+    let y = edge_between(&h, Vec3::ZERO, Vec3::new(0.0, 30.0, 0.0));
+    let mut near = false;
+    for width in [1600.0, 1280.0, 1100.0, 900.0, 700.0] {
+        h.call("ui.resize", json!({"width": width, "height": 720}));
+        h.app.session.selection = vec![x.clone()];
+        h.frame();
+        let one = crate::scenario::rect_of("viewport:selection_length").unwrap();
+        h.app.session.selection = vec![x.clone(), y.clone()];
+        h.frame();
+        let two = crate::scenario::rect_of("viewport:selection_length").unwrap();
+        let nav = h.app.viewport.layout.as_ref().unwrap().navigation;
+        assert_eq!(one.top(), two.top(), "{width}: one edge {one:?}, two edges {two:?}, navigation bar {nav:?}");
+        assert!(!one.intersects(nav) && !two.intersects(nav), "{width}: {one:?} or {two:?} on the navigation bar {nav:?}");
+        near |= nav.is_positive() && one.right() < nav.left() && nav.left() < two.right() + 4.0;
+    }
+    assert!(near, "no width put the navigation bar between the end of one edge's readout and two edges'");
+}
+
+#[test]
 fn a_circle_picked_as_both_rim_halves_is_one_edge() {
     let mut h = Harness::new();
     h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
