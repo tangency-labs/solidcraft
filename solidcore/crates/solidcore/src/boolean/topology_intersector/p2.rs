@@ -164,6 +164,7 @@ use crate::EntityRef;
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
 use super::curved_strip::drop_strip_crossings;
+use super::duplicate_edge_run::drop_duplicate_edge_runs;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
@@ -1753,6 +1754,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         #[cfg(test)]
         super::curved_strip::probe(k, &*brep, &intersections)?;
         drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
+
+        // Not upstream (WR-647): a curve's run along part of an edge that another curve of
+        // the same pair is from end to end is a second copy of that edge, no event
+        // (module docs of `duplicate_edge_run`).
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
 
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.
