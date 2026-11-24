@@ -876,6 +876,19 @@ pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<Str
     })
 }
 
+/// The window shows a design's results without waiting for SMLib's check of the bodies its last
+/// features keep: the checks end beside the window, and a check that refuses a feature's bodies
+/// fails that feature, as it would have failed had the evaluation waited
+/// ([`solidcraft_engine::Session::set_background_checks`]). A frame is asked for while a check
+/// runs, so its outcome lands within a frame of its end.
+pub(crate) fn tick_feature_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.set_background_checks(true);
+    app.session.settle_feature_checks(false);
+    if app.session.model.checking_features() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
 /// what it found joins the import's result, so its History chip warns, and a part to repair is
 /// said on the status line, once per import, in history order.

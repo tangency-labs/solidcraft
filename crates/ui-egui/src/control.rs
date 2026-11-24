@@ -558,7 +558,14 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     // What a request does is an agent's action in usage statistics (`usage_stats`).
     #[cfg(feature = "usage-stats")]
     let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
-    crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+    // An agent's request reads and answers with every feature checked, as a script's does: the
+    // checks the window left running end first, and its own evaluations wait for theirs.
+    let background = app.session.background_checks();
+    app.session.set_background_checks(false);
+    app.session.settle_feature_checks(true);
+    let out = crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req));
+    app.session.set_background_checks(background);
+    out
 }
 
 fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
