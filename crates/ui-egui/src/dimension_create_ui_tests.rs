@@ -2143,6 +2143,75 @@ fn double_clicking_another_shown_dimension_opens_it_from_the_model_view() {
     crate::dim_view::cancel();
 }
 
+/// The plate of [`shown_dimensions`] as a design leaves it: the extruded sketch hidden, no
+/// dimensions shown. Returns the harness and the extrude's id.
+fn plate_without_dimensions() -> (Harness, u64) {
+    let (mut h, sketch) = shown_dimensions();
+    crate::browser::set_sketch_visible(&mut h.app, sketch, false);
+    h.app.session.visibility.shown_dimensions.clear();
+    h.settle();
+    assert!(crate::dim_view::model_drawn().is_empty());
+    let extrude = h.app.session.doc.features.last().unwrap().id;
+    (h, extrude)
+}
+
+/// Run the Edit Dimensions entry of a menu.
+fn edit_dimensions(h: &mut Harness, items: &[crate::ui_kit::Item]) {
+    let item = items.iter().find(|i| i.id == "ui.editDimensions").expect("the menu has Edit Dimensions");
+    assert!(item.enabled);
+    crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+    h.settle();
+}
+
+/// Edit Dimensions on a feature shows its used-up sketch's dimensions for now (#6642): nothing
+/// is saved and no undo step is added. Several values can be changed one after the other, each
+/// one undo step, and Esc hides the dimensions again.
+#[test]
+fn edit_dimensions_on_a_feature_shows_its_sketch_dimensions_until_esc() {
+    let (mut h, extrude) = plate_without_dimensions();
+    let saved = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Feature { id: extrude });
+    edit_dimensions(&mut h, &items);
+    assert_eq!(crate::dim_view::model_drawn().len(), 2, "both dimensions are shown");
+    assert_eq!(h.app.session.doc.to_json(), saved, "showing them is not saved in the design");
+    assert_eq!(h.app.session.undo.len(), undo, "showing them is no undo step");
+    for (param, value, max) in [("d2", "14", [20.0, 14.0]), ("d1", "30", [30.0, 14.0])] {
+        let at = model_text(&h, param);
+        h.step(&json!({"click":at,"double":true})).unwrap();
+        assert!(crate::dim_view::editing(), "the double-click opens {param}");
+        type_value(&mut h, value);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.settle();
+        assert_eq!(plate_max(&h), max, "the extrude follows {param}");
+    }
+    assert_eq!(h.app.session.undo.len(), undo + 2, "one undo step per value");
+    assert_eq!(h.app.session.active_sketch, None, "the sketch is not edited");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    assert!(crate::dim_view::model_drawn().is_empty(), "Esc hides them");
+    assert_eq!(h.app.viewport.edit_dimensions, None);
+}
+
+/// The timeline row's Edit Dimensions does the same; a click on empty space or the start of a
+/// command hides the dimensions, and Show Dimension's own list is left alone.
+#[test]
+fn edit_dimensions_hide_on_a_click_on_empty_space_or_a_command() {
+    let (mut h, extrude) = plate_without_dimensions();
+    let items = crate::timeline::feature_items(&h.app, extrude);
+    edit_dimensions(&mut h, &items);
+    assert_eq!(crate::dim_view::model_drawn().len(), 2);
+    h.step(&json!({"click":{"world":[-15.0, 25.0, 0.0]}})).unwrap();
+    h.settle();
+    assert!(crate::dim_view::model_drawn().is_empty(), "a click on empty space hides them");
+    edit_dimensions(&mut h, &items);
+    assert_eq!(crate::dim_view::model_drawn().len(), 2);
+    h.app.start("solid.fillet");
+    h.settle();
+    assert!(crate::dim_view::model_drawn().is_empty(), "a command hides them");
+    assert!(h.app.session.visibility.shown_dimensions.is_empty());
+}
+
 /// A sketch seen nearly edge-on, with one of its directions pointing at the eye, keeps its
 /// dimensions near the sketch: shown on a finished sketch (Show Dimensions) and on the sketch
 /// being edited. The text sizes in millimetres came from that foreshortened direction alone, so

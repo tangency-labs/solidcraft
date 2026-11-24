@@ -3227,6 +3227,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
+                    app.viewport.edit_dimensions = None;
                     let _ = app.run("select.clear", json!({}));
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick

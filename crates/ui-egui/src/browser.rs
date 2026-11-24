@@ -3836,21 +3836,24 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    if app.session.visibility.shown_dimensions.is_empty() {
+    let shown = &app.session.visibility.shown_dimensions;
+    // Edit Dimensions' sketch is usually one a feature used up, so hidden: its dimensions show anyway.
+    let edit = app.viewport.edit_dimensions.filter(|id| !shown.contains(id));
+    if shown.is_empty() && edit.is_none() {
         return;
     }
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
     let st = crate::open_meshing::still_world(app);
-    for id in app
-        .session
-        .visibility
-        .shown_dimensions
+    for id in shown
         .iter()
-        .filter(|id| app.session.active_sketch != Some(**id) && solidcraft_engine::view::sketch_shown(&app.session, **id))
+        .copied()
+        .filter(|id| solidcraft_engine::view::sketch_shown(&app.session, *id))
+        .chain(edit)
+        .filter(|id| app.session.active_sketch != Some(*id))
     {
-        let Some(ss) = st.sketch(*id) else { continue };
+        let Some(ss) = st.sketch(id) else { continue };
         let sk = &ss.sketch;
         let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
         // Unplaced dimensions sit away from the middle of the sketch.
@@ -3900,7 +3903,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
             painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
             painter.galley(r.min + vec2(3.0, 1.0), galley, col);
             if rect.contains(tc) {
-                drawn.push(crate::dim_view::ModelDim { sketch: *id, id: c.id.clone(), param: c.param.clone(), text: r });
+                drawn.push(crate::dim_view::ModelDim { sketch: id, id: c.id.clone(), param: c.param.clone(), text: r });
             }
         }
     }

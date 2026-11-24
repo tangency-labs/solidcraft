@@ -2415,6 +2415,7 @@ impl SolveApp {
         // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
         // `logic`): build its hint in the user's language, not the thread default.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.viewport.edit_dimensions = None;
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);

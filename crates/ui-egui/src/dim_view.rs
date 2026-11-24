@@ -563,6 +563,11 @@ fn model_hit(pos: Pos2) -> Option<ModelDim> {
     MODEL.with(|m| m.borrow().iter().rev().find(|x| x.text.expand(2.0).contains(pos)).cloned())
 }
 
+/// Is a finished sketch's shown dimension value under a screen position?
+pub(crate) fn model_text_at(pos: Pos2) -> bool {
+    model_hit(pos).is_some()
+}
+
 /// Shown dimensions of finished sketches drawn last frame: (sketch, id, text centre), for tests
 /// and the control channel.
 pub fn model_drawn() -> Vec<(u64, String, Pos2)> {

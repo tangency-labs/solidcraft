@@ -766,11 +766,13 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let dimensions = act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
     let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
         // Off without a reason for a feature that has no profile sketch: selecting one feature
         // would not turn it on.
         if sketch.is_some() { one(profile) } else { profile },
+        if sketch.is_some() { one(dimensions) } else { dimensions },
         one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
     ];
     if is_construction {
@@ -938,6 +940,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        v.push(act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
@@ -1167,6 +1170,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "sketch").with(json!({ "sketch": id })),
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
+        act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": id })).on(!editing),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         zoom_item(vec![Sel::Feature { id }], true),
@@ -2283,6 +2287,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
             }
         }
+        "ui.editDimensions" => app.viewport.edit_dimensions = id_of(&p, "sketch"),
         "ui.sketchProfile" => {
             if let Some(id) = id_of(&p, "sketch") {
                 if app.session.visibility.hidden_profiles.contains(&id) {
