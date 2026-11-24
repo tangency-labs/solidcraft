@@ -485,7 +485,7 @@ impl WireConstraintKind {
         let v = match self {
             WireConstraintKind::Distance { .. } => p(0).dist(p(1)),
             WireConstraintKind::AxisDistance { axis, reversed, .. } => {
-                let d = constraint::plane_distance(dual::of(p(1)), dual::of(p(0)), dual::of(axis.unit()));
+                let d = constraint::plane_distance::<f64>(dual::of(p(1)), dual::of(p(0)), dual::of(axis.unit()));
                 if *reversed { -d } else { d }
             }
             WireConstraintKind::Angle { a_reversed, b_reversed, .. } => {
@@ -502,12 +502,12 @@ impl WireConstraintKind {
             }
             WireConstraintKind::PlaneDistance { plane, reversed, .. } => {
                 let (o, n) = plane.frame()?;
-                let d = constraint::plane_distance(dual::of(p(0)), dual::of(o), dual::of(n));
+                let d = constraint::plane_distance::<f64>(dual::of(p(0)), dual::of(o), dual::of(n));
                 if *reversed { -d } else { d }
             }
             WireConstraintKind::PlaneAngle { plane, .. } => {
                 let (_, n) = plane.frame()?;
-                constraint::plane_angle(dual::of(p(0)), dual::of(p(1)), dual::of(n)).0.abs()
+                constraint::plane_angle::<f64>(dual::of(p(0)), dual::of(p(1)), dual::of(n)).0.abs()
             }
             _ => return None,
         };

@@ -22,8 +22,10 @@ pub trait Num:
     /// Its plain value.
     fn val(self) -> f64;
     /// Its square root.
+    #[must_use]
     fn sqrt(self) -> Self;
     /// The angle of the point (x, self) from the x axis, as `f64::atan2`.
+    #[must_use]
     fn atan2(self, x: Self) -> Self;
 }
 
@@ -174,6 +176,7 @@ impl<T: Num> V<T> {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
     /// The vector product.
+    #[must_use]
     pub fn cross(self, o: V<T>) -> V<T> {
         V {
             x: self.y * o.z - self.z * o.y,
@@ -186,6 +189,7 @@ impl<T: Num> V<T> {
         self.dot(self).sqrt()
     }
     /// Scale every coordinate.
+    #[must_use]
     pub fn scale(self, s: T) -> V<T> {
         V {
             x: self.x * s,
