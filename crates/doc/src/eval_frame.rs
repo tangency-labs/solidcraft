@@ -23,9 +23,14 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 
 #[path = "frame_earlier.rs"]
 mod earlier;
-
 #[path = "frame_paths.rs"]
 mod paths;
+#[path = "eval_frame_trim.rs"]
+mod trimming;
+
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    trimming::trim(doc, vals, f, st, warning)
+}
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
@@ -68,6 +73,7 @@ fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         let bases = group_bases(&f.kind, &default, ids.len());
         let pinned = ids.iter().cloned().zip(group_member_names(st, &ids, &bases, names)).collect::<BTreeMap<_, _>>();
         let (start, counter) = (st.bodies.len(), st.body_counter);
+        let records = st.frame_members.len();
         let result = (|| {
             let mut offset = 0;
             for mut group in groups {
@@ -83,6 +89,7 @@ fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if result.is_err() {
             st.bodies.truncate(start);
             st.body_counter = counter;
+            st.frame_members.truncate(records);
         }
         return result;
     }
@@ -284,6 +291,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
         for (k, t) in all.into_iter().enumerate() {
             let name = new_name(st, f, copy_offset + k);
+            if trimming::can_rebuild(&f.kind)
+                && let Some((line, ..)) = segments.get(k)
+            {
+                st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
         return Ok(());
@@ -295,6 +307,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
         if let Some(t) = t {
+            if trimming::can_rebuild(&f.kind)
+                && let Some(line) = ids.get(m)
+            {
+                st.frame_members.push(trimming::record(f.id, line, name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
@@ -2081,6 +2098,17 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    let original = untrimmed_member_section(doc, vals, f, st, line)?;
+    trimming::section(doc, vals, f, st, line, original)
+}
+
+fn untrimmed_member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2, [bool; 2])> {
     if paths::uses(st, &f.kind)? {
         return paths::member_section(doc, vals, f, st, line);
     }
@@ -2092,7 +2120,7 @@ pub(crate) fn member_section(
             FeatureKind::FrameMember { lines, .. } if lines.is_empty() || lines.iter().any(|id| id == line))
             })
             .ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-        return member_section(doc, vals, &group, st, line);
+        return untrimmed_member_section(doc, vals, &group, st, line);
     }
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
