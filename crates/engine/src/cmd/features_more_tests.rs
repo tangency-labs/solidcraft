@@ -5002,7 +5002,7 @@ fn align_refuses_a_target_on_a_body_that_moves() {
         let mut p = json!({"bodies": ["B"], "from_face": [55, 5, 0]});
         p.as_object_mut().into_iter().for_each(|o| o.extend(to.as_object().cloned().unwrap_or_default()));
         let e = align_error(&mut s, p);
-        assert!(e.contains("is on a body that moves"), "{to}: {e}");
+        assert!(e.contains("is on a body that moves") && e.contains("use `to_frame` for a sketch"), "{to}: {e}");
     }
     run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 0], "to": [50, 0, 5]}));
     assert_bounds(&mut s, "B", [50., 0., 5.], [60., 10., 15.]);
@@ -5010,6 +5010,43 @@ fn align_refuses_a_target_on_a_body_that_moves() {
     run(&mut s, "solid.box", json!({"corner": [50, 0, 15], "length": 10, "width": 10, "height": 10, "body_name": "C"}));
     run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 5], "to": {"snap": "vertex", "at": [60, 10, 15]}}));
     assert_bounds(&mut s, "B", [60., 10., 15.], [70., 20., 25.]);
+}
+
+/// Box `B` (10 x 10 x 10) standing on box `C` (20 x 10 x 10 at the origin), `B` made first.
+fn block_on_slab() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 10], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "body_name": "C"}));
+    s
+}
+
+/// A target picked where the moved `B` touches `C` is `C`'s top, facing up, though `B` comes
+/// first: `B`'s top is laid on it, `B` turned over and standing on `C`.
+#[test]
+fn align_takes_a_target_face_on_a_body_that_stays_where_a_moved_one_touches_it() {
+    let mut s = block_on_slab();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_face": [5, 5, 20], "to_face": [5, 5, 10]}));
+    assert_bounds(&mut s, "B", [0., 0., 10.], [10., 10., 20.]);
+}
+
+/// A face centre target there is the centre of `C`'s top.
+#[test]
+fn align_snaps_a_target_face_centre_on_a_body_that_stays_where_a_moved_one_touches_it() {
+    let mut s = block_on_slab();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_face": [5, 5, 20], "to": {"snap": "face_center", "at": [5, 5, 10]}}));
+    assert_bounds(&mut s, "B", [5., 0., 10.], [15., 10., 20.]);
+}
+
+/// A start picked where the moved `B` touches `A`, which stays and comes first, is `B`'s bottom,
+/// facing down: `B` is set down on `D` the way up it was.
+#[test]
+fn align_takes_a_start_face_on_a_moved_body_where_one_that_stays_touches_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 10], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "D"}));
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_face": [5, 5, 10], "to_face": [55, 5, 10]}));
+    assert_bounds(&mut s, "B", [50., 0., 10.], [60., 10., 20.]);
 }
 
 /// A body listed twice is refused, not moved twice.
