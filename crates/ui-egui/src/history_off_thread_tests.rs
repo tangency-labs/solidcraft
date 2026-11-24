@@ -2288,6 +2288,34 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
 }
 
+/// A plugin run is a row of the operations panel named for the plugin and its entry, and its X
+/// stops it: nothing of it lands.
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_run_is_an_operation_named_for_the_plugin_and_its_x_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("operations");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let reply = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("the run is an operation");
+    assert_eq!(row.label, "sample: make");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    let response = reply_to(&mut h, &reply);
+    assert_eq!((response["ok"].clone(), response["stopped"].clone()), (json!(false), json!(true)), "{response}");
+    release.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A block whose length is the parameter `len` (60 mm), with a boss and a hole placed by `len`: a
 /// change of `len` recomputes every feature. Every command computes off the window thread.
 fn block_of_len() -> Harness {
