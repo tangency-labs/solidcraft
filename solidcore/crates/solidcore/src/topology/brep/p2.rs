@@ -4043,9 +4043,12 @@ mod tests {
         }
     }
 
-    /// `Solids/fillet_ts.smb`: the trim of edge use 58 leaves edge 29 by about 2.14e-2 between
-    /// its ends (sampled; the edge's tolerance in the file is 1.86e-5), and the cover raises
-    /// the tolerance to the proved distance, which the dense sample stays under. Edge 27's
+    /// `Solids/fillet_ts.smb`: the trim of edge use 58 leaves edge 29 by about 2.63e-5 between
+    /// its ends (sampled), above the edge's tolerance in the file (1.86e-5), and the cover
+    /// raises the tolerance to the proved distance, which the dense sample stays under. (The
+    /// face keeps the file's B-spline surface, an exact copy of its analytic surface (WR-450,
+    /// #18923), so the trim is measured on the surface it was written on; when the analytic
+    /// surface replaced it, the same trim sat 2.14e-2 off.) Edge 27's
     /// trim lies on its edge with another parameterisation (3.1e-2 apart at equal
     /// parameters): its tolerance stays 1e-5.
     #[test]
@@ -4056,8 +4059,18 @@ mod tests {
         assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
         let tol = edge::tolerance(&b, e).unwrap();
         let sampled = sampled_distance(&k, &b, eu, 1024);
-        assert!(sampled > 2e-2 && sampled <= tol, "{sampled:e} {tol:e}");
+        let (before, after) = b.trim_cover_raises().edges[&e];
+        assert_eq!(after.to_bits(), tol.to_bits());
+        assert!(
+            before < sampled && sampled <= tol,
+            "{before:e} {sampled:e} {tol:e}"
+        );
         assert!(tol <= sampled * 1.01, "{sampled:e} {tol:e}");
+        let bound = proved_distance(&k, &b, eu).unwrap();
+        assert!(
+            sampled <= bound && bound <= tol,
+            "{sampled:e} {bound:e} {tol:e}"
+        );
         let (eu, e) = (EdgeuseId::from_index(54), EdgeId::from_index(27));
         assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
         assert_eq!(edge::tolerance(&b, e).unwrap(), 1e-5);

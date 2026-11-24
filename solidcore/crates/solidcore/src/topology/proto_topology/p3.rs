@@ -145,6 +145,7 @@
 //!   each.
 
 use crate::curve::curve::p2::Curve;
+use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
 use crate::error::boolean::BooleanFailure;
@@ -155,18 +156,22 @@ use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact,
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{
-    contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT,
+    coincidence_reach_3d, contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d,
+    USE_DEFAULT,
 };
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    periodic_trim_witness, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
+    PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::surface::p6::COINCIDENT_TANGENT_SINE;
 
 use super::p1::proto::{can_imprint, find_position_from_pcs, topo_dimension};
@@ -507,7 +512,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let region = crossing_region(
             k, geometry, crossing, along, pc1, pc2, position, point_tol, limit,
         )?;
-        let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
+        let within =
+            self.find_proto_vertex_within_if(k, position, point_tol, Some(&region), |id| {
+                self.proto_vertex_incidence_conflicts(k, geometry, id, [pc1, pc2])
+                    .map(|conflict| !conflict)
+            })?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
         // Not upstream: a point classified on a vertex is that vertex's point, whatever the
         // position found for the pair (the average of the two objects' points), so the proto
@@ -2118,25 +2127,68 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .edge_interval(edge2)
                 .ok_or(dangling("edge is unknown"))?;
 
+            let edge_tol1 = geometry
+                .topology_tolerance(edge1)
+                .ok_or(dangling("edge is unknown"))?;
+            let edge_tol2 = geometry
+                .topology_tolerance(edge2)
+                .ok_or(dangling("edge is unknown"))?;
+            // Both classifications carry the first edge's curve and its source zone.
+            let curve_tol = max2(tol, edge_tol1);
+
             // arbitrary - pick XSectFace as first Edge Face
             f1 = Some(*faces1.first().ok_or(dangling("edge has no faces"))?);
             f2 = Some(*faces2.first().ok_or(dangling("edge has no faces"))?);
 
-            // Find the Edge->Curve coincidences; the status is ignored.
+            // Find the coincident intervals of the two edge curves.
             let sols = {
                 let c1 = curve_of(&*geometry, h1)?;
                 let c2 = curve_of(&*geometry, h2)?;
-                Some(c1.global_coincidence_checker::<CurveHandle>(
+                // Prior merges can raise edge zones. Bound this new shared-interval
+                // search by each owning B-rep's zone, as in find_edge_proved_along.
+                let manager_zone = self.tolerance(k);
+                let [search_zone1, search_zone2] =
+                    [(edge1, edge_tol1), (edge2, edge_tol2)].map(|(edge, edge_zone)| {
+                        let body_zone = geometry
+                            .topology_entity(edge)
+                            .map_or(manager_zone, |(brep, _)| brep.tolerance());
+                        // Unknown zones stay unknown through the cap and floor.
+                        if edge_zone.is_nan() || body_zone.is_nan() || manager_zone.is_nan() {
+                            f64::NAN
+                        } else {
+                            edge_zone.min(body_zone).max(manager_zone)
+                        }
+                    });
+                // Include rounding at the trimmed curves' scale.
+                // A missing normal box contributes zero extra rounding.
+                let req = BoundingBoxRequest {
+                    normal: true,
+                    ..BoundingBoxRequest::default()
+                };
+                let mut size = 0.0;
+                for (curve, interval) in [(c1, &ivl1), (c2, &ivl2)] {
+                    let boxes = curve.calculate_bounding_box(k, interval, req, true)?;
+                    if let Some(bounds) = boxes.normal {
+                        if bounds.is_defined()
+                            && bounds.is_bounded()
+                            && !bounds.has_negative_volume()
+                            && is_measurable_box(&bounds)
+                        {
+                            size = max2(size, bounds.max_dimension());
+                        }
+                    }
+                }
+                let coincidence_tol = coincidence_reach_3d(k, search_zone1, search_zone2, size);
+                c1.global_coincidence_checker::<CurveHandle>(
                     k,
                     &ivl1,
                     c2,
                     &ivl2,
-                    tol,
+                    coincidence_tol,
                     true,
                     [None, None],
-                )?)
-                .map(|c| c.solutions)
-                .unwrap_or_default()
+                )?
+                .solutions
             };
 
             for sol in &sols {
@@ -2144,8 +2196,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     // PEs expect the same curve classified against each face
                     let ivl = Extent1d::from_min_max(sol.start.param(0)?, sol.end.param(0)?);
                     let c1h = h1.ok_or(dangling("edge has no curve"))?;
-                    let mut cc1 = new_curve_classification(k, c1h, ivl, tol)?;
-                    let mut cc2 = new_curve_classification(k, c1h, ivl, tol)?;
+                    let mut cc1 = new_curve_classification(k, c1h, ivl, curve_tol)?;
+                    let mut cc2 = new_curve_classification(k, c1h, ivl, curve_tol)?;
 
                     // Classify the coincident curves against their faces
                     let face1 = f1.ok_or(dangling("face is null"))?;
@@ -2407,7 +2459,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             None => BIG_DOUBLE,
         };
         for &id in self.proto_vertices() {
-            if Some(id) == within || !self.is_same_edge_face_crossing(k, geometry, id, pc1, pc2)? {
+            if Some(id) == within
+                || !self.is_same_edge_face_crossing(k, geometry, id, pc1, pc2)?
+                || self.proto_vertex_incidence_conflicts(k, geometry, id, [pc1, pc2])?
+            {
                 continue;
             }
             let dist = distance(id)?;
@@ -2417,6 +2472,81 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         Ok(held)
+    }
+
+    /// A shared event must keep each fixed native vertex on every opposite defining face.
+    /// Check both definition orders so reach regions cannot erase a proved separation.
+    pub(crate) fn proto_vertex_incidence_conflicts(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        id: ProtoVertexId,
+        incoming: [&PointClassification<O>; 2],
+    ) -> Result<bool> {
+        let pv = self
+            .proto_vertex(id)
+            .ok_or(dangling("proto vertex is deleted"))?;
+        for &def in pv.vertex_definitions() {
+            let def = self
+                .vertex_def(def)
+                .ok_or(dangling("vertex definition is deleted"))?;
+            let stored = [def.brep_point_classif(1), def.brep_point_classif(2)];
+            for (fixed, faces) in [(incoming, stored), (stored, incoming)] {
+                let [first, second] = fixed;
+                let [opposite_first, opposite_second] = faces;
+                for (fixed, opposite) in [(first, opposite_second), (second, opposite_first)] {
+                    let Some(vertex) = fixed.vertex_object() else {
+                        continue;
+                    };
+                    let Some(marker) = periodic_trim_witness(k, geometry, vertex)? else {
+                        continue;
+                    };
+                    let Some(vertex_zone) = geometry.topology_tolerance(vertex) else {
+                        continue;
+                    };
+                    let Some(vertex_face_zone) = fixed
+                        .face()
+                        .and_then(|face| geometry.topology_tolerance(face))
+                    else {
+                        continue;
+                    };
+                    let Some(face) = opposite.face().or_else(|| opposite.face_object()) else {
+                        continue;
+                    };
+                    let Some(surface) = geometry
+                        .face_surface(face)
+                        .flatten()
+                        .and_then(|s| geometry.surface(s))
+                    else {
+                        continue;
+                    };
+                    let Some(face_zone) = geometry.topology_tolerance(face) else {
+                        continue;
+                    };
+                    let Some(object_zone) = opposite
+                        .object()
+                        .and_then(|o| geometry.topology_tolerance(o))
+                    else {
+                        continue;
+                    };
+                    if ![face_zone, object_zone, vertex_zone, vertex_face_zone]
+                        .iter()
+                        .all(|zone| zone.is_finite() && *zone >= 0.0)
+                        // Raised stitched zones retain their covering-gap policy.
+                        || object_zone > face_zone
+                        || vertex_zone > vertex_face_zone
+                    {
+                        continue;
+                    }
+                    if AnalyticSupport::of(surface).is_some_and(|support| {
+                        marker.outside_surface(k, &support, face_zone.max(object_zone))
+                    }) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Not upstream (#17595; see the module's Deviations). Whether the proto vertex `pv`

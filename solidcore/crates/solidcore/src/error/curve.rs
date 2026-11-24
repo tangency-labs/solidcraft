@@ -238,9 +238,6 @@ pub enum CurveFailure {
         /// Where the line cuts the chord, as a fraction of the chord from its start.
         at: f64,
     },
-    /// Two curves found within tolerance of each other, but the local minimisation from
-    /// the intervals' midpoints found no nearest point pair. [`ErrorKind::NotFound`].
-    NearestNotFound,
     /// A composite curve is evaluated through its segments; it has no evaluation of its own
     /// at a parameter of the whole. [`ErrorKind::Unsupported`].
     NoEvaluationOfItsOwn,
@@ -711,7 +708,6 @@ impl CurveFailure {
             | Self::LineDistanceNotAboveTolerance { .. }
             | Self::LocalSolveFailed
             | Self::MidTangentOffChord { .. }
-            | Self::NearestNotFound
             | Self::NoEvaluationOfItsOwn
             | Self::NoEvaluationSlots
             | Self::NoOffsetCurve
@@ -849,7 +845,7 @@ impl CurveFailure {
             | Self::ZeroTangent { .. } => ErrorKind::of_status(self.comparison_status()),
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::TargetDidNotDrop | Self::NearestNotFound => ErrorKind::NotFound,
+            Self::TargetDidNotDrop => ErrorKind::NotFound,
         }
     }
 
@@ -891,7 +887,6 @@ impl CurveFailure {
             | Self::LineDistanceNotAboveTolerance { .. }
             | Self::LocalSolveFailed
             | Self::MidTangentOffChord { .. }
-            | Self::NearestNotFound
             | Self::NoEvaluationOfItsOwn
             | Self::NoEvaluationSlots
             | Self::NoOffsetCurve
@@ -1192,9 +1187,6 @@ impl core::fmt::Display for CurveFailure {
             Self::TargetDidNotDrop => {
                 f.write_str("the target point did not drop onto the curve's surface")
             }
-            Self::NearestNotFound => f.write_str(
-                "the curves are within tolerance but the solve found no nearest point pair",
-            ),
             Self::CornerOnViewAxis => {
                 f.write_str("a pseudo box corner projects onto the view origin")
             }
@@ -1695,7 +1687,6 @@ mod tests {
                 ErrorKind::Unsupported,
             ),
             (CurveFailure::TargetDidNotDrop, SM_ERR, ErrorKind::NotFound),
-            (CurveFailure::NearestNotFound, SM_ERR, ErrorKind::NotFound),
             (CurveFailure::CornerOnViewAxis, SM_ERR, ErrorKind::Failed),
         ];
         for (cause, status, kind) in cases {

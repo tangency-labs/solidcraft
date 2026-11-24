@@ -206,6 +206,7 @@ use crate::blend::fillet_section::definition_box::{definition_partials_over_box,
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{as_b_spline, span, Nurbs};
 use crate::error::{Result, SolidError};
+use crate::geom::interval_vector::{cross, dot, norm, square};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
@@ -264,32 +265,8 @@ fn invalid(reason: &'static str) -> SolidError {
 /// An interval vector.
 type I3 = [Ivl; 3];
 
-fn cross(a: I3, b: I3) -> I3 {
-    let [ax, ay, az] = a;
-    let [bx, by, bz] = b;
-    [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
-}
-
-fn dot(a: I3, b: I3) -> Ivl {
-    let [ax, ay, az] = a;
-    let [bx, by, bz] = b;
-    ax * bx + ay * by + az * bz
-}
-
 fn scale(a: I3, s: Ivl) -> I3 {
     a.map(|x| x * s)
-}
-
-/// `x^2`, never below 0.
-fn square(x: Ivl) -> Ivl {
-    let s = x * x;
-    Ivl::new(s.lo.max(0.0), s.hi)
-}
-
-/// `|a|`, enclosed.
-fn norm(a: I3) -> Ivl {
-    let [x, y, z] = a;
-    (square(x) + square(y) + square(z)).sqrt()
 }
 
 /// The knot spans `k` (`u[k] < u[k + 1]`, `p <= k < n`) of a knot vector of degree `p` with
@@ -1675,21 +1652,6 @@ pub(crate) fn face_use_normal(
         return Ok(None);
     }
     Ok(Some(u.f(Ivl::from(t))?))
-}
-
-/// `a x b` of interval vectors.
-pub(crate) fn cross_ivl(a: [Ivl; 3], b: [Ivl; 3]) -> [Ivl; 3] {
-    cross(a, b)
-}
-
-/// `a . b` of interval vectors.
-pub(crate) fn dot_ivl(a: [Ivl; 3], b: [Ivl; 3]) -> Ivl {
-    dot(a, b)
-}
-
-/// `|a|` of an interval vector.
-pub(crate) fn norm_ivl(a: [Ivl; 3]) -> Ivl {
-    norm(a)
 }
 
 /// The answer of [`tangent_all_along`].

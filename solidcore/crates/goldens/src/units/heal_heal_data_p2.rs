@@ -1415,6 +1415,8 @@ fn put_owner_block(b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
 }
 
 fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     o.push(STATE);
     o.push(h.tgt_vertices.len() as f64);
     o.extend(h.tgt_vertices.iter().map(|v| f64::from(v.index())));
@@ -2595,6 +2597,8 @@ fn rust_heal(
                     crate::trim_hook::observe(&mut b);
                     put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
+                #[cfg(test)]
+                crate::certify::written(&b);
                 o.extend([0.0, flag(new_probs)]);
                 stop = true;
                 break;
@@ -2862,7 +2866,6 @@ pub(crate) mod certificates {
 
     use solidcore::geom::tol::{context_xsect_tol_3d, SmallTopoType};
     use solidcore::heal::gap::GapFunction;
-    use solidcore::kernel::Kernel;
     use solidcore::topology::edgeuse::p1 as eu1;
     use solidcore::surface::surface::p4::NoObject;
     use solidcore::surface::surface::p5::DropPointOptions;
@@ -2899,7 +2902,7 @@ pub(crate) mod certificates {
         let b = KEPT
             .with(|k| k.borrow_mut().take())
             .expect("the script dumped its state");
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let tol = context_xsect_tol_3d(&k, None, SmallTopoType::NormalSize);
         let mut out = Vec::new();
         for (eu, r) in b.edgeuses().iter() {
@@ -2971,7 +2974,7 @@ pub(crate) mod certificates {
         let b = KEPT
             .with(|k| k.borrow_mut().take())
             .expect("the script dumped its state");
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut out = Vec::new();
         for (vu, r) in b.vertexuses().iter() {
             let cached = r.vertex_face_gap;
@@ -3153,7 +3156,7 @@ mod tests {
     }
 
     fn built(input: &BIn) -> Brep {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         match own_brep(&mut k, input, false, false).unwrap() {
             Built::Brep(b) => *b,
             Built::Failed(e) => panic!("build failed: {e}"),

@@ -1786,7 +1786,7 @@ fn run_rust_op(
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    run_rust_on(&mut Kernel::default(), i)
+    run_rust_on(&mut crate::runner_kernel(), i)
 }
 
 /// The unit's Rust run of `case` on the caller's kernel `k` (a fresh default kernel in
@@ -1980,7 +1980,7 @@ fn run_rust_intersection(
 ) -> Result<Output, HarnessError> {
     cross_body_input(i, other)?; // same input-kind check, no native construction/import
     let run = || -> Result<Output, Fail> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let first = i
             .brep
             .as_ref()

@@ -183,7 +183,7 @@ pub(crate) fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessEr
     let (path, _) = fixture_input(brep.clone())?;
     let src: BrepIn = serde_json::from_value(brep.clone())
         .map_err(|e| harness(format!("topology fixture: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let built = match &src {
         BrepIn::File { rebuild, .. } => {
             read_as(&mut k, &path, *rebuild, false, false, &Conventions::EDGEUSE_GRAPH)?
@@ -251,7 +251,7 @@ fn run_box(input: &BoxInput) -> Result<Output, HarnessError> {
     let Some(id) = pick(input.index, n) else {
         return Ok(none_output());
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let tight = input.tight && !input.use_default;
     let mut bx = Extent3d::from_points(
         Vec3::new(SEED_MIN[0], SEED_MIN[1], SEED_MIN[2]),
@@ -345,7 +345,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -400,7 +400,7 @@ fn run_point(k: &Kernel, i: &PointInput) -> Result<Output, HarnessError> {
     let Some(a) = point_args(k, &m, i)? else {
         return Ok(none_output());
     };
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut b = m.brep;
     drop_trim_cache(&b, a.face)?;
     let mut pc = PointClassification::new(zone_tol3d(&k, i.pc_tol));
@@ -453,7 +453,7 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
     let edge = (i.edge >= 0)
         .then(|| pick(i.edge as usize, n_edges).map(EdgeId::from_index))
         .flatten();
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let [px, py, pz] = i.p;
     let [qx, qy, qz] = i.q;
     let line = match BSplineCurve::create_line_segment(
@@ -732,7 +732,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         run(k, case)
     }
 

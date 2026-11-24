@@ -901,6 +901,36 @@ pub fn ends_seam_edge(b: &Brep, v: VertexId) -> Result<bool> {
     Ok(seam_edge(b, v)?.is_some())
 }
 
+/// The unique smooth closed material trim whose chart endpoint this vertex marks.
+pub(crate) fn regular_periodic_trim_edge(
+    k: &Kernel,
+    b: &Brep,
+    v: VertexId,
+) -> Result<Option<EdgeId>> {
+    let mut has_seam = false;
+    let mut material = None;
+    for edge in edges(b, v, None)? {
+        if is_seam_edge(b, edge)? {
+            has_seam = true;
+        } else if material.replace(edge).is_some() {
+            return Ok(None);
+        }
+    }
+    let Some(edge) = material else {
+        return Ok(None);
+    };
+    if !has_seam || !crate::topology::edge::is_closed(b, edge)? {
+        return Ok(None);
+    }
+    let Some(curve) = crate::topology::edge::curve(b, edge)? else {
+        return Ok(None);
+    };
+    Ok(
+        (curve.dim() == 3 && curve.is_periodic(k, &crate::topology::edge::interval(b, edge)?)?)
+            .then_some(edge),
+    )
+}
+
 /// Not upstream: the first seam edge the vertex ends ([`is_seam_edge`]).
 ///
 /// # Errors

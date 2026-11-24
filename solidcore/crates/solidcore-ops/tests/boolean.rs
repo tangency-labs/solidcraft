@@ -18,7 +18,7 @@ use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
     Error, PointClass,
 };
-use solidcore_record::brep::Brep as Record;
+use solidcore_record::brep::{Brep as Record, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 fn all_fixes() {
@@ -1380,36 +1380,14 @@ fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_fra
 /// Four frames of the cut above that failed, the ball's seam turned 1e-8, 1e-10 and -1e-8 rad
 /// off the meridian the line runs into the poles along: the trim's end is then that far off the
 /// corner of the ball's domain, and these were refused too. Each is one valid solid of the same
-/// volume as above (turning the ball about its axis moves no point of it).
+/// volume as above (turning the ball about its axis moves no point of it). The coincidence
+/// crossing is found as the section curve (WR-647, #21306 parts C and D): the section's
+/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
+/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
+/// (Test #70, frame 2); it now keeps the seam side the drop point is on.
 #[test]
 fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut() {
     all_fixes();
-    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
-    let mut failed = Vec::new();
-    for turn in [1e-8, 1e-10, -1e-8] {
-        for frame in [2, 5, 8, 14] {
-            let what = format!("turned {turn:e}, frame {frame}");
-            let b = ball([0.0, 50.0, 20.0], turn);
-            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
-        }
-    }
-    assert!(failed.is_empty(), "{failed:#?}");
-}
-
-/// The same cuts with the coincidence crossing found as the section curve
-/// (`simple_coincidence_crossing_is_point` off; WR-647, #21306 part C). The section's
-/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
-/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
-/// (Test #70, frame 2); it now keeps the seam side the drop point is on. Same V.
-#[test]
-fn a_seam_meridian_crossing_into_the_balls_pole_cuts_with_the_crossing_as_a_curve() {
-    session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| *n != "simple_coincidence_crossing_is_point"),
-    )
-    .unwrap();
     let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
     let mut failed = Vec::new();
     for turn in [1e-8, 1e-10, -1e-8] {
@@ -3383,54 +3361,32 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// joined. The range is the flank of the tangency at the touching point and is dropped. The
 /// join is the bin and the insert less what they share: the insert's corners
 /// inside the walls outside the two rounds, its full section there, of height the top's.
+///
+/// WR-647 part A: the curve where the top crosses the corner round reaches the round's floor
+/// edge only at its end vertex (4, 249.15, 7), so the curve/edge range there is that one
+/// contact. The top's other boundary, the floor's line y = 249.15, meets the round's floor
+/// arc only at that point, as its tangent; the face/face tangency witness proves the range
+/// is the point from those two carriers.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, true);
-}
-
-/// #18064 without `simple_coincidence_crossing_is_point` (WR-647 part A): the curve where the
-/// top crosses the corner round reaches the round's floor edge only at its end vertex
-/// (4, 249.15, 7), so the curve/edge range there is that one contact. The top's other
-/// boundary, the floor's line y = 249.15, meets the round's floor arc only at that point, as
-/// its tangent; the face/face tangency witness proves the range is the point from those two
-/// carriers, and the join is the same as with the flag.
-#[test]
-fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, false);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
 }
 
 /// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
 /// times flatter where it meets the floor, so the curve where it crosses the corner round
-/// stays within the scaled zero of the round's floor edge for longer before the touch.
+/// stays within the scaled zero of the round's floor edge for longer before the touch. The
+/// witness makes the longer range at the round's end vertex the one contact there (WR-647
+/// part A).
 #[test]
 fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, true);
-}
-
-/// The flatter insert of #18064 without `simple_coincidence_crossing_is_point`: the witness
-/// makes the longer range at the round's end vertex the one contact there (WR-647 part A).
-#[test]
-fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness(
-) {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, false);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
 }
 
 /// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
 /// less what they share, the insert's corners inside the walls outside the two rounds, its
-/// full section there, of height the top's. `crossing_is_point` keeps
-/// `simple_coincidence_crossing_is_point` on; without it every other fix is on.
-fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64, crossing_is_point: bool) {
-    if crossing_is_point {
-        all_fixes();
-    } else {
-        session::set_thread_fixes(
-            solidcore::kernel::UpstreamFixes::NAMES
-                .iter()
-                .copied()
-                .filter(|n| *n != "simple_coincidence_crossing_is_point"),
-        )
-        .unwrap();
-    }
+/// full section there, of height the top's.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
+    all_fixes();
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
     // insert's height above the floor
@@ -3819,6 +3775,134 @@ fn a_short_edge_joined_onto_a_body_read_coarser_is_kept() {
             let got = volume(&r);
             assert!(near(got, want), "{plate_tolerance}: {got} vs {want}");
         }
+    }
+}
+
+/// The lower rim of the clipped sphere has radius sqrt(10² − 6²) = 8. A bore starting
+/// in that face opens to the exterior even when its rim is only one tolerance inside.
+/// The volume alone cannot distinguish the opening from a sealed cylindrical void.
+/// Once the rims are farther apart than their coincidence tolerance, an inner bore
+/// leaves an annulus and an outer bore meets the sphere at z = −sqrt(10² − radius²).
+#[test]
+fn a_bore_starting_at_a_clipped_spheres_rim_opens_the_bottom() {
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    let sphere = make_sphere([0.0; 3], 10.0).unwrap();
+    let above = make_box([-11.0, -11.0, 7.0], [22.0, 22.0, 11.0]).unwrap();
+    let upper = boolean(sphere, above, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    check_clipped_sphere_bores(
+        &upper,
+        -6.0,
+        &[
+            -1e-5, -1e-4, -2e-5, -1.5e-5, -1.25e-5, -5e-6, 0.0, 1.01e-5, 1.1e-5, 1.25e-5, 1.5e-5,
+            2e-5,
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    // Rotating the seam rotates the rational tangent hull outside the face box.
+    // The bottom face still has the analytic annular area checked below.
+    check_clipped_sphere_bores(&upper, -6.0, &[-2e-5], [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0]);
+    // At z = −8 the true section is within a tolerance of the cutter's cap,
+    // while the old rim is more than a tolerance from the cutter's wall.
+    check_clipped_sphere_bores(&upper, -8.0, &[1.25e-5], [1.0, 0.0, 0.0]);
+}
+
+#[allow(clippy::disallowed_methods)] // the test's closed forms
+fn check_clipped_sphere_bores(upper: &Body, base_z: f64, offsets: &[f64], reference: [f64; 3]) {
+    let z = [0.0, 0.0, 1.0];
+    let below = make_box([-11.0, -11.0, base_z - 11.0], [22.0, 22.0, 11.0]).unwrap();
+    let target = boolean(upper.copy().unwrap(), below, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let target_volume = volume(&target);
+    let rim = (100.0 - base_z * base_z).sqrt();
+    for &offset in offsets {
+        let radius = rim + offset;
+        let circle = Curve::Arc {
+            center: [0.0, 0.0, base_z],
+            axis: z,
+            reference,
+            radius,
+            start: 0.0,
+            end: TAU,
+        };
+        let bore = extrude(&[circle], z, -base_z, 0.0, DraftCorner::default(), true).unwrap();
+        let cut = boolean(target.copy().unwrap(), bore, BooleanOp::Subtract)
+            .map_err(|error| (base_z, offset, error))
+            .unwrap()
+            .unwrap();
+        let (record, order) = cut
+            .to_record()
+            .map_err(|error| (base_z, offset, error))
+            .unwrap();
+        if offset.abs() > 1e-5 {
+            let bottom: Vec<_> = record
+                .faces
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| match &face.surface {
+                    Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } => {
+                        (origin[2] - base_z).abs() < 1e-8
+                    }
+                    _ => false,
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if offset < 0.0 {
+                let area: f64 = bottom
+                    .iter()
+                    .map(|&face| cut.face_area(&order, face, 1e-10).unwrap())
+                    .sum();
+                let want = PI * (rim * rim - radius * radius);
+                assert!(
+                    (area - want).abs() < 1e-8,
+                    "z={base_z}, offset {offset}: bottom area {area}, expected {want}"
+                );
+            } else {
+                assert!(
+                    bottom.is_empty(),
+                    "z={base_z}, offset {offset}: bottom faces {bottom:?}"
+                );
+                let lowest = record
+                    .vertices
+                    .iter()
+                    .map(|v| v.point[2])
+                    .fold(f64::INFINITY, f64::min);
+                let height = -(100.0 - radius * radius).sqrt();
+                assert!(
+                    (lowest - height).abs() < 1e-8,
+                    "z={base_z}, offset {offset}: lowest vertex {lowest}, expected {height}"
+                );
+            }
+        }
+        // Both rays see the ceiling except where the wider inset leaves material at the rim.
+        let near_rim = rim - 5e-5;
+        let rim_hit_z = if near_rim > radius { base_z } else { 0.0 };
+        for (x, height) in [(0.0, 0.0), (near_rim, rim_hit_z)] {
+            let hit = cut
+                .face_hit_by_ray(&order, [x, 0.0, base_z - 1.0], z)
+                .unwrap()
+                .unwrap();
+            assert!(
+                (hit.point[2] - height).abs() < 1e-8,
+                "z={base_z}, offset {offset}, x {x}: {:?}",
+                hit.point
+            );
+        }
+        assert_eq!(record.shells.len(), 1, "z={base_z}, offset {offset}");
+        // Beyond the rim the tool includes a thin slice outside the sphere.
+        let z0 = (100.0 - radius * radius).sqrt().min(-base_z);
+        let h = -base_z - z0;
+        let want = target_volume + PI * radius * radius * base_z + PI * h * h * (z0 + h / 3.0);
+        assert!(near(volume(&cut), want), "z={base_z}, offset {offset}");
+        let check = cut.check(CheckLevel::All).unwrap();
+        assert!(
+            check.is_valid(),
+            "z={base_z}, offset {offset}: {}",
+            check.text
+        );
     }
 }
 

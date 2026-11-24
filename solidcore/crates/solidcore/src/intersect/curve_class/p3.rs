@@ -1963,8 +1963,33 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         object_zone_tol_3d(k, geometry, Some(edge_vertex2))?,
     );
 
+    let accepts_native_vertex = |vertex| -> Result<bool> {
+        if !cc.native_material_contacts() {
+            return Ok(true);
+        }
+        let Some(marker) =
+            crate::intersect::point_class::periodic_trim_witness(k, geometry, vertex)?
+        else {
+            return Ok(true);
+        };
+        let Some(curve) = cc.curve().and_then(|curve| geometry.curve(curve)) else {
+            return Ok(true);
+        };
+        let Some(support) = crate::curve::contact::NativeSupport::curve(curve, &cc.interval())
+        else {
+            return Ok(true);
+        };
+        let zone = object_zone_tol_3d(k, geometry, Some(vertex))?.max(edge_zone_tol_3d);
+        Ok(!marker.excluded_by(
+            k,
+            &support,
+            src_zone_tol_3d,
+            zone,
+            cc.native_foreign_support(),
+        ))
+    };
     // when target_point is closer to pEdgeVertex1 and within tolerance
-    if dist1 < dist2 && dist1 < xsect_tol_3d1 {
+    if dist1 < dist2 && dist1 < xsect_tol_3d1 && accepts_native_vertex(edge_vertex1)? {
         // inform the public that the classification was modified
         changed_to_vertex = true;
 
@@ -1979,7 +2004,7 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
         }
     }
     // when target_point is closer to pEdgeVertex2 and within tolerance
-    else if dist2 <= dist1 && dist2 < xsect_tol_3d2 {
+    else if dist2 <= dist1 && dist2 < xsect_tol_3d2 && accepts_native_vertex(edge_vertex2)? {
         // inform the public that the classification was modified
         changed_to_vertex = true;
 

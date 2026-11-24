@@ -1765,11 +1765,7 @@ fn seam_ends(k: &Kernel, b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<
     if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
         return Ok(None);
     }
-    let first = crate::topology::edge::vertex(b, edge)?;
-    let second = match first {
-        Some(v) => crate::topology::edge::other_vertex(b, edge, Some(v))?,
-        None => None,
-    };
+    let (first, second) = crate::topology::edge::start_end_vertices(b, edge)?;
     let mut ends = [None, None];
     for (slot, v) in ends.iter_mut().zip([first, second]) {
         let Some(v) = v else { continue };
@@ -2327,6 +2323,7 @@ fn curve_on_classify_body<O: ClassObject>(
     // init output
     reset_classification(k, cc)?;
     cc.set_face(Some(objects.face(f)));
+    cc.set_native_material_contacts(!has_big_gaps);
     let mut modified = false;
     // the UV trim curves made by the trim boundary intersection's ComputeUVPoint calls
     // that `objects` cannot resolve (see WithMadeTrimCurves)
