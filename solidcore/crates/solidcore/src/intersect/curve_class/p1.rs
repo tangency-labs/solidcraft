@@ -620,6 +620,12 @@ pub struct CurveClassification<O> {
     /// while it names the classification's face; `None` makes every vertex and edge
     /// test for itself.
     pub(super) seam_hint: Option<(O, bool)>,
+    /// Not upstream (WR-647): the other face of a face/face intersection whose curve is
+    /// classified here, as a topology handle. It is set only by
+    /// [`crate::topology::face::p3::face_intersect_breps_cached`]. It lets the tangency
+    /// witness ([`super::witness`]) make a range of the curve on a boundary edge a
+    /// single point, where the two faces' surfaces show the contact is one point.
+    pub(super) tangency_partner: Option<O>,
 }
 
 /// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
@@ -763,6 +769,7 @@ impl<O: ClassObject> CurveClassification<O> {
             ok_to_set_tolerance: true,
             source_reach: None,
             seam_hint: None,
+            tangency_partner: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -832,6 +839,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 .seam_hint
                 .map(|(h, s)| f(h).map(|h| (h, s)))
                 .transpose()?,
+            tangency_partner: self.tangency_partner.map(&mut *f).transpose()?,
             tgt_loops_only: self.tgt_loops_only,
             tgt_loops,
             other_classification: self.other_classification.map(&mut *f).transpose()?,
@@ -1094,6 +1102,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Not upstream: sets the seam hint (see the field).
     pub fn set_seam_hint(&mut self, hint: Option<(O, bool)>) {
         self.seam_hint = hint;
+    }
+
+    /// Not upstream (WR-647): the other face of the face/face intersection whose curve is
+    /// classified here (see the field).
+    #[must_use]
+    pub const fn tangency_partner(&self) -> Option<O> {
+        self.tangency_partner
+    }
+
+    /// Not upstream (WR-647): sets the other face of the face/face intersection whose
+    /// curve is classified here (see the field).
+    pub fn set_tangency_partner(&mut self, partner: Option<O>) {
+        self.tangency_partner = partner;
     }
 
     /// Not upstream: whether the classification's face is known to have no seam edge, so

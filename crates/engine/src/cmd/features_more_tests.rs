@@ -4181,3 +4181,28 @@ fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
         Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
     }
 }
+
+/// #18541: a 3° draft of the side of an extruded closed spline outline is refused, and the
+/// refusal says what about the face it cannot handle: the side is neither a plane nor a cone or
+/// cylinder. It used to read "not supported yet: SMLib draft for this geometry". The body is
+/// left as it was.
+#[test]
+fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    let outline = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25, "operation": "new", "body_name": "Base"}));
+    let shape = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Base").unwrap().body;
+        [b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()]
+    };
+    let (before, volume) = (shape(&s), body_volume(&s, "Base"));
+    let draft = json!({"faces": [[-30, 0, 12.5]], "angle": "3 deg", "neutral": "XY", "body": "Base"});
+    let e = s.execute("solid.draft", &draft).unwrap_err().to_string();
+    assert!(e.contains("a drafted face is neither a plane nor a cone or cylinder"), "{e}");
+    assert!(!e.contains("for this geometry"), "{e}");
+    assert_eq!(shape(&s), before);
+    assert_eq!(body_volume(&s, "Base"), volume);
+}

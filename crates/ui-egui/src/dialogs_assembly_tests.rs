@@ -2566,6 +2566,37 @@ fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
     assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
 }
 
+/// Edit Joint from the Drive Joints dialog opens with the joint's two sides, so its offsets can
+/// be edited and the edit confirmed (#17196).
+#[test]
+fn edit_joint_from_drive_joints_keeps_its_two_sides() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
+    let glue = h.app.session.doc.assembly.joints[0].id;
+    h.app.start("joint.drive");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    let mut d = h.app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "20 mm".into();
+    // The edit can be confirmed: the dialog has the joint's two sides, so nothing is asked for
+    // again (without them OK was off and asked for component 1's joint origin).
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].0, "joint.edit");
+    assert_eq!(commands[0].1["joint"], json!(glue));
+    assert_eq!(commands[0].1["offset_x"], json!("20 mm"));
+    // The two sides are the first two inputs; the Joint dialog holds the alignment references
+    // after them, so the sides are read by their place and not by the count of the inputs.
+    assert!(d.inputs.len() >= 2, "the Edit Joint dialog keeps its two sides");
+    assert_eq!(d.inputs[0].label, "Component 1");
+    assert_eq!(d.inputs[1].label, "Component 2");
+    assert_eq!(d.inputs[0].items.len(), 1, "the first side keeps its pick");
+    assert_eq!(d.inputs[1].items.len(), 1, "the second side keeps its pick");
+}
+
 /// A rigid joint has nothing to drive: Drive Joints won't start on it.
 #[test]
 fn drive_preset_refuses_a_rigid_joint() {
@@ -3698,4 +3729,71 @@ fn edit_joint_keeps_a_limit_typed_as_an_expression() {
     assert_eq!(app.session.doc.assembly.joints[0].exprs.limit(0), [None, Some("stop")]);
     app.run("parameters.change", json!({"name": "stop", "expression": "12 mm"})).unwrap();
     assert_eq!(app.session.doc.assembly.joints[0].limits[0], Some((0.0, 12.0)));
+}
+
+#[test]
+fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "12.5".into();
+        f.dynamics[0][2] = "0.1".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].dynamics[0].unwrap();
+    assert_eq!((saved.effort, saved.damping), (Some(12.5), Some(0.1)));
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.dynamics[0][0], "12.5");
+        f.dynamics[0] = Default::default();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(app.session.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn find_limits_leaves_the_dynamics_out() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
+    f.dynamics[0][0] = "lots".into();
+    let commands = edit_commands(&app, f, &d.inputs).unwrap();
+    assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
+}
+
+#[test]
+fn a_mistyped_dynamics_value_is_refused_with_a_message() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    for typed in ["lots", "nan", "inf", "-inf"] {
+        if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+            f.dynamics[0][0] = typed.into();
+        }
+        assert!(apply_commands(&app, &d).is_err(), "{typed}");
+    }
 }

@@ -17,8 +17,8 @@ use crate::params::{bad, req_expr, str_, vec3};
 use crate::schema::construct::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
     PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneSquareToLineParams, PlaneTangentParams, PlaneThreePointsParams,
-    PlaneTwoEdgesParams, PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams,
-    PointVertexParams,
+    PlaneTwoEdgesParams, PointAlongPathParams, PointAverageParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams,
+    PointTwoEdgesParams, PointVertexParams,
 };
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -38,6 +38,7 @@ const POINT_THREE_PLANES_CONTRACT: TypedContract<PointThreePlanesParams> = Typed
 const POINT_CENTER_CONTRACT: TypedContract<PointCenterParams> = TypedContract::new();
 const POINT_EDGE_PLANE_CONTRACT: TypedContract<PointEdgePlaneParams> = TypedContract::new();
 const POINT_ALONG_PATH_CONTRACT: TypedContract<PointAlongPathParams> = TypedContract::new();
+const POINT_AVERAGE_CONTRACT: TypedContract<PointAverageParams> = TypedContract::new();
 const PLANE_MIDPLANE_CONTRACT: TypedContract<MidplaneParams> = TypedContract::new();
 const PLANE_TWO_EDGES_CONTRACT: TypedContract<PlaneTwoEdgesParams> = TypedContract::new();
 const PLANE_AXIS_POINT_CONTRACT: TypedContract<PlaneAxisPointParams> = TypedContract::new();
@@ -114,6 +115,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&POINT_ALONG_PATH_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name?"),
+    CommandSpec::new("construct.point.average", "Point at Average of Points", crate::checked!("construct.point.average", point_average)).begins_edit()
+        .at("SOLID", "CONSTRUCT")
+        .icon("c_midpoint")
+        .contract(&POINT_AVERAGE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("points: two or more point refs (vertices, sketch points, points), in any order; the new point sits at their average; name?"),
     CommandSpec::new("construct.plane.midplane", "Midplane", crate::checked!("construct.plane.midplane", plane_mid)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("plane_midplane")
@@ -433,6 +440,25 @@ fn point_along(s: &mut Session, p: &Value) -> Result<Value> {
     let path = geo(s, p.get("path"), cmd, "path")?;
     let t = t_param(s, p, cmd)?;
     point(s, p, PointDef::AlongPath { path, t })
+}
+
+/// The most points a point at their average takes; the same number as the `max` of
+/// `PointAverageParams::points` in `crate::schema::construct`.
+const MAX_AVERAGE_POINTS: usize = 1000;
+
+fn point_average(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "construct.point.average";
+    let Some(list) = p.get("points").and_then(Value::as_array) else {
+        return Err(bad(cmd, format!("`points` is required: a list of two or more of {REF}")));
+    };
+    if list.len() < 2 {
+        return Err(bad(cmd, "`points` needs two or more points"));
+    }
+    if list.len() > MAX_AVERAGE_POINTS {
+        return Err(bad(cmd, format!("`points` takes at most {MAX_AVERAGE_POINTS} points")));
+    }
+    let points = list.iter().map(|v| geo(s, Some(v), cmd, "points")).collect::<Result<Vec<_>>>()?;
+    point(s, p, PointDef::Average { points })
 }
 
 fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {

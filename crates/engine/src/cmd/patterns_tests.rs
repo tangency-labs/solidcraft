@@ -784,6 +784,129 @@ fn component_pattern_follows_its_count_parameter() {
     assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
 }
 
+#[test]
+fn inactive_component_patterns_keep_their_occurrences_and_joints() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "name": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern_params = json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30});
+    let pattern = run(&mut s, "solid.pattern.rectangular", pattern_params.clone());
+    let feature = pattern["feature"].as_u64().expect("pattern feature");
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let made_joint = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": copy}));
+    let joint_id = made_joint["joint"].as_u64().expect("joint");
+    let joints = s.doc.assembly.joints.clone();
+    let marker = s.doc.feature_index(feature).expect("pattern position");
+    let shown = |s: &mut Session, expected| {
+        assert_eq!(s.occurrence_placement(&[copy]).is_ok(), expected);
+        let children = s.occurrence_children(&[]).expect("active root children");
+        assert_eq!(children.len(), if expected { 2 } else { 1 });
+        assert_eq!(children.iter().any(|child| child.occurrence == copy), expected);
+        let measured = run(s, "inspect.measure", json!({}));
+        assert_eq!(measured["body_count"], if expected { 3 } else { 2 });
+        let mass = s.mass_properties().expect("active assembly mass");
+        assert_eq!(mass.occurrences.iter().any(|row| row.occurrence == copy), expected);
+        let solved = run(s, "joint.solve", json!({}));
+        assert_eq!(solved["errors"], json!([]));
+        let dof = solved["dof"].as_array().expect("degrees of freedom");
+        assert_eq!(dof.iter().any(|entry| entry["occurrence"] == copy), expected);
+    };
+
+    // A saved rollback still contains, but does not place or solve, the Pattern's copies.
+    s.visibility.shown_component_origins.push(vec![copy]);
+    run(&mut s, "timeline.roll_to", json!({"position": marker}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(s.visibility.shown_component_origins, vec![vec![copy]]);
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).expect("rolled-back design"));
+    shown(&mut s, false);
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    // Edit Feature rolls the scratch design behind the later pattern while building the edit.
+    run(&mut s, "timeline.redefine", json!({"feature": "Base", "command": "solid.box", "params": {"length":9, "width":8, "height":8}}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    let mut larger = pattern_params.clone();
+    larger["count1"] = json!(3);
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": larger}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 4);
+
+    let extra_copy = s.doc.active_occurrences().last().expect("new copy").id;
+    assert_ne!(extra_copy, copy);
+    let extra = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": extra_copy}));
+    assert!(extra["joint"].is_number());
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": pattern_params}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == extra_copy));
+    assert_eq!(s.doc.assembly.joints, joints);
+    shown(&mut s, true);
+
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": false}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+
+    // Deleting the inactive feature really removes its placements and their references.
+    run(&mut s, "timeline.delete", json!({"feature": feature}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == copy));
+    assert!(!s.doc.assembly.joints.iter().any(|joint| joint.id == joint_id));
+    shown(&mut s, false);
+}
+
+#[test]
+fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Unit", "grounded": false}));
+    let seed = s.doc.occurrences.first().expect("seed occurrence").id;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let driver = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": copy}))["joint"].as_u64().expect("driver");
+    let follower = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": seed}))["joint"].as_u64().expect("follower");
+    run(&mut s, "joint.motion_link", json!({"a": driver, "b": follower, "ratio": 1, "offset": 7}));
+    let check = |s: &mut Session, expected: f64| {
+        let listed = run(s, "joint.list", json!({}));
+        let row = listed["joints"].as_array().unwrap().iter().find(|row| row["id"] == follower).expect("listed follower");
+        assert_eq!(row["values"][0]["value"], expected);
+        let inspected = run(s, "joint.inspect", json!({"joint": follower}));
+        assert_eq!(inspected["joints"][0]["values"][0]["value"], expected);
+    };
+    check(&mut s, 7.0);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    check(&mut s, 0.0);
+    let target = solidcraft_doc::joints::Reach {
+        occurrence: seed,
+        point: solidcore_record::Vec3::ZERO,
+        to: solidcore_record::Vec3::new(0.0, 0.0, 3.0),
+        axis: None,
+        joints: None,
+    };
+    let reached = solidcraft_doc::joints::reach(&s.doc, &s.model.state(), &target).unwrap();
+    assert_eq!(reached.values.keys().copied().collect::<Vec<_>>(), [follower]);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": false}));
+    check(&mut s, 7.0);
+
+    // Replacing the dormant link preserves the active slider's solved position, even though
+    // the old link would have driven it to 7 mm if its pattern were active.
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    run(&mut s, "component.create", json!({"name": "Rotor", "activate": false, "grounded": false}));
+    let spin = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Rotor"}))["joint"].as_u64().expect("revolute driver");
+    let before = s.occurrence_placement(&[seed]).unwrap().world;
+    run(&mut s, "joint.screw", json!({"a": spin, "b": follower, "link": 0, "pitch": 2}));
+    check(&mut s, 0.0);
+    assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
+}
+
 /// A component pattern's copies placed again on a rebuild read the spacing as the first copies
 /// were placed (#8523): in an inch design `1 + 0` is 1 in, before and after the count changes.
 #[test]
