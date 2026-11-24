@@ -248,10 +248,16 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
         }
     }
     let may_read = |c: &u64| !outside.contains(c) || allowed.contains(c);
+    // A file an importer plugin reads waits for Update Links: this reads without being asked, and
+    // running a plugin's code takes the user's go.
+    let by_plugin = |c: &u64| app.session.doc.links.get(c).is_some_and(|l| l.importer.is_some());
     let changed: Vec<u64> = now
         .iter()
         .filter(|(c, s)| {
-            s.is_some() && may_read(c) && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c)))
+            s.is_some()
+                && may_read(c)
+                && !by_plugin(c)
+                && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c)))
         })
         .map(|(c, _)| *c)
         .collect();
@@ -1254,6 +1260,29 @@ mod tests {
         assert!((volume(&app) - 1000.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
         assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_link_read_by_an_importer_plugin_waits_for_update_links_on_tab_return() {
+        let folder = std::env::temp_dir().join(format!("solidcraft-importer-links-ui-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("bracket.step");
+        let export = |length| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": length, "width": 10, "height": 10})).unwrap();
+            part.execute("file.export", &json!({"path": source})).unwrap();
+        };
+        export(10);
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let linked = app.run("file.insert_step", json!({"path": source})).unwrap()["component"].as_u64().unwrap();
+        let named = solidcraft_engine::doc::LinkImporter { format: "smp.convert".into(), ..Default::default() };
+        app.session.doc_mut().links.get_mut(&linked).unwrap().importer = Some(named);
+        crate::documents::open_tab(&mut app, Session::default()).unwrap();
+        export(20);
+        crate::documents::switch(&mut app, 0);
+        assert!(app.file_load.idle(), "no plugin runs on its own when the tab comes back");
+        assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]

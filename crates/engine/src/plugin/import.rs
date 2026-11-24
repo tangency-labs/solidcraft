@@ -88,6 +88,31 @@ pub fn importers(session: &Session) -> Vec<Importer> {
     format_slots(session, EntryKind::Importer)
 }
 
+/// Whether the importer plugin a link names can read now, and which version of it is installed.
+pub struct ImporterStatus {
+    /// The installed plugin's version, when its manifest can be read.
+    pub installed_version: Option<String>,
+    /// Why it can't read: `not installed`, `turned off`, `unreadable` or `no longer offers that importer`.
+    pub problem: Option<&'static str>,
+}
+
+/// The state of the importer `format` of plugin `plugin`, from manifests alone: no plugin code runs.
+pub fn importer_status(session: &Session, plugin: &str, format: &str) -> ImporterStatus {
+    let folders = package_folders(session);
+    let Some(folder) = folders.get(plugin) else { return ImporterStatus { installed_version: None, problem: Some("not installed") } };
+    let installed_version = with_installed(session, folder, || read_manifest(folder)).ok().map(|m| m.version);
+    let problem = if session.disabled_plugins.contains(plugin) {
+        Some("turned off")
+    } else if installed_version.is_none() {
+        Some("unreadable")
+    } else if !importers(session).iter().any(|i| i.id == format) {
+        Some("no longer offers that importer")
+    } else {
+        None
+    };
+    ImporterStatus { installed_version, problem }
+}
+
 /// The slot of `kind` that `format` names, or else the one that claims `path`'s extension. Two
 /// plugins claiming the same extension need `format` to choose.
 pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: Option<&str>) -> Result<Option<FormatSlot>> {

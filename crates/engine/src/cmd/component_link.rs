@@ -350,7 +350,17 @@ fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &D
     let Some(importer) = &link.importer else { return source_bodies(file, bytes, link, s.validation()) };
     let slot = linked_importer(s, importer)?;
     let options = if importer.options.is_null() { json!({}) } else { importer.options.clone() };
-    let made = crate::plugin::import_design_bytes(s, &slot, &file.to_string_lossy(), &options)?;
+    // Another version of the plugin that can't read the file says so beside its own words.
+    let other_version = |s: &Session, e: EngineError| {
+        let now = crate::plugin::importer_status(s, &slot.plugin_id, &slot.id).installed_version;
+        match (&importer.version, now) {
+            (Some(was), Some(now)) if *was != now => {
+                EngineError::Other(format!("{e} (this link was read with version {was} of the plugin; version {now} is installed)"))
+            }
+            _ => e,
+        }
+    };
+    let made = crate::plugin::import_design_bytes(s, &slot, &file.to_string_lossy(), &options).map_err(|e| other_version(s, e))?;
     let (mut read, images) = design_bodies(file, &made.design, None, s.validation())?;
     // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
     remember_read(file, None, digest(bytes), &read.1, &read.2, &read.4, &read.3, &read.5);
@@ -363,10 +373,12 @@ fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &D
 
 /// The installed, enabled importer a link names, to read its file again.
 fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Result<crate::plugin::Importer> {
-    crate::plugin::importers(s)
-        .into_iter()
-        .find(|i| i.id == importer.format)
-        .ok_or_else(|| EngineError::Other(format!("the importer `{}` is not installed or is turned off", importer.format)))
+    let status = importer.plugin.as_deref().map(|plugin| crate::plugin::importer_status(s, plugin, &importer.format));
+    let needs = status.as_ref().and_then(|status| importer_needs(importer, status));
+    crate::plugin::importers(s).into_iter().find(|i| i.id == importer.format && needs.is_none()).ok_or_else(|| {
+        let what = needs.unwrap_or_else(|| format!("the importer `{}` is not installed or is turned off", importer.format));
+        EngineError::Other(format!("{what}; the component keeps its last bodies"))
+    })
 }
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature, and its canvases and
@@ -1504,12 +1516,40 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What reads `link`'s file: the built-in STEP reader, an importer, or (for a design) nothing
 /// to name.
-fn link_source(link: &DesignLink) -> Option<LinkSource> {
+fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
+    let plain =
+        |format: &str| LinkSource { format: format.into(), plugin: None, version: None, available: None, installed_version: None, needs: None };
     match (&link.importer, &link.step_names) {
-        (Some(i), _) => Some(LinkSource { format: i.format.clone(), plugin: i.plugin.clone(), version: i.version.clone() }),
-        (None, Some(_)) => Some(LinkSource { format: "step".into(), plugin: None, version: None }),
+        (Some(i), _) => {
+            let Some(plugin) = &i.plugin else { return Some(plain(&i.format)) };
+            let status = crate::plugin::importer_status(s, plugin, &i.format);
+            let needs = importer_needs(i, &status);
+            let differs = status.installed_version.as_ref().is_some_and(|v| Some(v) != i.version.as_ref());
+            Some(LinkSource {
+                format: i.format.clone(),
+                plugin: i.plugin.clone(),
+                version: i.version.clone(),
+                available: Some(status.problem.is_none()),
+                installed_version: status.installed_version.filter(|_| differs || needs.is_some()),
+                needs,
+            })
+        }
+        (None, Some(_)) => Some(plain("step")),
         (None, None) => None,
     }
+}
+
+/// What a link needs when the importer plugin it names can't read its file: which plugin and
+/// version, and why it can't. `None` when it can.
+fn importer_needs(importer: &solidcraft_doc::LinkImporter, status: &crate::plugin::ImporterStatus) -> Option<String> {
+    let problem = status.problem?;
+    let plugin = importer.plugin.as_deref().unwrap_or(&importer.format);
+    let version = importer.version.as_deref().map_or_else(String::new, |v| format!(" version {v}"));
+    let installed = match &status.installed_version {
+        Some(v) if Some(v) != importer.version.as_ref() => format!(" (version {v} is installed)"),
+        _ => String::new(),
+    };
+    Some(format!("importer plugin `{plugin}`{version} is needed to read this file again, but it is {problem}{installed}"))
 }
 
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1523,7 +1563,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
             let path = stored(s.path.as_deref(), &file);
             let shown = file.to_string_lossy().into_owned();
-            let importer = link_source(l);
+            let importer = link_source(s, l);
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {

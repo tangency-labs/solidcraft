@@ -2905,7 +2905,7 @@ mod importers {
         assert!(importer.options.is_null() && link.step_names.is_none() && !link.is_design());
         assert_eq!(link.file_sha256, Some(solidcraft_doc::DesignLink::file_digest(&std::fs::read(&file).unwrap())));
         let listed = s.execute("component.links", &json!({})).unwrap();
-        assert_eq!(listed["links"][0]["importer"], json!({"format": "smp.convert", "plugin": "smp", "version": "1"}), "{listed}");
+        assert_eq!(listed["links"][0]["importer"], json!({"format": "smp.convert", "plugin": "smp", "version": "1", "available": true}), "{listed}");
         assert_eq!(listed["links"][0]["changed"], false, "{listed}");
         // The file's own bytes decide whether it changed, not the design the importer made.
         let mut bigger = design();
@@ -2966,6 +2966,54 @@ mod importers {
         let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
         assert!(refused.contains("Sample Importer"), "{refused}");
         assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The plugin a link needs is uninstalled, turned off or another version that refuses the file:
+    /// the link says which plugin and version it needs and the component keeps its last bodies.
+    #[test]
+    fn a_link_whose_plugin_is_missing_says_which_one_it_needs_and_keeps_its_bodies() {
+        let (mut s, root) = installed("missing-plugin", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let comp = s.execute("component.insert_design", &json!({"path": file})).unwrap()["component"].as_u64().unwrap();
+        let listed = |s: &mut Session| s.execute("component.links", &json!({})).unwrap()["links"][0]["importer"].clone();
+        assert_eq!(listed(&mut s)["available"], true);
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        // Turned off.
+        s.disabled_plugins.insert("smp".into());
+        let off = listed(&mut s);
+        assert_eq!((off["available"].clone(), off["installed_version"].clone()), (json!(false), json!("1")), "{off}");
+        assert!(off["needs"].as_str().unwrap().contains("`smp` version 1") && off["needs"].as_str().unwrap().contains("turned off"), "{off}");
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("`smp` version 1") && refused.contains("keeps its last bodies"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6, "the last good bodies stay");
+        // A batch names it in `failed` and goes on.
+        let batch = s.execute("component.update_links", &json!({"components": [comp]}));
+        assert!(batch.is_err() || batch.unwrap()["failed"][0]["error"].as_str().is_some_and(|e| e.contains("smp")));
+        s.disabled_plugins.clear();
+        // Another version reads the file: the link takes the new version.
+        let manifest = root.join("plugins/smp/plugin.json");
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        std::fs::write(&manifest, text.replace("\"version\":\"1\"", "\"version\":\"2\"")).unwrap();
+        let other = listed(&mut s);
+        assert_eq!((other["available"].clone(), other["installed_version"].clone()), (json!(true), json!("2")), "{other}");
+        // Another version that refuses the file says which version the link was read with.
+        std::fs::write(&file, b"T").unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("version 1") && refused.contains("version 2 is installed"), "{refused}");
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        s.execute("component.update_links", &json!({"component": comp})).unwrap();
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        assert_eq!(s.doc.links[&comp].importer.as_ref().unwrap().version.as_deref(), Some("2"));
+        // Uninstalled.
+        std::fs::remove_dir_all(root.join("plugins/smp")).unwrap();
+        let gone = listed(&mut s);
+        assert_eq!((gone["available"].clone(), gone["installed_version"].clone()), (json!(false), Value::Null), "{gone}");
+        assert!(gone["needs"].as_str().unwrap().contains("not installed"), "{gone}");
+        std::fs::write(&file, sized_design(40.0)).unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("`smp` version 2") && refused.contains("not installed"), "{refused}");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
         std::fs::remove_dir_all(root).unwrap();
     }
 

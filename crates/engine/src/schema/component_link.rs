@@ -539,6 +539,16 @@ pub struct LinkSource {
     /// The version of the plugin that read the file last; left out for a built-in reader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Plugin only: whether the plugin is installed and on, so Update Links can read the file again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available: Option<bool>,
+    /// Plugin only: the version installed now, when it differs from `version` or the plugin is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Plugin only, when it is not available: which plugin and version the link needs, and why it
+    /// can't be used. The component keeps the bodies it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<String>,
 }
 
 /// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
