@@ -526,5 +526,12 @@
         </enum>
       </elements>
     </policy>
+    <policy name="InterfaceFont" class="Both" displayName="$(string.InterfaceFont)" explainText="$(string.InterfaceFont_Explain)" presentation="$(presentation.InterfaceFont)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <text id="InterfaceFont" valueName="InterfaceFont" maxLength="64" required="true" />
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

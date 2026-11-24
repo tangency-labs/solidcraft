@@ -255,6 +255,14 @@ Disabled or Not configured: each person chooses.
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
       <string id="Theme_dark">Dark</string>
       <string id="Theme_light">Light</string>
+      <string id="InterfaceFont">Interface font</string>
+      <string id="InterfaceFont_Explain">The font of SolidCraft's interface (Preferences, Appearance, Font).
+
+Enabled: SolidCraft draws its interface in this font family, and people cannot choose another or load a font file. Enter the name of a font family installed on the computer, for example Segoe UI. A family the computer does not have leaves the built-in font showing. A file path is not accepted and counts as not configured.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
       <string id="Theme_1-bit-dark">1-bit Dark</string>
       <string id="Theme_1-bit">1-bit</string>
       <string id="Theme_akari">Akari</string>
@@ -330,6 +338,11 @@ In Preferences the setting shows as set by the organization. The person's own ch
       </presentation>
       <presentation id="Theme">
         <dropdownList refId="Theme" noSort="true" defaultItem="0">Theme:</dropdownList>
+      </presentation>
+      <presentation id="InterfaceFont">
+        <textBox refId="InterfaceFont">
+          <label>Font family name:</label>
+        </textBox>
       </presentation>
     </presentationTable>
   </resources>

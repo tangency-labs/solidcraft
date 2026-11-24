@@ -155,25 +155,13 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
+                let font_locked = app.policy.locks("ui_font");
                 ui_kit::settings_font_row(ui, solidcraft_ui_text::tr("prefs.font"), |ui, part| {
                     if part == 0 {
-                        ui_font_row(app, ui);
+                        crate::policy::row(ui, font_locked, |ui| ui_font_row(app, ui));
                         return;
                     }
-                    if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
-                        app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
-                            if let Some(path) = path {
-                                if crate::fonts::ui_font(&path).is_some() {
-                                    app.preferences.ui_font = path;
-                                } else {
-                                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
-                                }
-                            }
-                        });
-                    }
-                    if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
-                        app.preferences.ui_font.clear();
-                    }
+                    ui.add_enabled_ui(!font_locked, |ui| font_file_buttons(app, ui));
                 });
                 ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
             }
@@ -888,4 +876,22 @@ fn document_browser_preview(p: &egui::Painter, rect: egui::Rect, panel_fraction:
         "box",
         t.text_dim,
     );
+}
+
+/// Choose a font file for the interface, or go back to the built-in font.
+fn font_file_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if ui_kit::button(ui, app.tr("prefs.choose_font"), ui_kit::Button::Normal).clicked() {
+        app.pick_open_for(&["ttf", "otf", "ttc"], |app, path| {
+            if let Some(path) = path {
+                if crate::fonts::ui_font(&path).is_some() {
+                    app.preferences.ui_font = path;
+                } else {
+                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
+                }
+            }
+        });
+    }
+    if ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+        app.preferences.ui_font.clear();
+    }
 }

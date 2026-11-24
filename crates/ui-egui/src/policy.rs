@@ -54,6 +54,9 @@ enum Kind {
     Choice(&'static [&'static str]),
     /// A `REG_SZ`: `dark`, `light` or the id of a built-in theme, in any case.
     Theme,
+    /// A `REG_SZ`: the name of a font family. One the computer does not have leaves the
+    /// built-in font showing.
+    Font,
 }
 
 /// `MeshExportFormat`: the formats the Save Mesh dialog offers.
@@ -103,6 +106,7 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "DefaultUnits", pref: "default_units", kind: Kind::Units },
     Lock { policy: "DxfDashedHiddenLines", pref: "view_dxf_dashed", kind: Kind::Switch },
     Lock { policy: "DxfOrigin", pref: "view_dxf_zero", kind: Kind::Choice(DXF_ORIGINS) },
+    Lock { policy: "InterfaceFont", pref: "ui_font", kind: Kind::Font },
     Lock { policy: "Language", pref: "language", kind: Kind::Language },
     Lock { policy: "Layout", pref: "layout", kind: Kind::Choice(LAYOUTS) },
     Lock { policy: "MeshExportFormat", pref: "save_mesh_format", kind: Kind::Choice(MESH_FORMATS) },
@@ -260,6 +264,11 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
             let builtin = crate::theme_files::builtin().iter().map(|t| t.id.as_str());
             ["dark", "light"].into_iter().chain(builtin).find(|id| id.eq_ignore_ascii_case(text)).map(|id| Setting::Text(id.into()))
         }
+        (Kind::Font, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let text = text.trim();
+            let family = !text.is_empty() && !text.chars().any(|c| c.is_control() || c == '/' || c == '\\');
+            family.then(|| Setting::Text(text.into()))
+        }
         _ => None,
     }
 }
@@ -286,6 +295,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "show_donate_button" => Setting::Switch(p.show_donate_button),
         "status_bar" => Setting::Switch(p.status_bar),
         "theme" => Setting::Text(p.theme.clone()),
+        "ui_font" => Setting::Text(p.ui_font.clone()),
         "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
         "view_dxf_zero" => Setting::Text(p.view_dxf_zero.clone()),
         _ => return None,
@@ -320,6 +330,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
         ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
         ("theme", Setting::Text(text)) => p.theme.clone_from(text),
+        ("ui_font", Setting::Text(text)) => p.ui_font.clone_from(text),
         ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
         ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
@@ -1139,6 +1150,37 @@ mod tests {
         assert_eq!(dark.mandatory.settings.get("theme"), Some(&Setting::Text("dark".into())));
         for hostile in ["system", "acme", ""] {
             assert!(Policy::from_json(&format!(r#"{{"Theme": "{hostile}"}}"#)).locked().is_empty(), "{hostile}");
+        }
+    }
+
+    #[test]
+    fn the_interface_font_is_set_by_the_policy_and_an_unknown_one_leaves_the_built_in_font() {
+        use serde_json::json;
+        crate::i18n::install();
+        let family = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.policy = Policy::from_json(&json!({ "InterfaceFont": format!(" {family} ") }).to_string());
+        h.frames(2);
+        assert_eq!(h.app.preferences.ui_font, family);
+        assert_eq!(h.app.applied_ui_font, family, "the interface is drawn in the organization's font");
+        assert_eq!(saved(&h.app)["ui_font"], json!(""), "the font is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"ui_font": "ACME Sans"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert_eq!(h.app.preferences.ui_font, family);
+        // Preferences shows the font greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(3);
+        assert!(h.widget("Set by your organization").is_some());
+        // A family the computer does not have still locks the choice; the built-in font shows.
+        let unknown = Policy::from_json(r#"{"InterfaceFont": "ACME Sans 1290"}"#);
+        assert!(unknown.locks("ui_font"));
+        assert!(crate::fonts::ui_font("ACME Sans 1290").is_none());
+        // Only a family name: no font file, nothing empty, nothing too long.
+        let long = "x".repeat(MAX_CHOICE + 1);
+        for hostile in ["", "  ", r"C:\Fonts\acme.ttf", "/usr/share/fonts/acme.ttf", "ACME\u{7}Sans", long.as_str()] {
+            assert!(Policy::from_json(&json!({ "InterfaceFont": hostile }).to_string()).locked().is_empty(), "{hostile:?}");
         }
     }
 
