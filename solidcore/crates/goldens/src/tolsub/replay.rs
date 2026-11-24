@@ -652,30 +652,31 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
-/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
-/// hash is of the row with that change, from Linux CI.
+/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), and
+/// tangency-labs/solidcraft#21421 moves them again (the round's end vertices kept on the
+/// seams they are on), so each hash is of the row with those changes.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
 /// step latch (#18916).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x9e43_eafe_0171_4c09,
+        0xce83_12e9_feb0_48d2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe2ec_b89d_309a_54a8,
+        0x53c7_e638_2d5a_3371,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x9fc9_deff_361b_7066,
+        0x9d97_b5a7_1a11_7697,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x5669_c3ab_dde7_2e76,
+        0x2763_1ef9_69ac_60dc,
     ),
 ];
 

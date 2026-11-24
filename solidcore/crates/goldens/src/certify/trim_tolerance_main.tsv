@@ -26,6 +26,7 @@
 # blend.fillet_geom_p1, blend.fillet_solver_p4, blend.fillet_standard_solver_p2, nlib.srf_adv_p1, nlib.srf_adv_p3, nurbs.b_spline_surface_n_lib_p1, surface.offset_surface: #21383 moves 179 rows, all ok -> ok, by the G1R homogeneous continuation (a rational side with mixed weight ratios gets the far row cb(1+t)B - tI, which is G1); each moved row is certified by its unit's g1r_moved_rows test (or each_moved_row_extends_its_base_by_certified_g1_steps); the digests are the branch files
 # topology.face_p1: a seam move needs a closed direction (UB-138, tangency-labs/solidcraft#21368): the digest is this branch's file. Its 62 MoveSeam rows move (the 37 UB-137 rows on vase_rev.smb and 25 op9/p5 rows), each replayed and checked by topology_face_p1::tests::seam_move_rows_keep_the_tolerances_the_geometry_needs; no other value moved
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
+# blend.fillet_executive_p3: a fillet's body vertex stays on the seam it is on (tangency-labs/solidcraft#21421): the digest is this branch's file with the rows put back. Its four stubs4-delete-edge-sphere_diff_3cylinders e1/e4 r0.1/r0.5 rows are this branch's lines (the round's end vertices kept on or put on the sphere's seam, each moved within its tolerance (by 2^-20 where the input's B-spline seam and the sphere's disagree); status and counts unchanged); issue_21421_round_ends_on_the_sphere_seam certifies each row's mass properties against certified enclosures and its vertices on the seam
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -33,7 +34,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	be2e67021a9d3656
+blend.fillet_executive_p3	e9408237184446e3
 blend.fillet_geom_p1	555c086725065e34
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
