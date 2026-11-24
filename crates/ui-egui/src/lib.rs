@@ -3469,8 +3469,7 @@ impl SolveApp {
         // The preference only changes how a person opens an existing sketch.
         // Scripted edits and new sketches retain the previous view behaviour.
         let remembered = if turn {
-            self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view)
-                .filter(|camera| camera.up == self.ui.up_axis)
+            self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis)
         } else {
             None
         };
