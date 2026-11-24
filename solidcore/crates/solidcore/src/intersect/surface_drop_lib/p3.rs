@@ -117,9 +117,9 @@
 //!   drop domain spans the full natural range of a closed parameter direction (both seam
 //!   sides lie on the domain boundary), a curve whose normal drop crosses the seam is split
 //!   at the exact seam crossing ([`seam_crossing`], using Illinois false position on the
-//!   unwrapped cyclic offset with 1D along-seam Newton refinement near the seam, bounded by
-//!   [`MAX_CROSSING_DROPS`] drops per crossing and [`MAX_SEAM_CROSSINGS`] crossings per
-//!   curve span). The arriving piece ends on the arriving seam side and the trace continues
+//!   unwrapped cyclic offset outside the seam tolerance band and exact 2x2 seam-orthogonality
+//!   Newton refinement inside it, bounded by [`MAX_CROSSING_DROPS`] drops per crossing and
+//!   [`MAX_SEAM_CROSSINGS`] crossings per curve span). The arriving piece ends on the arriving seam side and the trace continues
 //!   from the opposite seam side as a new UV curve piece (`add_to_curve_with_policy` flushes
 //!   on the UV jump). Leaving a non-wrappable boundary still abandons the whole trace
 //!   atomically (truncating any partial seam pieces from that start point). Single-piece
@@ -405,7 +405,6 @@ fn drop_point_near_seam(
         }
     }
 
-    let base_dev_limit = max2(approx_tol_3d * 10.0, EFF_ZERO_SQRT);
     let mut best: Option<(Point2, f64)> = None;
     for seed in seeds.into_iter().flatten() {
         let r = surface.local_point_solve::<ObjectHandle>(
@@ -428,11 +427,10 @@ fn drop_point_near_seam(
         }
         let p = surface.evaluate_point(k, uv)?;
         let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-        let (dev, _) = line_point_distance(p, n, pt_3d);
-        let scaled_limit = max2(
-            max2(1.0, p.distance(pt_3d)) * approx_tol_3d * 10.0,
-            base_dev_limit,
-        );
+        // Match `DropPt::set_properties`'s normal-line tolerance (`max(1, |drop_param|) *
+        // approx_tol_3d`) so every accepted bracket point is held to the caller's tolerance.
+        let (dev, drop_param) = line_point_distance(p, n, pt_3d);
+        let scaled_limit = max2(1.0, drop_param.abs()) * approx_tol_3d;
         let d = cyclic_uv_dist(uv);
         if !(dev.is_finite() && scaled_limit.is_finite() && d.is_finite() && dev <= scaled_limit) {
             continue;
@@ -446,10 +444,23 @@ fn drop_point_near_seam(
 }
 
 /// Finds the exact drop point where the dropped curve crosses a closed seam (`axis`, `U` or
-/// `V`) between `start` and `(end_t, end_uv)`, using Illinois false position on the
-/// unwrapped cyclic offset from the seam boundary. Returns a `DropPt` lying on the arriving
-/// seam side with its arriving tangent (pointing forward along the curve, `leaving_domain =
-/// Some(true)`), or `None` if no valid crossing is found.
+/// `V`) between `start` and `(end_t, end_uv)`.
+///
+/// The crossing regime is chosen from the bracket geometry before any solve:
+/// - While either bracket end lies outside `near_seam_band = max(uv_tol_across,
+///   EFF_ZERO_SQRT * (1 + len_p))` (the parameter width of `approx_tol_3d` from
+///   [`seam_uv_tols`] and `local_point_solve`'s `EFF_ZERO_SQRT` boundary floor), Illinois
+///   false position narrows the bracket with [`drop_point_near_seam`] alone (returning `None`
+///   if any probe has no valid normal foot within `approx_tol_3d`).
+/// - Once a bracket or probe enters `near_seam_band`, exact 2x2 Newton solves the normal-foot
+///   seam-orthogonality system `(C(t) - S(seam, q)) . S_along = 0`,
+///   `(C(t) - S(seam, q)) . S_across = 0` inside the verified `[before.0, after.0]` bracket to
+///   full parameter precision, avoiding the quadratic `dist^2` precision loss of boundary-clamped
+///   distance minimization.
+///
+/// Returns a `DropPt` lying on the arriving seam side with its arriving tangent (pointing
+/// forward along the curve, `leaving_domain = Some(true)`), or `None` if no valid crossing is
+/// found.
 #[allow(clippy::too_many_arguments)]
 fn seam_crossing(
     k: &Kernel,
@@ -520,17 +531,15 @@ fn seam_crossing(
     let mut before = (start.t, off0, other_coord(start.uv_pd[0]));
     let mut after = (end_t, off1, other_coord(end_uv));
     let mut moved_before: Option<bool> = None;
-    let param_zero = EFF_ZERO_PARAM * (1.0 + len_p);
     let t_zero = EFF_ZERO_PARAM * (1.0 + start.t.abs() + end_t.abs());
 
-    let mut cross_t = None;
-    let mut cross_other = other_coord(start.uv_pd[0]);
     let (other_min, other_max) = if axis == SurfParamType::U {
         (uv_domain.min().y, uv_domain.max().y)
     } else {
         (uv_domain.min().x, uv_domain.max().x)
     };
     let other_len = other_max - other_min;
+    let other_zero = EFF_ZERO_PARAM * (1.0 + other_len);
     let from_left_u = if axis == SurfParamType::U {
         !crossing_high
     } else {
@@ -542,145 +551,152 @@ fn seam_crossing(
         true
     };
 
-    // Near the seam, 3D distance minimization loses half its precision because `dist^2` is
-    // quadratic in the tangential offset, causing `local_point_solve` to clamp prematurely
-    // onto the seam boundary. Solve the 1D along-seam orthogonality condition
-    // `(S(seam, q) - C(t)) . S_along = 0` by safeguarded Newton and evaluate the linear
-    // normal-plane residual `(C(t) - S(seam, q)) . T_perp / |T_perp|^2`, which has the same
-    // sign as `signed_offset` and full double-precision accuracy through 0.
-    let seam_linear_residual = |t: f64, other_init: f64| -> Result<Option<(f64, f64)>> {
-        let pt_3d = curve.evaluate_point(k, t)?;
-        let mut q = min2(max2(other_init, other_min), other_max);
-        let step_cap = max2(other_len * 0.25, 1.0);
-        for _ in 0..8 {
-            let seam_uv = uv_domain.clamp_point(make_uv(arriving_p, q));
-            let [p_seam, su, sv, _suv, suu, svv] =
-                surface.evaluate_2nd_derivatives(k, seam_uv, from_left_u, from_left_v)?;
-            let (along, along_2) = if axis == SurfParamType::U {
-                (sv, svv)
-            } else {
-                (su, suu)
-            };
-            let along_sq = along.length_squared();
-            if along_sq <= EFF_ZERO_SQ {
-                break;
-            }
-            let diff = p_seam - pt_3d;
-            let f = diff.dot(along);
-            if f.abs() <= EFF_ZERO * along_sq.sqrt() * (1.0 + diff.length()) {
-                break;
-            }
-            let df = along_sq + diff.dot(along_2);
-            let denom = if df > 0.25 * along_sq { df } else { along_sq };
-            let dq = min2(max2(-f / denom, -step_cap), step_cap);
-            let q_next = min2(max2(q + dq, other_min), other_max);
-            if (q_next - q).abs() <= EFF_ZERO_PARAM * (1.0 + other_len) {
-                q = q_next;
-                break;
-            }
-            q = q_next;
+    // Parameter width around the seam where `approx_tol_3d` (`seam_uv_tols`) or
+    // `local_point_solve`'s `EFF_ZERO_SQRT` floor limits boundary-clamped distance drops.
+    let (uv_tol_u, uv_tol_v) = seam_uv_tols(k, surface, &seam_wrap.nat, approx_tol_3d)?;
+    let uv_tol_across = if axis == SurfParamType::U {
+        uv_tol_u
+    } else {
+        uv_tol_v
+    };
+    let near_seam_band = max2(uv_tol_across, EFF_ZERO_SQRT * (1.0 + len_p));
+
+    let secant_seed = |b: (f64, f64, f64), a: (f64, f64, f64)| -> (f64, f64) {
+        let mut t = (b.0 * a.1 - a.0 * b.1) / (a.1 - b.1);
+        if !(b.0 < t && t < a.0) {
+            t = 0.5 * (b.0 + a.0);
         }
-        let seam_uv = uv_domain.clamp_point(make_uv(arriving_p, q));
-        let (p_seam, su, sv) =
-            surface.evaluate_1st_derivatives(k, seam_uv, from_left_u, from_left_v)?;
-        let (across_raw, along) = if axis == SurfParamType::U {
-            (su, sv)
-        } else {
-            (sv, su)
-        };
-        let along_sq = along.length_squared();
-        let t_perp = if along_sq > EFF_ZERO_SQ {
-            across_raw - (across_raw.dot(along) / along_sq) * along
-        } else {
-            across_raw
-        };
-        let t_perp_sq = t_perp.length_squared();
-        if t_perp_sq <= EFF_ZERO_SQ {
-            return Ok(None);
-        }
-        let linear_off = (pt_3d - p_seam).dot(t_perp) / t_perp_sq;
-        if !linear_off.is_finite() {
-            return Ok(None);
-        }
-        Ok(Some((linear_off, q)))
+        let span = a.0 - b.0;
+        let alpha = if span > 0.0 { (t - b.0) / span } else { 0.5 };
+        let q = min2(max2(b.2 + alpha * (a.2 - b.2), other_min), other_max);
+        (t, q)
     };
 
-    let near_seam_band = max2(EFF_ZERO_SQRT * (1.0 + len_p), 1e-3 * len_p);
+    // Choose construction from the bracket geometry before attempting any surface solve.
+    let seed = if before.1.abs() <= near_seam_band && after.1.abs() <= near_seam_band {
+        Some(secant_seed(before, after))
+    } else {
+        let mut localized = None;
+        for _ in 0..MAX_CROSSING_DROPS {
+            let mut t = (before.0 * after.1 - after.0 * before.1) / (after.1 - before.1);
+            if !(before.0 < t && t < after.0) {
+                t = 0.5 * (before.0 + after.0);
+            }
+            if !(before.0 < t && t < after.0) {
+                localized = Some((0.5 * (before.0 + after.0), 0.5 * (before.2 + after.2)));
+                break;
+            }
+            let alpha = (t - before.0) / (after.0 - before.0);
+            let off_guess = before.1 + alpha * (after.1 - before.1);
+            let other_guess = before.2 + alpha * (after.2 - before.2);
+            let mut p_guess = arriving_p + off_guess;
+            if p_guess < min_p {
+                p_guess += len_p;
+            } else if p_guess > max_p {
+                p_guess -= len_p;
+            }
+            let uv_guess = uv_domain.clamp_point(make_uv(p_guess, other_guess));
 
-    for _ in 0..MAX_CROSSING_DROPS {
-        let mut t = (before.0 * after.1 - after.0 * before.1) / (after.1 - before.1);
-        if !(before.0 < t && t < after.0) {
-            t = 0.5 * (before.0 + after.0);
-        }
-        if !(before.0 < t && t < after.0) {
-            cross_t = Some(0.5 * (before.0 + after.0));
-            cross_other = 0.5 * (before.2 + after.2);
-            break;
-        }
-        let alpha = (t - before.0) / (after.0 - before.0);
-        let off_guess = before.1 + alpha * (after.1 - before.1);
-        let other_guess = before.2 + alpha * (after.2 - before.2);
-        let mut p_guess = arriving_p + off_guess;
-        if p_guess < min_p {
-            p_guess += len_p;
-        } else if p_guess > max_p {
-            p_guess -= len_p;
-        }
-        let uv_guess = uv_domain.clamp_point(make_uv(p_guess, other_guess));
-
-        let (mut off, mut other) = if let Some(uv) = drop_point_near_seam(
-            k,
-            surface,
-            uv_domain,
-            seam_wrap,
-            curve,
-            t,
-            uv_guess,
-            approx_tol_3d,
-        )? {
-            (signed_offset(coord(uv)), other_coord(uv))
-        } else if let Some((linear_off, q)) = seam_linear_residual(t, other_guess)? {
-            if linear_off.abs() <= 0.05 * len_p {
-                (linear_off, q)
-            } else {
+            let Some(uv) = drop_point_near_seam(
+                k,
+                surface,
+                uv_domain,
+                seam_wrap,
+                curve,
+                t,
+                uv_guess,
+                approx_tol_3d,
+            )?
+            else {
+                return Ok(None);
+            };
+            let off = signed_offset(coord(uv));
+            let other = other_coord(uv);
+            if !off.is_finite() || !other.is_finite() {
                 return Ok(None);
             }
-        } else {
-            return Ok(None);
-        };
-        if !off.is_finite() {
-            return Ok(None);
-        }
-        if off.abs() <= near_seam_band {
-            if let Some((linear_off, q)) = seam_linear_residual(t, other)? {
-                off = linear_off;
-                other = q;
+            if off.abs() <= near_seam_band || (after.0 - before.0) <= t_zero {
+                localized = Some((t, other));
+                break;
             }
-        }
-        if off.abs() <= param_zero || (after.0 - before.0) <= t_zero {
-            cross_t = Some(t);
-            cross_other = other;
-            break;
-        }
 
-        let on_starts_side = (off < 0.0) == (before.1 < 0.0);
-        if on_starts_side {
-            before = (t, off, other);
-            if moved_before == Some(true) {
-                after.1 *= 0.5;
+            let on_starts_side = (off < 0.0) == (before.1 < 0.0);
+            if on_starts_side {
+                before = (t, off, other);
+                if moved_before == Some(true) {
+                    after.1 *= 0.5;
+                }
+            } else {
+                after = (t, off, other);
+                if moved_before == Some(false) {
+                    before.1 *= 0.5;
+                }
             }
-        } else {
-            after = (t, off, other);
-            if moved_before == Some(false) {
-                before.1 *= 0.5;
-            }
+            moved_before = Some(on_starts_side);
         }
-        moved_before = Some(on_starts_side);
-    }
+        localized
+    };
 
-    let Some(t_cross) = cross_t else {
+    let Some((mut t_cross, mut cross_other)) = seed else {
         return Ok(None);
     };
+    cross_other = min2(max2(cross_other, other_min), other_max);
+
+    // Exact 2x2 Newton refinement of the seam normal-foot equations inside `[before.0, after.0]`:
+    //   F1(t, q) = (C(t) - S(seam, q)) . S_along(seam, q) = 0
+    //   F2(t, q) = (C(t) - S(seam, q)) . S_across(seam, q) = 0
+    // Both vanish iff `C(t) - S(seam, q)` lies on the surface normal line at `(arriving_p, q)`.
+    for _ in 0..8 {
+        let crv = curve.evaluate(k, t_cross, 1, false, true)?;
+        let (Some(&c_pt), Some(&c_vel)) = (crv.first(), crv.get(1)) else {
+            break;
+        };
+        let seam_uv = uv_domain.clamp_point(make_uv(arriving_p, cross_other));
+        let [p_seam, su, sv, suv, suu, svv] =
+            surface.evaluate_2nd_derivatives(k, seam_uv, from_left_u, from_left_v)?;
+        let (across, along, along_2) = if axis == SurfParamType::U {
+            (su, sv, svv)
+        } else {
+            (sv, su, suu)
+        };
+        let r = c_pt - p_seam;
+        let f2 = r.dot(across);
+        let j21 = c_vel.dot(across);
+
+        let (dt, dq) = if other_len <= EFF_ZERO_PARAM {
+            if !j21.is_finite() || j21.abs() <= EFF_ZERO_SQ {
+                break;
+            }
+            (-f2 / j21, 0.0)
+        } else {
+            let f1 = r.dot(along);
+            let j11 = c_vel.dot(along);
+            let j12 = -along.length_squared() + r.dot(along_2);
+            let j22 = -along.dot(across) + r.dot(suv);
+            let det = j11 * j22 - j12 * j21;
+            // Unit-invariant relative singularity test: `j11*j22` and `j12*j21` share units
+            // `[L^4 / (T * Q)]` with `det`.
+            let det_scale = (j11 * j22).abs() + (j12 * j21).abs();
+            if !det.is_finite() || det.abs() <= max2(EFF_ZERO * det_scale, EFF_ZERO_SQ) {
+                break;
+            }
+            ((j12 * f2 - j22 * f1) / det, (j21 * f1 - j11 * f2) / det)
+        };
+
+        if !(dt.is_finite() && dq.is_finite()) {
+            break;
+        }
+        let t_next = min2(max2(t_cross + dt, before.0), after.0);
+        let q_next = min2(max2(cross_other + dq, other_min), other_max);
+        let converged =
+            (t_next - t_cross).abs() <= t_zero && (q_next - cross_other).abs() <= other_zero;
+        t_cross = t_next;
+        cross_other = q_next;
+        if converged {
+            break;
+        }
+    }
+
     if !(start.t + EFF_ZERO < t_cross && t_cross < end_t - EFF_ZERO) {
         return Ok(None);
     }
@@ -3788,6 +3804,118 @@ mod tests {
         assert!(
             out_base.uv_curves.is_empty(),
             "single-piece drop_curve_base must not split across a closed seam"
+        );
+    }
+
+    #[test]
+    fn seam_crossing_refuses_no_foot_probe_and_enforces_approx_tol_3d() {
+        let k = Kernel::default();
+        let surface = closed_cylinder_surface(10.0, 40.0, false);
+        let dom = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let seam_wrap = SeamWrap::new(true, false, &dom, &dom);
+        let tol = 1e-4;
+
+        // 1. `drop_point_near_seam` holds every probe to `approx_tol_3d` (matching
+        // `DropPt::set_properties`), rejecting a point displaced past the top rim by 2 * tol
+        // along the cylinder axis (normal-line deviation = 2 * tol, drop distance = 0).
+        let above_rim = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Point3::new(10.0, 0.0, 40.0 + 2.0 * tol),
+                Point3::new(10.0, 0.1, 40.0 + 2.0 * tol),
+            )
+            .unwrap(),
+        );
+        let no_foot = drop_point_near_seam(
+            &k,
+            &surface,
+            &dom,
+            seam_wrap,
+            &above_rim,
+            0.0,
+            Point2::new(0.0, 40.0),
+            tol,
+        )
+        .unwrap();
+        assert!(
+            no_foot.is_none(),
+            "normal-line deviation 2*tol must be rejected under approx_tol_3d: {no_foot:?}"
+        );
+
+        // 2. A curve whose endpoints lie on opposite sides of the U seam at z = 20, but whose
+        // midpoint probe (t = 0.5) rises to z = 45 above the cylinder top before returning to
+        // cross the seam at z = 20: `drop_point_near_seam` returns `None` at t = 0.5, and
+        // `seam_crossing` must return `None` rather than falling back to an unchecked residual.
+        let detour = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(20.0, -1.0, 20.0, NOW),
+                    CPoint::new(20.0, -0.4, 45.0, NOW),
+                    CPoint::new(20.0, 0.0, 20.0, NOW),
+                    CPoint::new(20.0, 1.0, 20.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 0.5, 0.75, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let start_uv = drop_point_near_seam(
+            &k,
+            &surface,
+            &dom,
+            seam_wrap,
+            &detour,
+            0.0,
+            Point2::new(0.99, 20.0),
+            tol,
+        )
+        .unwrap()
+        .expect("start endpoint must drop cleanly");
+        let end_uv = drop_point_near_seam(
+            &k,
+            &surface,
+            &dom,
+            seam_wrap,
+            &detour,
+            1.0,
+            Point2::new(0.01, 20.0),
+            tol,
+        )
+        .unwrap()
+        .expect("end endpoint must drop cleanly");
+        let mut start = DropPt::new(0.0, Some(false));
+        let crv0 = detour.evaluate(&k, 0.0, 2, false, true).unwrap();
+        for (dst, src) in start.crv_pd.iter_mut().zip(crv0.iter()) {
+            *dst = *src;
+        }
+        start.uv_pd[0] = start_uv;
+        let mut offset = DropOffset::new(0.0, SS_NONE);
+        let status = start
+            .set_properties(&k, &surface, &mut offset, SS_NONE, tol, &dom, false)
+            .unwrap();
+        assert_eq!(status, SM_SUCCESS);
+
+        let crossing = seam_crossing(
+            &k,
+            &surface,
+            &mut offset,
+            SS_NONE,
+            &dom,
+            seam_wrap,
+            SurfParamType::U,
+            &detour,
+            tol,
+            true,
+            &start,
+            1.0,
+            end_uv,
+        )
+        .unwrap();
+        assert!(
+            crossing.is_none(),
+            "seam_crossing must reject a bracket whose probe has no normal foot: {crossing:?}"
         );
     }
 }
