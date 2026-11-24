@@ -2191,7 +2191,8 @@ pub(super) fn containment_curved(fill: &Fill, faces: &[Face], convex: bool) -> R
             let mut w = t_make(p, q);
             for (k, x) in w.c.iter_mut().enumerate() {
                 // fewer control points than a one-span net of degrees (p, q): the caller's
-                // fill (canonical data does not bound a knot's multiplicity by the degree)
+                // fill (a NURBS net built as given does not bound a knot's multiplicity by
+                // the degree)
                 *x = if rational {
                     *canonical.weights.get(k).ok_or_else(fill_not_from_split)?
                 } else {

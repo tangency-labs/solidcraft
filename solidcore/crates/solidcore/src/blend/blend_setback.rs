@@ -156,10 +156,10 @@ fn past_table() -> SolidError {
 /// and round count give, from the canonical B-spline data of its rounds and patches. The
 /// indices a caller passes into a list are checked on entry: an edge's faces
 /// ([`distances`], `model_rounds`), a fill's faces ([`containment_kept`]). A caller's fill
-/// patch need not hold the points a one-span net of its degrees has (canonical data does not
-/// bound a knot's multiplicity by the degree): where its points are read into such a net
-/// ([`containment`]'s plane bound, the curved containment, `first` and `comps`) a count past
-/// it is [`CornerInput::FillNotFromSetbackSplit`] instead.
+/// patch need not hold the points a one-span net of its degrees has (a NURBS net built as
+/// given does not bound a knot's multiplicity by the degree): where its points are read into
+/// such a net ([`containment`]'s plane bound, the curved containment, `first` and `comps`)
+/// a count past it is [`CornerInput::FillNotFromSetbackSplit`] instead.
 const WHY_TABLE: &str = "an index or size is past a table of the setback fill, though every table is built at the size its order, degrees and round count give, from the canonical B-spline data of its rounds and patches, the indices a caller passes (an edge's faces, a fill's faces) checked on entry and a caller's fill patches' point counts checked where they are read";
 
 /// `round_jets` inserts the round's end parameter to the round's degree (`raise_knot`,
@@ -3263,7 +3263,7 @@ fn plane_bound(
         most = smax(most, wi * terms);
         w_min = smin(w_min, wi);
         // more control points than a one-span net of degrees (p, q) holds: the caller's fill
-        // (canonical data does not bound a knot's multiplicity by the degree)
+        // (a NURBS net built as given does not bound a knot's multiplicity by the degree)
         *w.c.get_mut(i).ok_or_else(fill_not_from_split)? = wi;
         *el_mut(&mut f.c, i)? = wi * side * d.dot(face.normal);
     }
@@ -3553,26 +3553,24 @@ mod tests {
     /// past a table.
     #[test]
     fn a_patch_with_more_points_than_its_net_is_invalid_input() {
-        let mut pts = Vec::new();
-        for i in 0..5 {
-            for z in [0.0, 1.0] {
-                pts.push(Point3::new(f64::from(i), 1.0, z));
-            }
-        }
-        let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
-            u_degree: 2,
-            v_degree: 1,
-            control_points: &pts,
-            form: BSplineSurfaceForm::Unspecified,
-            u_multiplicities: &[4, 4],
-            v_multiplicities: &[2, 2],
-            u_knots: &[0.0, 1.0],
-            v_knots: &[0.0, 1.0],
-            knot_type: KnotType::Unspecified,
-            weights: None,
-            uv_domain: None,
-        })
-        .unwrap();
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        // knots 0^4 1^4 at degree 2: one span with 5 points in u, where (p+1) is 3 (the
+        // NLib net takes them as given; create_canonical would clamp them away)
+        let net = (0..5)
+            .map(|i| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|z| CPoint::new(f64::from(i), 1.0, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let v = vec![0.0, 0.0, 1.0, 1.0];
+        let patch = BSplineSurface::from_gw_nurb(&NurbSurface::new(net, 2, 1, u, v).unwrap());
+        let canonical = patch.canonical().unwrap();
+        assert_eq!(canonical.u_multiplicities, vec![4, 4]);
+        assert_eq!(canonical.control_points.len(), 10);
         let fill = Fill {
             patches: vec![patch],
             round: Vec::new(),
