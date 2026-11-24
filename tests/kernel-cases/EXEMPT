@@ -483,6 +483,7 @@ sketch.spline.insert_point        2D sketch only (the sketch solver and engine t
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.reset_handles       2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::reset_tangent_handles_gives_back_the_spline_through_its_fit_points); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline3d.control_point     a 3D sketch curve: its tests in crates/engine/src/cmd/sketch_3d_frame_tests.rs
 sketch.toggle_diameter            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
