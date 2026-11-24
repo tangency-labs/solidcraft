@@ -71,6 +71,7 @@ pub use design::write_design_container_with_preview;
 pub use design::write_design_container_with_provenance;
 pub use design::write_design_container_with_thumbnail;
 pub use design::write_drawing_container;
+pub use design::written_design_provenance_chain;
 pub use glb::DEFAULT_COLOR as GLB_DEFAULT_COLOR;
 pub use glb::GlbOptions;
 pub use glb::MAX_GLB_BYTES;
@@ -82,10 +83,17 @@ pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
+pub use native_cad::CadmpegOptions;
+pub use native_cad::DecalPlan;
+pub use native_cad::Hidden;
 pub use native_cad::NATIVE_CAD_EXTS;
 pub use native_cad::NativeDesign;
+pub use native_cad::OpticsPlan;
 pub use native_cad::RecordsRead;
+pub use native_cad::SurfaceMap;
+pub use native_cad::SurfacePlan;
 pub use native_cad::USD_EXTS;
+pub use native_cad::cadmpeg_export;
 pub use native_cad::cadmpeg_iges_records;
 pub use native_cad::cadmpeg_step_records;
 pub use native_cad::detects_freecad;
@@ -96,7 +104,7 @@ pub use native_cad::native_cad_design;
 pub use native_cad::native_cad_records;
 pub use native_cad::native_cad_to_step;
 pub use native_cad::read_usd;
-pub use native_cad::usd_from_step;
+pub use native_cad::usd_from_design;
 pub use native_cad::usd_records;
 pub mod paper;
 mod pat;
@@ -241,6 +249,7 @@ pub use kicad_in::is_kicad_path;
 pub use kicad_in::kicad_board_mesh;
 pub use kicad_in::kicad_board_path;
 pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::kicad_file_thickness;
 pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
@@ -891,8 +900,15 @@ pub enum Format {
     /// and decal images; written by the engine, since it is several files.
     Sdf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
-    /// file's extension ([`usd_from_step`]); written by the engine from the STEP it writes.
+    /// file's extension ([`usd_from_design`]); written from the design, which holds the
+    /// components and looks.
     Usd,
+    /// Rhino `.3dm`, written by cadmpeg from the design ([`cadmpeg_export`]): each body's exact
+    /// shape where cadmpeg's Rhino writer can write it, else its mesh.
+    Rhino,
+    /// FreeCAD `.FCStd`: named so that `file.export` can say why it is not written yet (cadmpeg
+    /// cannot write a new FreeCAD file; [`cadmpeg_export`] refuses it).
+    FreeCad,
 }
 
 impl Format {
@@ -911,6 +927,8 @@ impl Format {
             "glb" => Format::Glb,
             "sdf" => Format::Sdf,
             "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
+            "3dm" => Format::Rhino,
+            "fcstd" => Format::FreeCad,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1790,6 +1808,8 @@ pub fn export_with_parts_noted(
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
         Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
         Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
+        Format::Rhino => return Err(IoError::Format("3dm (written from the design by cadmpeg; use file.export)".into())),
+        Format::FreeCad => return Err(IoError::Invalid(native_cad::FREECAD_REFUSED.into())),
     };
     Ok((bytes, notes))
 }
@@ -1921,7 +1941,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.
