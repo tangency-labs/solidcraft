@@ -363,7 +363,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         // While the selected feature's corridor is checked, a light runs along them towards it.
         let lighting = shown.is_some_and(|s| s.light_low.is_some() || s.light_high.is_some());
         if app.preferences.timeline_2d_cell_dots || lighting {
-            let opacity = app.preferences.timeline_2d_dot_opacity.clamp(0.05, 1.0);
+            let opacity = super::DOT_OPACITY;
             let active_dot_color = accent.color.gamma_multiply(opacity * 0.9);
             let regular_dot_color = t.text_dim.gamma_multiply(opacity * 0.7);
             let inactive_dot_color = t.border.gamma_multiply(opacity * 0.5);
@@ -512,8 +512,8 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                     }
                 }
 
-                let prereq_col = crate::theme::model_color(app.preferences.timeline_2d_prereq_color);
-                let dep_col = crate::theme::model_color(app.preferences.timeline_2d_dependent_color);
+                let prereq_col = t.warning;
+                let dep_col = t.accent;
 
                 // Paint individual chips
                 for (fid, track_idx) in column_chips {

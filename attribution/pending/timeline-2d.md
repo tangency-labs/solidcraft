@@ -25,3 +25,5 @@
 | docs/screenshots/timeline-2d-resize-1row.png | SolidCraft contributors | screenshot of SolidCraft itself: 2D Timeline vertically resized to its compact 1-row minimum height with vertical scrollbar | MIT OR Apache-2.0 |
 | docs/screenshots/timeline-2d-view-assembly-full.png | SolidCraft contributors | screenshot of SolidCraft itself: 2D Timeline with the Modeling track contracted into the left dock tab and the Assembly & Joints track fully expanded | MIT OR Apache-2.0 |
 | docs/screenshots/timeline-2d-view-modeling-full.png | SolidCraft contributors | screenshot of SolidCraft itself: 2D Timeline with the Assembly & Joints track contracted into the right dock tab and the Modeling track fully expanded | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/timeline_1d.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/timeline_2d.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |

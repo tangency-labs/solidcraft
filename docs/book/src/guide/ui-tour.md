@@ -197,7 +197,7 @@ view.
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
   Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
-  Enable **Preferences › Layout › 2D Timeline** with History placed at the **Bottom** for a multi-track
+  Click the view button in the History's header, with History placed at the **Bottom**, for a multi-track
   component matrix view that maps features across their owning components, visualizes cross-component actions
   with vertical connectors, highlights topological dependency corridors `[ ... ]` for safe reordering,
   and supports folder grouping and cascading suppression (the 2D Timeline applies only to bottom placement;

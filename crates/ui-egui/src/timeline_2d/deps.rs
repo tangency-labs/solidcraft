@@ -703,6 +703,11 @@ fn collect_point_prereqs(def: &PointDef, prereqs: &mut BTreeSet<u64>, name_to_id
             collect_geo_prereqs(b, prereqs, name_to_id, body_producers);
             collect_geo_prereqs(c, prereqs, name_to_id, body_producers);
         }
+        PointDef::Average { points } => {
+            for point in points {
+                collect_geo_prereqs(point, prereqs, name_to_id, body_producers);
+            }
+        }
     }
 }
 

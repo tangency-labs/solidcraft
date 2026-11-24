@@ -356,6 +356,14 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
+    /// Puts the panel's `action` at the right end of its header, next to the menu, also when
+    /// the header is one row with the content (the bottom History).
+    pub(crate) fn set_header_action_trailing(&mut self, instance: InstanceId, action: ControlId) {
+        if self.options.geometry.trailing_header_actions.entry(instance).or_default().insert(action) {
+            self.invalidate_geometry();
+        }
+    }
+
     pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
         let hidden = &mut self.options.geometry.hidden_header_actions;
         let changed = if visible {
@@ -2819,13 +2827,16 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 apply_action(self.layout.revision, vec![Mutation::Close { instance: instance.clone() }]),
                                 control.id,
                             )),
-                            HostPointerTarget::HeaderAction { instance, action } if clicked => self.commands.push(HostCommand::WidgetLayout(
-                                apply_action(
-                                    self.layout.revision,
-                                    vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
-                                ),
-                                control.id,
-                            )),
+                            HostPointerTarget::HeaderAction { instance, action } if clicked => {
+                                self.frame_content.header_action_clicked(instance, action, response.rect);
+                                self.commands.push(HostCommand::WidgetLayout(
+                                    apply_action(
+                                        self.layout.revision,
+                                        vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
+                                    ),
+                                    control.id,
+                                ))
+                            }
                             HostPointerTarget::HeaderAction { instance, .. } if secondary => {
                                 if let Some(at) = response.interact_pointer_pos() {
                                     self.frame_content.header_action_context_menu(instance, at);

@@ -386,6 +386,7 @@ svg	false
 sweep	false
 text	false
 thread	false
+timeline_2d	false
 timeline_play	false
 timeline_stop	false
 torus	false

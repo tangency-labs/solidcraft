@@ -38,8 +38,8 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the `timeline_2d` preference (Preferences › Layout › 2D Timeline) and the other
-  `timeline_2d_*` preferences; its two parts are the *modeling track* and the *assembly track*.
+- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+  behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
 - **For translators:** not a 2D sketch. Keep "2D" as written.
@@ -624,8 +624,8 @@ feature follows its edges when the part changes.
 The unsuppress mode in which unsuppressing a feature in the 2D Timeline leaves suppressed the
 dependents that were suppressed separately there in the same session.
 
-- **In SolidCraft:** `timeline_2d_unsuppress_mode: "restore_state"` (the default); Preferences ›
-  Layout › 2D Timeline › DAG unsuppress › Restore State. The other mode is `unsuppress_all`.
+- **In SolidCraft:** `timeline_2d_unsuppress_mode: "restore_state"` (the default); **Unsuppress:
+  Restore State** behind the 2D Timeline's settings button. The other mode is `unsuppress_all`.
 - **Don't use:** restore, undo suppression.
 - **Elsewhere:** keep suppression state.
 - **For translators:** not Undo and not opening a saved version of a design.

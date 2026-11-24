@@ -11,6 +11,34 @@ pub mod state;
 
 use crate::SolveApp;
 use egui::Ui;
+use serde_json::json;
+
+/// How strongly the alignment dots in empty cells show: faint enough to sit behind the chips.
+pub(crate) const DOT_OPACITY: f32 = 0.35;
+
+/// The 2D Timeline's own options, in the right-click menu of its header: the alignment dots,
+/// activating a component by its row, and what unsuppressing brings back.
+pub(crate) fn option_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    use crate::prefs::Timeline2dUnsuppressMode::{RestoreState, UnsuppressAll};
+    use crate::ui_kit::Item;
+    let p = &app.preferences;
+    let tr = solidcraft_ui_text::tr;
+    let mode = |mode: crate::prefs::Timeline2dUnsuppressMode, key: &str| {
+        let item = Item::action("ui.timeline2dUnsuppress", tr(key), "suppress").with(json!({ "mode": mode }));
+        if p.timeline_2d_unsuppress_mode == mode { item.key("current") } else { item }
+    };
+    // A check mark shows what is on, as for the unsuppress modes.
+    let toggle = |id: &str, key: &str, icon: &str, on: bool| {
+        let item = Item::action(id, tr(key), icon).with(json!({ "on": !on }));
+        if on { item.key("current") } else { item }
+    };
+    vec![
+        toggle("ui.timeline2dCellDots", "ui.timeline_2d_dots", "grid", p.timeline_2d_cell_dots),
+        toggle("ui.timeline2dActivation", "ui.timeline_2d_activation", "component", p.timeline_2d_component_activation),
+        mode(RestoreState, "ui.timeline_2d_unsuppress_restore"),
+        mode(UnsuppressAll, "ui.timeline_2d_unsuppress_all"),
+    ]
+}
 
 /// Draws the 2D Timeline into the area the panel host gives its `timeline-2d` panel, which owns
 /// the frame, the header with the playback controls and the resizable top edge.
@@ -885,33 +913,60 @@ mod tests {
         h.app.preferences.timeline_2d = true;
         h.call("ui.resize", json!({"width": 1400, "height": 900}));
 
-        // 1. Verify default values of new preferences
+        // 1. The defaults: dots shown, a row's label activates its component.
         assert!(h.app.preferences.timeline_2d_cell_dots);
-        assert!((h.app.preferences.timeline_2d_dot_opacity - 0.35).abs() < 1e-4);
         assert!(h.app.preferences.timeline_2d_component_activation);
-        assert_eq!(h.app.preferences.timeline_2d_prereq_color, [245, 158, 11]);
-        assert_eq!(h.app.preferences.timeline_2d_dependent_color, [56, 189, 248]);
 
-        // 2. Test ui.prefs control-channel validation
-        let res = h.call("ui.prefs", json!({"timeline_2d_dot_opacity": 0.75}));
-        assert!(res["error"].is_null(), "{res}");
-        assert!((h.app.preferences.timeline_2d_dot_opacity - 0.75).abs() < 1e-4);
+        // 2. The options are behind the 2D Timeline's settings button: each item flips its option.
+        use crate::context_menu::{Target, items, run_item};
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+        h.app.home.open = false;
+        h.frames(3);
+        let button = |instance: &str, action: &str| {
+            HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: InstanceId(instance.into()), action: ControlId(action.into()) })
+        };
+        let bounds = |h: &Harness, target: &HostControlTarget| {
+            let frame = h.app.universal_panel_frame().unwrap();
+            frame.controls.iter().find(|c| c.target == *target).map(|c| crate::panel_runtime::egui_rect(c.bounds))
+        };
+        click_control(&mut h, &button("timeline-2d", "settings"));
+        assert_eq!(h.app.menu.target, Target::Timeline2dOptions, "the settings button opens the options");
+        let run = |h: &mut Harness, id: &str| {
+            let item = items(&h.app, &Target::Timeline2dOptions).into_iter().find(|i| i.id == id).unwrap_or_else(|| panic!("the menu offers {id}"));
+            run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        };
+        run(&mut h, "ui.timeline2dCellDots");
+        assert!(!h.app.preferences.timeline_2d_cell_dots);
+        run(&mut h, "ui.timeline2dActivation");
+        assert!(!h.app.preferences.timeline_2d_component_activation);
+        run(&mut h, "ui.timeline2dActivation");
+        assert!(h.app.preferences.timeline_2d_component_activation);
+        let all = items(&h.app, &Target::Timeline2dOptions)
+            .into_iter()
+            .find(|i| i.params.as_ref().is_some_and(|p| p["mode"] == "unsuppress_all"))
+            .expect("the menu offers both modes");
+        run_item(&mut h.app, &all, egui::Pos2::ZERO);
+        assert_eq!(h.app.preferences.timeline_2d_unsuppress_mode, crate::prefs::Timeline2dUnsuppressMode::UnsuppressAll);
+        assert!(!items(&h.app, &Target::HistoryControls).iter().any(|i| i.id.starts_with("ui.timeline2d")), "the Play button's menu stays as it was");
 
-        // Reject out-of-range opacity
-        let bad = h.call("ui.prefs", json!({"timeline_2d_dot_opacity": 2.5}));
-        assert!(bad["error"].is_string());
+        // 3. The view switch sits at the same place in both headers, and switches.
+        let in_2d = bounds(&h, &button("timeline-2d", "timeline-view")).expect("the 2D Timeline has the switch");
+        click_control(&mut h, &button("timeline-2d", "timeline-view"));
+        assert!(!h.app.preferences.timeline_2d);
+        h.frames(3);
+        let in_1d = bounds(&h, &button("history", "timeline-view")).expect("the 1D History has the switch");
+        assert!((in_1d.center().x - in_2d.center().x).abs() < 1.0, "the switch lines up: {in_1d:?} {in_2d:?}");
+        click_control(&mut h, &button("history", "timeline-view"));
+        assert!(h.app.preferences.timeline_2d);
 
-        // 3. Test custom DAG highlight colors via ui.prefs
-        let res = h.call(
-            "ui.prefs",
-            json!({
-                "timeline_2d_prereq_color": [255, 99, 71],
-                "timeline_2d_dependent_color": [138, 43, 226],
-            }),
-        );
-        assert!(res["error"].is_null(), "{res}");
-        assert_eq!(h.app.preferences.timeline_2d_prereq_color, [255, 99, 71]);
-        assert_eq!(h.app.preferences.timeline_2d_dependent_color, [138, 43, 226]);
+        // A History on the left has no switch: the 2D Timeline shows only at the bottom.
+        h.app.preferences.timeline_left = true;
+        h.frames(3);
+        assert!(bounds(&h, &button("history", "timeline-view")).is_none());
+        h.app.preferences.timeline_left = false;
+        h.app.preferences.timeline_2d_cell_dots = true;
+        h.frames(3);
 
         // 4. Test disabling component activation from timeline
         let c1 = h.app.run("component.create", json!({"name": "TestPart", "activate": false})).unwrap();

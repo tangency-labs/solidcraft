@@ -157,12 +157,6 @@ macro_rules! layout_preferences {
             timeline_2d_cell_dots: bool = true, PAGE_LAYOUT;
             /// Allow activating components directly by clicking component tracks or radio indicators in the 2D timeline.
             timeline_2d_component_activation: bool = true, PAGE_LAYOUT;
-            /// Highlight color for downstream dependent features in the 2D timeline Directed Acyclic Graph (DAG).
-            timeline_2d_dependent_color: [u8; 3] = [56, 189, 248], PAGE_LAYOUT;
-            /// Opacity of alignment dots in unoccupied 2D timeline cells (0.05 to 1.0).
-            timeline_2d_dot_opacity: f32 = 0.35, PAGE_LAYOUT, accept(0.05..=1.0);
-            /// Highlight color for prerequisite features in the 2D timeline Directed Acyclic Graph (DAG).
-            timeline_2d_prereq_color: [u8; 3] = [245, 158, 11], PAGE_LAYOUT;
             /// How unsuppressing an upstream feature affects downstream dependents in the 2D timeline DAG.
             timeline_2d_unsuppress_mode: Timeline2dUnsuppressMode = Default::default(), PAGE_LAYOUT;
             /// Vertical History starts with the active component's Bodies folder and the Origin (#6490).

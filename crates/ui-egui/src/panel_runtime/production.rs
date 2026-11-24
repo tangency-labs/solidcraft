@@ -214,13 +214,22 @@ impl Product {
 
     fn header_actions(self) -> Vec<HeaderActionSpec> {
         let entries: Vec<(&str, &str, &str)> = match self {
-            Self::History | Self::Timeline2d => vec![
-                ("first", "ui.history_first", "timeline_first"),
-                ("back", "ui.history_back", "timeline_back"),
-                ("play", "cmd.timeline_play", "timeline_play"),
-                ("forward", "ui.history_forward", "timeline_forward"),
-                ("last", "ui.history_last", "timeline_last"),
-            ],
+            Self::History | Self::Timeline2d => {
+                let mut entries = vec![
+                    ("first", "ui.history_first", "timeline_first"),
+                    ("back", "ui.history_back", "timeline_back"),
+                    ("play", "cmd.timeline_play", "timeline_play"),
+                    ("forward", "ui.history_forward", "timeline_forward"),
+                    ("last", "ui.history_last", "timeline_last"),
+                ];
+                // The switch shows the view it switches to, at the header's right end in both.
+                entries.extend(if self == Self::History {
+                    vec![(TIMELINE_VIEW, "ui.timeline_2d_show", "timeline_2d")]
+                } else {
+                    vec![(TIMELINE_SETTINGS, "ui.timeline_2d_settings", "display"), (TIMELINE_VIEW, "ui.timeline_2d_hide", "timeline_1d")]
+                });
+                entries
+            }
             Self::Assistant => vec![("new-chat", "ui.agent_chat_new", "new")],
             Self::RenderBrowser => vec![
                 ("by-object", "render.tree_by_object", "list"),
@@ -274,6 +283,15 @@ impl Product {
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
                     }
                 })
+                .chain(self.header_actions().into_iter().filter(|spec| [TIMELINE_SETTINGS, TIMELINE_VIEW].contains(&spec.id.0.as_str())).map(
+                    |spec| RuntimeAction {
+                        id: spec.id,
+                        label: solidcraft_ui_text::tr(&spec.label_key).into(),
+                        enabled: true,
+                        disabled_reason: None,
+                        pressed: None,
+                    },
+                ))
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
@@ -620,7 +638,10 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
         }
         match action.product {
             Product::History | Product::Timeline2d => {
-                if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|control| control.id() == action.action.0) {
+                if action.action.0 == TIMELINE_VIEW {
+                    let on = !app.preferences.timeline_2d;
+                    crate::prefs::set(app, &json!({ "timeline_2d": on })).map_err(|reason| error(Rule::Availability, reason))?;
+                } else if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|control| control.id() == action.action.0) {
                     crate::timeline::run_transport(app, control);
                 }
             }
@@ -1043,6 +1064,11 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
         Err(reason) => Err(reason),
     }
 }
+
+/// The header button that switches between the 1D History and the 2D Timeline.
+pub(crate) const TIMELINE_VIEW: &str = "timeline-view";
+/// The 2D Timeline's header button that opens its options.
+pub(crate) const TIMELINE_SETTINGS: &str = "settings";
 
 /// The 2D Timeline replaces History while History would be a bottom strip (`timeline_2d`).
 fn timeline_2d(app: &crate::SolveApp) -> bool {
@@ -1525,6 +1551,12 @@ impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_context_menu(&mut self, instance: &InstanceId, at: egui::Pos2) {
         if instance.0 == Product::History.id() {
             crate::context_menu::open_for(self.app, at, crate::context_menu::Target::HistoryControls);
+        }
+    }
+
+    fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
+        if instance.0 == Product::Timeline2d.id() && action.0 == TIMELINE_SETTINGS {
+            crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
         }
     }
 

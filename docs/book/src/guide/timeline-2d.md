@@ -9,21 +9,35 @@ components, you can see which component owns each step and which steps depend on
 
 ## Turning on the 2D Timeline
 
-You can turn on the 2D Timeline in two ways:
+You switch between the 1D and the 2D Timeline in the timeline itself:
 
-1. **Preferences**: Open **Preferences › Layout** and select **2D Timeline (Bottom only)**
-   (`prefs.timeline_2d`). The 2D Timeline replaces the timeline at the bottom of the window only.
-   The other places for the history (Left, Under browser, In browser) keep the 1D timeline.
-2. **Control channel or agent tools**: Send the preference through the control channel. The first
+1. **The view button**: Click the button left of the `…` menu in the timeline's header. In the 1D
+   timeline it shows three rows of chips and switches to the 2D Timeline. In the 2D Timeline it
+   shows one row and switches back. It sits at the same place in both.
+2. **Control channel or agent tools**: Set `timeline_2d` through the control channel. The first
    request on a connection also needs a `"token"` parameter:
    ```json
    {"id": 1, "method": "ui.prefs", "params": {"timeline_2d": true}}
    ```
 
+The 2D Timeline shows only at the bottom of the window. With the history on the left, under the
+browser or in the browser, the button is off and the 1D timeline stays.
+
 The 2D Timeline then takes the place of the timeline at the bottom of the window, as its own panel
-(`timeline-2d`). Its header holds the title and the playback buttons (First, Back, Play, Forward,
-Last), as the 1D timeline's header does. Turn the preference off and the 1D timeline comes back in
-its place.
+(`timeline-2d`). Its header holds the title, the playback buttons (First, Back, Play, Forward,
+Last), the settings button and the view button. SolidCraft remembers your choice.
+
+### Options
+
+Click the settings button (the sliders) in the 2D Timeline's header for its options. A check mark
+shows what is on.
+
+- **Alignment Dots**: the small dots in empty cells.
+- **Click a Row to Activate**: whether a click on a row's label activates its component.
+- **Unsuppress: Restore State** or **Unsuppress: All Features**: what unsuppressing a feature brings
+  back (see [Suppressing features](#suppressing-features)).
+
+The outline colours come from the theme: amber for prerequisites, blue for dependents.
 
 ### Changing the height
 
@@ -86,7 +100,7 @@ When the design has joints, the 2D Timeline has two parts side by side: **Modeli
 
 - **Rows**: The top row is the root of the design. Each component follows in the order of the
   browser, active or not. Each row starts with a round **activation** indicator (`○` inactive, `⊙`
-  active), as in the browser. While **Activate components from timeline**
+  active), as in the browser. While **Click a Row to Activate**
   (`timeline_2d_component_activation`) is on, which is the default, a click on a row's label makes
   that component active (`component.activate`). While it is off, the indicator only shows which
   component is active.
@@ -181,7 +195,7 @@ A suppressed feature stays in the timeline, but SolidCraft does not compute it.
 - **Dependents follow**: When you suppress a feature, the features that depend on it are suppressed
   too, because they need its geometry.
 - **Unsuppressing**: When you unsuppress a feature, its suppressed prerequisites come back too. What
-  happens to its dependents depends on **Preferences › Layout › 2D Timeline › DAG unsuppress**:
+  happens to its dependents depends on the unsuppress option behind the settings button:
   - **Restore State** (default): Only the dependents that its suppression suppressed come back. A
     dependent you had suppressed on its own in the 2D Timeline before stays suppressed. The 2D
     Timeline remembers this only while the design is open, and only for suppressions made in the

@@ -174,8 +174,8 @@ pub fn paint_assembly_section(
 
     let purple_accent = t.icons.agent;
     let grid_line_color = t.border.gamma_multiply(0.2);
-    let prereq_color = crate::theme::model_color(app.preferences.timeline_2d_prereq_color);
-    let dep_color = crate::theme::model_color(app.preferences.timeline_2d_dependent_color);
+    let prereq_color = t.warning;
+    let dep_color = t.accent;
 
     let mut open: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
@@ -229,7 +229,7 @@ pub fn paint_assembly_section(
 
     // 3. Draw alignment dots (·) in unoccupied whole cells across the grid (NO DOT on half-column)
     if app.preferences.timeline_2d_cell_dots {
-        let opacity = app.preferences.timeline_2d_dot_opacity.clamp(0.05, 1.0);
+        let opacity = super::DOT_OPACITY;
         let active_dot_color = purple_accent.gamma_multiply(opacity * 0.9);
         let regular_dot_color = t.text_dim.gamma_multiply(opacity * 0.7);
 
