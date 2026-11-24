@@ -1785,6 +1785,13 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .and_then(OffsetExecutive::offset_brep)
         .map(rust_result_projection)
         .transpose()?;
+    // (a probe's copies of the bodies the projections read: capture off, none)
+    if let Some(b) = result.as_ref() {
+        crate::dump::body(&kernel, "result", b);
+    }
+    if let Some(b) = exec.as_ref().and_then(OffsetExecutive::offset_brep) {
+        crate::dump::body(&kernel, "executive_offset", b);
+    }
     // A consumed source that comes back as the result (a Difference assigns its
     // result to the inset's primary operand, the original) keeps the source's
     // identity: native lifetime/origin 2 (`result == source`). Any other result is
