@@ -19,12 +19,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-pub use solidcraft_kernel::services::develop::Bent;
-pub use solidcraft_kernel::services::develop::Fold;
-pub use solidcraft_kernel::services::develop::crossings;
-pub use solidcraft_kernel::services::develop::curve_through;
-pub use solidcraft_kernel::services::develop::hermite;
-pub use solidcraft_kernel::services::query::Query;
 pub use solidcore_record::develop::Anchor;
 pub use solidcore_record::develop::Bend;
 pub use solidcore_record::develop::Corner;
@@ -49,6 +43,12 @@ pub use solidcore_record::develop::Tail;
 pub use solidcore_record::develop::Trim;
 pub use solidcore_record::develop::Zone;
 pub use solidcore_record::develop::ZoneEnds;
+pub use solidcraft_kernel::services::develop::Bent;
+pub use solidcraft_kernel::services::develop::Fold;
+pub use solidcraft_kernel::services::develop::crossings;
+pub use solidcraft_kernel::services::develop::curve_through;
+pub use solidcraft_kernel::services::develop::hermite;
+pub use solidcraft_kernel::services::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
 pub mod prelude {
