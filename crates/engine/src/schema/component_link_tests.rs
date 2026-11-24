@@ -17,7 +17,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<InsertDesignParams>(),
         &["angle", "axis", "configuration", "document", "matrix", "name", "origin", "parent", "path", "reuse", "to_matrix", "tolerance", "translate"],
     );
-    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
     assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
