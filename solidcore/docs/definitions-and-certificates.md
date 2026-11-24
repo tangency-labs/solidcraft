@@ -361,7 +361,15 @@ Every face is in one of three classes:
 One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
 `blend::foot_blend`, #15129). Its feet are proved between its stations (Krawczyk on the foot
 equations over each piece, `generic-blend.md` §2.5; at a tapered or rounded end only where the legs
-are at least a quarter of the full ones). The chord's net (sagitta 0) is proved: on
+are at least a quarter of the full ones), each on the branch of its support's section that leaves
+the root along the face where the leg holds over the piece (not in a shaped end's zone): a chain
+of Krawczyk boxes over the leg, `t` over the piece and the distance `ρ` from the root over each
+step (the first to an eighth of the leg, each further one an eighth longer than its start's
+distance from the root), from the root (in `(S − e)/ρ` near it, from 64 times the bound on the
+root's own gap from the support) to the toe, each box's root strictly inside the next box, the
+foot's box inside the last (`FootBlend::prove_chain`); and the corner's rise `(n₁ × n₂)·e′` keeps
+one sign over every such piece, so the corner read at the stations stays an inside corner
+between them. The chord's net (sagitta 0) is proved: on
 each span between two stations it is the cubic Hermite through the feet and their rates, and its
 distance from the section is bounded by the Hermite remainder `h⁴/16 · max |a_4|` from the feet's
 Taylor series enclosed over the span (`FootBlend::feet_series`, solved order by order from the
