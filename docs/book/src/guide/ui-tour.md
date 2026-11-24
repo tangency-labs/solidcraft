@@ -18,7 +18,9 @@ view.
   unsaved changes). Double-click a design's tab, or right-click it and choose **Rename**, to rename
   the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave the old
   one (Preferences › Interface turns the double-click off, for a double-click that maximizes the
-  window instead; **Rename** stays in the menu). On the right: Report a bug,
+  window instead; **Rename** stays in the menu). **Save** and **Save As…** in a design tab's
+  right-click menu save that tab's design (it is shown first), as the File menu's do. On the right:
+  Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
