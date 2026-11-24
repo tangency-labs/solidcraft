@@ -139,6 +139,8 @@ pub struct GroupSeg {
     pub icon: &'static str,
     /// Container kind.
     pub kind: GroupKind,
+    /// Occurrence path when `kind == GroupKind::Occurrence` (selectable directly from the tree).
+    pub path: Option<Vec<u64>>,
 }
 
 /// One row of the list.
@@ -164,6 +166,8 @@ pub struct Popup {
     pub total: usize,
     /// The row under the pointer (lit in the viewport).
     pub hovered: Option<usize>,
+    /// The component occurrence group row under the pointer (lit in the viewport).
+    pub hovered_occurrence: Option<Vec<u64>>,
     /// Active category filter (`None` = All).
     pub filter: Option<Category>,
     /// Whether to nest rows by component/occurrence/body/sketch when multiple groups exist.
@@ -548,7 +552,13 @@ fn occurrence_chain(app: &SolveApp, path: &[u64]) -> Vec<GroupSeg> {
         let Some(&occ_id) = prefix.last() else { continue };
         let name =
             app.session.doc.occurrences.iter().find(|o| o.id == occ_id).map(|o| o.name.clone()).unwrap_or_else(|| format!("Component {occ_id}"));
-        segs.push(GroupSeg { key: format!("occ:{}", join_path(prefix)), name, icon: "component", kind: GroupKind::Occurrence });
+        segs.push(GroupSeg {
+            key: format!("occ:{}", join_path(prefix)),
+            name,
+            icon: "component",
+            kind: GroupKind::Occurrence,
+            path: Some(prefix.to_vec()),
+        });
     }
     segs
 }
@@ -565,7 +575,7 @@ fn component_chain(app: &SolveApp, comp_id: u64) -> Vec<GroupSeg> {
         let Some(comp) = app.session.doc.components.iter().find(|c| c.id == cur) else {
             break;
         };
-        chain.push(GroupSeg { key: format!("comp:{}", comp.id), name: comp.name.clone(), icon: "component", kind: GroupKind::Component });
+        chain.push(GroupSeg { key: format!("comp:{}", comp.id), name: comp.name.clone(), icon: "component", kind: GroupKind::Component, path: None });
         cur = comp.parent;
     }
     chain.reverse();
@@ -586,7 +596,13 @@ fn body_hierarchy(app: &SolveApp, body_name: &str) -> Vec<GroupSeg> {
         let comp_id = st.body(body_name).map(|b| app.session.doc.model_body_component(b)).unwrap_or(0);
         component_chain(app, comp_id)
     };
-    segs.push(GroupSeg { key: format!("body:{body_name}"), name: body_display_name(app, body_name), icon: "body", kind: GroupKind::Body });
+    segs.push(GroupSeg {
+        key: format!("body:{body_name}"),
+        name: body_display_name(app, body_name),
+        icon: "body",
+        kind: GroupKind::Body,
+        path: None,
+    });
     segs
 }
 
@@ -600,13 +616,19 @@ fn hierarchy_for(app: &SolveApp, sel: &Sel) -> Vec<GroupSeg> {
             let Some(sid) = app.session.active_sketch else { return Vec::new() };
             let comp = app.session.doc.feature(sid).map(|f| f.component).unwrap_or(0);
             let mut segs = component_chain(app, comp);
-            segs.push(GroupSeg { key: format!("sketch:{sid}"), name: sketch_name(app, sid), icon: "sketch", kind: GroupKind::Sketch });
+            segs.push(GroupSeg { key: format!("sketch:{sid}"), name: sketch_name(app, sid), icon: "sketch", kind: GroupKind::Sketch, path: None });
             segs
         }
         Sel::ExternalSketchPoint { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::Profile { sketch, .. } => {
             let comp = app.session.doc.feature(*sketch).map(|f| f.component).unwrap_or(0);
             let mut segs = component_chain(app, comp);
-            segs.push(GroupSeg { key: format!("sketch:{sketch}"), name: sketch_name(app, *sketch), icon: "sketch", kind: GroupKind::Sketch });
+            segs.push(GroupSeg {
+                key: format!("sketch:{sketch}"),
+                name: sketch_name(app, *sketch),
+                icon: "sketch",
+                kind: GroupKind::Sketch,
+                path: None,
+            });
             segs
         }
         Sel::Feature { id } => {
@@ -647,6 +669,7 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
         rows,
         total,
         hovered: None,
+        hovered_occurrence: None,
         filter: None,
         grouped: true,
         collapsed: HashSet::new(),
@@ -680,6 +703,18 @@ pub fn choose(app: &mut SolveApp, i: usize, add: bool, toggle: bool) -> Result<R
     apply(app, &row, add, toggle);
     remember(app, at, if add { None } else { Some(row.sel.clone()) });
     Ok(row)
+}
+
+/// Select a component occurrence directly from its tree node and close the popup.
+fn choose_occurrence(app: &mut SolveApp, path: Vec<u64>, add: bool, toggle: bool) {
+    let Some(p) = app.viewport.select_other.popup.as_ref() else { return };
+    let at = p.at;
+    let (opened_add, opened_toggle) = crate::tool_modifiers::selection_click(p.held, app.preferences.selection_shift_add_only);
+    let (add, toggle) = (add || opened_add, toggle || opened_toggle);
+    let sel = Sel::Occurrence { path };
+    close(app);
+    crate::viewport::select(app, Some(sel.clone()), add, toggle);
+    remember(app, at, if add { None } else { Some(sel) });
 }
 
 /// Select a row's entity: into the dialog's active input, or as a click does.
@@ -775,6 +810,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             return Err("filter must be a category string or null".into());
         }
         pop.hovered = None;
+        pop.hovered_occurrence = None;
         hover_override(app);
         return Ok(describe(app));
     }
@@ -876,10 +912,25 @@ pub(crate) fn hovered_body(app: &SolveApp) -> Option<&str> {
     }
 }
 
+pub(crate) fn hovered_occurrence(app: &SolveApp) -> Option<&[u64]> {
+    let popup = active_popup(app)?;
+    if let Some(path) = popup.hovered_occurrence.as_deref() {
+        return Some(path);
+    }
+    match &popup.rows.get(popup.hovered?)?.sel {
+        Sel::Occurrence { path } => Some(path.as_slice()),
+        _ => None,
+    }
+}
+
 /// While the list is open, the hovered row is what the viewport lights up.
 pub fn hover_override(app: &mut SolveApp) {
     let Some(popup) = active_popup(app) else { return };
-    app.viewport.hover = popup.hovered.and_then(|i| popup.rows.get(i)).filter(|row| !matches!(row.sel, Sel::Body { .. })).map(|row| row.hit.clone());
+    app.viewport.hover = popup
+        .hovered
+        .and_then(|i| popup.rows.get(i))
+        .filter(|row| !matches!(row.sel, Sel::Body { .. } | Sel::Occurrence { .. }))
+        .map(|row| row.hit.clone());
 }
 
 /// What a repeat click must find unchanged: the model, the view, the sketch and the filter.
@@ -955,6 +1006,7 @@ enum DisplayRow {
         depth: usize,
         count: usize,
         collapsed: bool,
+        occurrence_path: Option<Vec<u64>>,
     },
     Item {
         row_idx: usize,
@@ -1050,6 +1102,7 @@ fn emit_node(node: &TreeNode, rows: &[Row], collapsed: &HashSet<String>, depth: 
             depth,
             count: total,
             collapsed: is_collapsed,
+            occurrence_path: node.seg.path.clone(),
         });
     }
     if !is_collapsed {
@@ -1240,7 +1293,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let size = vec2(width, overhead + rows_height.min(scroll_height));
 
     let mut hovered = None;
+    let mut hovered_occ: Option<Vec<u64>> = None;
     let mut picked = None;
+    let mut picked_occ: Option<Vec<u64>> = None;
     let mut next_filter: Option<Option<Category>> = None;
     let mut toggle_grouped = false;
     let mut toggled_group: Option<String> = None;
@@ -1314,24 +1369,44 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for drow in &display_rows {
                         match drow {
-                            DisplayRow::Group { key, name, icon, depth, count, collapsed } => {
-                                let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::click());
-                                crate::scenario::publish_handle(&format!("select_other:group:{key}"), r.center());
+                            DisplayRow::Group { key, name, icon, depth, count, collapsed, occurrence_path } => {
+                                let (r, row_resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::hover());
+                                let base_x = r.left() + 6.0 + (*depth as f32) * INDENT_STEP;
+                                let chev_rect = Rect::from_min_size(pos2(base_x, r.top()), vec2(16.0, ROW_HEIGHT));
+                                let chev_resp = ui.interact(chev_rect, ui.scope_id().with(("select_other_group_chev", key)), Sense::click());
+                                crate::scenario::publish_handle(&format!("select_other:toggle:{key}"), chev_rect.center());
+                                let mut toggle_clicked = false;
+                                if chev_resp.clicked() {
+                                    toggled_group = Some(key.clone());
+                                    toggle_clicked = true;
+                                }
+
+                                let selectable_occ = if !p.dialog { occurrence_path.as_ref() } else { None };
+                                let icon_cx = base_x + 23.0;
+                                let click_rect = Rect::from_min_max(pos2(icon_cx - 8.0, r.top()), r.max);
+                                let resp = ui.interact(click_rect, ui.scope_id().with(("select_other_group", key)), Sense::click());
+                                crate::scenario::publish_handle(&format!("select_other:group:{key}"), click_rect.center());
                                 if resp.hovered() {
+                                    if let Some(occ_path) = selectable_occ {
+                                        hovered_occ = Some(occ_path.clone());
+                                    }
+                                    ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), t.radius_sm, t.hover);
+                                } else if row_resp.hovered() && !toggle_clicked {
                                     ui.painter().rect_filled(r.shrink2(vec2(2.0, 1.0)), t.radius_sm, t.hover);
                                 }
-                                let base_x = r.left() + 6.0 + (*depth as f32) * INDENT_STEP;
                                 crate::ui_kit::disclosure(
                                     ui.painter(),
-                                    pos2(base_x + 7.0, r.center().y),
+                                    chev_rect.center(),
                                     !*collapsed,
-                                    if resp.hovered() { t.text } else { t.text_dim },
+                                    if chev_resp.hovered() { t.text } else { t.text_dim },
                                 );
+                                let icon_alpha =
+                                    if selectable_occ.is_some() { f32::from(t.icon.a()) / 255.0 } else { (f32::from(t.icon.a()) / 255.0) * 0.85 };
                                 crate::icons::paint_icon(
                                     ui.painter(),
-                                    Rect::from_center_size(pos2(base_x + 23.0, r.center().y), vec2(15.0, 15.0)),
+                                    Rect::from_center_size(pos2(icon_cx, r.center().y), vec2(15.0, 15.0)),
                                     icon,
-                                    (f32::from(t.icon.a()) / 255.0) * 0.85,
+                                    icon_alpha,
                                 );
                                 let count_text = count.to_string();
                                 let count_font = FontId::proportional(t.font_small);
@@ -1341,10 +1416,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     pos2(base_x + 36.0, r.top()),
                                     pos2((r.right() - count_w - 14.0).max(base_x + 36.0), r.bottom()),
                                 );
-                                let elided = paint_elided_label(ui, text_rect, r.center().y, name, FontId::proportional(t.font_button), t.text_dim);
+                                let text_color = if selectable_occ.is_some() { t.text } else { t.text_dim };
+                                let elided = paint_elided_label(ui, text_rect, r.center().y, name, FontId::proportional(t.font_button), text_color);
                                 let resp = if elided { resp.backing_on_hover_text(name) } else { resp };
-                                if resp.clicked() {
-                                    toggled_group = Some(key.clone());
+                                if resp.clicked() && !toggle_clicked {
+                                    if let Some(occ_path) = selectable_occ {
+                                        picked_occ = Some(occ_path.clone());
+                                    } else {
+                                        toggled_group = Some(key.clone());
+                                    }
                                 }
                             }
                             DisplayRow::Item { row_idx, label, tooltip, icon, depth, toggle } => {
@@ -1419,9 +1499,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             pop.hovered = hovered;
             changed = true;
         }
+        if pop.hovered_occurrence != hovered_occ {
+            pop.hovered_occurrence = hovered_occ;
+            changed = true;
+        }
         if let Some(f) = next_filter {
             pop.filter = f;
             pop.hovered = None;
+            pop.hovered_occurrence = None;
             changed = true;
         }
         if toggle_grouped {
@@ -1443,6 +1528,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let held = Held::from_modifiers(mods);
         let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
         let _ = choose(app, i, add, toggle);
+    } else if let Some(path) = picked_occ {
+        let held = Held::from_modifiers(mods);
+        let (add, toggle) = crate::tool_modifiers::selection_click(held, app.preferences.selection_shift_add_only);
+        choose_occurrence(app, path, add, toggle);
     } else if pressed && !pointer.is_some_and(|q| resp.response.rect.contains(q)) {
         // A press elsewhere only closes the list.
         close(app);

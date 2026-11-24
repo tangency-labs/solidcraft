@@ -31,6 +31,7 @@ fn select_other_feedback_is_local_when_the_browser_hover_expires() {
         }],
         total: 1,
         hovered: Some(0),
+        hovered_occurrence: None,
         filter: None,
         grouped: true,
         collapsed: std::collections::HashSet::new(),
@@ -1370,13 +1371,36 @@ fn multi_component_assembly_nests_by_occurrence_tree_and_filters_cleanly() {
     let edge_groups = edge_desc["groups"].as_array().unwrap();
     assert!(edge_groups.iter().any(|g| g["key"] == format!("occ:{housing}/{lid}") && g["depth"] == 1), "{edge_groups:?}");
 
-    // Collapsing the Housing occurrence hides all nested Lid and Base rows.
+    // Collapsing via the chevron on Housing hides all nested Lid and Base rows without closing
+    // or selecting.
     let before = edge_desc["visible_rows"].as_array().unwrap().len();
-    let housing_handle = format!("select_other:group:occ:{housing}");
-    assert!(crate::scenario::handle_at(&housing_handle).is_some(), "Housing group header handle");
-    h.step(&json!({"click": {"handle": housing_handle}})).unwrap();
+    let housing_chev = format!("select_other:toggle:occ:{housing}");
+    assert!(crate::scenario::handle_at(&housing_chev).is_some(), "Housing chevron handle");
+    h.step(&json!({"click": {"handle": housing_chev}})).unwrap();
     h.frames(2);
     assert!(super::is_open(&h.app));
+    assert!(h.app.session.selection.is_empty(), "clicking the chevron must not select the component");
     let after = super::describe(&h.app)["visible_rows"].as_array().unwrap().len();
     assert!(after < before, "collapsing Housing hides nested rows: {after} vs {before}");
+
+    // Expanding Housing again via its chevron, then hovering and clicking the component row itself
+    // lights up and selects the component occurrence.
+    h.step(&json!({"click": {"handle": housing_chev}})).unwrap();
+    h.frames(2);
+    let housing_row = format!("select_other:group:occ:{housing}");
+    assert!(crate::scenario::handle_at(&housing_row).is_some(), "Housing component row handle");
+    h.step(&json!({"move": {"handle": housing_row}})).unwrap();
+    assert_eq!(super::hovered_occurrence(&h.app), Some(&[housing][..]), "hovering the component row lights up its occurrence");
+    h.step(&json!({"click": {"handle": housing_row}})).unwrap();
+    assert!(!super::is_open(&h.app), "clicking the component row selects it and closes Select Other");
+    assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![housing] }]);
+
+    // Clicking a nested child component row selects its full occurrence path.
+    h.step(&json!({"hold": pt})).unwrap();
+    h.frames(2);
+    let lid_row = format!("select_other:group:occ:{housing}/{lid}");
+    assert!(crate::scenario::handle_at(&lid_row).is_some(), "nested Lid component row handle");
+    h.step(&json!({"click": {"handle": lid_row}})).unwrap();
+    assert!(!super::is_open(&h.app));
+    assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![housing, lid] }]);
 }

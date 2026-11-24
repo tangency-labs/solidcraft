@@ -6534,6 +6534,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     crate::select_other::hovered_body(app).hash(&mut h);
+    crate::select_other::hovered_occurrence(app).hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
     app.viewport.hover_origin.hash(&mut h);
     app.preferences.browser_hover_shows_origin.hash(&mut h);
@@ -7485,6 +7486,9 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
     hovered.extend(crate::select_other::hovered_body(app).map(|name| Sel::Body { name: name.to_owned() }));
+    if let Some(path) = crate::select_other::hovered_occurrence(app) {
+        hovered.extend(displayed_selection(app, &Sel::Occurrence { path: path.to_vec() }));
+    }
     hovered.extend(crate::selection_mode::hovered(app, hover));
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
