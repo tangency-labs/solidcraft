@@ -1740,6 +1740,70 @@ fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
     assert_eq!(work.tight_boxes, 0, "{work:?}");
 }
 
+/// The first edit after a design opens from its saved model evaluates only what the edit
+/// changes, as every later edit does: a block changed leaves the other block and its round as
+/// they were. The saved model gave only each feature's whole result, so the first edit after
+/// opening evaluated every feature after it, the features of other bodies and parts included.
+#[test]
+fn the_first_edit_after_opening_keeps_the_features_of_other_bodies() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 25.0, 10.0))],
+        radius: "2".into(),
+        body: Some("B".into()),
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let rounded = volume(&model, "B");
+    assert!(rounded < 2000.0 - 1.0, "{rounded}");
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    // The same file with the round's body keyed otherwise (saved by a version that keyed it
+    // another way): what the round changed is not taken back, the round is evaluated again.
+    let mut other_key = model.saved(&doc).unwrap();
+    // B as the round left it: the deepest of its records (a body keeps the feature that made it).
+    let rounded_b = other_key.records["model_bodies"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|b| b["name"] == "B")
+        .max_by_key(|b| b["depth"].as_u64())
+        .unwrap();
+    assert_eq!(rounded_b["depth"], 3, "{rounded_b}");
+    rounded_b["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &other_key).unwrap();
+    let a = doc.features.first().unwrap().id;
+    if let FeatureKind::Box { length, .. } = &mut doc.feature_mut(a).unwrap().kind {
+        *length = "25".into();
+    }
+    let bodies = |model: &Model| {
+        let st = model.state();
+        st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>()
+    };
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let rebuilt = bodies(&fresh);
+    for (what, mut model, evaluated) in [("in the session", model, 1), ("opened", reopened, 1), ("opened, keyed otherwise", rekeyed, 2)] {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, evaluated, "{what}: {work:?}");
+        assert_eq!(work.blends, evaluated - 1, "{what}: {work:?}");
+        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{what}: {}", volume(&model, "A"));
+        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{what}: {} then {rounded}", volume(&model, "B"));
+        assert_eq!(bodies(&model), rebuilt, "{what}: the same bodies, keys and face names as the design evaluated afresh");
+    }
+}
+
 /// A join into the only body there is takes it without asking whether the tool meets it: the
 /// contact test meshes the body finely, and on a part of a few hundred faces it took longer than
 /// the join. With two bodies the tool picks the one it meets, as before.
