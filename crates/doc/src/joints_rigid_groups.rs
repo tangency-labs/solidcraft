@@ -94,6 +94,7 @@ impl Document {
                     offset_xy: [0.0; 2],
                     captured: None,
                     constraint: None,
+                    old_placement: false,
                 });
                 next = next.saturating_sub(1);
             }

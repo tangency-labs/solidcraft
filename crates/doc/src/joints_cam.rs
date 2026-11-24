@@ -1084,6 +1084,7 @@ mod tests {
             offset_xy: [0.0; 2],
             captured: None,
             constraint: None,
+            old_placement: false,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
             id,
@@ -1170,6 +1171,7 @@ mod tests {
             offset_xy: [0.0; 2],
             captured: None,
             constraint: None,
+            old_placement: false,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
             id,

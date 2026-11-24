@@ -187,6 +187,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
+        old_placement: false,
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -830,6 +831,7 @@ fn a_cams_profile_is_meshed_once() {
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
+        old_placement: false,
     };
     let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };
     let work = counted(|| {

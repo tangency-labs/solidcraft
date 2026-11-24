@@ -1493,6 +1493,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         offset_xy,
         captured: None,
         constraint: None,
+        old_placement: false,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
@@ -1541,6 +1542,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         offset_xy: [0.0; 2],
         captured: None,
         constraint: None,
+        old_placement: false,
     };
     add_joint(s, j, p)
 }

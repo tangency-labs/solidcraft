@@ -623,6 +623,12 @@ pub struct Joint {
     /// The assembly constraint it was made as; `None` for a joint made as a joint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint: Option<Constraint>,
+    /// The mate keeps the placement it was saved with: the two faces stay as they were, apart as
+    /// they were saved. Set for the mates of a design saved before the mate brought the two
+    /// faces together (#14939), by the format step that marks them; a mate made now leaves it
+    /// off and brings the faces together.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub old_placement: bool,
 }
 
 impl Joint {
@@ -3260,6 +3266,7 @@ mod tests {
                 offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
+                old_placement: false,
             })
             .collect();
         let links =

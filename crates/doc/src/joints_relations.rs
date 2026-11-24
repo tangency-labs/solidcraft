@@ -71,7 +71,8 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
     })?;
     // A mate's faces are coincident: the two faces meet, so the lateral offsets start at zero
     // and the faces' centres come together, as the Planar joint puts them. The other rules and
-    // the relations keep the parts where they are (#14939).
+    // the relations keep the parts where they are (#14939). A mate of a design saved before
+    // that change keeps the placement it was saved with.
     if mate_of_faces(j) {
         for (i, name) in j.kind.dofs().iter().enumerate() {
             if matches!(*name, "x" | "y")
@@ -86,9 +87,13 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
 
 /// A mate between two planar faces: the rule then makes them coincident, so the faces' centres
 /// meet and the faces touch. A datum side has no face centre to meet, so the part keeps its
-/// place on the datum.
+/// place on the datum. A mate of a design saved before the change keeps the placement it was
+/// saved with, gap and all.
 fn mate_of_faces(j: &Joint) -> bool {
-    j.constraint == Some(Constraint::Mate) && matches!(j.a.snap, Snap::FaceCenter { .. }) && matches!(j.b.snap, Snap::FaceCenter { .. })
+    j.constraint == Some(Constraint::Mate)
+        && !j.old_placement
+        && matches!(j.a.snap, Snap::FaceCenter { .. })
+        && matches!(j.b.snap, Snap::FaceCenter { .. })
 }
 
 #[cfg(test)]
@@ -139,6 +144,7 @@ mod tests {
             offset_xy: [0.0; 2],
             captured: None,
             constraint: None,
+            old_placement: false,
         }
     }
 
