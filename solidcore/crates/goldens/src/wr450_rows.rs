@@ -159,7 +159,6 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
                 // gate also moves within the comparator is listed by its class flips only;
                 // the rows the gate alone moved are `UNGATED_LINES`)
                 Seam::CarryGate => return Ok(vec![0]),
-                _ => return c.own,
             };
             if c.own.as_ref().ok() != Some(&main) {
                 let mut f = f.lock().unwrap();
@@ -259,7 +258,6 @@ pub(crate) fn with_mains_choices_counting_gate<R>(
             }
             Seam::AnalyticCopy => Ok(vec![0]),
             Seam::SplitTrims => Ok(c.input.to_vec()),
-            _ => c.own,
         },
         f,
     );
