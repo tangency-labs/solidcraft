@@ -912,10 +912,9 @@ fn contour_flange_orientation_thickness_width_direction_and_radius() {
 }
 
 /// A profile with a sharp corner at an arc: a 30 mm line along x, then at a right angle a quarter
-/// turn of radius 10 about (20, 0) down to (20, −10), under a rule 2 thick. Its surfaces lie off
-/// the profile at every orientation (the shifted line and circle crossing at the corner, see
-/// `offset_profile`'s tests), and the sheet then meets the same limit at each: a bend on the edge
-/// of a roll is not made yet. The orientation adds no refusal of its own.
+/// turn of radius 10 about (20, 0) down to (20, −10), under a rule 2 thick. The arc does not run
+/// on into the line, so at every orientation the flange meets the same limit, an arc not tangent
+/// to the curve beside it (#15576), named the same way. The orientation adds no refusal of its own.
 #[test]
 fn contour_flange_orientation_meets_the_same_limit_at_a_sharp_corner_at_an_arc() {
     let h = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
@@ -928,7 +927,7 @@ fn contour_flange_orientation_meets_the_same_limit_at_a_sharp_corner_at_an_arc()
         run(&mut s, "sketch.finish", json!({}));
         let p = json!({"sketch": "Sharp", "curves": ["l1", "a1"], "distance": 50, "rule": "R", "orientation": orientation});
         let e = s.execute("sheet.flange", &p).err().map(|e| e.to_string()).unwrap_or_default();
-        assert!(e.contains("a bend on the edge of a roll"), "{orientation}: {e}");
+        assert!(e.contains("the arc `a1` is not tangent to the curve beside it"), "{orientation}: {e}");
     }
 }
 
