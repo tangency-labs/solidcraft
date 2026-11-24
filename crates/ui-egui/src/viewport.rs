@@ -8109,12 +8109,15 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let paint_vp = framed_in_paint(&proj.vp, rect, paint);
         let ssaa = supersampling(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
+        // While the view moves, placements the last frame hid are left out; a still view draws them.
+        let occlusion = !view_settled(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let edge_px = edge_px(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
             product_lights: None,
             ssaa,
             ao_samples,
+            occlusion,
             edge_px,
             product: false,
             upload_error: None,
@@ -13888,6 +13891,7 @@ mod tests {
                     eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
                     ao_radius: 0.0,
                     ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+                    occlusion: false,
                     edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
                     sky: [0.0; 4],
                     ssaa: 1.0,
