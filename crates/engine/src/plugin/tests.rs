@@ -3133,6 +3133,41 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// An importer's link reads the file the path really opens: a link in the design's folder that
+    /// is a symlink to a file outside it is not read and runs no plugin, and a folder alias that
+    /// stays inside is read.
+    #[cfg(unix)]
+    #[test]
+    fn an_importers_symlink_out_of_the_designs_folder_is_not_read() {
+        let (mut s, root) = installed("symlink-linked", &[("smp", &["smp"], false)]);
+        let (inside, outside) = (root.join("files"), root.join("outside"));
+        std::fs::create_dir_all(inside.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        s.path = Some(inside.join("main.sc").to_string_lossy().into_owned());
+        let link = inside.join("part.smp");
+        std::fs::write(&link, sized_design(10.0)).unwrap();
+        let comp = s.execute("component.insert_design", &json!({"path": link})).unwrap()["component"].as_u64().unwrap();
+        // As a design opened later: this session did not name the file. The plugin traps on "T".
+        s.plugin_state.linked_files.clear();
+        // The file is now a symlink to one outside the design's folder.
+        std::fs::write(outside.join("real.smp"), b"T").unwrap();
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(outside.join("real.smp"), &link).unwrap();
+        let reply = s.execute("component.update_links", &json!({})).unwrap();
+        let error = reply["failed"][0]["error"].as_str().unwrap_or_default();
+        assert!(error.contains("outside the design's folder") && !error.contains("Sample Importer"), "{reply}");
+        assert!(reply["updated"].as_array().is_none_or(Vec::is_empty), "{reply}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A folder alias that stays inside the design's folder is read: the file is really there.
+        std::os::unix::fs::symlink(inside.join("sub"), inside.join("alias")).unwrap();
+        std::fs::write(inside.join("sub/part.smp"), sized_design(30.0)).unwrap();
+        s.doc_mut().links.get_mut(&comp).unwrap().path = inside.join("alias/part.smp").to_string_lossy().into_owned();
+        let reply = s.execute("component.update_links", &json!({"component": comp})).unwrap();
+        assert_eq!(reply["updated"].as_array().map(Vec::len), Some(1), "{reply}");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// A record that names no plugin, or another plugin than the one that offers its format, is
     /// refused with a clear message and runs nothing.
     #[test]

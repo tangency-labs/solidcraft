@@ -18,7 +18,9 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, MeshData, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, resolve, same_file, stored};
+use super::design_link::{
+    LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, real_file, resolve, same_file, stored,
+};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
@@ -728,9 +730,13 @@ fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Resu
 /// it, until its folder is allowed. `None`: it may be read.
 fn importer_file_refusal(s: &Session, file: &Path) -> Option<String> {
     let target = link_target(file);
-    let allowed = s.plugin_state.linked_files.contains(&target)
-        || inside_design_folder(s.path.as_deref(), file)
-        || s.plugin_state.link_folders.iter().any(|folder| target.starts_with(absolute(folder)));
+    // The file the read opens, every link in its path followed, must be in a consented place too.
+    let real = real_file(file).unwrap_or_else(|| target.clone());
+    let consented = |p: &Path| {
+        inside_design_folder(s.path.as_deref(), p)
+            || s.plugin_state.link_folders.iter().any(|folder| p.starts_with(real_file(folder).unwrap_or_else(|| absolute(folder))))
+    };
+    let allowed = s.plugin_state.linked_files.contains(&target) || (consented(&target) && consented(&real));
     (!allowed).then(|| {
         format!(
             "{}: this file is outside the design's folder and its folder is not allowed yet; allow it (Preferences, General, linked file folders) and SolidCraft reads it with the importer",

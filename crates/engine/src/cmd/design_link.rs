@@ -106,6 +106,12 @@ pub(super) fn link_target(file: &Path) -> PathBuf {
     parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
 }
 
+/// The place `file` really is, every link in its path followed (`None`: it cannot be resolved, as
+/// for a missing file, or on the web, which has no such links).
+pub(super) fn real_file(file: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(file).ok()
+}
+
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
