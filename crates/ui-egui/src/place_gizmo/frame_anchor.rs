@@ -159,6 +159,29 @@ fn finite3(p: Vec3) -> bool {
     p.x.is_finite() && p.y.is_finite() && p.z.is_finite()
 }
 
+/// How far apart two section points are (mm), as the kernel measures it; none for a coordinate
+/// that is not finite or a distance that overflows.
+fn apart(a: Vec2, b: Vec2) -> Option<f64> {
+    solidcore_ops::point_distance([a.x, a.y, 0.0], [b.x, b.y, 0.0]).ok().map(|d| d.value)
+}
+
+/// How far apart two screen points are (pixels), as the kernel measures it; infinite where it
+/// refuses them, so such a point is never the nearest nor within reach.
+fn px_apart(a: Pos2, b: Pos2) -> f64 {
+    let lift = |p: Pos2| [f64::from(p.x), f64::from(p.y), 0.0];
+    solidcore_ops::point_distance(lift(a), lift(b)).map_or(f64::INFINITY, |d| d.value)
+}
+
+/// The unit normal of the section's plane: the plane is square to the member's line, so its
+/// direction, made unit by the kernel's length of it. It runs along the line either way (x × y
+/// runs back along it for a member Auto lays against its line, or in a mirrored component); both
+/// of its uses ([`on_plane`] and the edge-on test) take either sign alike. None for a line with no
+/// length.
+fn plane_normal(view: &SectionView) -> Option<Vec3> {
+    let len = solidcore_ops::point_distance([view.start.x, view.start.y, view.start.z], [view.end.x, view.end.y, view.end.z]).ok()?.value;
+    (len.is_finite() && len > 0.0).then(|| (view.end - view.start) * (1.0 / len)).filter(|n| finite3(*n))
+}
+
 /// The overlay's section from the engine's: none when anything in it is not a finite number or
 /// the section has no size.
 fn laid_out(view: SectionView) -> Option<Shown> {
@@ -168,7 +191,7 @@ fn laid_out(view: SectionView) -> Option<Shown> {
     let anchors = view.anchors();
     let corner = |a: Anchor| anchors.iter().find(|(b, _)| *b == a).map(|(_, p)| *p).filter(|p| finite2(*p));
     let (lo, hi) = (corner(Anchor::BottomLeft)?, corner(Anchor::TopRight)?);
-    let size = (hi.x - lo.x).hypot(hi.y - lo.y);
+    let size = apart(lo, hi)?;
     if !(size.is_finite() && size > SAME) {
         return None;
     }
@@ -193,7 +216,7 @@ fn laid_out(view: SectionView) -> Option<Shown> {
         if let Some(slot) = points.get_mut(index) {
             *slot = Some(at);
         }
-        if dots.iter().all(|d| d.at.dist(at) > SAME) {
+        if dots.iter().all(|d| apart(d.at, at).is_none_or(|gap| gap > SAME)) {
             dots.push(Dot { index, name, label, at });
         }
     }
@@ -252,14 +275,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     let Some(sh) = frozen.or_else(|| section(app, d)) else { return };
     let Some(start) = proj.to_screen(sh.view.start) else { return };
-    let n = sh.view.x.cross(sh.view.y);
+    let Some(n) = plane_normal(&sh.view) else { return };
     let t = Tokens::get();
     let to_screen = |p: Vec2| proj.to_screen(sh.view.world(p));
     let loops: Vec<Vec<Pos2>> = sh.loops.iter().filter_map(|l| l.iter().map(|p| to_screen(*p)).collect::<Option<Vec<Pos2>>>()).collect();
     let bounds = loops.iter().flatten().fold(egui::Rect::NOTHING, |r, p| r.union(egui::Rect::from_min_max(*p, *p)));
     let across = if bounds.is_positive() { bounds.width().max(bounds.height()) } else { 0.0 };
     // Seen edge-on, a pointer on the section's plane is centimetres a pixel: nothing takes a press.
-    let live = proj.ray(start).1.dot(n).abs() >= 0.05;
+    let ray = proj.ray(start).1;
+    let live = solidcore_ops::affine::distance_along([0.0; 3], [n.x, n.y, n.z], [ray.x, ray.y, ray.z]).abs() >= 0.05;
     let dots: Vec<(Dot, Pos2)> = if live && across >= MIN_ACROSS {
         sh.dots.iter().filter_map(|dot| to_screen(dot.at).map(|s| (dot.clone(), s))).collect()
     } else {
@@ -273,7 +297,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         order.push((Target::Marker, start));
     }
     if let Some(p) = ui.ctx().pointer_latest_pos() {
-        order.sort_by(|a, b| b.1.distance(p).total_cmp(&a.1.distance(p)));
+        order.sort_by(|a, b| px_apart(b.1, p).total_cmp(&px_apart(a.1, p)));
     }
     let mut dot_hits: Vec<Option<egui::Response>> = vec![None; dots.len()];
     let mut marker: Option<egui::Response> = None;
@@ -313,8 +337,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                 let near = dots
                     .iter()
                     .enumerate()
-                    .filter(|(_, (_, s))| s.distance(target) <= REACH)
-                    .min_by(|a, b| a.1.1.distance(target).total_cmp(&b.1.1.distance(target)));
+                    .filter(|(_, (_, s))| px_apart(*s, target) <= f64::from(REACH))
+                    .min_by(|a, b| px_apart(a.1.1, target).total_cmp(&px_apart(b.1.1, target)));
                 if let Some((i, (dot, s))) = near {
                     let index = dot.index;
                     with_dialog(app, |_, d| set_anchor(d, index));
@@ -355,7 +379,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         let hovered = r.is_some_and(egui::Response::hovered) || snapped == Some(i);
         let hot = MARKER_HOT.run(&ctx, egui::Id::unique(("sc_frame_anchor_hot", dot.name)), hovered).t;
         let radius = DOT_R + (DOT_HOT_R - DOT_R) * hot;
-        if active_at.is_some_and(|a| a.dist(dot.at) <= SAME) {
+        if active_at.and_then(|a| apart(a, dot.at)).is_some_and(|gap| gap <= SAME) {
             painter.circle_stroke(*s, radius + ACTIVE_RING, egui::Stroke::new(OUTLINE + 0.6, t.manipulator));
         }
         painter.circle_filled(*s, radius + 0.4, case);
