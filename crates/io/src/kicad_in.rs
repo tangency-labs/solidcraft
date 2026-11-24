@@ -1607,7 +1607,7 @@ fn distance_to_loop(loop_: &Loop2, p: Vec2) -> Option<f64> {
 
 /// A closed polyline through the loop's points (curves drawn as lines).
 fn loop_to_pline(loop_: &Loop2) -> Option<cavalier_contours::polyline::Polyline<f64>> {
-    use cavalier_contours::polyline::{PlineSourceMut, Polyline};
+    use cavalier_contours::polyline::{PlineSource, PlineSourceMut, Polyline};
     let mut pl = Polyline::<f64>::new_closed();
     for point in loop_.polyline(CURVE_TOLERANCE) {
         pl.add(point.x, point.y, 0.0);
@@ -1623,7 +1623,7 @@ fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop
 
 /// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
 fn notch_loop(outer: &Loop2, drill: &Loop2) -> Option<Loop2> {
-    use cavalier_contours::polyline::{BooleanOp, PlineSource};
+    use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
     let mut a = loop_to_pline(outer)?;
     let mut b = loop_to_pline(drill)?;
     if a.area() < 0.0 {
