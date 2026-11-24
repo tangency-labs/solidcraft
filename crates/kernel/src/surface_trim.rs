@@ -1,9 +1,9 @@
 //! Trim: a surface body cut where a tool meets it (a plane, another body's face, or sketch
-//! curves swept onto it), keeping the side of a point or the regions points pick; and Mutual
-//! Trim: two surfaces cut by each other, each keeping its picked side, extended to meet first
-//! when one stops short of the other.
+//! curves swept onto it or dropped square onto it), keeping the side of a point or the regions
+//! points pick; and Mutual Trim: two surfaces cut by each other, each keeping its picked side,
+//! extended to meet first when one stops short of the other.
 
-use solidcore_record::Vec3;
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
@@ -147,6 +147,56 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     let kept = Body::from_record(stopped.record)?.with_color(walls.color());
     let faces = stopped.from.iter().map(|f| crate::record::from_face(0, *f, crate::history::Change::Kept)).collect();
     Ok((crate::record::attach(kept, &crate::record::counts(&[walls]), Some(faces), &[]), true))
+}
+
+/// A surface body trimmed along sketch curves (chains of segments in `plane`) dropped square
+/// onto it: each point of a curve goes to its foot on a face's surface (the nearest point of
+/// that surface, along its normal there), wherever the sketch lies, and each chain cuts the
+/// faces it bounds a region on (solidcore's `trim::trim_by_dropped_curves`); a chain that bounds
+/// no region on any face is refused, never left out. Dropped
+/// curves have no one side, so every point of `keep` picks the region of the face nearest it,
+/// as it does for a tool of several sketch curves. Each kept face is the face it is a piece of
+/// (the result's history is over `[body]`).
+///
+/// The curves are dropped within a millionth of the body's size of their true feet (the
+/// tolerance of every curve SMLib makes on a body's faces).
+pub fn trim_dropped_keep(body: &Body, plane: &Plane, curves: &[Vec<Seg2>], keep: TrimKeep) -> Result<Body> {
+    const NAME: &str = "trim";
+    body.require_brep(NAME)?;
+    keep.check()?;
+    let segments: usize = curves.iter().map(Vec::len).sum();
+    if segments == 0 || curves.iter().any(Vec::is_empty) {
+        return Err(KernelError::Invalid("no curves to trim with".into()));
+    }
+    if segments > crate::splitface::MAX_SEGMENTS {
+        return Err(KernelError::Invalid("too many trim curves".into()));
+    }
+    let dropped: Vec<Vec<_>> =
+        curves.iter().map(|chain| chain.iter().map(|s| crate::smlib_sweeps::curve(plane, s)).collect::<Result<_>>()).collect::<Result<_>>()?;
+    let points: Vec<[f64; 3]> = keep.points().iter().map(|p| [p.x, p.y, p.z]).collect();
+    crate::guard(NAME, || {
+        let (target, order) = crate::splitface::tagged(NAME, body)?;
+        let result = target.trim_by_dropped_curves(&dropped, &points, crate::smlib_sweeps::curve_tolerance(body)).map_err(dropped_refusal)?;
+        let (mut out, history) = crate::splitface::brought_back(NAME, body, &order, &result)?;
+        // An authored boundary: later rebuilds keep it.
+        out.regularization_protected = true;
+        Ok(out.with_checked_history(Some(history), &crate::record::counts(&[body])))
+    })
+}
+
+/// A dropped-curve trim's refusal in the user's words: curves that divide no face, and what
+/// solidcore refuses with a reason of its own (a curve that lands on no face, a point to keep
+/// on a cut line); anything else as SMLib's failure.
+fn dropped_refusal(e: solidcraft_smlib::Error) -> KernelError {
+    use solidcore_ops::Error as Ops;
+    match e {
+        solidcraft_smlib::Error::Refused(Ops::CurveDoesNotCut) => KernelError::Invalid(
+            "a sketch curve, projected along the surface's normal, doesn't divide the surface: each curve must close, reach the surface's edges or end on another curve"
+                .into(),
+        ),
+        solidcraft_smlib::Error::Refused(Ops::Unsupported(why)) => KernelError::Invalid(why.to_string()),
+        e => KernelError::smlib("SMLib trim", e),
+    }
 }
 
 /// The side of the tool each face of `body` (in its face order) lies on: the tool's field at a
@@ -406,6 +456,93 @@ mod tests {
         assert!(rel(area(&rest), all - inside) < 1e-3, "{} vs {}", area(&rest), all - inside);
         let picked = trim_keep(&half, &tool, TrimKeep::Regions(&[on])).unwrap();
         assert!(rel(area(&picked), area(&kept)) < 1e-9);
+    }
+
+    /// The slot |x| ≤ 3 (a straight run z = 12…28 and round ends) sketched in the plane y = 20
+    /// and dropped square onto a half cylinder (radius 10 about Z, y ≥ 0, 40 high). A point
+    /// (x, 20, z) of the sketch has its foot on the cylinder at the angle atan2(20, x), at its own
+    /// height, so a width 2w of the slot lands on the arc 2R·atan(w/d): the straight run covers
+    /// 16 · 2R·atan(a/d), and the two round ends (w = √(a² − t²)) together
+    /// 2πR·(√(a² + d²) − d), since ∫₀ᵃ atan(√(a² − t²)/d) dt = (π/2)(√(a² + d²) − d). The piece
+    /// inside is their sum, 61.7033…, the piece outside the rest of 10π · 40. The sketch's own
+    /// normal would carry the slot onto the wider arc 2R·asin(a/R) instead
+    /// ([`a_slot_projected_onto_a_cylinder`]).
+    ///
+    /// The areas are SMLib's integrals over the trimmed faces (to a relative 1e-8). The slot's
+    /// straight sides drop onto rulings exactly; its round ends lie within the curve tolerance
+    /// (a millionth of the body's size, which is under 45) of their true drop and are no longer
+    /// than the arcs they come from, 2πa together: the area is within 45e-6 · 2πa < 1e-3 of the
+    /// closed form.
+    #[test]
+    fn a_slot_dropped_square_onto_a_cylinder() {
+        let (r, a, d): (f64, f64, f64) = (10.0, 3.0, 20.0);
+        let half = extrude_sheet(&Plane::XY, &[vec![Seg2::Arc { center: Vec2::ZERO, radius: r, start: 0.0, sweep: PI }]], 0.0, 40.0).unwrap();
+        let slot = vec![
+            Seg2::Line { a: Vec2::new(a, 12.0), b: Vec2::new(a, 28.0) },
+            Seg2::Arc { center: Vec2::new(0.0, 28.0), radius: a, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(-a, 28.0), b: Vec2::new(-a, 12.0) },
+            Seg2::Arc { center: Vec2::new(0.0, 12.0), radius: a, start: PI, sweep: PI },
+        ];
+        let front = Plane { origin: Vec3::new(0.0, d, 0.0), y: Vec3::Z, ..Plane::XZ };
+        let inside = 32.0 * r * (a / d).atan() + 2.0 * PI * r * ((a * a + d * d).sqrt() - d);
+        let all = PI * r * 40.0;
+        let bound = 45e-6 * 2.0 * PI * a;
+        let (on, beside) = (Vec3::new(0.0, r, 20.0), Vec3::new(r, 0.0, 20.0));
+        let kept = trim_dropped_keep(&half, &front, std::slice::from_ref(&slot), TrimKeep::Side(on)).unwrap();
+        assert_eq!(kept.face_count(), 1);
+        assert!((area(&kept) - inside).abs() < bound, "{} vs {inside}", area(&kept));
+        let rest = trim_dropped_keep(&half, &front, std::slice::from_ref(&slot), TrimKeep::Side(beside)).unwrap();
+        assert!((area(&rest) - (all - inside)).abs() < bound, "{} vs {}", area(&rest), all - inside);
+        // Both regions picked: the whole wall, in two faces.
+        let both = trim_dropped_keep(&half, &front, std::slice::from_ref(&slot), TrimKeep::Regions(&[on, beside])).unwrap();
+        assert_eq!(both.face_count(), 2);
+        assert!(rel(area(&both), all) < 1e-9, "{}", area(&both));
+        // Each piece is the cylinder's face, cut.
+        for t in [&kept, &rest, &both] {
+            let h = t.history().unwrap();
+            assert_eq!(h.operands, 1);
+            assert!(h.faces.iter().all(|f| matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 0, face: 0 }])), "{h:?}");
+        }
+        // A point on the slot's own edge picks neither side; a line that ends inside the wall
+        // bounds nothing.
+        let reach = (a * a + d * d).sqrt();
+        let edge = Vec3::new(r * a / reach, r * d / reach, 20.0);
+        let e = trim_dropped_keep(&half, &front, std::slice::from_ref(&slot), TrimKeep::Side(edge)).unwrap_err().to_string();
+        assert!(e.contains("pick inside the region to keep"), "{e}");
+        let slit = vec![vec![Seg2::Line { a: Vec2::new(-a, 20.0), b: Vec2::new(a, 20.0) }]];
+        let e = trim_dropped_keep(&half, &front, &slit, TrimKeep::Side(on)).unwrap_err().to_string();
+        assert!(e.contains("doesn't divide the surface"), "{e}");
+        assert!(trim_dropped_keep(&half, &front, &[], TrimKeep::Side(on)).is_err());
+        // A curve behind the half cylinder (y = -20 from the axis) has its feet on the half that
+        // is not there: it lands on no face.
+        let behind = Plane { origin: Vec3::new(0.0, -d, 0.0), y: Vec3::Z, ..Plane::XZ };
+        let e = trim_dropped_keep(&half, &behind, std::slice::from_ref(&slot), TrimKeep::Side(on)).unwrap_err().to_string();
+        assert!(e.contains("drops onto no face"), "{e}");
+    }
+
+    /// Two sketch lines that cross (x = 10 and y = 10, sketched 5 above the 20 × 20 square)
+    /// dropped square onto it cut it into four squares of 100. Each line is its own chain, and
+    /// the second splits the first's edge where they cross: a point keeps its own square alone,
+    /// two points keep two. With them, a segment that ends inside the square bounds nothing:
+    /// the trim is refused, not made without it.
+    #[test]
+    fn crossing_lines_dropped_square_part_four_regions() {
+        let sq = rect(&Plane::XY, 0.0, 0.0, 20.0, 20.0);
+        let above = Plane { origin: Vec3::new(0.0, 0.0, 5.0), ..Plane::XY };
+        let lines = vec![
+            vec![Seg2::Line { a: Vec2::new(10.0, -5.0), b: Vec2::new(10.0, 25.0) }],
+            vec![Seg2::Line { a: Vec2::new(-5.0, 10.0), b: Vec2::new(25.0, 10.0) }],
+        ];
+        for p in [Vec3::new(5.0, 5.0, 0.0), Vec3::new(15.0, 5.0, 0.0), Vec3::new(15.0, 15.0, 0.0), Vec3::new(5.0, 15.0, 0.0)] {
+            let kept = trim_dropped_keep(&sq, &above, &lines, TrimKeep::Side(p)).unwrap();
+            assert!(kept.face_count() == 1 && rel(area(&kept), 100.0) < 1e-9, "{p:?}: {}", area(&kept));
+        }
+        let two = trim_dropped_keep(&sq, &above, &lines, TrimKeep::Regions(&[Vec3::new(5.0, 5.0, 0.0), Vec3::new(15.0, 15.0, 0.0)])).unwrap();
+        assert!(two.face_count() == 2 && rel(area(&two), 200.0) < 1e-9, "{}", area(&two));
+        let mut with_slit = lines;
+        with_slit.push(vec![Seg2::Line { a: Vec2::new(2.0, 3.0), b: Vec2::new(4.0, 3.0) }]);
+        let e = trim_dropped_keep(&sq, &above, &with_slit, TrimKeep::Side(Vec3::new(5.0, 5.0, 0.0))).unwrap_err().to_string();
+        assert!(e.contains("doesn't divide the surface"), "{e}");
     }
 
     /// Two 20 × 10 sheets crossing at right angles (z = 0 and x = 0, both y = 0…10) trimmed by

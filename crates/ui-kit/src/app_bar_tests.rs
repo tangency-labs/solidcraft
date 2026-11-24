@@ -506,6 +506,13 @@ fn app_bar_edit_mode_changes_only_separator_widths() {
 
 #[test]
 fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
+    // The bar's helpers and these checks never lock the context inside its own lock: a worker's
+    // repaint between the two reads froze the window (#21091).
+    let ((), nested) = egui::Context::record_nested_locks(separator_mode_changes_glide_and_resize_still_snaps);
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
+fn separator_mode_changes_glide_and_resize_still_snaps() {
     let mut rig = BarRig::new(1920.0);
     let mut style = rig.ctx.global_style().as_ref().clone();
     style.animation_time = 0.15;
@@ -517,7 +524,8 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
             Rect::from_min_size(pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0), vec2(item.right - item.left, ITEM_HEIGHT));
         // Outside a frame cumulative_frame_nr already points to the next frame, so
         // inspect the completed paint state rather than calling the in-frame helper.
-        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap().items.get("save").unwrap().drawn);
+        let key = motion_key(&rig.ctx);
+        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().drawn);
         (final_rect, Rect::from_min_size(painted, final_rect.size()))
     };
     let separator_gap = |rig: &BarRig| {
@@ -529,8 +537,9 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
                 pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0),
                 vec2(item.right - item.left, ITEM_HEIGHT),
             );
+            let key = motion_key(&rig.ctx);
             rig.ctx.data(|data| {
-                let state = data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap();
+                let state = data.get_temp::<BarMotion>(key).unwrap();
                 let item = state.items.get(id).unwrap();
                 Rect::from_min_size(item.drawn, vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()))
             })

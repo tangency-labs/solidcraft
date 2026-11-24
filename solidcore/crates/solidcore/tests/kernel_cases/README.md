@@ -9,7 +9,7 @@ The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.
 - every operation's operands are given records or earlier outputs;
 - recorded volumes of passing cases without known-failure markers agree with independent
   analytic expectations, as described below;
-- the manifest counts every entry;
+- every case the manifest names has its file, and is one the kernel alone does not account for;
 - no two nonempty traces contain exactly the same calls, operand import options and decoded
   operand records. Descriptions, expected values and gzip filenames do not make a replay
   distinct. Numbers are compared exactly, without a tolerance. Empty traces remain records
@@ -93,7 +93,7 @@ New kernel cases come here. A case about a command, the UI or a product rule sta
 1. **The entry**, `<area>/<case>.json` in an existing area (a new area is a new folder): `case` (`<source number>-<short-name>`, the issue or pull request it comes from), `area`, `sources`, `what`, `calls`, `bodies`, `records`, `params`, `result`, `expected`, `operation_expressible`, `expressible` and, where they apply, `why_not` and `ungraded`, as [An entry](#an-entry) gives them. `rig`, `golden`, `outcome` and `traced_ops` come with an export and are left out of a hand-written entry.
 2. **The operand records**, `<case>.bodies.json.gz` beside it (gzip, no timestamp): `{"b<n>": record}`, one solidcore B-rep record per body `bodies` names. Keep them small: the bodies the operation takes, not a whole design.
 3. **The expected values** in `expected` (SolidCraft's `expected.json` format) are closed-form or exact: a volume, an area, a distance or a count derived by hand or from analysis, with the derivation in `what`. Never a kernel's output, solidcore's included, and never a value taken from commercial CAD.
-4. **The manifest:** add one to the area's `cases` in `manifest.json` (and to `not_expressible` with the reason, for a case the kernel alone does not account for).
+4. **The manifest:** for a case the kernel alone does not account for, add it to `not_expressible` in `manifest.json` with the reason. Nothing else: the manifest keeps no per-area totals (the corpus test counts the case files).
 
 To export a case from SolidCraft instead of writing it: draft it there as `tests/kernel-cases/<area>/<id>/recipe.json` and `expected.json`, run `cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli --export DIR`, copy `DIR/<area>/<id>.json` and its `.bodies.json.gz` here, and delete the draft there.
 

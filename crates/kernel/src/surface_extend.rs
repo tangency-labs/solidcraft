@@ -164,7 +164,7 @@ fn picked_edges(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<(usiz
             Some((d, i)) if d <= reach => record.edges.get(i).map(|e| (i, e)),
             _ => None,
         }
-        .ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
+        .ok_or_else(|| KernelError::Invalid(format!("no edge at {p}")))?;
         let [only] = edge.uses.as_slice() else {
             return Err(KernelError::Invalid("an edge between two faces can't be extended: pick edges on the surface's boundary".into()));
         };
@@ -345,7 +345,7 @@ fn one_face(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Result
             solidcraft_smlib::Error::NotExact => KernelError::Invalid(format!(
                 "the surface cannot be extended exactly {distance} mm there: the extension would run past a pole of its surface, wrap round it, or not reach that length"
             )),
-            solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid(format!("no edge at {p:?}")),
+            solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid(format!("no edge at {p}")),
             e => failed("extend", e),
         })?;
     }

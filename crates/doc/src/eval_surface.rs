@@ -114,11 +114,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     if chains.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to trim with", ss.name)));
                     }
-                    kernel::trim_keep(
-                        &mb.body,
-                        &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
-                        keeps,
-                    )?
+                    if c.face_normal {
+                        kernel::trim_dropped_keep(&mb.body, &ss.plane, &chains, keeps)?
+                    } else {
+                        kernel::trim_keep(
+                            &mb.body,
+                            &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
+                            keeps,
+                        )?
+                    }
                 }
                 (None, None) => {
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
@@ -275,7 +279,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             } else {
                 for p in faces {
                     let fi =
-                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {p:?}")))?;
+                        crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Fair: no face of {body} at {}", p.0)))?;
                     if !picked.contains(&fi) {
                         picked.push(fi);
                     }
@@ -530,7 +534,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let mut picked: Vec<usize> = Vec::new();
             for p in &picks {
                 let fi =
-                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p:?}", mb.name)))?;
+                    crate::appearance::face_index_at(&mb, *p).ok_or_else(|| DocError::Invalid(format!("Offset: no face of {} at {p}", mb.name)))?;
                 if !picked.contains(&fi) {
                     picked.push(fi);
                 }
@@ -569,7 +573,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let i = st.bodies.iter().position(|b| b.name == face.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", face.body)))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let fi = crate::appearance::face_index_at(&mb, face.point.0)
-                .ok_or_else(|| DocError::Invalid(format!("Untrim: no face of {} at {:?}", mb.name, face.point)))?;
+                .ok_or_else(|| DocError::Invalid(format!("Untrim: no face of {} at {}", mb.name, face.point.0)))?;
             let which = match holes {
                 None => kernel::UntrimHoles::All,
                 Some(points) => kernel::UntrimHoles::At(&crate::plain(points)),
