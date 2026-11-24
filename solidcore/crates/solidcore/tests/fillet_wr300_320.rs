@@ -181,43 +181,86 @@ fn cube_with_round_hole(k: &mut Kernel) -> (Brep, EdgeId) {
     (b, rim)
 }
 
-/// The top rail's radius is 2.5 + r. At r = 2.5 it touches the top square's outer
-/// loop at four points: two loops that cannot bound a face. The open fit is 2.5 less
-/// the existing fit margin, including when the contact is within modelling tolerance.
+/// The removed ring of a round of `r` on the rim of a hole of radius `hole_radius`
+/// (Pappus): in radial distance x from the bore and depth from the top, the removed
+/// section is the r-square minus the quarter disk centred at (r, r). Its area is
+/// A = r^2 (1 - pi/4). Its first moment in x is the square's r^3/2 minus the quarter
+/// disk's (pi r^2/4)(r - 4r/(3pi)): M = r^3 (5/6 - pi/4). Thus the centroid's radius
+/// is R + M/A = R + r - r/(6(1 - pi/4)), and the ring's volume 2 pi A times that.
+fn hole_rim_round_removed(hole_radius: f64, r: f64) -> f64 {
+    let pi = std::f64::consts::PI;
+    let area = r * r * (1.0 - pi / 4.0);
+    let centroid = hole_radius + r - r / (6.0 * (1.0 - pi / 4.0));
+    2.0 * pi * area * centroid
+}
+
+/// The top rail's radius is 2.5 + r. At r = 2.5 it touches each side of the top
+/// square at its middle and nowhere else: the round's ring (radius 2.5 to 5 at the top)
+/// stays inside the cube, so the result is the bored cube less that ring. The contacts
+/// are imprinted (#21748): the top face is the square less the disk of radius 5, four
+/// corner pieces meeting only at those points, so four top faces, each one loop, with
+/// the round, the bore, four sides and the bottom 11 faces. Contacts within modelling
+/// tolerance do the same. Just past the contact (2.501) the rail crosses the rim, and
+/// the overflow refusal names the open fit, 2.5 less the fit margin.
 #[test]
-fn hole_rim_touching_the_outer_loop_is_refused_with_a_fit() {
+fn hole_rim_touching_the_outer_loop_builds_four_top_faces() {
     use solidcore::blend::fillet_executive::FitKind;
 
-    for (offset, tolerances) in [(0.0, 0.0), (0.0, -0.5), (0.0, 0.5), (0.001, 0.0)] {
+    for tolerances in [0.0, -0.5, 0.5] {
         let mut k = kernel(|f| *f = UpstreamFixes::all());
         let (mut b, rim) = cube_with_round_hole(&mut k);
-        let tolerance = edge::tolerance(&b, rim).unwrap();
-        let radius = 2.5 + offset + tolerances * tolerance;
-        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
-        session
-            .prepare_constant_radius_edges(&mut k, &[rim], radius, 1, 1, 1.0)
-            .unwrap();
-        let result = session.do_fillet(&mut k);
-        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
-            panic!("r{radius}: expected a typed fit refusal, got {result:?}");
-        };
-        assert_eq!(session.error_info().code, NO_ROOM, "r{radius}");
-        // At the contact the new rim check refuses; just past it the rail crosses the
-        // rim and the existing overflow refusal applies, with the same fit.
-        let want_reason = if offset > 0.0 {
-            NoRoomReason::OverflowKeepsNothing
-        } else {
-            NoRoomReason::RailLeavesFace
-        };
-        assert_eq!(reason, Some(want_reason), "r{radius}");
-        assert_eq!(fit.kind, FitKind::Radius);
-        assert_eq!(fit.edge, Some(rim));
-        let want = 2.5 - 1000.0 * tolerance;
+        let r = 2.5 + tolerances * edge::tolerance(&b, rim).unwrap();
+        let result = fillet_edges(&mut k, &mut b, &[rim], r, 1, 1, 1.0);
+        assert!(result.is_ok(), "r{r}: {result:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "r{r}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r{r}: {lines:?}");
+        assert_eq!(b.faces().ids().count(), 11, "r{r}");
+        let mut top_faces = 0;
+        for face in b.faces().ids() {
+            let vertices =
+                solidcore::topology::face::p4::vertices(&b, face, None, false, None).unwrap();
+            if !vertices.is_empty()
+                && vertices
+                    .iter()
+                    .all(|&v| (b.vertex(v).unwrap().point.z - 10.0).abs() < 1e-6)
+            {
+                top_faces += 1;
+                let loops = solidcore::topology::face::p2::loops(&b, face, false, None).unwrap();
+                assert_eq!(loops.len(), 1, "r{r}: {face:?}");
+            }
+        }
+        assert_eq!(top_faces, 4, "r{r}");
+        let pi = std::f64::consts::PI;
+        let expected = 1000.0 - pi * 2.5 * 2.5 * 10.0 - hole_rim_round_removed(2.5, r);
+        let got = volume(&k, &mut b);
+        // as in hole_rim_just_below_the_contact_builds_a_valid_solid: the round's
+        // construction tolerance and the integrator move the volume by under 0.0034
         assert!(
-            (fit.size - want).abs() < 1e-8,
-            "r{radius}: {fit:?}, want {want}"
+            (got - expected).abs() < 0.01,
+            "r{r}: volume {got}, expected {expected}"
         );
     }
+
+    let mut k = kernel(|f| *f = UpstreamFixes::all());
+    let (mut b, rim) = cube_with_round_hole(&mut k);
+    let tolerance = edge::tolerance(&b, rim).unwrap();
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[rim], 2.501, 1, 1, 1.0)
+        .unwrap();
+    let result = session.do_fillet(&mut k);
+    let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+        panic!("r2.501: expected a typed fit refusal, got {result:?}");
+    };
+    assert_eq!(session.error_info().code, NO_ROOM);
+    assert_eq!(reason, Some(NoRoomReason::OverflowKeepsNothing));
+    assert_eq!(fit.kind, FitKind::Radius);
+    assert_eq!(fit.edge, Some(rim));
+    let want = 2.5 - 1000.0 * tolerance;
+    assert!((fit.size - want).abs() < 1e-8, "{fit:?}, want {want}");
 }
 
 /// The touching rim's bound is 2.5, but a second bore in an 8 mm wide block has

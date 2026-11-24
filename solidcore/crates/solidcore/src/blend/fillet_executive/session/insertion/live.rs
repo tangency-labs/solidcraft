@@ -427,19 +427,22 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         let uv = pseudo
             .original_uv_curve(edge)?
             .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));
-        // An open rail's isolated contact with a hole must be imprinted, even
-        // though it does not cross the rim. MergeInterval splits the rim there;
-        // its first span joins the outer and inner loops, and its next span cuts
-        // off the removed face. The kept boundary visits the shared vertex twice
-        // in one loop (docs/validity-and-tolerances.md, section 4). Ignoring the
-        // contact instead leaves two touching loops, which fail Face 38.
-        // Only a face with a hole has a hole's edge to touch; any other face
-        // keeps ignoring tangent contacts as before.
-        let open_rail = pseudo.fillet_edge(edge)?.fillet_edge_type() == FilletEdgeType::Rail
-            && !crate::topology::edge::is_closed(pseudo.brep(), edge)?
+        // A rail's isolated contact with a hole must be imprinted, even though it
+        // does not cross the rim. MergeInterval splits the rim there; its first
+        // span joins the two loops, and its next span cuts off the removed face.
+        // The kept boundary visits the shared vertex twice in one loop
+        // (docs/validity-and-tolerances.md, section 4), or, where a closed rail
+        // touches the other loop at several points, the face parts there into one
+        // face per stretch between them. Ignoring the contact instead leaves two
+        // touching loops, which fail Face 38. That holds for an open rail and a
+        // closed one alike (a round on a closed edge whose contact line touches a
+        // hole's edge, #21748). Only a face with more than one loop has another
+        // loop to touch; any other face keeps ignoring tangent contacts as before.
+        let rail_on_holed_face = pseudo.fillet_edge(edge)?.fillet_edge_type()
+            == FilletEdgeType::Rail
             && crate::topology::face::p2::loops(target, face, false, None)?.len() > 1;
         let ignore_tangency = self.ti.ignore_tangency;
-        if open_rail {
+        if rail_on_holed_face {
             self.ti.ignore_tangency = false;
         }
         let result = self.merge_actual_curve(
