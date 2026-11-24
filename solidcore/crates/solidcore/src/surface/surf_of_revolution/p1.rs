@@ -2233,6 +2233,35 @@ pub fn test_for_iso_circles(
     Ok(out)
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The generator and polar
+/// curves are written through their own digests, so a surface of revolution about a curve
+/// with none has none.
+impl crate::geom::content::Content for SurfOfRevolution {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            gen_curve,
+            make_nurb_gen_curve,
+            planar_generator,
+            position,
+            anal_uv_domain,
+            swap_uv,
+            polar,
+            polar_curve,
+        } = self;
+        d.tag(0x5E7);
+        base.content(d)?;
+        gen_curve.content(d)?;
+        d.bool(*make_nurb_gen_curve);
+        d.bool(*planar_generator);
+        position.content(d)?;
+        anal_uv_domain.content(d)?;
+        d.bool(*swap_uv);
+        polar.content(d)?;
+        polar_curve.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
