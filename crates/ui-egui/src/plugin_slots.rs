@@ -259,15 +259,26 @@ fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<Atomic
         let mut woken_for = None;
         // Nothing is ever sent: the wait times out between looks, and ends when the Watch drops.
         while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-            let now = signature(&looked_at);
-            if now != scanned.load(Ordering::Relaxed) && woken_for != Some(now) {
-                woken_for = Some(now);
+            if should_wake(&mut woken_for, signature(&looked_at), scanned.load(Ordering::Relaxed)) {
                 flag.store(true, Ordering::Relaxed);
                 wake();
             }
         }
     });
     spawned.ok().map(|_| Watch { watched, changed, _stop: stop })
+}
+
+/// Whether the watcher wakes the window: the folder (`now`) differs from what the latest scan read
+/// (`scanned`), and it has not already woken it for this folder against this scan. The scan is
+/// part of the memory, so after another scan reads something else the same folder wakes it again
+/// (the folder going B, scanned, A, scanned, back to B is a change to report).
+#[cfg(not(target_arch = "wasm32"))]
+fn should_wake(woken_for: &mut Option<(u64, u64)>, now: u64, scanned: u64) -> bool {
+    if now == scanned || *woken_for == Some((now, scanned)) {
+        return false;
+    }
+    *woken_for = Some((now, scanned));
+    true
 }
 
 /// What the plugins' directory and the inspected packages hold, cheaply: whether the directory
@@ -720,6 +731,23 @@ mod tests {
 
     /// Polls a condition another thread makes true. The limit only bounds a failing run, so it is
     /// generous: a slow CI runner waits longer, it never fails a passing run.
+    /// The watcher wakes once per new folder state, and again for a state it already reported
+    /// when a scan has since read something else: B is reported, a scan reads B, the folder
+    /// becomes A and an invalidation scans A before the watcher looks, then the folder returns to
+    /// exactly B. The last scan read A, so B must wake the window again.
+    #[test]
+    fn a_folder_returning_to_a_reported_state_after_another_scan_wakes_again() {
+        let (a, b, start) = (1_u64, 2_u64, 0_u64);
+        let mut woken_for = None;
+        assert!(should_wake(&mut woken_for, b, start), "B differs from the first scan");
+        assert!(!should_wake(&mut woken_for, b, start), "and wakes once while its scan is pending");
+        assert!(!should_wake(&mut woken_for, b, b), "the scan read B: nothing to say");
+        // The folder became A and an invalidation scanned it before the watcher looked.
+        assert!(!should_wake(&mut woken_for, a, a), "the scan read A: nothing to say");
+        assert!(should_wake(&mut woken_for, b, a), "back to B after a scan of A wakes the window");
+        assert!(!should_wake(&mut woken_for, b, a), "once");
+    }
+
     fn sig(dir: &Path) -> u64 {
         signature(&Watched { root: Some(dir.to_path_buf()), inspected: Vec::new() })
     }
