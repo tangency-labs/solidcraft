@@ -274,8 +274,8 @@ fn main() -> ExitCode {
         (Ok(()), Some(Err(e))) => Err(e),
         (r, _) => r,
     };
-    // The device that drew this run's pictures closes before the process exits: with it open,
-    // NVIDIA's Linux driver can crash in its exit handler after the work is done (#19431).
+    // The device that drew this run's pictures closes before the process exits: with it open, a
+    // driver's exit handler can crash after the work is done (#19431).
     solidcraft_viewport_gpu::capture::close_shared_before_exit();
     match r {
         Ok(()) => ExitCode::SUCCESS,

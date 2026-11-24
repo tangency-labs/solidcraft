@@ -255,6 +255,5 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }

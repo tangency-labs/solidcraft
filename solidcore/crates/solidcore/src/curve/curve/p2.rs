@@ -1014,6 +1014,14 @@ impl Curve {
         self.memo = edited.memo;
     }
 
+    /// Not upstream: the content digest of this curve ([`crate::geom::content`]): equal
+    /// for two curves that evaluate alike bit for bit, whichever objects they are; `None`
+    /// for a kind that has no digest yet.
+    #[must_use]
+    pub fn content_id(&self) -> Option<crate::geom::content::ContentId> {
+        crate::geom::content::content_id(self)
+    }
+
     /// The concrete kind, mutable.
     pub fn kind_mut(&mut self) -> &mut CurveKind {
         // an edit makes another curve value: start an empty memo
@@ -4560,6 +4568,48 @@ impl KnotsWithStatus {
 /// [`SolidError::Unported`].
 pub fn knots_ignoring_status(r: Result<KnotsWithStatus>) -> Result<(Vec<f64>, Vec<usize>)> {
     Ok(ignored(r)?.map_or_else(Default::default, |r| (r.knots, r.mults)))
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]): the kind. The owner, the
+/// tolerance recorded from it (a copy has neither) and the notification identity say which
+/// object the curve is and who owns it, not what it is; a digest of a neighbourhood writes
+/// the owner's tolerance itself. The cache memo is a cache. Kinds that hold surfaces, volumes or other curves with state of their own
+/// have no digest yet.
+impl crate::geom::content::Content for Curve {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            kind,
+            owner: _,
+            notify_identity: _,
+            memo: _,
+            owner_zone_tol_3d: _,
+        } = self;
+        match kind {
+            CurveKind::BSpline(c) => {
+                d.tag(1);
+                c.content(d)
+            }
+            CurveKind::Line(c) => {
+                d.tag(2);
+                c.content(d)
+            }
+            CurveKind::Ellipse(c) => {
+                d.tag(3);
+                c.content(d)
+            }
+            CurveKind::Hermite(_)
+            | CurveKind::Hyperbola(_)
+            | CurveKind::Parabola(_)
+            | CurveKind::Projected(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Offset(_)
+            | CurveKind::Conic(_)
+            | CurveKind::CrvInVolume(_)
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
+            | CurveKind::Composite(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]

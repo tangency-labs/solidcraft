@@ -166,7 +166,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);
