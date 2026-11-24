@@ -710,6 +710,8 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let suppressed = feature.is_some_and(|f| f.suppressed);
     let targets = crate::timeline::menu_targets(app, id);
     let rule = crate::timeline::menu_rule(app, id);
+    let is_construction = feature.is_some_and(|f| f.kind.is_construction());
+    let visible = feature.is_some_and(|f| !app.session.visibility.hidden_origin.contains(&f.name));
     // Suppress for every selected feature, in the single entry's place.
     let suppress = match crate::timeline::suppress_selected(app, id).filter(|_| rule.many) {
         Some((label, params)) => act("timeline.suppress", &label, "suppress").with(params),
@@ -720,12 +722,18 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
-    vec![
+    let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
         // Off without a reason for a feature that has no profile sketch: selecting one feature
         // would not turn it on.
         if sketch.is_some() { one(profile) } else { profile },
         one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
+    ];
+    if is_construction {
+        let name = feature.map_or("", |f| f.name.as_str());
+        items.push(act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible })));
+    }
+    items.extend([
         suppress.on(exists),
         one(act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists)),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app)),
@@ -739,7 +747,8 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         zoom_item(vec![Sel::Feature { id }], exists),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists),
-    ]
+    ]);
+    items
 }
 
 /// Zoom to Selection in a Browser menu: frames what the row stands for, or the whole selection
@@ -1085,6 +1094,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         rule.one(act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id }))),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
+        act("ui.exportSvg", "Export SVG…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
@@ -1365,7 +1375,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if !edits {
         v.push(activate.clone());
     }
-    if id != 0 && doc.links.contains_key(&id) {
+    if id != 0 && doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
         v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
     }
@@ -1399,7 +1409,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id == 0 {
         own.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
-    if doc.links.contains_key(&id) {
+    if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
@@ -2291,6 +2301,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
+        "ui.historyClear" => crate::timeline::clear_history(app),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {
@@ -2391,6 +2402,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(id) = id_of(&p, "sketch") {
                 let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
                 app.pick_save_command(&format!("{name}.dxf"), &["dxf"], "sketch.export_dxf", json!({"sketch": id}));
+            }
+        }
+        "ui.exportSvg" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+                app.pick_save_command(&format!("{name}.svg"), &["svg"], "sketch.export_svg", json!({"sketch": id}));
             }
         }
         "ui.extrudeSketch" => {
@@ -2590,6 +2607,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
             Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
+            Sel::Feature { id } => app.session.doc.feature(*id).filter(|f| f.kind.is_construction()).map(|f| f.name.clone()),
             _ => None,
         })
         .collect();

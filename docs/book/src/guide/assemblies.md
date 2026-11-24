@@ -515,6 +515,16 @@ that cannot be read keeps its bodies, is tried again the next time, and holds up
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 
+**Insert STEP** also links `.step` and `.stp` files on disk. Its component shows the same link
+in the Browser, and **Update Links** and **Break Link** (Insert › Links) work on it. Saving the assembly stores
+the source path relative to its folder. Updates replace the imported bodies in one undo step;
+references that still resolve are kept, and references that no longer resolve are reported. Missing
+or corrupt sources keep their previous bodies and are retried next time, without holding up
+other links. The same **Update changed linked designs when a tab comes back** preference controls
+automatic STEP refresh. Use **Break Link** on the
+component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
+copies because uploaded files have no disk source path.
+
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
 another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
