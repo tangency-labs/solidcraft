@@ -21,9 +21,10 @@
 //! upstream's fixed bound of 35. Not upstream (#20438): when the global solver drops a
 //! minimum beyond the target distance, `GlobalPointSolve_1` answers with the tree
 //! solve (`GlobalPointSolve_0`, point testing off, on a curve-bounded surface's basis
-//! up to `MAX_GEOMETRY_NESTING` levels), which bounds every candidate by the target,
-//! so a nearer point within it is not lost (#20483); with no tree for the surface (its
-//! cache cannot be made) the drop stands.
+//! up to `MAX_GEOMETRY_NESTING` levels, on an ownerless copy with a cache of its own,
+//! as the face's trims play no part), which bounds every candidate by the target, so a
+//! nearer point within it is not lost (#20483); when the tree solve fails as upstream
+//! can (no tree for the surface, a failed evaluation) the drop stands.
 
 use super::p1::ErrorNormType;
 use super::p2::with_out_of_bounds_enabled_in_place;
@@ -33,8 +34,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p5::local_property_analysis;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::surface::SurfaceFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{native_failure, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::TerminationReason;
@@ -413,14 +413,18 @@ impl Surface {
     /// nearest point (#20483), so the tree solve answers instead
     /// ([`Surface::global_point_solve_0`], with the cache's point testing off as the
     /// new solver has none; on a curve-bounded surface's basis, which its evaluations
-    /// pass to): it bounds every candidate by the target, so it finds a nearer point
-    /// within the target and is empty only when there is none. A surface with no
-    /// decomposition tree (a STEP surface) keeps the drop.
+    /// pass to; on an ownerless copy with a cache of its own, so a face's surface needs
+    /// no trimmed cache): it bounds every candidate by the target, so it finds a nearer
+    /// point within the target and is empty only when there is none. Its solutions are
+    /// shaped by `requested` as the tree solve shapes them. A tree solve that fails as
+    /// upstream can (a STEP surface has no decomposition tree; a failed evaluation)
+    /// keeps the drop.
     ///
     /// # Errors
     ///
-    /// Those of [`SurfPtGlobalSolver::new`] and [`SurfPtGlobalSolver::solve`], and of
-    /// [`Surface::global_point_solve_0`] when the tree solve answers.
+    /// Those of [`SurfPtGlobalSolver::new`] and [`SurfPtGlobalSolver::solve`], and the
+    /// unported, cancelled and port-defect errors of [`Surface::global_point_solve_0`]
+    /// when the tree solve answers.
     pub fn global_point_solve_1<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -446,6 +450,34 @@ impl Surface {
         if !solver.dropped_beyond_target() {
             return Ok(found);
         }
+        Ok(self
+            .tree_solve_within_target(
+                k,
+                domain,
+                op,
+                point,
+                distance_tolerance,
+                target_distance,
+                requested,
+                surface_object,
+            )?
+            .unwrap_or(found))
+    }
+
+    /// The tree solve [`Surface::global_point_solve_1`] answers with when the global
+    /// solver drops a minimum beyond the target: `None` when it fails as upstream can,
+    /// so the drop stands.
+    pub(crate) fn tree_solve_within_target<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        domain: &Extent2d,
+        op: SolverOperation,
+        point: Point3,
+        distance_tolerance: f64,
+        target_distance: Option<f64>,
+        requested: SolutionRequested,
+        surface_object: Option<O>,
+    ) -> Result<Option<SolutionArray<O>>> {
         // the tree solve on the surface the distance is evaluated on: a curve-bounded
         // surface passes its evaluations to its basis
         let mut tree_on = self;
@@ -455,6 +487,14 @@ impl Surface {
                 _ => break,
             }
         }
+        // on an ownerless copy with a cache slot of its own: point testing is off, so
+        // the face's trims play no part, and a face-owned surface's trimmed cache cannot
+        // be built without its face; the copy's untrimmed cache never reaches the
+        // surface's own slot
+        let mut unowned = tree_on.clone_for_evaluation()?;
+        unowned.detach_for_edit();
+        let _ = unowned.set_owner(None);
+        let tree_on = &unowned;
         let tree = match surface_object {
             Some(object) => tree_on.global_point_solve_0_in(
                 k,
@@ -487,12 +527,10 @@ impl Surface {
                 )
                 .map(|t| t.without_objects()),
         };
-        match tree {
-            // a surface with no decomposition tree (a STEP surface, one whose cache
-            // cannot be made): the global solver's drop stands
-            Err(e) if e.surface_failure() == Some(&SurfaceFailure::SolveCacheNotMade) => Ok(found),
-            tree => tree,
-        }
+        // a tree solve that fails as upstream can (a surface with no decomposition
+        // tree, such as a STEP surface; a failed evaluation): the global solver's drop
+        // stands. Port defects, unported paths and cancellation still propagate.
+        native_failure(tree)
     }
 
     /// The new bounded local surface-point solve (`LocalPointSolve_1`).

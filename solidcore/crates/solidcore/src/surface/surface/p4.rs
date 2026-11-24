@@ -2786,5 +2786,30 @@ mod tests {
             )
             .unwrap();
         check(direct.as_slice(), "global_point_solve_1");
+        // a face's surface: the fallback tree solve needs no trimmed cache of the face
+        // (which cannot be built without its B-rep), and leaves the surface's own cache
+        // slot as it was
+        let mut owned = s.clone();
+        let owner = crate::geom::object::ObjectRef {
+            type_code: FACE_TYPE,
+            key: crate::geom::attribute::ObjectKey(42),
+        };
+        let _ = owned.set_owner(Some(owner));
+        let on_face = owned
+            .tree_solve_within_target::<NoObject>(
+                k,
+                &dom,
+                SolverOperation::Minimize,
+                test,
+                tol,
+                Some(target),
+                SolutionRequested::Single,
+                None,
+            )
+            .unwrap()
+            .expect("the tree solve answers");
+        check(on_face.as_slice(), "the tree solve on a face's surface");
+        assert_eq!(owned.owner(), Some(owner));
+        assert!(!owned.has_trim_cache());
     }
 }
