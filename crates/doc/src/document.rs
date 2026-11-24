@@ -4357,15 +4357,22 @@ impl Document {
             g.items.iter_mut().for_each(rename);
         }
         // Saved selections keep pointing at the renamed body (its faces and edges too), so a
-        // body given the old name later is not selected in its place (#18716).
+        // body given the old name later is not selected in its place (#18716). No body has the
+        // new name yet, so an item saved under it names a body that is gone (a pattern copy a
+        // lower count removed, say): it stays gone rather than selecting this body, which may
+        // have been made by the same feature.
         for item in self.named_selections.iter_mut().flat_map(|x| x.items.iter_mut()) {
             let key = match item.get("type").and_then(serde_json::Value::as_str) {
                 Some("body") => "name",
                 Some("face" | "edge") => "body",
                 _ => continue,
             };
-            if let Some(o) = item.as_object_mut().filter(|o| o.get(key).and_then(serde_json::Value::as_str) == Some(old)) {
+            let Some(o) = item.as_object_mut() else { continue };
+            let named = o.get(key).and_then(serde_json::Value::as_str).map(str::to_string);
+            if named.as_deref() == Some(old) {
                 o.insert(key.into(), serde_json::Value::from(new));
+            } else if named.as_deref() == Some(new) {
+                o.insert("gone".into(), serde_json::Value::Bool(true));
             }
         }
         for (_, v) in self.browser_order.iter_mut().filter(|(k, _)| k.ends_with("/bodies")) {

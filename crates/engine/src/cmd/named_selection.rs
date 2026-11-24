@@ -138,7 +138,8 @@ fn with_references(s: &Session, items: Vec<Value>) -> Vec<Value> {
 }
 
 /// The item to select for a saved one (`None`: it is gone). A body, face or edge whose body name
-/// now belongs to a body another feature made is gone. A named face or edge is found again by
+/// now belongs to a body another feature made is gone, as is one marked `gone` (another body was
+/// renamed to its name after it went, see `Document::rename_body_keys`). A named face or edge is found again by
 /// its name near its saved point; one of a solid with no name has nothing to be found by, and is
 /// gone too. A face or edge of a mesh body, and anything else, is selected as saved.
 fn found(state: &solidcraft_doc::ModelState, mut it: Value) -> Option<Value> {
@@ -148,6 +149,9 @@ fn found(state: &solidcraft_doc::ModelState, mut it: Value) -> Option<Value> {
         "face" | "edge" => "body",
         _ => return Some(it),
     };
+    if it.get("gone").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
     let made_by = it.as_object_mut().and_then(|o| o.remove("made_by"));
     let body_name = it.get(body_key).and_then(Value::as_str)?.to_string();
     let b = state.body(&body_name)?;

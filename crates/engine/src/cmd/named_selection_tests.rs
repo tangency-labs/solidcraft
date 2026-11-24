@@ -205,3 +205,26 @@ fn a_deleted_body_is_not_replaced_by_one_given_its_name() {
     let applied = run(&mut s, "named_selection.apply", json!({"selection": "Board"}));
     assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(2), Some(0)), "{applied}");
 }
+
+/// A saved pattern copy that a lower count removes, its name then given to another copy of the
+/// same pattern (made by the same feature): applying skips it rather than selecting that copy.
+/// Undo brings the copy back, and with it the selection.
+#[test]
+fn a_removed_pattern_copy_is_not_replaced_by_a_copy_given_its_name() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "3", "unit": ""}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 30}));
+    assert_eq!(names(&s), ["Base", "Base (2)", "Base (3)"]);
+    run(&mut s, "named_selection.save", json!({"name": "Third", "items": [{"type": "body", "name": "Base (3)"}]}));
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "2"}));
+    run(&mut s, "body.rename", json!({"body": "Base (2)", "name": "Base (3)"}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Third"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(0), Some(1)), "{applied} {:?}", s.selection);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Third"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(1), Some(0)), "{applied}");
+    assert_eq!(s.selection, [Sel::Body { name: "Base (3)".into() }]);
+}
