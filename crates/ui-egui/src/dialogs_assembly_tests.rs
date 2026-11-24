@@ -1178,7 +1178,7 @@ fn joint_from_two_snaps() {
     let o = &p["a"]["frame"]["origin"];
     let at = Vec3::new(o[0].as_f64().unwrap(), o[1].as_f64().unwrap(), o[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9, "{p}");
-    assert_eq!(p["offset_x"], 5.0);
+    assert_eq!(p["offset_x"], json!("5 mm"));
     // OK makes it.
     for (id, p) in apply_commands(&app, &d).unwrap() {
         app.run(&id, p).unwrap();
@@ -1552,10 +1552,13 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
     app.run("parameters.add", json!({"name": "gap", "expression": "3 mm"})).unwrap();
     let (fa, fb) = (json!({"occurrence": a, "face": [10, 10, 10]}), json!({"occurrence": b, "face": [40, 10, 0]}));
-    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset": "gap", "angle": "0 deg"})).unwrap();
+    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset_x": "gap * 2", "offset_y": "-gap", "offset": "gap", "angle": "0 deg"}))
+        .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.offset[0], "gap * 2");
+        assert_eq!(f.offset[1], "-gap");
         assert_eq!(f.offset[2], "gap");
         f.flip = true;
     }
@@ -1564,7 +1567,34 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     }
     let j = &app.session.doc.assembly.joints[0];
     assert!(j.flip);
-    assert_eq!((j.exprs.offset.as_deref(), j.exprs.angle.as_deref()), (Some("gap"), None));
+    assert_eq!(
+        (j.exprs.offset_x.as_deref(), j.exprs.offset_y.as_deref(), j.exprs.offset.as_deref(), j.exprs.angle.as_deref()),
+        (Some("gap * 2"), Some("-gap"), Some("gap"), None)
+    );
+}
+
+/// Creating a joint on a face with a parameter-backed lateral offset that evaluates to zero keeps
+/// the face reference (rather than freezing to a fixed frame) and still follows later changes.
+#[test]
+fn zero_valued_lateral_offset_expression_keeps_face_reference() {
+    let mut app = two_boxes();
+    app.run("parameters.add", json!({"name": "dx", "expression": "0 mm"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "dx".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1["a"].get("face").is_some(), "zero-valued expression keeps face reference: {}", cmds[0].1);
+    assert_eq!(cmds[0].1["offset_x"], json!("dx"));
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("dx"));
+    app.run("parameters.change", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].offset_xy, [15.0, 0.0]);
 }
 
 /// Edit Joint shows both sides pre-filled, each on its own component. OK sends no side while
@@ -2635,7 +2665,7 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let origin = &p["a"]["frame"]["origin"];
     let at = Vec3::new(origin[0].as_f64().unwrap(), origin[1].as_f64().unwrap(), origin[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9);
-    assert_eq!(p["offset_x"], json!(6.35));
+    assert_eq!(p["offset_x"], json!("0.25 in"));
     app.run("joint.create", p).unwrap();
     let joint = app.session.doc.assembly.joints[0].id;
     app.start("joint.drive");
