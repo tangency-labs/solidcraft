@@ -30,6 +30,7 @@
 # intersect.curve_class_p1, surface.surface_p4, surface.surface_point_solve_p3: #21504 (#20438) drops a global minimise answer farther than the target, and a dropped minimise falls back to the tree solve; each moved row is certified empty over its domain (target_bounded_solves_are_certified_empty in surface_surface_p4 and surface_surface_point_solve_p3) or replayed to main's row with the drops kept and each drop certified (target_bounded_rows_moved_only_through_certified_drops); the digests are the branch files
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
+# intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -140,7 +141,7 @@ intersect.curve_class_p9	0b4e73f8539ea534
 intersect.point_class	7987e83088e89cb6
 intersect.ray_tracer	ce63de70cd21ace6
 intersect.surface_drop_curve	ee0183329c02962f
-intersect.surface_drop_lib_p1	2cf06152abbf3ea8
+intersect.surface_drop_lib_p1	9caefa02b77701ff
 intersect.surface_drop_lib_p2	e638190d664c28c3
 intersect.surface_drop_lib_p3	756347b51d8262c9
 intersect.surface_intersector_p1	c15dc4e9c25559c9
