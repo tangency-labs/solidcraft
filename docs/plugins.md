@@ -133,7 +133,7 @@ notifications.
 
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
-limited by their requested budgets. They may refresh caches or panel data.
+limited by their requested budgets. They may refresh caches.
 Editing, file writes and starting jobs are refused with existing typed permission
 errors. A failure is shown in Preferences › Plugins and never fails the action
 that triggered the notification. Each invocation uses a fresh guest instance.
