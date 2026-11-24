@@ -163,10 +163,22 @@ impl Request {
         params.insert("path".into(), json!(self.path));
         Value::Object(params)
     }
+    /// [`Self::params`] for `doc.open`. A design saved without the bodies of its linked designs
+    /// reads only the linked files in its own folder or below it as it opens here: the others
+    /// wait for the question the app asks before it loads linked files from another folder
+    /// (`linked_source::update_changed`). A caller that names `linked_bodies` keeps its choice.
+    fn open_params(&self) -> Value {
+        let mut params = self.options.clone();
+        params.insert("path".into(), json!(self.path));
+        if solidcraft_engine::io::is_design_path(&self.path) {
+            params.entry("linked_bodies").or_insert_with(|| json!("folder"));
+        }
+        Value::Object(params)
+    }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open if self.plugin_import => ("file.import", self.params()),
-            Kind::Open => ("doc.open", self.params()),
+            Kind::Open => ("doc.open", self.open_params()),
             Kind::Insert if self.gerber => {
                 let mut params = self.options.clone();
                 params.insert("set".into(), json!(self.path));
@@ -176,7 +188,8 @@ impl Request {
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
-            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
+            // As an open: a link in another folder that the copy has no bodies of waits for Load.
+            Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir, "linked_bodies": "folder"})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             // Printing writes the whole drawing's PDF that asks for actual size.
             Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
@@ -494,6 +507,10 @@ impl SolveApp {
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     // An STL or OBJ file states no unit: ask which, then import (see `crate::mesh_units`).
     if crate::mesh_units::ask(app, path, insert) {
+        return;
+    }
+    // A STEP, IGES, FreeCAD, Rhino or glTF file: its import options first (`crate::import_options`).
+    if crate::import_options::ask(app, path, insert) {
         return;
     }
     let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
@@ -850,19 +867,7 @@ fn start(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
-    // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
-    // a tab number that will never match again and hold the queue.
-    let mut at = 0;
-    while at < app.file_load.queued.len() {
-        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
-        if orphan {
-            if let Some(request) = app.file_load.queued.remove(at) {
-                orphaned_request(app, request);
-            }
-        } else {
-            at += 1;
-        }
-    }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
@@ -1035,12 +1040,29 @@ fn start(app: &mut SolveApp) {
     }
 }
 
+/// Answer the queued requests whose design's tab was closed: each has nowhere to land, and it
+/// would wait for a tab number that never matches again and hold the queue.
+fn answer_orphaned(app: &mut SolveApp) {
+    let mut at = 0;
+    while at < app.file_load.queued.len() {
+        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
+        if orphan {
+            if let Some(request) = app.file_load.queued.remove(at) {
+                orphaned_request(app, request);
+            }
+        } else {
+            at += 1;
+        }
+    }
+}
+
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
+    answer_orphaned(app);
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };

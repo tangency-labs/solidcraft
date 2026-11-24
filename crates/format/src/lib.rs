@@ -31,8 +31,6 @@ pub mod newer;
 pub enum FormatError {
     /// The file isn't one of the family's, or it is damaged.
     Invalid(String),
-    /// A part or the sum of the expanded parts exceeds the opening limit.
-    ExpandedPackageTooLarge,
     /// The work was cancelled (a save the person stopped): nothing more was written.
     Cancelled,
 }
@@ -41,7 +39,6 @@ impl std::fmt::Display for FormatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FormatError::Invalid(why) => f.write_str(why),
-            FormatError::ExpandedPackageTooLarge => f.write_str("expanded package too large"),
             FormatError::Cancelled => f.write_str("cancelled"),
         }
     }

@@ -146,7 +146,7 @@ impl Capturer {
     /// ([`crate::select`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
@@ -156,7 +156,7 @@ impl Capturer {
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_with_depth(policy: crate::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
         Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
@@ -166,7 +166,7 @@ impl Capturer {
     /// draws where 4× isn't available (some browsers and devices, or MSAA turned off).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_single_sample(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let depth = crate::depth_format(&device, true);
         let lost = watch_lost(&device);
@@ -596,6 +596,21 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
         }
     }
     sc
+}
+
+/// A headless capturer's adapter and device ([`crate::open_headless`]). In this crate's own tests
+/// the capturers share a device apart from the other tests' one (`test_env::Sharers`): a capturer
+/// logs its device's uncaptured errors, where the other tests rely on wgpu's handler, which panics.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_headless(policy: crate::select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    {
+        crate::test_env::shared_headless(crate::test_env::Sharers::Capturers, policy)
+    }
+    #[cfg(not(test))]
+    {
+        crate::open_headless(policy)
+    }
 }
 
 /// A flag `device`'s lost callback sets (a device of this crate's own: a device has one lost
