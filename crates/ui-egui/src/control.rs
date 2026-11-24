@@ -71,10 +71,68 @@ pub(crate) use solidcraft_control::{ControlRequest, ControlResponse, DOCUMENT_WA
 /// each frame's logic (which runs while the window is hidden too) and of its drawing, so a
 /// change made in either goes out in that frame.
 pub(crate) fn publish_design(app: &mut SolveApp, watch: &DocumentWatch) {
-    if watch.subscribed() {
-        let revision = app.session.design_revision();
-        watch.publish(&app.session.document_id, revision);
+    if !watch.subscribed() {
+        app.open_designs_seen = None;
+        return;
     }
+    // The opened and closed events go first: a connection woken by the publish sends what is
+    // posted by then, so they come ahead of this frame's `design.changed`.
+    post_open_close(app, watch);
+    let revision = app.session.design_revision();
+    watch.publish(&app.session.document_id, revision);
+}
+
+/// Compares the open designs after one control request, so a design that one request opens and
+/// the next closes in the same frame is reported too. `design.changed` still goes out once a frame.
+pub(crate) fn post_request_open_close(app: &mut SolveApp) {
+    let watch = app.design_watch;
+    if watch.subscribed() {
+        post_open_close(app, watch);
+    }
+}
+
+/// The open designs as `(document_id, path, read_only)`, in tab order.
+fn open_designs(app: &SolveApp) -> Vec<(String, Option<String>, bool)> {
+    crate::documents::open_sessions(app).into_iter().map(|s| (s.document_id.clone(), s.path.clone(), s.read_only)).collect()
+}
+
+/// Posts `design.opened` and `design.closed` for the open designs that changed since the last
+/// frame while somebody is subscribed. The first frame of a subscription only takes the set.
+fn post_open_close(app: &mut SolveApp, watch: &DocumentWatch) {
+    let now = open_designs(app);
+    if let Some(seen) = app.open_designs_seen.take() {
+        for (id, path, read_only) in &now {
+            if !seen.iter().any(|(old, _, _)| old == id) {
+                watch.post("design.opened", json!({"document_id": id, "path": path, "read_only": read_only}));
+            }
+        }
+        for (id, path, _) in &seen {
+            if !now.iter().any(|(new, _, _)| new == id) {
+                watch.post("design.closed", json!({"document_id": id, "path": path}));
+            }
+        }
+    }
+    app.open_designs_seen = Some(now);
+}
+
+/// Posts `design.saved` after a save of the design file finished on success. `document_id` is the
+/// saved design's; `previous` is the path it had before the save.
+pub(crate) fn post_design_saved(app: &mut SolveApp, document_id: &str, previous: Option<String>) {
+    let watch = app.design_watch;
+    if !watch.subscribed() {
+        return;
+    }
+    // A design opened since the last comparison is reported first, so its save never comes before
+    // its `design.opened` (a script that starts a design and saves it, a save held behind a load).
+    post_open_close(app, watch);
+    let path = app.session.path.clone();
+    // The old file is named only when the design moved to another path.
+    let previous_path = previous.filter(|old| match path.as_deref() {
+        Some(new) => !crate::documents::same_path(old, new),
+        None => true,
+    });
+    let disk = app.session.disk.as_ref().map(|d| json!({"len": d.len, "modified_ns": d.modified_ns.map(|n| n.to_string())}));
+    watch.post("design.saved", json!({"document_id": document_id, "path": path, "previous_path": previous_path, "disk": disk}));
 }
 
 pub enum Outcome {
@@ -558,7 +616,14 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     // What a request does is an agent's action in usage statistics (`usage_stats`).
     #[cfg(feature = "usage-stats")]
     let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
-    crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+    // An agent's request reads and answers with every feature checked, as a script's does: the
+    // checks the window left running end first, and its own evaluations wait for theirs.
+    let background = app.session.background_checks();
+    app.session.set_background_checks(false);
+    app.session.settle_feature_checks(true);
+    let out = crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req));
+    app.session.set_background_checks(background);
+    out
 }
 
 fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
@@ -698,7 +763,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
             let revision = app.session.design_revision();
-            DOCUMENT_WATCH.publish(&app.session.document_id, revision);
+            let watch = app.design_watch;
+            watch.publish(&app.session.document_id, revision);
+            // The open designs are taken here too, so a tab opened before the next frame is reported.
+            if app.open_designs_seen.is_none() {
+                app.open_designs_seen = Some(open_designs(app));
+            }
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
         // The solved joint pose the preview shows: what a client follows a joint with (#19437).
@@ -3132,6 +3202,228 @@ pub(crate) mod tests {
         assert!(now().is_some_and(|(other, _)| other != id), "{:?}", now());
         drop(counted);
         assert!(!WATCH.subscribed());
+    }
+
+    /// The control events `watch` holds from `cursor` on; `cursor` moves past them.
+    fn events_since(watch: &DocumentWatch, cursor: &mut u64) -> Vec<Value> {
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        let next = watch.next(&(String::new(), 0), *cursor, &stop, std::time::Duration::ZERO);
+        *cursor = next.cursor;
+        next.events
+    }
+
+    /// The payloads of the events named `event`, in order.
+    fn named(events: &[Value], event: &str) -> Vec<Value> {
+        events.iter().filter(|e| e["event"] == event).map(|e| e["params"].clone()).collect()
+    }
+
+    /// Does a payload's path name `path` (the same file, per `same_path`)?
+    fn same_file(value: &Value, path: &std::path::Path) -> bool {
+        value.as_str().is_some_and(|s| crate::documents::same_path(s, &path.to_string_lossy()))
+    }
+
+    /// `design.opened` and `design.closed`: a second tab is reported when it opens, with its path
+    /// and read-only flag, and when it closes, with the path it last had. A design opened in place
+    /// of the tab's own (`doc.open` run on the active design) reports a close for the old design
+    /// and an open for the new one.
+    #[test]
+    fn a_tab_opening_and_closing_is_reported_with_its_path() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-tabs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let second = dir.join("second.solidcraft");
+        let mut other = Session::default();
+        other.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        other.execute("file.save_as", &json!({"path": second.to_string_lossy()})).unwrap();
+        let opened = || {
+            let mut s = Session::default();
+            s.execute("doc.open", &json!({"path": second.to_string_lossy()})).unwrap();
+            s
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}));
+        // The first frame of the subscription takes the open designs as they are.
+        h.frames(1);
+        let first = h.app.session.document_id.clone();
+
+        crate::documents::open_tab(&mut h.app, opened()).unwrap();
+        h.frames(1);
+        let events = events_since(&WATCH, &mut cursor);
+        let new = named(&events, "design.opened");
+        assert_eq!(new.len(), 1, "{events:?}");
+        assert!(named(&events, "design.closed").is_empty(), "{events:?}");
+        assert!(same_file(&new[0]["path"], &second), "{}", new[0]);
+        assert_eq!(new[0]["read_only"], false, "{}", new[0]);
+        let id = new[0]["document_id"].clone();
+
+        let closed = h.call("ui.documents", json!({"action": "close", "index": 1}));
+        assert_eq!(closed["ok"], true, "{closed}");
+        h.frames(1);
+        let events = events_since(&WATCH, &mut cursor);
+        let gone = named(&events, "design.closed");
+        assert_eq!(gone.len(), 1, "{events:?}");
+        assert_eq!(gone[0]["document_id"], id, "{}", gone[0]);
+        assert!(same_file(&gone[0]["path"], &second), "{}", gone[0]);
+        assert!(named(&events, "design.opened").is_empty(), "{events:?}");
+
+        // In place: the tab keeps its place, and its design changes id.
+        let swapped = h.call("engine.execute", json!({"command": "doc.open", "params": {"path": second.to_string_lossy()}}));
+        assert_eq!(swapped["ok"], true, "{swapped}");
+        h.frames(1);
+        let events = events_since(&WATCH, &mut cursor);
+        let (new, gone) = (named(&events, "design.opened"), named(&events, "design.closed"));
+        assert_eq!((new.len(), gone.len()), (1, 1), "{events:?}");
+        assert_eq!(gone[0]["document_id"], first.as_str(), "{}", gone[0]);
+        assert!(same_file(&new[0]["path"], &second), "{}", new[0]);
+        drop(sub);
+    }
+
+    /// Two requests run in one frame: a tab the first opens and the second closes is still
+    /// reported opened and then closed.
+    #[test]
+    fn a_tab_opened_and_closed_in_one_frame_is_reported() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        // A blank active design would be reused by `new` instead of a tab opening.
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}));
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.frames(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.control_rx = Some(rx);
+        let (open, opened) = ControlRequest::new("ui.documents", json!({"action": "new"}));
+        let (close, closed) = ControlRequest::new("ui.documents", json!({"action": "close", "index": 1}));
+        tx.send(open).unwrap();
+        tx.send(close).unwrap();
+        h.frame();
+        let answered = |reply: Result<Value, _>| reply.map(|v| v["ok"].clone()).ok();
+        assert_eq!((answered(opened.try_recv()), answered(closed.try_recv())), (Some(json!(true)), Some(json!(true))), "both in one frame");
+        let events = events_since(&WATCH, &mut cursor);
+        let (new, gone) = (named(&events, "design.opened"), named(&events, "design.closed"));
+        assert_eq!((new.len(), gone.len()), (1, 1), "{events:?}");
+        assert_eq!(new[0]["document_id"], gone[0]["document_id"], "{events:?}");
+        drop(sub);
+    }
+
+    /// A design that one script starts and saves is reported opened before its save.
+    #[test]
+    fn a_design_is_reported_opened_before_its_save() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-order-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.frames(1);
+        let path = dir.join("order.solidcraft");
+        let steps = json!([{"command": "file.new", "params": {}}, {"command": "file.save_as", "params": {"path": path.to_string_lossy()}}]);
+        let v = h.call("engine.script", json!({"commands": steps}));
+        assert_eq!(v["ok"], true, "{v}");
+        let events = events_since(&WATCH, &mut cursor);
+        let at = |name: &str| events.iter().position(|e| e["event"] == name);
+        assert!(at("design.opened").is_some_and(|opened| at("design.saved").is_some_and(|saved| opened < saved)), "{events:?}");
+        assert_eq!(named(&events, "design.opened")[0]["document_id"], named(&events, "design.saved")[0]["document_id"], "{events:?}");
+        drop(sub);
+    }
+
+    /// `design.saved`: the first save of an untitled design has no `previous_path`; a Save As to
+    /// another file names the file the design left.
+    #[test]
+    fn save_as_reports_the_file_it_left_and_a_first_save_has_none() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-saves-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (first, second) = (dir.join("first.solidcraft"), dir.join("second.solidcraft"));
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        let saved = h.call("engine.execute", json!({"command": "file.save_as", "params": {"path": first.to_string_lossy()}}));
+        assert_eq!(saved["ok"], true, "{saved}");
+        let events = events_since(&WATCH, &mut cursor);
+        let s = named(&events, "design.saved");
+        assert_eq!(s.len(), 1, "{events:?}");
+        assert!(same_file(&s[0]["path"], &first), "{}", s[0]);
+        assert!(s[0]["previous_path"].is_null(), "{}", s[0]);
+        let saved = h.call("engine.execute", json!({"command": "file.save_as", "params": {"path": second.to_string_lossy()}}));
+        assert_eq!(saved["ok"], true, "{saved}");
+        let events = events_since(&WATCH, &mut cursor);
+        let s = named(&events, "design.saved");
+        assert_eq!(s.len(), 1, "{events:?}");
+        assert!(same_file(&s[0]["path"], &second), "{}", s[0]);
+        assert!(same_file(&s[0]["previous_path"], &first), "{}", s[0]);
+        drop(sub);
+    }
+
+    /// `design.saved` for `file.save {path: other}`: the file it left is named as `previous_path`.
+    #[test]
+    fn file_save_to_another_path_names_the_file_it_left() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-file-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (first, second) = (dir.join("first.solidcraft"), dir.join("second.solidcraft"));
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+        let saved = h.call("engine.execute", json!({"command": "file.save_as", "params": {"path": first.to_string_lossy()}}));
+        assert_eq!(saved["ok"], true, "{saved}");
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        let saved = h.call("engine.execute", json!({"command": "file.save", "params": {"path": second.to_string_lossy()}}));
+        assert_eq!(saved["ok"], true, "{saved}");
+        let events = events_since(&WATCH, &mut cursor);
+        let s = named(&events, "design.saved");
+        assert_eq!(s.len(), 1, "{events:?}");
+        assert!(same_file(&s[0]["path"], &second), "{}", s[0]);
+        assert!(same_file(&s[0]["previous_path"], &first), "{}", s[0]);
+        drop(sub);
+    }
+
+    /// A batch that makes a new design and then fails is rolled back within the frame, so no tab
+    /// is reported opened or closed.
+    #[test]
+    fn a_rolled_back_batch_reports_no_tab_change() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        h.frames(1);
+        // The extrude's distance fails when the step runs, after `file.new` has run (an unknown
+        // command would be refused before any step).
+        let steps = json!([{"command": "file.new", "params": {}}, {"command": "solid.extrude", "params": {"distance": "bogus +"}}]);
+        let v = h.call("engine.batch", json!({"commands": steps}));
+        assert_eq!((&v["result"]["completed"], &v["result"]["rolled_back"]), (&json!(1), &json!(true)), "{v}");
+        h.frames(1);
+        let events = events_since(&WATCH, &mut cursor);
+        assert!(named(&events, "design.opened").is_empty(), "{events:?}");
+        assert!(named(&events, "design.closed").is_empty(), "{events:?}");
+        drop(sub);
+    }
+
+    /// Nobody subscribed: nothing is kept, and a subscriber starts with no events from before.
+    #[test]
+    fn nothing_is_kept_while_nobody_is_subscribed() {
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-design-events-idle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.design_watch = &WATCH;
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+        let saved = h.call("engine.execute", json!({"command": "file.save_as", "params": {"path": dir.join("idle.solidcraft").to_string_lossy()}}));
+        assert_eq!(saved["ok"], true, "{saved}");
+        h.frames(2);
+        assert!(h.app.open_designs_seen.is_none());
+        let sub = WATCH.join();
+        let mut cursor = sub.from();
+        assert!(events_since(&WATCH, &mut cursor).is_empty());
+        drop(sub);
     }
 
     /// #3750: the "Recover unsaved design?" prompt is `ui.inspect`'s `dialog`, and `ui.recover`

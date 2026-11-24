@@ -109,6 +109,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                      \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
                      \"{package_name}/files\": super::bindings::{namespace}::{name}::files,\n\
                      \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/forms\": super::bindings::{namespace}::{name}::forms,\n\
+                     \"{package_name}/design-state\": super::bindings::{namespace}::{name}::design_state,\n\
+                     \"{package_name}/storage\": super::bindings::{namespace}::{name}::storage,\n\
                  }},\n\
              }});\n\
          }}\n\

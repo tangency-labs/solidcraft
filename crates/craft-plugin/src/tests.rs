@@ -795,6 +795,7 @@ fn panel_wit_preserves_the_reviewed_interfaces() {
         assert!(WIT.contains(signature), "{signature}");
     }
     assert!(WIT.contains("world panel-plugin"));
+    assert!(WIT.contains("world panel-dialog-plugin"));
     assert_eq!(serde_json::to_value(ui::ColorRole::Series1).unwrap(), "series-1");
 }
 

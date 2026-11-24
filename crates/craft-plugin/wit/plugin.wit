@@ -401,15 +401,14 @@ interface ui-provider {
 
 
 world panel-plugin {
-    // Keep this world's original imports when command-plugin gains optional capabilities.
-    import commands;
-    import log;
-    import control;
-    import files;
-    import clock;
-    export entry;
+    include command-plugin;
     import ui;
     export ui-provider;
+}
+
+world panel-dialog-plugin {
+    include panel-plugin;
+    export dialog-provider;
 }
 
 // Optional, additive capability dialog@0.1. Existing worlds retain their exports.

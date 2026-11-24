@@ -2827,6 +2827,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         };
         trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
     }
+    if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
+        after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path

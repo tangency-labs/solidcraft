@@ -1051,7 +1051,9 @@ not run, or two versions at once, is refused before any of its code runs.
 ## Docked panels
 
 Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
-`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+`crates/craft-plugin/wit/plugin.wit`. The `panel-plugin` world includes `command-plugin`, bringing
+`storage`, `forms` and `design-state` to panel plugins. Plugins that also provide a dialog field hook
+can target `panel-dialog-plugin`, which adds `export dialog-provider`. The `ui` and `ui-provider` records follow
 [RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
 listed during installation. The component's `ui-provider.describe` must return those declarations.
 The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
