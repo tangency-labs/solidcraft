@@ -283,7 +283,13 @@ fn case(name: &str) -> Case {
         // The pull runs along the cylinder's axis z, but the neutral plane x = 0 holds that axis.
         "draft_a_cylinder_about_a_plane_through_its_axis" => c(
             Op::Draft(Shape::Cylinder([0.0; 3], 5.0, 10.0), vec![[5.0, 0.0, 5.0]], [0.0; 3], [1.0, 0.0, 0.0], Z, 0.1),
-            Expect::Fails(draft_refused("a drafted cone or cylinder's axis lies in the neutral plane")),
+            Expect::Fails(draft_refused("a drafted cone or cylinder's axis is parallel to the neutral plane")),
+        ),
+        // The neutral plane x = 10 misses the axis x = 0 but runs along it: the same refusal,
+        // without claiming the axis lies in the plane.
+        "draft_a_cylinder_about_a_plane_along_its_axis" => c(
+            Op::Draft(Shape::Cylinder([0.0; 3], 5.0, 10.0), vec![[5.0, 0.0, 5.0]], [10.0, 0.0, 0.0], [1.0, 0.0, 0.0], Z, 0.1),
+            Expect::Fails(draft_refused("a drafted cone or cylinder's axis is parallel to the neutral plane")),
         ),
         // The cone r 10 at its base to 8 at its top, 20 tall, drafted 0.5 rad about its base:
         // its top radius would be 10 + 20 tan(atan(-0.1) - 0.5) = -3.68, so it closes on the way up.
@@ -292,10 +298,11 @@ fn case(name: &str) -> Case {
             Expect::Fails(draft_refused("a drafted cone would close within the face")),
         ),
         // The same cone about the plane z = 150, past its apex at z = 100: its radius there,
-        // 10 - 0.1 * 150 = -5, is not positive.
+        // 10 - 0.1 * 150 = -5, is not positive. The face itself does not close: the refusal names
+        // the neutral plane.
         "draft_a_cone_about_a_plane_past_its_apex" => c(
             Op::Draft(Shape::Frustum([0.0; 3], 10.0, 8.0, 20.0), vec![[0.0, 9.0, 10.0]], [0.0, 0.0, 150.0], Z, Z, 0.1),
-            Expect::Fails(draft_refused("a drafted cone would close within the face")),
+            Expect::Fails(draft_refused("the neutral plane is at or past a drafted cone's apex")),
         ),
         _ => panic!("{name}"),
     }
@@ -447,6 +454,7 @@ cases!(
     draft_a_sphere,
     draft_a_cylinder_across_its_axis,
     draft_a_cylinder_about_a_plane_through_its_axis,
+    draft_a_cylinder_about_a_plane_along_its_axis,
     draft_a_cone_until_it_closes,
     draft_a_cone_about_a_plane_past_its_apex,
 );

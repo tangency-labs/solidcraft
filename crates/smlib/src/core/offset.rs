@@ -482,7 +482,7 @@ fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) ->
 }
 
 /// A face the draft cannot tilt, refused for what about it the draft cannot handle (#18541), in
-/// the words `solidcore_ops::offset::draft` gives the same refusal.
+/// the words `solidcore_ops::offset::draft` gives the same refusal where they fit this check.
 fn cannot_draft(why: &'static str) -> Error {
     Error::Refused(solidcore_ops::Error::Unsupported(why))
 }
@@ -501,7 +501,8 @@ const CONE_CLOSES: &str = "a drafted cone would close within the face";
 /// its height, so it keeps the surface's parameters and the face's UV trims stay valid: for a
 /// cylinder solidcore's `Cone::lean_cylinder` (solidcore#1545), for a cone the same edit on
 /// [`Cone::base_mut`]. Refused ([`cannot_draft`]) when the pull does not run along the axis, the
-/// axis lies in the neutral plane, or the cone would close within the face's span;
+/// axis is parallel to the neutral plane, the neutral plane is at or past the cone's apex, or the
+/// cone would close within the face's span;
 /// [`Error::Unsupported`] when the cone's frame or net cannot be read or edited.
 #[allow(clippy::too_many_arguments)] // the capi's drafted_cone
 fn drafted_cone(
@@ -528,7 +529,7 @@ fn drafted_cone(
     let axis = frame.origin();
     let toward = z.dot(normal);
     if toward.abs() < 1e-12 {
-        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis lies in the neutral plane")));
+        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane")));
     }
     // The hinge circle's centre: the axis on the neutral plane, at the cone's height v0.
     let v0 = (origin - axis).dot(normal) / toward;
@@ -540,7 +541,10 @@ fn drafted_cone(
     let r0 = cyl.radius(v0);
     let slope = (cyl.radius(1.0) - cyl.radius(0.0)) * sense;
     let turned = (slope.atan() - s * angle).tan();
-    if !(r0 > 0.0) || !turned.is_finite() {
+    if !(r0 > 0.0) {
+        return Ok(Err(cannot_draft("the neutral plane is at or past a drafted cone's apex")));
+    }
+    if !turned.is_finite() {
         return Ok(Err(cannot_draft(CONE_CLOSES)));
     }
     if cyl.is_cylinder() {
