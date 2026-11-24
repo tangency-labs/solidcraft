@@ -124,7 +124,7 @@ the user grants it, as folders are:
 | Group | Commands |
 |---|---|
 | `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
-| `doc` | `doc.*`: opening, recovering or switching designs |
+| `doc` | `doc.*`: opening, recovering or switching designs, and `doc.info`: the open design's file |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
 
@@ -143,6 +143,13 @@ that id's stored grants with the manifest's requests; another plugin's grants ne
 A hand-installed package with no grant record receives no groups or folders. Removing a package
 through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
 package. These are host preferences, never design data.
+
+`doc.info` (group `doc`, effect `read`) reports the design a run started on, as it was before the
+run: `path`, `read_only`, `unsaved`, `disk` and `document_id`. `run_package` records them in
+`AppState::caller_design`. The scratch keeps `path` empty, so a save in the run never defaults to
+the user's file. `Session::source_path` carries the file name through the desktop worker's copies,
+for `doc.info` only. A design the run opens itself answers for itself. Outside a run, `doc.info`
+reports the session's own design.
 
 ## Versions and capabilities
 

@@ -1,8 +1,8 @@
 {
   "ar": {
-    "POINT AT AVERAGE OF POINTS": "نقطة في منتصف عدة نقاط",
-    "cmd.construct_point_average": "نقطة في منتصف عدة نقاط",
-    "help.construct.point.average": "ينشئ نقطة إنشاء في منتصف نقطتين أو أكثر تحددها؛ وعند نقطتين تكون هي النقطة في منتصف المسافة بينهما. تتبع النقطة الجديدة النقاط التي حددتها عندما تتحرك."
+    "POINT AT AVERAGE OF POINTS": "نقطة عند متوسط النقاط",
+    "cmd.construct_point_average": "نقطة عند متوسط النقاط",
+    "help.construct.point.average": "ينشئ نقطة إنشاء عند متوسط مواضع نقطتين أو أكثر تحددها؛ ومع نقطتين تكون هي النقطة الواقعة في منتصف المسافة بينهما. تتبع النقطة الجديدة النقاط التي حددتها عندما تتحرك."
   },
   "de": {
     "POINT AT AVERAGE OF POINTS": "PUNKT IN DER MITTE MEHRERER PUNKTE",

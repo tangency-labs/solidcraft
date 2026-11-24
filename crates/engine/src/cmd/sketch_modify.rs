@@ -4722,7 +4722,11 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             let mut drawn_ids = Vec::new();
             for (wire, plane) in &drawn {
                 let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)).collect();
-                drawn_ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                drawn_ids.push(match (wire.arc, wire.control) {
+                    (Some(_), _) => sk.add_drawn_arc_in(&fit, wire.space)?,
+                    (None, Some(control)) => sk.add_drawn_control_in(&fit, control.degree, wire.space)?,
+                    (None, None) => sk.add_drawn_wire_in(&fit, wire.space)?,
+                });
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
             if let Some(target) = target.filter(|_| !drawn_ids.is_empty()) {

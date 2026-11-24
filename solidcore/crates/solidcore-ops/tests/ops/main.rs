@@ -15,6 +15,8 @@
 
 #[path = "../analytic_cv_edit.rs"]
 mod analytic_cv_edit;
+#[path = "../bead.rs"]
+mod bead;
 #[path = "../birail.rs"]
 mod birail;
 #[path = "../blend.rs"]
