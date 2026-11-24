@@ -3265,11 +3265,11 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
 
 /// #18671: the ledge's operand asked 2.5e-4 wide, below the 7.4e-4 its strips settle at
 /// ([`the_ledge_corner_rolls_over_across_the_bores_tangent_seam`]), ends at its floor: the
-/// enclosure's least width (the strips' least widths however they are cut) is past 2.5e-4,
-/// so no refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so
-/// no refinement narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
-/// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`]
-/// (131,375 cells, 129,094 of them strip cells) for 7.43e-4.
+/// enclosure's least width (the strips' least widths however they are cut) is past 2.5e-4, so no
+/// refinement reaches it, and the enclosure is within 2.5e-4 of that least width, so no refinement
+/// narrows it by more than the width asked. It still holds the operand's closed-form volume, and it
+/// takes well under a quarter of the cell budget: before, it spent all of [`CELL_BUDGET`] (131,375
+/// cells, 129,094 of them strip cells) for 7.43e-4.
 #[test]
 fn the_ledge_operand_asked_below_its_strips_ends_at_its_floor() {
     use solidcore::mass::enclosure::{enclose_volume, EnclosureStop, CELL_BUDGET};

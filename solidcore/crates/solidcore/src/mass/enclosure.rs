@@ -187,11 +187,10 @@ pub struct VolumeEnclosure {
     /// below the floor; otherwise a width asked below it ends at [`EnclosureStop::Floor`],
     /// [`EnclosureStop::Budget`] or [`EnclosureStop::Exhausted`].
     pub floor: f64,
-    /// A lower bound, rounded down, of the width of every enclosure refining can still give
-    /// (the fixed terms and each strip cell's least width however it is cut;
-    /// [`Work::strip_cell`]): no width below it is reached, and the result is at least this
-    /// wide. Asked a width below it, refining ends at [`EnclosureStop::Floor`] once the
-    /// enclosure is at most this plus the width asked.
+    /// A lower bound, rounded down, of the width of every enclosure refining can still give (the
+    /// fixed terms and each strip cell's least width however it is cut): no width below it is
+    /// reached, and the result is at least this wide. Asked a width below it, refining ends at
+    /// [`EnclosureStop::Floor`] once the enclosure is at most this plus the width asked.
     pub least: f64,
     /// Why refinement ended.
     pub stop: EnclosureStop,
@@ -221,17 +220,15 @@ pub enum VolumeSign {
 }
 
 /// An enclosure of the volume of the closed body `b` at most `width` wide
-/// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within
-/// [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
-/// ([`EnclosureStop::Exhausted`]). A width below the enclosure's [`VolumeEnclosure::least`]
-/// is not reached: refining ends at [`EnclosureStop::Floor`] once the enclosure is at most
-/// that least width plus `width`, so no refinement could narrow it by more than `width`
-/// (the answer is as close to the narrowest any refinement gives as `width` asks of the
-/// volume). A width below the
-/// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection
-/// of every enclosure summed along the way (each holds the volume), so a tighter `width` is
-/// never answered wider by further refinement.
-/// Missing UV trim curves are made on `b`, as
+/// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within [`CELL_BUDGET`]
+/// refinement cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
+/// ([`EnclosureStop::Exhausted`]). A width below the enclosure's [`VolumeEnclosure::least`] is not
+/// reached: refining ends at [`EnclosureStop::Floor`] once the enclosure is at most that least
+/// width plus `width`, so no refinement could narrow it by more than `width` (the answer is as
+/// close to the narrowest any refinement gives as `width` asks of the volume). A width below the
+/// [`VolumeEnclosure::floor`] alone is still refined toward. The result is the intersection of
+/// every enclosure summed along the way (each holds the volume), so a tighter `width` is never
+/// answered wider by further refinement. Missing UV trim curves are made on `b`, as
 /// [`super::integrator::properties::brep_volume_default`] makes them.
 ///
 /// # Errors
@@ -331,14 +328,13 @@ pub fn enclose_face_area(
     w.refine(|e| e.hi - e.lo <= width, |_, _| false, absolute(width))
 }
 
-/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
-/// magnitude wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives
-/// within [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Floor`], [`EnclosureStop::Budget`],
-/// [`EnclosureStop::Exhausted`]),
-/// as [`enclose_face_area`]
-/// refines it. The width asked follows the enclosure as it narrows, in one refinement: no
-/// rough first enclosure is needed to size it, and no restart re-evaluates an earlier
-/// run's cells. An unbounded enclosure never counts as reached.
+/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own magnitude
+/// wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives within
+/// [`CELL_BUDGET`] refinement cells ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]) or
+/// within the width asked of the least width any refinement gives ([`EnclosureStop::Floor`]), as
+/// [`enclose_face_area`] refines it. The width asked follows the enclosure as it narrows, in one
+/// refinement: no rough first enclosure is needed to size it, and no restart re-evaluates an
+/// earlier run's cells. An unbounded enclosure never counts as reached.
 ///
 /// # Errors
 ///
@@ -2171,7 +2167,8 @@ impl<'a> Work<'a> {
     /// refining can make `done` hold; [`EnclosureStop::Settled`]), the least width
     /// ([`Work::least`]) is past every width `asked` of an enclosure inside the enclosure
     /// (`None`: `done` is not a width) while the enclosure is at most that least width plus
-    /// the least width asked ([`EnclosureStop::Floor`]), the refinement budget is spent, or no cell is left to cut. The result is the
+    /// the least width asked ([`EnclosureStop::Floor`]), the refinement budget is spent, or
+    /// no cell is left to cut. The result is the
     /// intersection of every enclosure summed (each holds the volume): rounding that grows
     /// faster than the cells shrink does not widen it. Two enclosures that do not overlap mean
     /// one of them is not sound, which no cell's construction allows: a defect
