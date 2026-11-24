@@ -71,6 +71,39 @@ fn wall_outer_loop(b: &Brep, face: usize, axis: Vec3) -> Option<&[OrientedEdge]>
     fours.map(|e| (e, span(e))).filter(|(_, s)| s.is_finite()).max_by(|x, y| x.1.total_cmp(&y.1)).map(|(e, _)| e)
 }
 
+/// Whether a profile's box overlaps, by more than `tol`, the box of any loop of wall face `face`
+/// other than its outer one (an earlier emboss's footprint or an opening), in the profiles' wall
+/// coordinates: arc length from `radial`, on the turn from `alo`, and height along the axis.
+fn wall_loops_overlap(b: &Brep, face: usize, mapped: &[Region2], frame: (Vec3, Vec3, Vec3, Vec3), r: f64, alo: f64, tol: f64) -> Result<bool> {
+    let (o, axis, radial, tangent) = frame;
+    let (Some(outer), Some(f)) = (wall_outer_loop(b, face, axis), b.faces.get(face)) else { return Ok(false) };
+    let union = |(a, z): (Vec2, Vec2), (l, h): (Vec2, Vec2)| (Vec2::new(a.x.min(l.x), a.y.min(l.y)), Vec2::new(z.x.max(h.x), z.y.max(h.y)));
+    let empty = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    let profiles: Vec<(Vec2, Vec2)> = mapped.iter().map(|m| m.outer.segs.iter().map(seg_box).fold(empty, union)).collect();
+    for l in &f.loops {
+        let Loop::Edges { edges } = l else { continue };
+        if std::ptr::eq(edges.as_slice(), outer) {
+            continue;
+        }
+        let mut lb = empty;
+        for u in edges {
+            let e = b.edges.get(u.edge as usize).ok_or_else(|| fail("edge"))?;
+            let c = CurveEval::new(&e.curve).map_err(|_| fail("wall loop curve"))?;
+            let [t0, t1] = solidcore_ops::label::edge_curve_interval(e).ok_or_else(|| fail("wall loop interval"))?;
+            for k in 0..=16 {
+                let p = c.point(t0 + (t1 - t0) * f64::from(k) / 16.0).ok_or_else(|| fail("wall loop point"))?;
+                let a = alo + (angle(p, o, axis, radial, tangent) - alo).rem_euclid(std::f64::consts::TAU);
+                let q = Vec2::new(a * r, (p - o).dot(axis));
+                lb = union(lb, (q, q));
+            }
+        }
+        if profiles.iter().any(|(l, h)| h.x.min(lb.1.x) - l.x.max(lb.0.x) > tol && h.y.min(lb.1.y) - l.y.max(lb.0.y) > tol) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The angles a wall face spans about the axis, seen from `radial`: from one of its arcs about
 /// the axis (a face whose outer loop has four edge uses: two arcs and two lines, or a whole turn's two
 /// circles and its seam used twice).
@@ -604,6 +637,9 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             crate::numbered::number_regions(&unoriented).iter().map(|r| r.oriented().map_loops(split_single)).collect();
         let mapped: Vec<Region2> = numbered.iter().map(NumberedRegion::region).collect();
         validate_profiles(&mapped, tol)?;
+        if wall_loops_overlap(&rec, fi, &mapped, (o, axis, radial, tangent), r, alo, tol)? {
+            return Err(fail("the profile runs over an earlier emboss or opening in the wall"));
+        }
         if qualify {
             let segment = mapped.first().and_then(|region| region.outer.segs.first()).ok_or_else(|| fail("empty profile"))?;
             let p = segment.point_at(0.5);
@@ -2533,8 +2569,7 @@ mod tests {
         let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
         for depth in [1., -1.] {
             let one = emboss_cylinder(&body, &plane(), &[rect(12., 16.)], depth).unwrap();
-            let e = emboss_cylinder(&one, &plane(), &[rect(10., 14.)], depth).unwrap_err().to_string();
-            assert!(e.contains(if depth > 0. { "runs into another part" } else { "breaks through another face" }), "{e}");
+            refused_for_overlap(emboss_cylinder(&one, &plane(), &[rect(10., 14.)], depth));
         }
     }
 
