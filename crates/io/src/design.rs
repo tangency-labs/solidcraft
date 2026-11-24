@@ -426,7 +426,9 @@ fn write_container(
         && writer.room(2, manifest.len().saturating_add(data.len()), budget)
     {
         writer.part("cache/preview.json", &manifest, false)?;
-        writer.part("cache/preview.bin", &data, false)?;
+        // Deflated: the window's saves keep it in every design (#19328), and the meshes shrink
+        // well, so a design grows by much less than the meshes' raw size.
+        writer.part("cache/preview.bin", &data, true)?;
     }
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
