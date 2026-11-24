@@ -155,8 +155,9 @@ fn with_mains_choices(u: &dyn UnitDiff, case: &crate::Case) -> (Value, Flips) {
             let main = match c.seam {
                 Seam::AnalyticCopy => vec![0],
                 Seam::SplitTrims => c.input.to_vec(),
-                // (main had no carry gate; its flips are not a class of their own: the
-                // gate turns away only trims an exact copy or a kept trim brought)
+                // (main had no carry gate: put back to a carry, uncounted, so a DATA row the
+                // gate also moves within the comparator is listed by its class flips only;
+                // the rows the gate alone moved are `UNGATED_LINES`)
                 Seam::CarryGate => return Ok(vec![0]),
                 _ => return c.own,
             };
@@ -404,8 +405,9 @@ pub(crate) fn carry_gated(unit_id: &str, case: &str) -> bool {
 /// carried, as before the gate), it is its line before the gate under the goldens' rule
 /// ([`diff`] with the unit's floors) and at least one call turned a trim away; run as is,
 /// it is its committed golden line. So the gate's choices are the rows' only move, and each
-/// trim it turned away had a same-parameter bound past its edge's tolerance (or none
-/// enclosed): the gate turns away nothing else.
+/// trim it turned away was one the gate refused (by the gate's code in
+/// `copy_uv_trim_curves_of_other_face`: a same-parameter bound past its edge's tolerance, or
+/// none enclosed; the hook sees the choice, not the bound).
 #[test]
 fn carry_gate_rows_move_only_through_the_gate() {
     let mut failures = Vec::new();

@@ -3626,8 +3626,9 @@ pub fn trim_image_gap_bound_within(
 /// exact data (a surface with no exact net at the trim, a curve without exact data, a UV
 /// line, whose rounding moves its parameters, a range outside either curve's domain) or the
 /// floor is not finite; a pair with exact data whose gap it does not enclose (a net whose
-/// own distance from the surface is not enclosed among them) gets `Some(f64::INFINITY)`,
-/// since nothing proves that gap.
+/// own distance from the surface is not enclosed among them, a bisection that does not
+/// enclose a piece, or a slack that is not finite) gets `Some(f64::INFINITY)`, since nothing
+/// proves that gap.
 ///
 /// # Errors
 ///
