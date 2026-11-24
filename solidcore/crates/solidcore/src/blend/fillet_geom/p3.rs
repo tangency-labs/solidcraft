@@ -104,7 +104,7 @@ use crate::blend::fillet_intersector;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, FilletSetUp};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -344,8 +344,8 @@ impl FilletBrep {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` without a main vertex, solver or face; `SM_ERR` when `v`
-    /// is on no rail of a fillet geometry; [`SolidError::InvalidInput`] for a
+    /// `SM_ERR_NULL_POINTER` without a main vertex (the caller's set-up,
+    /// [`FilletSetUp::MateMainVertex`]), solver or face; `SM_ERR` when `v` is on no rail of a fillet geometry; [`SolidError::InvalidInput`] for a
     /// classification object of the wrong kind, a main vertex without a rail-end
     /// vertex use (upstream dereferences `NULL`), a solver missing from `solvers` or
     /// mates nested deeper than [`MAX_MATE_DEPTH`]; those of
@@ -414,10 +414,14 @@ impl FilletBrep {
         }
 
         // our mate (which is the 'real' fillet vertex) must be done first.
-        let main_fv = self
-            .fillet_vertex(v)?
-            .mate(0)
-            .ok_or_else(|| broken_link(OP_MATE, MATE_NO_MAIN))?;
+        let main_fv = self.fillet_vertex(v)?.mate(0).ok_or_else(|| {
+            Failure::new(
+                OP_MATE,
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::MateMainVertex),
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         if !self.fillet_vertex(main_fv)?.is_processed() {
             // upstream ignores this status; fork 9b7cd48 passes it on (SER)
             main(self, target, solvers, main_fv)?;
@@ -2021,9 +2025,6 @@ fn end_drop_failed<T>(drop: Result<T>, at_end: bool, tolerance: f64) -> SolidErr
     }
 }
 
-/// Why a mate vertex has no main vertex.
-const MATE_NO_MAIN: &str = "the mate vertex has no main vertex, though the kernel types a \
-     vertex as a mate only with its main vertex set";
 /// Why no rail ends at a mate vertex.
 const MATE_NO_RAIL: &str = "no rail of a fillet geometry ends at the mate vertex, though the \
      kernel makes a mate vertex at a rail's end";
@@ -2365,7 +2366,7 @@ mod tests {
     }
 
     #[test]
-    fn mate_without_main_vertex_is_a_null_pointer() {
+    fn mate_without_main_vertex_is_the_callers_set_up() {
         let k = Kernel::default();
         let mut fb = FilletBrep::new();
         let a = vertex(&mut fb, &k, Point3::new(0.0, 0.0, 0.0));
@@ -2375,7 +2376,9 @@ mod tests {
         assert_eq!(
             failure(&e),
             (
-                Some(&BlendFailure::Defect { why: MATE_NO_MAIN }),
+                Some(&BlendFailure::FilletSetUpInvalid(
+                    FilletSetUp::MateMainVertex
+                )),
                 Some(SM_ERR_NULL_POINTER)
             ),
             "{e:?}"
