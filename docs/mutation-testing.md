@@ -1,11 +1,9 @@
 # Mutation testing
 
-SolidCraft will move from truck to solidcore (#1597). The tests that have to catch regressions
-across that switch are the ones that don't depend on the kernel: the reference tests
+SolidCraft runs on solidcore. The tests that have to catch kernel regressions are the ones that don't depend on the kernel: the reference tests
 ([docs/oracle.md](oracle.md)) and the engine's command tests. The reference for what the kernel
 builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
-[docs/kernel-ladder.md](kernel-ladder.md)). Most of the kernel's own unit tests call
-truck-specific code and go away with it.
+[docs/kernel-ladder.md](kernel-ladder.md)).
 
 Mutation testing checks those suites. [cargo-mutants](https://mutants.rs) makes small changes to
 the source, one at a time (`*` becomes `/`, a condition is negated, a function returns a default

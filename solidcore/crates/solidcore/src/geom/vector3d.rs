@@ -85,6 +85,7 @@
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -425,6 +426,26 @@ impl Vec3 {
         (parallel, anti)
     }
 
+    /// Not upstream: this direction, reversed when it points more than a right angle away from
+    /// `like` ([`Vec3::parallel_sense`]'s anti-parallel flag): a line's direction given the sense
+    /// of another, as a turn about an edge found again keeps the sense it was picked with.
+    /// `None` when either has zero length or a coordinate that is not finite. The two are
+    /// compared scaled by their largest coordinate, so a vector whose squared length overflows
+    /// still has its sense.
+    #[must_use]
+    pub fn with_sense_of(self, like: Self) -> Option<Self> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self) || !finite(like) {
+            return None;
+        }
+        if self.length_squared() <= EFF_ZERO_SQ || like.length_squared() <= EFF_ZERO_SQ {
+            return None;
+        }
+        let scaled = |v: Self| v * (1.0 / v.x.abs().max(v.y.abs()).max(v.z.abs()));
+        let anti = scaled(self).parallel_sense(scaled(like), 0.0).1?;
+        Some(if anti { -self } else { self })
+    }
+
     /// True when `self` and `o` are perpendicular within `ang_tol_deg` degrees
     /// (`IsPerpendicularTo`). Zero-length vectors are perpendicular to nothing.
     #[must_use]
@@ -573,9 +594,9 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::vector3d::Vec3::solve_two_linear_equations",
-            "the system is singular",
+            GeomFailure::Singular { measure: denom },
         ))
     }
 
@@ -601,9 +622,9 @@ impl Vec3 {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(SolidError::geom_failed(
+            _ => Err(SolidError::geom(
                 "geom::vector3d::Vec3::component_mut",
-                "the component index is out of range",
+                GeomFailure::IndexOutOfRange { index, len: 3 },
             )),
         }
     }
@@ -683,9 +704,11 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::geom_failed(
+                // reached when `self` overflows: unitizing a vector whose squared
+                // length is infinite gives a zero vector
+                return Err(SolidError::geom(
                     "geom::vector3d::Vec3::make_unit_ortho_vectors",
-                    "no perpendicular vector found",
+                    GeomFailure::NoPerpendicular,
                 ));
             }
         }
@@ -1070,6 +1093,41 @@ mod tests {
                 + PI / 4.0)
                 .abs()
                 < 1e-12
+        );
+    }
+
+    #[test]
+    fn a_direction_takes_the_sense_of_another_and_none_without_length() {
+        let y = Vec3::new(0.1, 1.0, 0.0);
+        assert_eq!(
+            Vec3::new(0.0, -2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        // Not along one line at all: the sense of the nearer half.
+        assert_eq!(
+            Vec3::new(1.0, -1.0, 0.0).with_sense_of(Vec3::new(0.0, 1.0, 0.0)),
+            Some(Vec3::new(-1.0, 1.0, 0.0))
+        );
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0).with_sense_of(y), None);
+        assert_eq!(y.with_sense_of(Vec3::new(0.0, 0.0, 0.0)), None);
+        assert_eq!(Vec3::new(f64::NAN, 1.0, 0.0).with_sense_of(y), None);
+        // Squared lengths that overflow keep their sense (#21447 review).
+        assert_eq!(
+            Vec3::new(1e200, 0.0, 0.0).with_sense_of(Vec3::new(-1.0, 0.0, 0.0)),
+            Some(Vec3::new(-1e200, 0.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 1e200, 0.0).with_sense_of(Vec3::new(0.0, 1e300, 0.0)),
+            Some(Vec3::new(0.0, 1e200, 0.0))
+        );
+        // Tiny but above the zero-length tolerance: still compared.
+        assert_eq!(
+            Vec3::new(0.0, -1e-9, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 1e-9, 0.0))
         );
     }
 

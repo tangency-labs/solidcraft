@@ -162,6 +162,13 @@ impl Bent {
         self.0.wrapped(vec2(p))
     }
 
+    /// Whether the flat line from `a` to `b` runs straight across the bend, so that it folds to
+    /// an arc round the bend's axis.
+    #[must_use]
+    pub fn straight_across(&self, a: Vec2, b: Vec2) -> bool {
+        self.0.straight_across(vec2(a), vec2(b))
+    }
+
     /// Where a point of space lies in the bend: the point of the flat zone whose fiber runs
     /// through it, how deep it lies, and the way deeper. `None` on the bend's axis.
     #[must_use]

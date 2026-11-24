@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Lista rörelsestudier",
   "cmd.motion_play": "Spela upp rörelsestudie",
   "cmd.motion_plot": "Rita rörelsestudie",
+  "cmd.motion_simulate": "Simulera rörelse",
   "cmd.motion_study": "Rörelsestudie",
   "cmd.motion_trace": "Rörelsespår",
   "cmd.motion_trace_edit": "Redigera rörelsespår",

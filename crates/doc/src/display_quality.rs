@@ -160,6 +160,23 @@ mod tests {
         }
     }
 
+    /// Normal quality, and the reference mesh, plan at exactly the kernel's display tolerance: an
+    /// imported part's check plans it there and keeps the plan, which both then take
+    /// ([`solidcraft_kernel::Body::keeping_plans`]). A tolerance a bit off would plan it again.
+    #[test]
+    fn normal_and_the_reference_mesh_take_the_kernels_display_tolerance() {
+        use solidcore_record::Vec3;
+        for size in [0.2, 1.0, 37.5, 1200.0] {
+            let n = DisplayQuality::Normal;
+            let normal = solidcraft_kernel::MeshTolerance { chord: n.chord(size), angle: Some(n.angle()) };
+            assert_eq!(normal.key(), solidcraft_kernel::display_tolerance(size).key(), "size {size}");
+        }
+        let body = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 50.0).unwrap();
+        let mb = crate::ModelBody::new("Body1".into(), body.clone(), 1);
+        let reference = solidcraft_kernel::MeshTolerance { chord: mb.display_tol(), angle: Some(solidcraft_kernel::DISPLAY_ANGLE) };
+        assert_eq!(reference.key(), solidcraft_kernel::display_tolerance(body.size()).key());
+    }
+
     /// Each level keeps its own plan: finer levels draw a round body with more triangles and
     /// closer to the surface, and the reference mesh the model reads never changes.
     #[test]

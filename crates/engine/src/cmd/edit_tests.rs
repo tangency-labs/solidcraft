@@ -1303,6 +1303,21 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// Once every feature is deleted no body keeps a number, so the next body is `Body1` again, in a
+/// design that was saved and opened in between (#20922).
+#[test]
+fn deleting_every_body_feature_starts_body_names_again_at_body1() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [x, 0, 0], "name": name}));
+    }
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None, None);
+    run(&mut s, "timeline.delete", json!({"features": ["A", "B"]}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "name": "C"}));
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, vec!["Body1".to_string()]);
+}
+
 /// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
 /// for the features after the marker too (#14008): a body made at the marker does not take the
 /// number of a later body, so the later bodies keep the names they were saved with and a combine
@@ -1609,6 +1624,92 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
 }
 
+/// #18107: Invert Selection swaps faces for the other faces of their body, edges for the other
+/// edges of theirs, and bodies for the other shown bodies. A body selected with some of its faces
+/// inverts inside it; items of other kinds stay; nothing to invert is refused. No undo step.
+#[test]
+fn select_invert_swaps_each_kind_within_its_body_and_keeps_history() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    let history = (s.undo.len(), s.redo.len());
+    let faces = |s: &Session, body: &str| -> Vec<usize> {
+        s.selection
+            .iter()
+            .filter_map(|x| match x {
+                Sel::Face { body: b, index, .. } if b == body => Some(*index),
+                _ => None,
+            })
+            .collect()
+    };
+    // Two faces of A: the other four.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0},{"type":"face","body":"A","index":3}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 4, 5]);
+    assert_eq!(s.selection.len(), 4, "only faces of A");
+    // Inverting again gives the first two back.
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 3]);
+    // One edge of B: the other eleven.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"B","index":5}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection.len(), 11);
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, index, .. } if body == "B" && *index != 5)));
+    // A body: the other shown bodies; a hidden one is left out.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }, Sel::Body { name: "C".into() }]);
+    s.visibility.hidden_bodies.push("C".into());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(s.selection, [Sel::Body { name: "B".into() }]);
+    // A body with a face of it selected: the other faces of that body, not the other bodies.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":2},{"type":"feature","id":1}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [0, 1, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "the body is where the faces invert");
+    assert!(s.selection.contains(&Sel::Feature { id: 1 }), "a feature stays selected");
+    // Another body beside it: A is still not taken back as a whole body.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":0},{"type":"body","name":"B"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "neither A nor B (C is hidden)");
+    // Nothing of those kinds: refused, the selection unchanged.
+    run(&mut s, "select.set", json!({"items":[{"type":"feature","id":1}]}));
+    let before = s.selection.clone();
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert_eq!(s.selection, before);
+    run(&mut s, "select.clear", json!({}));
+    assert!(s.execute("select.invert", &json!({})).is_err());
+    assert!(s.execute("select.invert", &json!({"kind":"face"})).is_err(), "no parameters");
+    assert_eq!((s.undo.len(), s.redo.len()), history, "not an undo step");
+}
+
+/// Invert Selection leaves out bodies a hidden folder hides, and its 10,000 limit counts the
+/// items it keeps; a refusal leaves the selection as it was.
+#[test]
+fn select_invert_skips_folder_hidden_bodies_and_counts_kept_items_in_its_limit() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    assert!(!s.body_visible("B"));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert!(s.selection.is_empty(), "B is hidden by its folder: {:?}", s.selection);
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+
+    // 9,999 kept features and one face of A: five faces more would be 10,004 items.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0}]}));
+    s.selection.extend((1..10_000).map(|id| Sel::Feature { id }));
+    let before = s.selection.clone();
+    let err = s.execute("select.invert", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("too many items"), "{err}");
+    assert_eq!(s.selection, before, "the selection stays as it was");
+}
+
 #[test]
 fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refuses_hostile_input() {
     let mut s = Session::default();
@@ -1875,6 +1976,17 @@ fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
     assert!(!spec.undoable && !spec.reads_model);
     assert_eq!(spec.tab, "", "palette command, without a ribbon placement");
     assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"reset":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
+}
+
+#[test]
+fn app_bar_customize_validates_without_opening_or_changing_a_design() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarCustomize").unwrap();
+    assert!(spec.info(&s).enabled);
+    assert!(!spec.undoable);
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"available":true}));
     assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
 }
 
@@ -2669,4 +2781,22 @@ fn a_hole_position_edited_with_an_expression_follows_it() {
     assert_eq!(hole["position"][0], 20.0, "`position` keeps the point the hole was made at: {hole}");
     let id = s.doc.find_feature("H").unwrap().id;
     assert_eq!(s.model.result(id).and_then(|r| r.error.clone()), None, "the hole rebuilds");
+}
+
+/// `select.mode` (#4255) names every selection mode and gives it back; anything else is refused.
+/// A window setting: the design, its history and the selection are untouched.
+#[test]
+fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Body1"}]}));
+    let (doc, undo, selection) = (s.doc.to_json(), s.undo.len(), s.selection.clone());
+    for mode in crate::PickMode::ALL {
+        let name = serde_json::to_value(mode).unwrap();
+        assert_eq!(run(&mut s, "select.mode", json!({"mode": name})), json!({"mode": name}));
+    }
+    for p in [json!({}), json!({"mode": "edges"}), json!({"mode": 1}), json!({"mode": null}), json!({"mode": "Bodies"})] {
+        assert!(s.execute("select.mode", &p).is_err(), "{p}");
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
 }
