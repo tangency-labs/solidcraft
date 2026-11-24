@@ -31,9 +31,9 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
     if let Some(name) = str_(p, "body").filter(|b| !b.trim().is_empty()) {
         return Ok(name.to_owned());
     }
-    let selected: Vec<&str> = s.selection.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.as_str()) } else { None }).collect();
+    let selected: Vec<String> = s.selected_items()?.into_iter().filter_map(|x| if let Sel::Body { name } = x { Some(name) } else { None }).collect();
     match selected.as_slice() {
-        [name] => Ok((*name).to_owned()),
+        [name] => Ok(name.clone()),
         [] => Err(bad(cmd, "select a mesh body")),
         _ => Err(bad(cmd, "select one mesh body")),
     }

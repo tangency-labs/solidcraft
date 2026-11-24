@@ -54,7 +54,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
-    s.selection.clear();
+    s.clear_selection();
     Ok(r)
 }
 
@@ -145,19 +145,30 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
-    // A whole-body selection is a scope: resolve it once, here, into the bodies it covers.
-    if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
-        let mut params = p.clone();
-        params["items"] = serde_json::to_value(s.selected_items()?).map_err(|e| bad(cmd, e.to_string()))?;
-        params["all_bodies"] = json!(false);
-        return apply(s, &params);
-    }
-    let items: Vec<Sel> = match p.get("items") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 10_000 => {
-            a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+    let items: Vec<Sel> = if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
+        // A whole-body selection is a scope: resolve it once, here, into the bodies it covers,
+        // however many (the 10000-item cap is for lists a caller sends). A locked body stays, as
+        // it does when the selection names it (the app leaves it out).
+        let locked = &s.visibility.locked_bodies;
+        let mut items: Vec<Sel> = s.selected_items()?.into_iter().filter(|x| !matches!(x, Sel::Body { name } if locked.contains(name))).collect();
+        // Any items named beside the scope go too.
+        if let Some(Value::Array(a)) = p.get("items") {
+            for v in a.iter().take(10_000) {
+                let x: Sel = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))?;
+                if !items.contains(&x) {
+                    items.push(x);
+                }
+            }
         }
-        Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        items
+    } else {
+        match p.get("items") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(a)) if a.len() <= 10_000 => {
+                a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+            }
+            Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        }
     };
     if items.iter().any(|x| matches!(x, Sel::Drawing { .. })) || s.sheet_sketching() {
         return delete_in_drawing(s, p, &items);

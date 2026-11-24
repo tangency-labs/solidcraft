@@ -73,7 +73,7 @@ fn pair(s: &Session, st: &solidcraft_doc::ModelState, p: &Value, cmd: &str) -> R
         (Some(a), Some(b)) => (a, b),
         (None, None) => {
             let selected: Vec<String> =
-                s.selection.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+                s.selected_items()?.into_iter().filter_map(|x| if let Sel::Body { name } = x { Some(name) } else { None }).collect();
             let all: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
             match (selected.as_slice(), all.as_slice()) {
                 ([a, b], _) | (_, [a, b]) => (a.clone(), b.clone()),

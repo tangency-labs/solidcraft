@@ -35,6 +35,10 @@ pub struct SelectionDeleteParams {
     /// being edited) are named in `skipped`.
     #[serde(default)]
     pub items: Option<SelectionItems>,
+    /// Delete every shown body as well, by scope rather than by name: what Select All selected
+    /// (`selection.get` reports it as `all_bodies`). Locked bodies stay. Default: false.
+    #[serde(default)]
+    pub all_bodies: Option<bool>,
     /// Components to delete, by id or name (not the design itself). Only the first 10000 are
     /// read.
     #[serde(default)]
