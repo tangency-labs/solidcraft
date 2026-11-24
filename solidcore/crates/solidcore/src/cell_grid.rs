@@ -65,6 +65,8 @@ pub use lattice::MAX_CELLS;
 
 /// Most sides of a polygon cell.
 pub const MAX_SIDES: u32 = 64;
+/// Most lattice lines a snapped field edge may be moved in.
+pub const MAX_SNAP_INSET: u32 = 1000;
 /// Largest coordinate (mm) of the field or the anchor.
 pub const MAX_COORD: f64 = 1e9;
 /// Smallest cell size and web (mm).
@@ -135,6 +137,9 @@ pub struct CellGridSpec {
     pub clip: Clip,
     /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
     pub keepout_clip: Option<Clip>,
+    /// With [`Clip::Snap`], how many lattice lines further in each straight field edge moves
+    /// after it snaps (0: onto the nearest line). Keep-outs are not moved.
+    pub snap_inset: u32,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -152,6 +157,7 @@ impl Default for CellGridSpec {
             anchor: Vec2::ZERO,
             clip: Clip::Snap,
             keepout_clip: None,
+            snap_inset: 0,
             margin: 0.0,
         }
     }
@@ -179,6 +185,18 @@ impl CellGridSpec {
                 "the web must be from {MIN_SIZE} to {MAX_COORD} mm, not {}",
                 self.web
             )));
+        }
+        if self.snap_inset > MAX_SNAP_INSET {
+            return Err(CellGridError::Parameter(format!(
+                "the snap inset must be from 0 to {MAX_SNAP_INSET} lattice lines, not {}",
+                self.snap_inset
+            )));
+        }
+        if self.snap_inset > 0 && self.clip != Clip::Snap {
+            return Err(CellGridError::Parameter(
+                "a snap inset needs `clip: snap`: it moves the lines the field's edges snap to"
+                    .into(),
+            ));
         }
         if !(self.margin.is_finite() && (0.0..=MAX_COORD).contains(&self.margin)) {
             return Err(CellGridError::Parameter(format!(
@@ -371,6 +389,7 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
             &region,
             &lat,
             (field_clip == Clip::Snap, keepout_clip == Clip::Snap),
+            spec.snap_inset,
         );
         region = snapped;
         warnings.extend(notes);

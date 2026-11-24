@@ -6,17 +6,14 @@
 //! - `LoopNotPlanar`: a planar cap asked for a cylinder fillet's loop (two lines and two arcs
 //!   on the cylinder), which no plane holds;
 //! - `ExtensionRefused`: the faces along the loop asked to be extended by 0;
-//! - `TangentNeighbours`: a patch piece cut from a neighbour's extension only along an edge
-//!   the kernel proves smooth. `fillet1019`'s fillet that ends on the tangent corner round
-//!   was refused so until #15247 corrected the classification that left its patch open; it
-//!   now comes off, and the tests below prove the body it builds (no upstream file here
-//!   reaches this limit now);
+//! - `TangentNeighbours`: the two shoulders of a rib extend as far as each other,
+//!   sharing a smooth edge while their far edges remain off the loop;
 //! - `NotEnclosed`: a box face, whose neighbours, extended, run past it;
 //! - `ExtensionWithinTolerance`: the faces along a fillet's loop extended by less than the
 //!   distance within which the loop's vertices and the patch's are one point.
 //!
-//! The models are the upstream test files, read by the Rust reader when the pinned upstream
-//! checkout is present.
+//! The rib is swept from its profile here. The other models are read from the pinned
+//! upstream checkout when it is present.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,8 +24,7 @@
 use solidcore::blend::feature_executive::{FeatureExecutive, KeptFeature, RebuildBrepType};
 use solidcore::error::defeature::DefeatureFailure;
 use solidcore::error::{Reason, SM_ERR};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::enclose_volume;
 use solidcore::surface::implicit::AnalyticSupport;
 use solidcore::topology::brep::p1 as bp1;
@@ -37,7 +33,8 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel, SolidError};
+use solidcore::topology::FaceId;
+use solidcore::{Brep, EntityRef, Kernel};
 
 /// An upstream test file, read and arena-named as the goldens reader does.
 fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
@@ -55,10 +52,7 @@ fn read(k: &mut Kernel, file: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -83,37 +77,36 @@ fn limit(
     let mut k = Kernel::default();
     let mut b = read(&mut k, file)?;
     let faces = bp1::faces(&b, None).unwrap();
-    let before = faces.len();
-    let r = {
-        let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
-        ex.add_feature(
-            &mut k,
-            &[faces[face]],
-            base_rb,
-            RebuildBrepType::ExtendSurface,
-        )
-        .unwrap()
-        .unwrap();
+    Some(limit_on_faces(&mut k, &mut b, &[faces[face]], base_rb, ext))
+}
+
+fn limit_on_faces(
+    k: &mut Kernel,
+    b: &mut Brep,
+    removed: &[FaceId],
+    base_rb: RebuildBrepType,
+    ext: Option<f64>,
+) -> DefeatureFailure {
+    let before = bp1::faces(b, None).unwrap();
+    let error = {
+        let mut ex = FeatureExecutive::new(k, b).unwrap();
+        ex.add_feature(k, removed, base_rb, RebuildBrepType::ExtendSurface)
+            .unwrap()
+            .unwrap();
         if let Some(d) = ext {
             ex.set_base_ext_dist(d);
         }
-        ex.do_defeature(&mut k)
+        ex.do_defeature(k).unwrap_err()
     };
-    assert_eq!(
-        bp1::faces(&b, None).unwrap().len(),
-        before,
-        "{file} {face}: base changed"
+    assert_eq!(bp1::faces(b, None).unwrap(), before, "base changed");
+    assert!(
+        matches!(error.entity(), Some(EntityRef::Edge(_))),
+        "{error:?}"
     );
-    match &r {
-        Err(e @ SolidError::Failed(f)) => {
-            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
-            assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
-            match f.reason {
-                Reason::Defeature(d) => Some(d),
-                _ => panic!("{file} {face}: {r:?}"),
-            }
-        }
-        other => panic!("{file} {face}: a refusal naming its limit, got {other:?}"),
+    assert_eq!(error.sm_status(), Some(SM_ERR), "{error:?}");
+    match error.failure().map(|f| &f.reason) {
+        Some(Reason::Defeature(limit)) => *limit,
+        _ => panic!("expected a refusal naming its limit, got {error:?}"),
     }
 }
 
@@ -225,6 +218,21 @@ fn a_feature_per_fillet_of_fillet1019_takes_off_the_bottom_fillet() {
     certify_feature(&mut k, features, Removed::Bottom);
 }
 
+/// The three rounds as one feature, the base rebuilt by extending its surfaces and the
+/// feature from the other B-rep (the goldens' `fillet_group_fillet1019_rb23`): the base is
+/// the plain frustum ([`certify`]: on the bottom, the top and the four walls only, holding
+/// the frustum's volume) and the feature B-rep the three rounds' gaps as one solid
+/// ([`certify_feature`]).
+#[test]
+fn the_three_rounds_of_fillet1019_as_one_feature_leave_the_frustum() {
+    let mut k = Kernel::default();
+    let Some((mut b, features)) = defeatured(&mut k, &[&[3, 6, 8]], &[true]) else {
+        return;
+    };
+    certify(&mut k, &mut b, Removed::All);
+    certify_feature(&mut k, features, Removed::All);
+}
+
 #[test]
 fn a_box_face_is_refused_as_not_enclosed() {
     let Some(l) = limit(
@@ -236,6 +244,60 @@ fn a_box_face_is_refused_as_not_enclosed() {
         return;
     };
     assert!(matches!(l, DefeatureFailure::NotEnclosed { .. }), "{l:?}");
+}
+
+/// Removing the crown and flanks of a 2-wide rib leaves its raised outline on
+/// both end faces. The shoulders at y = 3 leave a gap if extended by 0.5 each.
+/// At 1 they meet at x = 0 in the same plane, but their free edges run past the
+/// ends of the rib and cannot close that outline.
+#[test]
+fn rib_shoulders_that_just_meet_leave_the_patch_open_at_a_tangent_edge() {
+    use solidcore::curve::curve::Curve;
+    use solidcore::math::{Point3, Vec3};
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::query::face::p1::calculate_bounding_box;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+
+    let mut k = Kernel::default();
+    let profile = [
+        (-5.0, 0.0),
+        (5.0, 0.0),
+        (5.0, 3.0),
+        (1.0, 3.0),
+        (1.0, 4.0),
+        (-1.0, 4.0),
+        (-1.0, 3.0),
+        (-5.0, 3.0),
+        (-5.0, 0.0),
+    ]
+    .map(|(x, y)| Point3::new(x, y, 0.0));
+    let outline: Vec<_> = profile
+        .windows(2)
+        .map(|ends| Curve::from(create_line_segment(ends[0], ends[1]).unwrap()))
+        .collect();
+    let curves: Vec<_> = outline.iter().map(Some).collect();
+    let mut body = create_linear_sweep(&mut k, &curves, Vec3::Z, 10.0, true).unwrap();
+    // Only the crown and the two flanks have their midpoint above the shoulders.
+    let rib: Vec<_> = bp1::faces(&body, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| calculate_bounding_box(&k, &body, f, false).unwrap().mid().y > 3.25)
+        .collect();
+    assert_eq!(rib.len(), 3);
+
+    let extend = RebuildBrepType::ExtendSurface;
+    assert_eq!(
+        limit_on_faces(&mut k, &mut body, &rib, extend, Some(0.5)),
+        DefeatureFailure::NotEnclosed {
+            extended_by: Some(0.5)
+        }
+    );
+    assert_eq!(
+        limit_on_faces(&mut k, &mut body, &rib, extend, Some(1.0)),
+        DefeatureFailure::TangentNeighbours {
+            within_deg: k.tolerances.ang_tol_deg
+        }
+    );
 }
 
 /// `box_with_large_fillet`'s fillet (face 6), its faces extended by 0.001: the loop's
@@ -623,6 +685,8 @@ struct Expected {
     without_top: I,
     gap_bottom: I,
     gap_top: I,
+    frustum: I,
+    gap_all: I,
 }
 
 fn expected(m: &Model, n: usize) -> Expected {
@@ -643,6 +707,8 @@ fn expected(m: &Model, n: usize) -> Expected {
         without_top: v_f - v3 - v6 + v36,
         gap_bottom: v3 - v36,
         gap_top: v8 - v68,
+        frustum: v_f,
+        gap_all: v3 + v6 + v8 - v36 - v68,
     }
 }
 
@@ -831,6 +897,8 @@ fn match_supports(k: &Kernel, b: &Brep, named: &[(&'static str, Sup)]) -> Vec<(&
 enum Removed {
     Bottom,
     Top,
+    /// All three rounds, as one feature: the base is the plain frustum.
+    All,
 }
 
 /// The surfaces bound (the faces' bound, [`bound`]) holds for points within `R0` = 50 of the
@@ -986,6 +1054,17 @@ fn certify(k: &mut Kernel, b: &mut Brep, removed: Removed) {
             ],
             e.without_top,
         ),
+        Removed::All => (
+            &[
+                ("bottom", 2),
+                ("top", 2),
+                ("wall x-", 2),
+                ("wall x+", 1),
+                ("wall y-", 2),
+                ("wall y+", 3),
+            ],
+            e.frustum,
+        ),
     };
     let what = format!("{removed:?} base");
     let built_delta = sound_on_model(k, b, &named, names, &what);
@@ -1030,6 +1109,19 @@ fn certify_feature(k: &mut Kernel, features: Vec<Option<Brep>>, removed: Removed
                 ("corner round", 1),
             ],
             e.gap_top,
+        ),
+        Removed::All => (
+            &[
+                ("bottom round", 1),
+                ("top round", 1),
+                ("corner round", 1),
+                ("bottom", 1),
+                ("top", 1),
+                ("wall x-", 1),
+                ("wall y-", 1),
+                ("wall y+", 2),
+            ],
+            e.gap_all,
         ),
     };
     let what = format!("{removed:?} feature");

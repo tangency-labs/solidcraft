@@ -553,12 +553,11 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
         let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", params));
         let Ok(out) = pasted else { return false };
+        // Move/Copy opens on it, to place it.
         if let Some(id) = out.get("occurrence").and_then(Value::as_u64) {
-            let mut movement = crate::browser::OccMove::new(id);
-            movement.path = parent_path;
-            movement.path.push(id);
-            movement.baseline = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform);
-            app.tree.occurrence_move = Some(movement);
+            let mut path = parent_path;
+            path.push(id);
+            crate::dialogs_move::open_on_occurrence(app, path, true);
         }
         app.set_status("Pasted linked component: use Move/Copy to position it", false);
         return true;

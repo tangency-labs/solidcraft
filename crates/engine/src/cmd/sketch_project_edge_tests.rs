@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{Link, LinkSource, Shape};
+use solidcraft_sketch::{CurveKind, Link, LinkSource, Shape};
 
 use crate::Session;
 
@@ -126,13 +126,13 @@ fn lost(s: &Session) -> Option<String> {
     r.error.as_deref().and_then(solidcraft_doc::lost_projection_parts).filter(|t| t.feature == "Top").map(|t| t.listed.to_string())
 }
 
-/// How sketch `Top` names its projected edge: by its body and its curve, never by the edge's
-/// persistent name `name`.
+/// How sketch `Top` names its projected edge: by its body, its curve and the feature that made
+/// the edge (the plate's side and top), never by the edge's persistent name `name`.
 #[track_caller]
 fn assert_lost_edge(s: &Session, name: &str) {
     let sk = s.doc.sketch(s.doc.find_feature("Top").unwrap().id).unwrap();
     let curve = &sk.curves[sk.link_curves(&sk.links[0].id)[0]].id;
-    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve})")), "{}", trouble(s));
+    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve}; made by Plate)")), "{}", trouble(s));
     assert!(!trouble(s).contains(name), "{}", trouble(s));
 }
 
@@ -461,6 +461,27 @@ fn dependent_sketch_on_extruded_corners_survives_parameter_jump_15324() {
         assert!(a.dist(Vec2::new(0.0, h)) < 1e-6, "Hoehe={h}: vertex 0 moved to {a:?}");
         assert!(b.dist(Vec2::new(1.5, h)) < 1e-6, "Hoehe={h}: vertex 1 moved to {b:?}");
     }
+}
+
+/// #17172: a cylinder's end circle is one closed edge, and projecting it into a parallel sketch
+/// gives one circle (its centre and radius), not two arcs.
+#[test]
+fn a_cylinders_end_circle_projects_as_one_circle() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 20], "radius": 12}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "distance": "25 mm", "name": "Tank"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "25 mm", "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [42, 20, 25], "body": "Body1"}]}));
+    let st = s.model.state();
+    let sk = &st.sketch(s.doc.find_feature("Top").unwrap().id).unwrap().sketch;
+    let circles: Vec<_> = sk.curves.iter().map(|c| &c.kind).collect();
+    assert_eq!(circles.len(), 1, "{circles:?}");
+    let Some(CurveKind::Circle { c, r }) = circles.first() else { panic!("not a circle: {circles:?}") };
+    assert!((r - 12.0).abs() < 1e-6, "radius {r}");
+    let centre = sk.point(*c).expect("the circle has a centre");
+    assert!((centre.x - 30.0).abs() < 1e-6 && (centre.y - 20.0).abs() < 1e-6, "centre {centre:?}");
 }
 
 /// The closed-path sweep "Tube" with the sketch "Top" projecting its outer top corner.

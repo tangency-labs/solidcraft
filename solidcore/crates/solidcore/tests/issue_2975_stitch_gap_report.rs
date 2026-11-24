@@ -271,9 +271,8 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
         "the direct stitch has already edited the operand"
     );
 
-    for statuses in [false, true] {
+    {
         let (mut k, mut b) = unsupported_shared_edge();
-        k.fixes.brep_edit_statuses_pass_on = statuses;
         let before = binary(&k, &b);
         let ids = (
             b.face_list().to_vec(),
@@ -289,13 +288,9 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
                     ..
                 })
             ),
-            "flag={statuses}: {result:?}"
+            "{result:?}"
         );
-        assert_eq!(
-            binary(&k, &b),
-            before,
-            "flag={statuses}: the full operand must be restored"
-        );
+        assert_eq!(binary(&k, &b), before, "the full operand must be restored");
         assert_eq!(
             (
                 b.face_list().to_vec(),
@@ -777,7 +772,6 @@ fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
     };
 
     let mut k = Kernel::default();
-    k.fixes.validate_tolerances_fixes_reported_gaps = true;
     // (a check repairs the vertex tolerances it finds short as it runs: one body per check)
     let (mut every, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
     assert_eq!(sewed, 1);

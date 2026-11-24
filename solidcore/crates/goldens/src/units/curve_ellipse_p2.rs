@@ -396,7 +396,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
             let [s0, s1, a0, a1, ang] = *args;
             if let Some(r) = st(
                 o,
-                PolarConversion::angle_param_to_nurb_param(s0, s1, a0, a1, ang),
+                PolarConversion::angle_param_to_nurb_param(s0, s1, a0, a1, ang, (1.0, 1.0)),
             )? {
                 o.push(r);
             }
@@ -493,7 +493,7 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
                 &opts,
             );
             let oi = line_ivl(&l, *li);
-            let r = a.intersect_with_line::<i64>(&Kernel::default(), &i, &l, &oi, *tol, Some(0), Some(1));
+            let r = a.intersect_with_line::<i64>(&Kernel::default(), &i, &l, &oi, *tol, 0.0, Some(0), Some(1));
             if let Some(r) = st(o, r)? {
                 o.push(b(r.needs_more_intersections));
                 put_sols(o, &r.solutions);

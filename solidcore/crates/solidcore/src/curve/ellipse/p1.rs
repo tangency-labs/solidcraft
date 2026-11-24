@@ -45,10 +45,9 @@
 //! | [`PolarConversion::write_to_db`]                   | `SmPolarConversion::WriteToDB`                    |
 //!
 //! Deviations:
-//! - **Collapsed STEP edits (#428).** `Kernel::fixes.ellipse_step_interval_checks`
-//!   rejects inverted STEP edits and empty/non-finite converted NURBS intervals
-//!   before mutation. Default finite-input behavior stays pinned C++; non-finite
-//!   source intervals are always refused.
+//! - **Collapsed STEP edits (#428, WR-211).** `AdjustSTEPInterval` refuses inverted
+//!   and non-finite STEP intervals and empty or non-finite converted NURBS intervals
+//!   before mutation, where upstream installs them.
 //! - **Projected 2D semi-axes (#2140, WR-31).** `ConvertTo2D` passes the extremal
 //!   projected-radius quadratic to `SolveQuadraticEqn` in ascending `[C, B, A]`
 //!   order, evaluates the second semi-axis at `dThetaYRad` (`theta_x_rad + HALF_PI`
@@ -117,6 +116,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::CIRCLE_TYPE;
 use crate::curve::curve::p4::is_closed_base;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::curve::{CurveFailure, JoinCheck};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::assert_array::labels::{
     self, EDGEUSE_TYPE, EDGE_TYPE, POLAR_CONVERSION_TYPE, SURF_OF_EXTRUSION_TYPE,
@@ -255,7 +255,10 @@ impl PolarConversion {
     ) -> Result<(f64, bool)> {
         // Can't do anything if not set.
         if !self.has_curve {
-            return Err(SolidError::null_pointer(OP_TO_POLAR));
+            return Err(SolidError::curve(
+                OP_TO_POLAR,
+                CurveFailure::PolarConversionNotSetUp,
+            ));
         }
 
         // avoid roundoff errors at boundaries
@@ -940,7 +943,10 @@ impl Ellipse {
 
         // all done
         if e.base.nurb.is_none() {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::curve(
+                OP_CANONICAL,
+                CurveFailure::EllipseWithoutNurb,
+            ));
         }
         Ok(e)
     }
@@ -962,7 +968,10 @@ impl Ellipse {
     ) -> Result<Self> {
         // Reject zero/negative radius: no valid NURB
         if radius.is_nan() || radius <= EFF_ZERO {
-            return Err(SolidError::sm_err(OP_CIRCLE_CANONICAL));
+            return Err(SolidError::curve(
+                OP_CIRCLE_CANONICAL,
+                CurveFailure::RadiusNotPositive { radius },
+            ));
         }
 
         // new circle, interval = given interval or [0,360], InsideOut = given value or FALSE
@@ -1193,7 +1202,13 @@ impl Ellipse {
         };
 
         if offset_rad < -approx_tol_3d {
-            return Err(SolidError::sm_err(OP_OFFSET));
+            return Err(SolidError::curve(
+                OP_OFFSET,
+                CurveFailure::OffsetRadiusNegative {
+                    offset_radius: offset_rad,
+                    tolerance: approx_tol_3d,
+                },
+            ));
         } else if offset_rad < approx_tol_3d {
             // Offset is a degenerate curve.
             let c = BSplineCurve::create_degenerate_curve(3, self.position.origin())?;
@@ -1817,10 +1832,15 @@ impl Ellipse {
 
             let mid_p = (start_ang_deg + end_ang_deg) / 2.0;
             let point_and_der = self.evaluate_step(mid_p, 1)?;
-            let der = point_and_der
-                .get(1)
-                .copied()
-                .ok_or_else(|| SolidError::sm_err(OP_MAKE_NURB))?;
+            let der = point_and_der.get(1).copied().ok_or_else(|| {
+                SolidError::curve(
+                    OP_MAKE_NURB,
+                    CurveFailure::Defect {
+                        why: "the ellipse's own evaluation, asked for one derivative, \
+                                  returned no first derivative",
+                    },
+                )
+            })?;
 
             approx_tol_3d / der.length()
         } else if owner.is_some_and(|o| {
@@ -2004,9 +2024,8 @@ impl Ellipse {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a non-finite source interval. With
-    /// `Kernel::fixes.ellipse_step_interval_checks`, also for an inverted interval
-    /// or endpoints that map to one NURBS parameter (nothing changed). Those of
+    /// `InvalidInput` for a non-finite source interval, an inverted interval or
+    /// endpoints that map to one NURBS parameter (nothing changed; WR-211). Those of
     /// [`PolarConversion::convert_to_nurbs_parameter`] (nothing changed) and
     /// [`Self::make_nurb_owned`] (the new domain is kept).
     pub fn adjust_step_interval(
@@ -2025,7 +2044,7 @@ impl Ellipse {
             ));
         }
 
-        if k.fixes.ellipse_step_interval_checks && new_interval.length() < 0.0 {
+        if new_interval.length() < 0.0 {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
                 "STEP interval must have nonnegative length",
@@ -2051,14 +2070,12 @@ impl Ellipse {
         let new_nurbs_ivl = Extent1d::from_min_max(nurbs_t0, nurbs_t1);
         // The polar converter clamps out-of-arc angles to the old endpoints.
         // Distinct STEP angles can therefore map to one NURBS parameter. Do not
-        // install that zero-length interval with the opt-in: the next edit divides
-        // by its length and creates NaN interior knots (#428 / WR-211).
-        // The default preserves the pinned C++ result, including legacy probes.
-        if k.fixes.ellipse_step_interval_checks
-            && (!nurbs_t0.is_finite()
-                || !nurbs_t1.is_finite()
-                || !new_nurbs_ivl.length().is_finite()
-                || new_nurbs_ivl.length() <= 0.0)
+        // install that zero-length interval: the next edit divides by its length and
+        // creates NaN interior knots (#428 / WR-211; upstream installs it).
+        if !nurbs_t0.is_finite()
+            || !nurbs_t1.is_finite()
+            || !new_nurbs_ivl.length().is_finite()
+            || new_nurbs_ivl.length() <= 0.0
         {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
@@ -2218,11 +2235,9 @@ impl Ellipse {
         gap_tol: Option<f64>,
         owner: Option<ObjectRef>,
     ) -> Result<()> {
-        let err = || SolidError::sm_err(OP_JOIN);
-
         // the other curve must actually be an SmEllipse
         let CurveKind::Ellipse(other_ell) = other.kind() else {
-            return Err(err());
+            return Err(SolidError::curve(OP_JOIN, CurveFailure::JoinOtherKind));
         };
 
         // Get geometric info.
@@ -2237,36 +2252,51 @@ impl Ellipse {
         let tol = gap_tol
             .unwrap_or_else(|| max2(self.x_radius(), self.y_radius()) * EFF_ZERO_SQRT * 1000.0);
 
+        // Each geometry check that fails says what differs and by how much.
+        let mismatch = |check, off| {
+            SolidError::curve(
+                OP_JOIN,
+                CurveFailure::JoinMismatch {
+                    check,
+                    off,
+                    tolerance: tol,
+                },
+            )
+        };
+
         // Same curve? Geometry checks:
         if (rad1_this - rad1_that).abs() > tol {
-            return Err(err());
+            return Err(mismatch(JoinCheck::RadiusX, (rad1_this - rad1_that).abs()));
         }
         if (rad2_this - rad2_that).abs() > tol {
-            return Err(err());
+            return Err(mismatch(JoinCheck::RadiusY, (rad2_this - rad2_that).abs()));
         }
 
         if !placement_this
             .origin()
             .closer_than(tol, placement_that.origin())
         {
-            return Err(err());
+            return Err(mismatch(
+                JoinCheck::Centre,
+                placement_this.origin().distance(placement_that.origin()),
+            ));
         }
 
         // We do need the same normals though, plus or minus.
         let mut cross = placement_this.z_axis().cross(placement_that.z_axis());
         if cross.length() > tol {
-            return Err(err());
+            return Err(mismatch(JoinCheck::Normal, cross.length()));
         }
 
         // If circular, then we're good to go, otherwise x and y axes must be compatible.
         if (rad2_this - rad1_this).abs() > tol {
             cross = placement_this.x_axis().cross(placement_that.x_axis());
             if cross.length() > tol {
-                return Err(err());
+                return Err(mismatch(JoinCheck::XAxis, cross.length()));
             }
             cross = placement_this.y_axis().cross(placement_that.y_axis());
             if cross.length() > tol {
-                return Err(err());
+                return Err(mismatch(JoinCheck::YAxis, cross.length()));
             }
         }
 
@@ -2292,7 +2322,10 @@ impl Ellipse {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(err());
+            return Err(mismatch(
+                JoinCheck::JoinPoint,
+                this_common.distance(other_common),
+            ));
         }
 
         // Passed all tests, good to go.  Modify ourself.
@@ -2468,8 +2501,7 @@ mod tests {
     /// mapping (#1846).
     #[test]
     fn step_interval_checks_allow_turn_preserving_mapping() {
-        let mut k = kernel();
-        k.fixes.ellipse_step_interval_checks = true;
+        let k = kernel();
         let past = Extent1d::from_min_max(360.0, 540.0);
         for end in [360.0, 180.0] {
             let mut c = circle(&k, 0.0, end, 2.0);
@@ -2494,8 +2526,7 @@ mod tests {
 
     #[test]
     fn invalid_step_interval_is_rejected_before_an_ellipse_edit() {
-        let mut k = kernel();
-        k.fixes.ellipse_step_interval_checks = true;
+        let k = kernel();
         // An equal-angle request is not retained as a point arc: MakeNurb
         // expands it to a full turn, while the old converter still gives a
         // zero-length NURBS interval. Reject it rather than creating that pair.
@@ -2581,6 +2612,18 @@ mod tests {
             .assert_valid(&k, Some(&mut l), false, ObjectKey(1), ObjectKey(2))
             .unwrap());
         assert!(l.is_empty());
+        // a table never set up from an ellipse converts nothing
+        let err = PolarConversion::new()
+            .convert_to_polar_parameter(&k, &c, ivl.evaluate(0.3))
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::PolarConversionNotSetUp)
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -2664,7 +2707,29 @@ mod tests {
         a.join_with(&k, 1, &b, 0, None, None).unwrap();
         assert!((a.step_interval().max() - 180.0).abs() < 1e-6);
         let line = Curve::from(BSplineCurve::create_degenerate_curve(3, Vec3::UNDEF).unwrap());
-        assert!(a.join_with(&k, 1, &line, 0, None, None).is_err());
+        let err = a.join_with(&k, 1, &line, 0, None, None).unwrap_err();
+        assert_eq!(err.curve_failure(), Some(&CurveFailure::JoinOtherKind));
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a circle of another radius is no piece of this one
+        let wider = Curve::from(circle(&k, 180.0, 270.0, 2.0));
+        let err = a.join_with(&k, 1, &wider, 0, Some(1e-6), None).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::JoinMismatch {
+                check: JoinCheck::RadiusX,
+                off: 1.0,
+                tolerance: 1e-6
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        // a circle's radius must be above zero
+        let err = Ellipse::create_canonical_circle(&k, &Axis2Placement::default(), 0.0, None, None)
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::RadiusNotPositive { radius: 0.0 })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
     }
 
     #[test]
@@ -2759,20 +2824,22 @@ mod tests {
         let tol = 1e-4;
 
         // Radius exceeds tolerance in negative direction (1.0 - 1.5 = -0.5 < -tol) -> error
-        let res = c.create_simple_offset(&k, tol, normal_neg_z, 1.5, false);
-        assert!(res.is_err());
-        match res {
-            Err(SolidError::Upstream {
-                code, operation, ..
-            }) => {
-                assert_eq!(code, 1001);
-                assert_eq!(
-                    operation,
-                    "curve::ellipse::p1::Ellipse::create_simple_offset"
-                );
-            }
-            _ => panic!("expected Upstream error"),
-        }
+        let err = c
+            .create_simple_offset(&k, tol, normal_neg_z, 1.5, false)
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::OffsetRadiusNegative {
+                offset_radius: 1.0 - 1.5,
+                tolerance: tol
+            })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(err.sm_status(), Some(1001));
+        assert_eq!(
+            err.operation(),
+            "curve::ellipse::p1::Ellipse::create_simple_offset"
+        );
     }
 
     #[test]

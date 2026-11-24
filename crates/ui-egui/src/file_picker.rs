@@ -14,9 +14,10 @@ use crate::SolveApp;
 pub type FilePickerFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
 type Completion = Box<dyn FnOnce(&mut SolveApp, Option<String>)>;
 
+type Ready = Box<dyn FnOnce(&mut SolveApp)>;
+
 pub(crate) struct Pending {
-    future: FilePickerFuture,
-    complete: Completion,
+    future: Pin<Box<dyn Future<Output = Ready>>>,
 }
 
 struct Repaint(egui::Context);
@@ -43,6 +44,8 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
+        // The dialog offers the files installed importer plugins read too.
+        solidcraft_engine::io::formats::set_plugin_open_filters(solidcraft_engine::plugin::open_filters(&self.session));
         let future = self.services.pick_open.as_ref().map(|pick| pick(extensions));
         self.begin_picker(future, Box::new(complete));
     }
@@ -79,12 +82,37 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
+    /// Ask for a folder: a plugin field's Browse button, or the document library's folder.
+    /// The plugin dialog shows Browse only when this service is set. Without a host dialog,
+    /// the answer is a cancel and nothing is changed.
+    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        self.begin_picker(future, Box::new(complete));
+    }
+
     fn begin_picker(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
         let Some(future) = future else {
             complete(self, None);
             return;
         };
-        self.file_picker = Some(Pending { future, complete });
+        self.begin_file_task(future, move |app, path| complete(app, path));
+    }
+
+    /// Keep the existing picker/input lock while asynchronous file work runs.
+    pub(crate) fn begin_file_task<T: 'static>(
+        &mut self,
+        future: impl Future<Output = T> + 'static,
+        complete: impl FnOnce(&mut SolveApp, T) + 'static,
+    ) {
+        self.file_picker = Some(Pending {
+            future: Box::pin(async move {
+                let result = future.await;
+                Box::new(move |app: &mut SolveApp| complete(app, result)) as Ready
+            }),
+        });
     }
 
     pub(crate) fn pick_open_command(&mut self, command: &str, params: Value, extensions: &[&str]) {
@@ -123,16 +151,16 @@ impl SolveApp {
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(pending) = app.file_picker.as_mut() else { return };
     let waker = Waker::from(Arc::new(Repaint(ctx.clone())));
-    let Poll::Ready(path) = pending.future.as_mut().poll(&mut Context::from_waker(&waker)) else {
+    let Poll::Ready(complete) = pending.future.as_mut().poll(&mut Context::from_waker(&waker)) else {
         // A fallback for native backends that do not wake reliably. Resizing still draws
         // the ordinary UI in every frame.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
         return;
     };
-    if let Some(pending) = app.file_picker.take() {
+    if app.file_picker.take().is_some() {
         // The dialog may have kept a button or modifier release for itself (#16460).
         crate::window_chrome::mark_input_stale(ctx);
-        (pending.complete)(app, path);
+        complete(app);
         // Hosts can flush writes or restore native input on the following frame.
         ctx.request_repaint();
     }
@@ -395,8 +423,8 @@ mod tests {
             ("sketch.insert_svg", vec!["svg"]),
             ("sketch.insert_dxf", vec!["dxf"]),
             ("file.insert_step", vec![]),
-            ("canvas.insert", vec!["png", "jpg", "jpeg"]),
-            ("canvas.decal", vec!["png", "jpg", "jpeg"]),
+            ("canvas.insert", vec!["png", "jpg", "jpeg", "svg"]),
+            ("canvas.decal", vec!["png", "jpg", "jpeg", "svg"]),
         ] {
             h.app.start(command);
             tick(&mut h.app, &h.ctx);
@@ -467,7 +495,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.app.start("canvas.insert");
         h.frames(2);
-        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg"]]);
+        assert_eq!(*asked.borrow(), [vec!["csv", "json"], vec!["png", "jpg", "jpeg", "svg"]]);
     }
 
     /// #4717: a canvas placed with a click on the origin of a sketch on XY, seen from the top,

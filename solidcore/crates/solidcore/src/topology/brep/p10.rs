@@ -48,7 +48,12 @@
 //!   identities of the geometry copies (their attributes are listed under them in
 //!   [`TopologyEnv::attributes`]). Each B-rep data curve or surface gets its copy as
 //!   owner, as upstream; the copy is found again through a local table (a data
-//!   object owned by anything else is [`SolidError::InvalidInput`]).
+//!   object owned by anything else is [`SolidError::InvalidInput`]). An address is
+//!   distinct and its object's type is known, so identities that do not name each
+//!   built object distinctly under its own type code are refused with
+//!   [`SolidError::InvalidInput`] before healing: the geometry owners would name no
+//!   edge, face or edge use, and every later owner lookup (a solve's `GetEdge`,
+//!   `GetFace`) would find nothing.
 //! - **Notifications.** The `SM_NO_COPY` of an analytic edge curve and the
 //!   `SM_NO_CHANGE_OWNER` of `SetOwner` go to the kernel's context; the
 //!   construction and destruction notifications of new and deleted temporary objects
@@ -89,7 +94,10 @@
 
 use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
@@ -188,7 +196,10 @@ pub struct TopologyEnv<'a> {
     /// The attribute lists of the B-rep data's curves and surfaces (by their
     /// [`crate::topology::brep_data::Keyed::key`]) and of the copies made from them.
     pub attributes: &'a mut AttributeStore,
-    /// The identity (an upstream address) of each topology entity of the B-rep.
+    /// The identity (an upstream address) of each topology entity of the B-rep: distinct
+    /// per entity and carrying the entity's own type code (`SmEdge_TYPE` for an edge, ...),
+    /// as [`crate::topology::loopuse::notify_ref`] makes them. [`make_topology_from_data`]
+    /// refuses identities that are not.
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
     /// The `SmTopology` records (flags, user values) of the topology objects, by
     /// identity; one is added for each object built.
@@ -505,6 +516,7 @@ fn make_topology(
     fill_shells(b, env, data, &built, &shell_map)?;
     link_loops(b, data, &built)?;
     set_primary_edgeuses(b, data, &built)?;
+    check_identities(b, env.key_of)?;
 
     // Set isManifold after all objects are created and connected to one another
     if calculate_is_manifold {
@@ -528,13 +540,17 @@ fn make_topology(
 ///
 /// # Errors
 ///
-/// Those of the healer and of binding the UV trims it makes.
+/// [`SolidError::InvalidInput`] for identities that do not name each object of `b`
+/// distinctly under its own type code (as [`make_topology_from_data`] refuses them);
+/// those of the healer and of binding the UV trims it makes.
 pub fn heal_made(
     k: &mut Kernel,
     b: &mut Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
     make_uv_trim_curves: bool,
 ) -> Result<()> {
+    // the healer resolves geometry owners through these identities
+    check_identities(b, key_of)?;
     // Run the Assert/Heal sequences as needed (status ignored upstream)
     p1::heal_brep(
         k,
@@ -549,6 +565,87 @@ pub fn heal_made(
     // ClassifyLoops' snapshot write-back) have no caller owner yet; bind them to
     // their edge uses as upstream's SetUVTrimCurve(this) does.
     bind_uv_trim_owners(b, key_of)
+}
+
+/// Refuses identities that cannot stand for upstream's addresses: every topology object
+/// of `b` must be named distinctly and under its own type code. The geometry owners the
+/// build recorded are these identities, and `GetEdge` / `GetFace` resolve an owner by its
+/// type code and then by identity; a curve owned by a non-edge identity names no edge, so
+/// every point-edge solve on it (the healer's ray fires among them) has no edge to solve
+/// on, and a key two objects share resolves to the wrong one.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an identity whose type code is not its object's or
+/// one two objects share.
+fn check_identities(b: &Brep, key_of: &dyn Fn(EntityRef) -> ObjectRef) -> Result<()> {
+    use crate::geom::assert_array::labels as l;
+    let entities = b
+        .regions()
+        .ids()
+        .map(|id| (EntityRef::Region(id), l::REGION_TYPE))
+        .chain(
+            b.shells()
+                .ids()
+                .map(|id| (EntityRef::Shell(id), l::SHELL_TYPE)),
+        )
+        .chain(
+            b.faceuses()
+                .ids()
+                .map(|id| (EntityRef::Faceuse(id), l::FACEUSE_TYPE)),
+        )
+        .chain(
+            b.faces()
+                .ids()
+                .map(|id| (EntityRef::Face(id), l::FACE_TYPE)),
+        )
+        .chain(
+            b.loopuses()
+                .ids()
+                .map(|id| (EntityRef::Loopuse(id), l::LOOPUSE_TYPE)),
+        )
+        .chain(
+            b.loops()
+                .ids()
+                .map(|id| (EntityRef::Loop(id), l::LOOP_TYPE)),
+        )
+        .chain(
+            b.edgeuses()
+                .ids()
+                .map(|id| (EntityRef::Edgeuse(id), l::EDGEUSE_TYPE)),
+        )
+        .chain(
+            b.edges()
+                .ids()
+                .map(|id| (EntityRef::Edge(id), l::EDGE_TYPE)),
+        )
+        .chain(
+            b.vertexuses()
+                .ids()
+                .map(|id| (EntityRef::Vertexuse(id), l::VERTEXUSE_TYPE)),
+        )
+        .chain(
+            b.vertices()
+                .ids()
+                .map(|id| (EntityRef::Vertex(id), l::VERTEX_TYPE)),
+        );
+    let mut seen = std::collections::BTreeSet::new();
+    for (entity, type_code) in entities {
+        let identity = key_of(entity);
+        if identity.type_code != type_code {
+            return Err(SolidError::invalid_input(
+                OP_MAKE,
+                "an object identity does not carry its object's type code",
+            ));
+        }
+        if !seen.insert(identity) {
+            return Err(SolidError::invalid_input(
+                OP_MAKE,
+                "two objects share one identity",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Takes the data's zone tolerance or computes one relative to the vertex box.
@@ -604,7 +701,13 @@ fn build_regions(
         // smiges_ReadIges: a single solid region; the infinite region and the void
         // regions are implied.
         let rr = data.regions.first().ok_or_else(|| {
-            SolidError::topology_failed(OP_MAKE, "the single solid region's record is not there")
+            SolidError::topology(
+                OP_MAKE,
+                TopologyFailure::Defect {
+                    why: "the single region record is not there, though the list was just \
+                          counted to hold one",
+                },
+            )
         })?;
         let solid = new_region(b, env, Region::default())?;
         add_attributes(env, EntityRef::Region(solid), &rr.topology.attributes)?;
@@ -700,9 +803,11 @@ fn build_regions(
                 *slot = Some(s);
             }
             if rs.shell_type > 2 {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_MAKE,
-                    "the shell record's type is not a known shell type",
+                    TopologyFailure::UnknownShellType {
+                        shell_type: rs.shell_type,
+                    },
                 ));
             }
             b.shell_mut(s)?.shell_type = match rs.shell_type {
@@ -885,11 +990,17 @@ fn face_surface(
                 OP_MAKE,
                 "data surface owned outside this B-rep",
             ))?;
-    let owner = b
-        .face(owner_face)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner face's surface"))?;
+    let owner = b.face(owner_face)?.surface.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner face has no surface, though a face is listed as an owner \
+                          only once its surface is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut copy = owner.copy(k)?;
     let key = env.new_key()?;
     let copy_ref = ObjectRef {
@@ -1140,11 +1251,17 @@ fn edge_curve(
                 OP_MAKE,
                 "data curve owned outside this B-rep",
             ))?;
-    let owner = b
-        .edge(owner_edge)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner edge's curve"))?;
+    let owner = b.edge(owner_edge)?.curve.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner edge has no curve, though an edge is listed as an owner \
+                          only once its curve is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut curve = owner.copy(k)?;
     let key = env.new_key()?;
     let curve_ref = ObjectRef {
@@ -1188,9 +1305,9 @@ fn build_edgeuses(
             // NER(pNewVU), NER(pNewVU->m_pNext): the next use of a non-empty
             // circular list is never null
             if list.is_empty() {
-                return Err(SolidError::topology_missing(
+                return Err(SolidError::topology(
                     OP_MAKE,
-                    "the vertex's next vertex use",
+                    TopologyFailure::VertexWithoutUses,
                 ));
             }
             continue;
@@ -1603,9 +1720,9 @@ fn link_loops(b: &mut Brep, data: &BrepData, built: &Built) -> Result<()> {
         }
         let Some((mut last1, mut last2)) = last else {
             // Big problems here
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MAKE,
-                "no edge use of the loop record was built",
+                TopologyFailure::LoopRecordWithoutEdgeuse,
             ));
         };
 
@@ -2339,10 +2456,9 @@ fn faces_to_delete(
             edges = face_edges(b, face)?;
             for &e in &edges {
                 let rec = b.edge(e)?;
-                let c = rec
-                    .curve
-                    .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_PROJECT, "the edge's curve"))?;
+                let c = rec.curve.as_ref().ok_or_else(|| {
+                    SolidError::topology(OP_PROJECT, TopologyFailure::EdgeWithoutCurve)
+                })?;
                 let tol1 = 5.0 * (rec.tolerance + tol);
                 let p = c.evaluate_point(k, rec.interval.evaluate(0.5))?;
                 if let Some(side) = side_vote(k, curve, p, direction, tol1)? {
@@ -2481,9 +2597,9 @@ fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: Verte
 pub fn remove_all_topology(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_REMOVE,
-            "editing is disabled on the B-rep",
+            TopologyFailure::EditingDisabled,
         ));
     }
     crate::topology::brep::p3::with_kernel_callbacks(k, b, remove_all_topology_notified)
@@ -2503,9 +2619,9 @@ pub fn remove_all_topology_notified(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_REMOVE,
-            "editing is disabled on the B-rep",
+            TopologyFailure::EditingDisabled,
         ));
     }
 
@@ -2516,18 +2632,12 @@ pub fn remove_all_topology_notified(
 
     for e in brep_wire_edges(b)? {
         // status ignored upstream
-        ignored(crate::error::passed_on(
-            delete_edge(k, b, env, e),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_edge(k, b, env, e)?;
     }
 
     for v in brep_shell_vertices(b)? {
         // status ignored upstream
-        ignored(crate::error::passed_on(
-            delete_vertex(k, b, env, v),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_vertex(k, b, env, v)?;
     }
     Ok(())
 }
@@ -2747,9 +2857,9 @@ fn subdivide_face_body(
             // Null segment at interior of curve: split the edge, both halves inspected
             let split = p9::make_vertex_split_edge(k, b, e, first, env, curve_ref)?;
             if !split.split {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_SUBDIVIDE,
-                    "the edge could not be split at its null segment",
+                    TopologyFailure::EdgeNotSplit,
                 ));
             }
             let [e1, e2] = split.edges.ok_or(SolidError::invalid_input(
@@ -3294,11 +3404,11 @@ mod tests {
         ));
         let mut d = square(0);
         d.shells[0].shell_type = 7;
+        let e = build(&mut d, MakeTopologyOptions::default()).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(
-            build(&mut d, MakeTopologyOptions::default())
-                .err()
-                .and_then(|e| e.upstream_status()),
-            Some(1001)
+            e.topology_failure(),
+            Some(&TopologyFailure::UnknownShellType { shell_type: 7 })
         );
         let mut d = square(0);
         d.edgeuses[0].next_eu = 99;

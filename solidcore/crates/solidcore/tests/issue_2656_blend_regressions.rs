@@ -30,6 +30,9 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -57,20 +60,13 @@ use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::Kernel;
 use std::f64::consts::FRAC_PI_4;
 
-/// SolidCraft's fixes at the 5d2635d36 pin: the corpus's `fixes.json` and the bump's other fixes
-/// (tangency-labs/solidcraft#11875).
+/// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes the 5d2635d36 bump's
+/// other fixes (tangency-labs/solidcraft#11875: `closed_smooth_pole_tangent_limit`; its
+/// `fillet_chamfer_corner` and `face_swap_uv_transposes_trims` are no longer flags), and
+/// since the preset is `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in names.iter().map(String::as_str).chain([
-        "face_swap_uv_transposes_trims",
-        "closed_smooth_pole_tangent_limit",
-        "fillet_chamfer_corner",
-    ]) {
-        *f.flag_mut(name).unwrap_or_else(|| panic!("flag {name}")) = true;
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
@@ -263,8 +259,22 @@ fn ladder_012_variable_round_runs_on_into_the_upright_round() {
 /// the box's top back edge r5, the top right edge r3 alone (it runs
 /// on at y = 35 into the r5 round's end arc), then the upright (60, 40) r2 with its tangent
 /// chain, up the arc and along the seam. The case's invariants: 11 faces, one valid body;
-/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices, 47589.770467. Capped (#2364):
-/// 25 edges, 16 vertices, 47591.482.
+/// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices. Capped (#2364): 25 edges,
+/// 16 vertices, 47591.482. The volume is the rolling-ball volume (#18166; each piece by
+/// piecewise Gauss-Kronrod quadrature split at every boundary change, within 1e-11):
+///
+/// ```text
+/// 48000 - (1 - pi/4)(25*60 + 9*35 + 4*15)
+///       - 4.293342478629   r3 run-on
+///       - 1.608436379598   end arc (Pappus)
+///       - 1.158579441504   end arc under the r3 cut
+///       - 0.790151961430   r3/r5 seam
+///       = 47589.771046109
+/// ```
+///
+/// It replaces SolidCraft's measured 47589.770467, which is 1.2e-8 off it, and the
+/// 47589.770999 measured once a round is fitted as finely as its edge is known (#16735),
+/// 1.0e-9 off it.
 #[test]
 fn ladder_021_round_runs_on_into_the_earlier_round() {
     let mut k = solidcraft_kernel();
@@ -281,7 +291,7 @@ fn ladder_021_round_runs_on_into_the_earlier_round() {
     blend(&mut k, &mut b, Kind::Round, &chain, 2.0).unwrap();
     let (counts, v) = measured(&mut k, &mut b);
     assert_eq!(counts, (11, 24, 15));
-    assert_rel(v, 47_589.770_467, 1e-8, "021");
+    assert_rel(v, 47_589.771_046, 1e-8, "021");
 }
 
 /// fillets/1207-fillet-box-end-edge-into-unblended-round-partial-chain, also SolidCraft's
@@ -338,7 +348,9 @@ fn upright_runs_on_into_the_earlier_round() {
 /// second rounds run on into the first ones' end arcs as before smlib#124: the plate 8
 /// faces, SolidCraft's closed form 1681.903758348 (to 1e-5 there); the notched block 13
 /// faces, 10198.718249 (the fork's two passes, 9822462; its closed form 10198.718039, 2.1e-8
-/// off). Capped (#2364): 10 and 15 faces.
+/// off) until `brep_volume` closed tolerant edges' gaps (#16735): the 2.1e-8 was the
+/// integrator's leak, and the block is now the closed form 10198.718038816 to 5.8e-12
+/// (MEASURED). Capped (#2364): 10 and 15 faces.
 #[test]
 fn second_pass_runs_on_into_the_first_without_its_faces() {
     let mut k = solidcraft_kernel();
@@ -363,7 +375,7 @@ fn second_pass_runs_on_into_the_first_without_its_faces() {
     blend(&mut k, &mut b, Kind::Round, &second, 8.0).unwrap();
     let ((faces, _, _), v) = measured(&mut k, &mut b);
     assert_eq!(faces, 13, "1080");
-    assert_rel(v, 10_198.718_249, 1e-9, "1080");
+    assert_rel(v, 10_198.718_038_816, 1e-10, "1080");
 }
 
 /// fillets/every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain:
@@ -547,16 +559,13 @@ fn block_cylinder_both_pieces_round_the_half_circle() {
 }
 
 /// Both pieces rounded r 2 through the session's `do_fillet` (its tolerance scope and the
-/// split at radius corners) with every fix but
-/// `geometric_g2_continuity`, as the blend's other End tests: the same torus, valid at level
+/// split at radius corners) with every fix, as the blend's other End tests: the same torus, valid at level
 /// 2 and a manifold solid, its volume at 1e-12.
 #[test]
 fn block_cylinder_both_pieces_round_through_do_fillet() {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     let mut b = block_cylinder(&mut k);
     let pieces: Vec<EdgeId> = ARC_PIECES.iter().map(|&(p, _)| pick(&k, &b, p)).collect();
@@ -1090,4 +1099,50 @@ mod crease_end {
     fn a_cap_turned_through_a_skewed_crease_beside_a_side_leaning_away_is_the_prism() {
         skewed_round_is_the_prism(-15.0);
     }
+}
+
+/// Ladder 021's golden checked against its own convergence: the r2 chain built with its
+/// edges stored at 4e-6, 2e-6 and 1e-6 (so the round is fitted at 4 times each) gives
+/// volumes that never fall as the edges tighten and agree to 1e-5, and the golden (its edges
+/// as the earlier rounds left them) lies within 1e-4 of the finest. The golden before a round was
+/// fitted as finely as its edge is known, 47589.770467, lies 5.8e-4 below it.
+#[test]
+fn ladder_021_volume_converges_as_its_edges_tighten() {
+    let chain = [
+        [60.0, 40.0, 7.5],
+        [60.0, 39.791287847477925, 16.0],
+        [58.931891825700944, 37.559849485548405, 19.29401699439179],
+    ];
+    let v: Vec<f64> = [4e-6, 2e-6, 1e-6]
+        .iter()
+        .map(|&t| {
+            let mut k = solidcraft_kernel();
+            let mut b = boxed(&mut k, 60.0, 40.0, 20.0);
+            blend(&mut k, &mut b, Kind::Round, &[[30.0, 40.0, 20.0]], 5.0).unwrap();
+            blend(&mut k, &mut b, Kind::Round, &[[60.0, 20.0, 20.0]], 3.0).unwrap();
+            for &p in &chain {
+                let e = pick(&k, &b, p);
+                edge::set_tolerance(&mut b, e, t, false, false).unwrap();
+            }
+            blend(&mut k, &mut b, Kind::Round, &chain, 2.0).unwrap();
+            let (counts, v) = measured(&mut k, &mut b);
+            assert_eq!(counts, (11, 24, 15), "edges at {t:e}");
+            v
+        })
+        .collect();
+    assert!(
+        v[0] <= v[1] && v[1] <= v[2],
+        "falls as the edges tighten: {v:?}"
+    );
+    assert!(v[2] - v[0] < 1e-5, "the tight builds disagree: {v:?}");
+    let golden = 47_589.770_999;
+    assert!(
+        (v[2] - golden).abs() < 1e-4,
+        "golden {golden} vs finest {}",
+        v[2]
+    );
+    assert!(
+        (v[2] - 47_589.770_467).abs() > 5e-4,
+        "the old golden is as near: {v:?}"
+    );
 }

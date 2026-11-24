@@ -132,9 +132,26 @@ fn nurb_cone(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
+    // the goldens reader's identities (`own_reader::read_key_of`): typed, one per object
+    let key = |e: EntityRef| {
+        use EntityRef as E;
+        let (type_code, kind, i) = match e {
+            E::Brep(x) => (16011, 0u64, x.index()),
+            E::Region(x) => (16012, 1, x.index()),
+            E::Shell(x) => (16013, 2, x.index()),
+            E::Faceuse(x) => (16022, 3, x.index()),
+            E::Face(x) => (16002, 4, x.index()),
+            E::Loopuse(x) => (16004, 5, x.index()),
+            E::Loop(x) => (16003, 6, x.index()),
+            E::Edgeuse(x) => (16005, 7, x.index()),
+            E::Edge(x) => (16016, 8, x.index()),
+            E::Vertexuse(x) => (16006, 9, x.index()),
+            E::Vertex(x) => (16021, 10, x.index()),
+        };
+        ObjectRef {
+            type_code,
+            key: ObjectKey(((kind + 1) << 40) | u64::from(i)),
+        }
     };
     let mut env = TopologyEnv {
         all_attributes: &[],
@@ -152,7 +169,7 @@ fn nurb_cone(k: &mut Kernel) -> Brep {
 /// `stubs4-degenerate-nurb_cone-e8-r0.5`) turns by 0.61 degrees: a crease under the half
 /// degree limit, not a tangent edge. A round of r 0.5 there stands
 /// `r (sec(turn / 2) - 1)` off the edge, under its tolerance, so it is refused as too small
-/// before the solver runs (which leaves the solver's step latch unset), naming the
+/// before the solver runs, naming the
 /// smallest radius `tolerance / (sec(turn / 2) - 1)` that rounds it.
 #[test]
 fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
@@ -196,5 +213,4 @@ fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
         ),
         "{err:?}"
     );
-    assert_eq!(k.fillet_point_step.get(), None);
 }

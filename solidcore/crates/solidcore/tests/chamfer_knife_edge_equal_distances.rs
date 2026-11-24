@@ -17,6 +17,7 @@ use std::f64::consts::PI;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::curve::curve::Curve;
+use solidcore::error::blend::BlendFailure;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -28,7 +29,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, EntityRef, Kernel};
 
 const R: f64 = 21.0;
 const TIP: f64 = 62.0 + 1.0 / 6.0;
@@ -37,7 +38,6 @@ const H: f64 = 10.0;
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
     k
 }
 
@@ -138,6 +138,28 @@ fn other_sizes_stay_refused() {
             "{size:?} was accepted on a knife edge"
         );
     }
+}
+
+/// Equal distances at or below the body's resolution are refused as too small, naming the
+/// edge, as any other chamfer's setbacks are (#21004).
+#[test]
+fn a_distance_below_resolution_is_refused_on_a_knife_edge() {
+    let mut k = kernel();
+    let mut b = part(&mut k);
+    let e = knife_edge(&k, &b);
+    let tolerance = b.tolerance();
+    let d = tolerance;
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    let err = s
+        .prepare_chamfers(&k, &[e], &[ChamferSize::Distances([d, d])])
+        .unwrap_err();
+    let Some(&BlendFailure::SizeBelowResolution { size, tolerance: t }) = err.blend_failure()
+    else {
+        panic!("{err:?}");
+    };
+    assert_eq!(size, d);
+    assert_eq!(t, tolerance);
+    assert_eq!(err.entity(), Some(EntityRef::Edge(e)), "{err:?}");
 }
 
 /// Every fix, as SolidCraft runs the kernel: a blend past its faces is trimmed at its creases.

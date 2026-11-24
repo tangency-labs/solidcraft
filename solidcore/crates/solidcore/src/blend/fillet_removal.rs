@@ -35,9 +35,10 @@
 //!   B-rep's own surfaces for its intersections and restores it; the port intersects
 //!   evaluation copies of the surfaces with the flag on, leaving the B-rep's surfaces
 //!   alone.
-//! - **Ring fillets (not upstream).** With `Kernel::fixes.fillet_removal_takes_ring_fillets`
-//!   (WR-605, the SolidCraft fork's tangency-labs/smlib 52bfef0) [`delete_fillet_face`]
-//!   hands a ring fillet to [`ring::RingFilletRemoval`].
+//! - **Ring fillets (not upstream).** [`delete_fillet_face`] hands a ring fillet to
+//!   [`ring::RingFilletRemoval`] (WR-605, the SolidCraft fork's tangency-labs/smlib
+//!   52bfef0; formerly `Kernel::fixes.fillet_removal_takes_ring_fillets`); upstream
+//!   refuses it.
 //! - **Notifications.** Each B-rep edit notifies through the kernel's callbacks
 //!   (`with_kernel_callbacks`), one edit at a time, as upstream's objects notify their
 //!   context.
@@ -64,6 +65,10 @@
 //!   continued) instead of a fitted intersection of its faces. A curved side edge, a
 //!   corner of more than three edges, or a face other than a plane whose new corner lies
 //!   outside its surface's natural domain fails the removal before the B-rep changes.
+//!   The intersection that finds the new edge takes each tangent plane continued over
+//!   the domain it searches (its analytic domain grown), since the intersector keeps
+//!   to a surface's natural domain and a plane made at its face's size would stop the
+//!   trace at the old corner (#17414).
 //!   The fork installs the run-on curve with `SetCurve` and then sets its owner; the
 //!   port names it by the edit's identity first, which `SetCurve` then records (the same
 //!   owner).
@@ -107,7 +112,11 @@ use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopuseStart, VertexId};
 
+mod chain;
+mod chain_edit;
 pub mod ring;
+
+pub use chain::delete_fillet_faces;
 
 const OP: &str = "blend::fillet_removal";
 
@@ -984,14 +993,20 @@ impl FilletRemoval {
             sv
         };
 
-        let tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
-        let tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
+        let mut tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
+        let mut tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
         let mut uv_domain1 = tan0.natural_uv_domain_with_nurb(k)?;
         let mut uv_domain2 = tan1.natural_uv_domain_with_nurb(k)?;
 
         // Also expand the domains, for srf/srf/srf intersect.
         uv_domain1.expand_relative(2.0);
         uv_domain2.expand_relative(2.0);
+        // Not upstream (WR-606, exact only): planes continued over them, so the trace
+        // reaches the new corners past the faces' edges.
+        if self.exact_only {
+            continue_plane(&mut tan0, &uv_domain1);
+            continue_plane(&mut tan1, &uv_domain2);
+        }
 
         let int = or_sm_err(tan0.point_based_surface_intersect(
             k,
@@ -1566,6 +1581,20 @@ fn out_of_bounds_copy(b: &Brep, f: FaceId) -> Result<Surface> {
     Ok(s)
 }
 
+/// Not upstream (WR-606, exact only): the evaluation copy `s` of a face's surface, when it
+/// is a plane, continued over `domain` (its analytic domain grown to it). The surface
+/// intersector works within each surface's natural domain, and a plane's is the face's
+/// own extent where the face was made at that size (an extruded profile's side): a new
+/// corner past the face's edge, where the removed fillet stood, lies outside it, and the
+/// trace from it stops there, a curve of no length. A plane continued is the same plane
+/// with the same parameters, as the exact-only check of [`FilletRemoval::remove_face`]
+/// already takes it; any other surface keeps its domain.
+fn continue_plane(s: &mut Surface, domain: &Extent2d) {
+    if let SurfaceKind::Plane(p) = s.kind_mut() {
+        p.update_analytical_domain(domain);
+    }
+}
+
 /// `pVertex->SetPoint(p)` through the kernel's callbacks.
 fn set_vertex_point(k: &mut Kernel, b: &mut Brep, v: VertexId, p: Point3) -> Result<()> {
     with_kernel_callbacks(k, b, |_k, b, env| {
@@ -1928,9 +1957,8 @@ pub fn glue_edges(
 
 /// `SmBrep::DeleteFilletFace(pFilletFace, pd3dTol)`: removes the four-sided fillet face
 /// `fillet_face` and closes the hole with the sharp edge where its tangent faces meet
-/// ([`FilletRemoval::remove_face`]); `tol_3d` defaults to the face's tolerance. With
-/// `Kernel::fixes.fillet_removal_takes_ring_fillets` (WR-605, not upstream) a ring
-/// fillet goes to [`ring::RingFilletRemoval`] instead.
+/// ([`FilletRemoval::remove_face`]); `tol_3d` defaults to the face's tolerance. A ring
+/// fillet goes to [`ring::RingFilletRemoval`] instead (WR-605, not upstream).
 ///
 /// # Errors
 ///
@@ -1950,12 +1978,13 @@ pub fn delete_fillet_face(
         Some(t) => t,
         None => crate::topology::face::p2::tolerance(b, fillet_face)?,
     };
-    // Not upstream (WR-605, `fixes.fillet_removal_takes_ring_fillets`; SolidCraft change,
-    // tangency-labs/smlib 52bfef0): a ring fillet (closed rails, no ends) has its own
-    // removal.
-    if k.fixes.fillet_removal_takes_ring_fillets
-        && ring::RingFilletRemoval::is_ring(k, b, Some(fillet_face), 2.0)?
-    {
+    // Not upstream (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0): a ring
+    // fillet (closed rails, no ends) has its own removal. Not the fork's: the ring test
+    // reads the rails' tangency, which may make UV trim curves, on a copy standing for
+    // the B-rep, so a face that is no ring reaches the four-sided removal (or its
+    // refusal) exactly as it was.
+    let mut scratch = b.clone_standing_for_self()?;
+    if ring::RingFilletRemoval::is_ring(k, &mut scratch, Some(fillet_face), 2.0)? {
         let mut removal = ring::RingFilletRemoval::new(fillet_face, tol_3d);
         let r = removal.remove_face(k, b);
         // (not upstream: the port's cached topology fields, true again for the caller)

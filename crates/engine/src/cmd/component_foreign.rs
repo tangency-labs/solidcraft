@@ -70,7 +70,8 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let header = solidcraft_kernel::StepHeader { organization: "SolidCraft".into(), ..Default::default() };
     let step = solidcraft_kernel::step_export_bodies(&list, &header)?;
     let mut scratch = s.scratch();
-    let kind = FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind =
+        FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None };
     // Named as any import is ("Import1"); the design they came from stays on it as its file.
     let id = scratch.doc_mut().add_feature(kind, None)?;
     let feature = scratch.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
@@ -83,7 +84,7 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("the pasted bodies didn't import: {error}")));
     }
     scratch.selection = names.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"bodies": names, "feature": feature, "component": to}))
 }
 
@@ -116,7 +117,7 @@ fn paste_components(
     }
     let Some(mut scratch) = computed else { return Err(bad("component.paste_from_design", "the copied components are gone")) };
     scratch.selection = made.iter().map(|path| crate::Sel::Occurrence { path: path.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"paths": made, "component": to}))
 }
 

@@ -4,8 +4,7 @@
 #   $DIST/solidcraft-<version>-macos-<arch>.dmg        SolidCraft.app (with solidcraft-cli inside) on a
 #                                                      drag-to-Applications DMG with a drawn window
 #                                                      (assets/platforms/macos/dmg)
-#   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI (and its solvecraft-cli
-#                                                      compatibility alias) with the licence files
+#   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI with the licence files
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build] [--sign]
 #        packaging/macos/package.sh --build-only <rust-target>
@@ -158,7 +157,7 @@ fi
 
 rm -rf "$WORK"
 mkdir -p "$WORK/bin"
-for bin in solidcraft solidcraft-cli solvecraft-cli; do
+for bin in solidcraft solidcraft-cli; do
   inputs=()
   for t in "${TARGETS[@]}"; do inputs+=("$CARGO_TARGET_DIR/$t/release/$bin"); done
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
@@ -270,9 +269,6 @@ CLI_DIR="$WORK/solidcraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/solidcraft-cli" "$CLI_DIR/"
 sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli" "$SCRIPT_DIR/cli-entitlements.plist"
-# Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
-cp "$WORK/bin/solvecraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias" "$SCRIPT_DIR/cli-entitlements.plist"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"

@@ -2,14 +2,14 @@
 //! SolidCraft's flag profile (tangency-labs/solidcraft#8526
 //! at c494a18, `crates/smlib/src/core.rs` `fixes()`, 292 flags), reported on #2260.
 //!
-//! With `query_statuses_pass_on` (tangency-labs/smlib 8311f8e) `sm_RefineCCSolutions`
-//! passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
+//! Passing on the statuses SMLib drops (WR-663, tangency-labs/smlib 8311f8e),
+//! `sm_RefineCCSolutions` passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
-//! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
-//! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
+//! 1001. The body the boolean builds with the operand's exact trims (WR-361, always on
+//! now) and the offset extension flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
-//! now does that under the same flag (#2264).
+//! now does that too (#2264).
 //!
 //! Expected volume: the tangency-labs/smlib 729f893 build run on the same construction by
 //! `SmApiBrepComputeVolume`, 40267.709270590589 at accuracy 1e-7 (3bc54a4 and c596548
@@ -46,123 +46,52 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "analytic_inversion_answers_apart",
-    "boolean_new_face_closure_both_sides",
-    "boolean_splits_definition_across_split",
-    "boolean_union_refuses_solid_leak",
-    "boolean_vertex_by_best_crossing",
-    "box_face_failures_propagate",
-    "brep_edit_statuses_pass_on",
-    "bspline_trim_keeps_rational_end_spans",
     "bspline_trim_preserves_uv_spans",
-    "classify_edge_interval",
-    "cone_create_canonical_preserves_inside_out_and_checks_height",
-    "corner_patch_face_side_twist",
-    "cover_refuses_folded_continuation",
-    "curve_contacts_at_curve_ends",
     "curve_loop_normal_from_area",
-    "cylinder_rebuild_mean_radius",
-    "degenerate_proto_edge_in_one_vertex",
-    "degen_param_tiebreak_uses_actual_param",
-    "delete_vertex_joins_seam_iso_curve",
-    "edge_check_orders_tangent_faces",
     "edgeuse_convexity_propagates_step_off_failure",
-    "ellipse_step_interval_checks",
-    "ellipse_trim_seam_lines_span_cone_height",
-    "extrusion_origin_scaled_zero",
-    "face_tight_box_searches_trim",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",
-    "fillet_corner_per_vertex_fan",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
-    "fillet_mitre_concave_face_corners",
-    "fillet_mitre_gap_patch",
-    "fillet_nx1_tangent_side_edge",
     "fillet_patch_keeps_fillet_edges",
-    "fillet_point_step_per_point",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
-    "fillet_removal_takes_ring_fillets",
-    "fillet_run_on_bspline_trims",
-    "fillet_statuses_pass_on",
     "fillet_trace_reaches_rails",
-    "fillet_trim_inside_by_best_dot",
-    "fillet_trim_status",
     "fillet_variable_span_follows_fillet",
-    "fillet_vertex_error_diagnostics",
-    "found_torus_sphere_keep_tested_nurb",
-    "geometric_g2_continuity",
-    "good_drop_result_distances_in_order",
-    "imprint_extends_edge_to_proto_vertex",
-    "imprint_reuses_coincident_face_edge",
-    "internal_pole_row_through_knot",
     "join_touching_loops",
-    "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
-    "local_operation_box_holds_new_surfaces",
-    "local_operation_refuses_loose_tangent_edges",
-    "local_operation_step_walls",
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
-    "nurb_cylinder_inside_out_frame",
     "offset_analytic_mate_edges",
-    "offset_collapsed_rounds_mated",
-    "offset_edges_keep_source_tolerance",
-    "offset_extended_edges_mated",
     "offset_extension_as_itself",
     "offset_extension_from_base",
-    "offset_keep_cavity_regions",
-    "offset_open_edge_second_trim_point",
-    "offset_resolve_crossing_loops",
-    "offset_stitch_at_body_tolerance",
-    "offset_swap_uv_extended_distance",
     "point_class_gap_3d_propagates_no_drop_error",
-    "point_on_start_point_squared_tolerance",
-    "point_solve_keeps_triangle_guess",
-    "proto_edge_self_loop_on_vertex_degenerate",
-    "proto_edge_splits_at_captured_vertices",
-    "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
-    "query_statuses_pass_on",
-    "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
-    "revolve_holed_profile_void",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
-    "ssi_low_angle_start_on_probation",
-    "ssi_pole_point_keeps_its_tangent",
     "ssi_proto_topology_statuses_pass_on",
-    "ssi_split_curves_at_singular_points",
-    "ssi_tangent_contact_points",
     "ssi_tangent_curve_tracer",
-    "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
-    "surface_parallel_to_vector_checks",
-    "sweep_statuses_pass_on",
-    "taper_tangent_corner_planes",
-    "thicken_planar_side_walls",
-    "torus_check_spindle_apex",
-    "transform_model_size_from_body_box",
-    "transform_scales_each_tolerance",
     "uv_trim_corner_end_points_only",
-    "validate_tolerances_fixes_reported_gaps",
-    "validation_does_not_make_uv_trims",
-    "volume_lift_third_derivative_terms",
-    "volume_representational_end_continuities",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
 const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
+/// A kernel with the fixes `names` on and the rest off. A name the kernel no longer has is a
+/// retired flag, whose fix is now the default behaviour: it is skipped, so retiring a flag
+/// edits none of these lists. The lists are frozen snapshots of past profiles, so a misspelt
+/// name is skipped silently too; a check against a list of retired names would bring back
+/// an edit here for every retirement.
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::default();
     for name in names {
-        *k.fixes
-            .flag_mut(name)
-            .unwrap_or_else(|| panic!("no flag {name}")) = true;
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
     }
     k
 }
@@ -221,25 +150,10 @@ fn solidcraft_profile_pipe_gn_round_completes() {
     check_round(SOLIDCRAFT_C494A18);
 }
 
-/// The four flags the failure needed together (`keep_operand_uv_trims`,
-/// `query_statuses_pass_on`, `offset_extension_from_base`, `offset_extension_as_itself`).
+/// The flags the failure needed together with the passed-on query statuses
+/// (`offset_extension_from_base`, `offset_extension_as_itself`; it also needed
+/// `keep_operand_uv_trims`, always on since that flag was retired).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&[
-        "keep_operand_uv_trims",
-        "query_statuses_pass_on",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
-}
-
-/// Without `query_statuses_pass_on` the status is dropped, as upstream, and the round
-/// completes with the same volume.
-#[test]
-fn without_pass_on_pipe_gn_round_completes() {
-    check_round(&[
-        "keep_operand_uv_trims",
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
+    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
 }

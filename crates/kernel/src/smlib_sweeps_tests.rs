@@ -643,3 +643,24 @@ fn an_extrusion_of_one_closed_curve_turning_back_mid_run_passes_the_check_as_it_
     let vertices = crate::native::brep_record(&body).unwrap().vertices;
     assert!(vertices.iter().any(|v| Vec3::new(v.point[0], v.point[1], v.point[2]).dist(edge) < 1e-9), "the trailing edge is where the walls meet");
 }
+
+#[test]
+fn a_ring_swept_round_a_cylinders_rim_edge_keeps_its_hole_empty() {
+    // The rim of a cylinder r10 is a closed path of rational Bézier spans, so the sweep goes
+    // through SMLib's curve sweep. A ring (outer radius 2, bore 1) square to the rim where it
+    // starts: Pappus, V = 2π·10·π(2² − 1²). The hole's tube is taken away, not added
+    // (986.96 before), and the solid ring stays 2π·10·π·2².
+    let cyl = crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0).unwrap();
+    let (e, _) = cyl.nearest_edge(Vec3::new(10.0, 0.0, 5.0), 1e-3).unwrap().unwrap();
+    let path = crate::point_path::edge_path(&cyl, e).unwrap();
+    assert!(path.iter().all(|s| matches!(s, crate::PathSeg::Bezier(_))), "the rim is Bézier spans");
+    let start = path[0].start();
+    let (t, _) = path[0].tangents().unwrap();
+    let plane = Plane::from_normal(start, t).unwrap();
+    let b = smlib_sweeps::sweep(&plane, &pieces_of(&ring(2.0, 1.0)), &path, false).unwrap();
+    close(volume(&b), 2.0 * PI * PI * 10.0 * 3.0, 1e-6, "ring round the rim");
+    let o = origins(&b);
+    assert!(o.contains(&profile(0)) && o.contains(&profile(1)) && o.iter().all(|x| x.contains("Profile")), "{o:?}");
+    let disc = smlib_sweeps::sweep(&plane, &pieces_of(&region(Loop2::circle(Vec2::ZERO, 2.0))), &path, false).unwrap();
+    close(volume(&disc), 2.0 * PI * PI * 10.0 * 4.0, 1e-6, "solid ring round the rim");
+}

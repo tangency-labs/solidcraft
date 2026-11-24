@@ -1755,16 +1755,7 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
-        "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
-        "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
-        "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
-        "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
-        "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
-        "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
-        "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
-        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
         _ => k
@@ -2487,10 +2478,10 @@ mod tests {
     #[test]
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
-        enable_fix(&mut k, "imprint_extends_edge_to_proto_vertex").unwrap();
-        enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
-        assert!(k.fixes.imprint_extends_edge_to_proto_vertex);
-        assert!(k.fixes.cover_refuses_folded_continuation);
+        enable_fix(&mut k, "offset_extension_as_itself").unwrap();
+        enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
+        assert!(k.fixes.offset_extension_as_itself);
+        assert!(k.fixes.analytic_copy_keeps_parameterization);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 

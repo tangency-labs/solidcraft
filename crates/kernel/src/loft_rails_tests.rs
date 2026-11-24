@@ -93,6 +93,19 @@ fn a_bulging_rail_makes_the_solid_of_revolution_of_the_rail() {
     assert!(close(v, want, 1e-4), "reversed: volume {v} vs {want}");
 }
 
+/// The end on the first section wins even when the other rail end is closer to its centroid.
+#[test]
+fn a_rail_is_oriented_by_its_first_section_not_its_centroid() {
+    let sections = [
+        (Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(100.0)),
+        (Plane { origin: Vec3::new(100.0, 27.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(75.0)),
+    ];
+    let r = [Vec3::ZERO, Vec3::new(25.0, 27.0, 0.0)];
+    let b = loft_with_rails(&sections, &[r.to_vec()], RailFit::Scale).unwrap();
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
 /// A rail from the middle of a square's side bulging out by 5: stretching widens the squares
 /// only across to the rail (sections 2w × 10 with w = 5 + 5 sin, volume 4000 + 8000/π); scaling
 /// grows them both ways (sections (2w)², volume 6000 + 16000/π).
@@ -166,6 +179,29 @@ fn a_sheet_loft_of_lines_follows_its_rail() {
     assert!((m.bbox.max.x - 15.0).abs() < 1e-2 && (m.bbox.min.x + 15.0).abs() < 1e-2, "{:?}", m.bbox);
 }
 
+/// A section that is one straight line lies in every plane through it, so the plane of the
+/// sketch it was drawn in says nothing about the loft. Here the bow's line is drawn on XZ, the
+/// plane the keel rail lies in; the loft still follows both rails, from either end, and stays
+/// between its two sections (#4056).
+#[test]
+fn a_line_section_drawn_in_a_rails_plane_still_takes_the_rail() {
+    let stern = (
+        Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z },
+        vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(30.0, 5.0) }, Seg2::Line { a: Vec2::new(30.0, 5.0), b: Vec2::new(40.0, 20.0) }],
+    );
+    // XZ's y runs down world Z: the bow line rises from the keel to the sheer at x = 0.
+    let bow = (Plane::XZ, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, -20.0) }]);
+    let keel: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, 0.0, 0.0)).collect();
+    let sheer: Vec<Vec3> = (0..=50).map(|i| Vec3::new(f64::from(i) * 2.0, (f64::from(i) * PI / 100.0).sin() * 40.0, 20.0)).collect();
+    for sections in [[stern.clone(), bow.clone()], [bow.clone(), stern.clone()]] {
+        let b = loft_sheet_with_rails(&sections, &[keel.clone(), sheer.clone()], RailFit::Scale).unwrap();
+        let worst = keel.iter().chain(&sheer).map(|p| off(&b, *p)).fold(0.0, f64::max);
+        assert!(worst < 1e-2, "a rail is {worst} mm off the sheet");
+        let m = measure(&b).unwrap();
+        assert!(m.bbox.min.x > -1e-3 && m.bbox.max.x < 100.0 + 1e-3, "{:?}", m.bbox);
+    }
+}
+
 /// Rails the loft cannot follow are refused, saying why: one that starts off the first section,
 /// one that stops short of the last, three rails, and one up the middle of a sheet loft's lines.
 #[test]
@@ -237,8 +273,38 @@ fn sections_of_an_arc_and_a_line_take_rails() {
     let m = measure(&b).unwrap();
     let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
     assert!(worst < 1e-3, "the rail is {worst} mm off the loft");
-    assert!(m.volume > 40.0 * 50.0 * PI && m.volume < 40.0 * 800.0, "volume {}", m.volume);
+    // PROPOSED, for the maintainer to choose. The rectangle prism (40 x 800) was no derived cap:
+    // each station is the plain section scaled about its middle until the guided point (the top
+    // segment's middle) reaches the rail, which bulges 5 mm past the rectangle's top edge, so
+    // the stations swell past the prism. Derived cap: the box around every face's and every
+    // edge's control points bounds the solid (`control_box`), so its volume bounds the loft's.
+    let (lo, hi) = control_box(&b);
+    let d = hi - lo;
+    let cap = d.x * d.y * d.z;
+    assert!(m.volume > 40.0 * 50.0 * PI && m.volume < cap, "volume {} (control box {cap})", m.volume);
+    // Reference, MEASURED, not a bound: a continuum-station model of this construction (the
+    // exact affine station map, its volume by the divergence theorem, Richardson-extrapolated)
+    // gives 33500.62 mm3; the kernel's 17 wires give 33502.97, 7.0e-5 relative. Within 2e-4
+    // (about 6.7 mm3, three times that gap); main's partly twisted pairing gave 31319.95, 6.5% off.
+    assert!(close(m.volume, 33500.62, 2e-4), "volume {} vs the continuum model's 33500.62", m.volume);
     assert!(m.bbox.max.y > 15.0 - 1e-2 && m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 40.0).abs() < 1e-9, "{:?}", m.bbox);
+}
+
+/// A square lofted to the same square with a vertex in the middle of its top side, along a
+/// straight rail up that vertex (scaled to fit): the vertex splits the first square's top side
+/// where it lines up, so every station is the square and the loft is the 20 x 20 x 40 box. (When
+/// the square's first side was halved instead, the bottom's middle joined the top's and the walls
+/// twisted.)
+#[test]
+fn a_vertex_only_one_section_has_takes_a_straight_rail() {
+    let square = Loop2::polygon(&[Vec2::new(-10.0, -10.0), Vec2::new(10.0, -10.0), Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0)]);
+    let marked =
+        Loop2::polygon(&[Vec2::new(-10.0, -10.0), Vec2::new(10.0, -10.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0), Vec2::new(-10.0, 10.0)]);
+    let r = straight(Vec2::new(0.0, 10.0), 40.0);
+    let b = loft_with_rails(&[(at(0.0), square), (at(40.0), marked)], std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    assert!(close(volume(&b), 16_000.0, 1e-9), "volume {}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-6, "the rail is {worst} mm off the loft");
 }
 
 /// Arcs of different turns (one piece against two, different weights) pair up too: a quarter pie
@@ -388,4 +454,136 @@ fn a_hull_side_follows_a_stem_that_turns_tightly() {
             assert!(worst < 0.5, "{fit:?}: the {name} is {worst:.3} mm off the loft at {p:?}");
         }
     }
+}
+
+/// The box around the control points of every face's surface and every edge's curve of `b`'s
+/// record (each face's NURBS form where it has one). A B-spline or NURBS surface with positive
+/// weights lies in the convex hull of its control points, and a trimmed face in its surface, so
+/// in that box; so does every B-spline or NURBS edge curve and every line between its ends. A
+/// planar face lies in the convex hull of its boundary, its edges, so in the box too. Hence the
+/// box holds the whole solid. Any other surface or curve kind panics: the argument does not
+/// cover it.
+fn control_box(b: &crate::Body) -> (Vec3, Vec3) {
+    use solidcore_record::brep as rb;
+    let (mut lo, mut hi) =
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
+    let mut add = |p: [f64; 3]| {
+        lo = Vec3::new(lo.x.min(p[0]), lo.y.min(p[1]), lo.z.min(p[2]));
+        hi = Vec3::new(hi.x.max(p[0]), hi.y.max(p[1]), hi.z.max(p[2]));
+    };
+    let unweight = |h: [f64; 4]| {
+        assert!(h[3] > 0.0, "a weight {} is not positive", h[3]);
+        [h[0] / h[3], h[1] / h[3], h[2] / h[3]]
+    };
+    for f in &b.record.faces {
+        match f.nurbs.as_ref().unwrap_or(&f.surface) {
+            rb::Surface::Spline { points, .. } => points.iter().flatten().for_each(|p| add(*p)),
+            rb::Surface::RationalSpline { homogeneous, .. } => homogeneous.iter().flatten().for_each(|h| add(unweight(*h))),
+            rb::Surface::Plane { .. } | rb::Surface::PlaneThrough { .. } => {}
+            other => panic!("a face's surface the control box does not cover: {other:?}"),
+        }
+    }
+    for e in &b.record.edges {
+        match e.nurbs.as_ref().unwrap_or(&e.curve) {
+            rb::Curve::Line { start, end } => {
+                add(*start);
+                add(*end);
+            }
+            rb::Curve::Polyline { points } | rb::Curve::Spline { points, .. } => points.iter().for_each(|p| add(*p)),
+            rb::Curve::RationalSpline { homogeneous, .. } => homogeneous.iter().for_each(|h| add(unweight(*h))),
+            other => panic!("an edge's curve the control box does not cover: {other:?}"),
+        }
+    }
+    (lo, hi)
+}
+
+/// A rail to the apex of a loft to a point (#20985), from the section at z = 0 to (0, 0, 30), at
+/// `x(z)` in the XZ plane.
+fn rail_to_apex(x: impl Fn(f64) -> f64) -> Vec<Vec3> {
+    (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(if z >= 30.0 { 0.0 } else { x(z) }, 0.0, z)).collect()
+}
+
+/// A circle of radius 20 lofted to a point 30 mm above its centre along a straight rail up the
+/// cone's side changes nothing: the cone, π r² h / 3 = 4000π, the base as drawn.
+#[test]
+fn a_straight_rail_to_the_apex_leaves_the_cone() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - z / 30.0));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 4000.0 * PI;
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    let m = measure(&b).unwrap();
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{:?}", m.bbox);
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-3, "the rail is {worst} mm off the loft");
+}
+
+/// A rail curving in to the apex, r = 20 (1 − (z/30)²), makes the rail's solid of revolution:
+/// π∫₀³⁰ r² dz = 12000π ∫₀¹ (1 − t²)² dt = 6400π.
+#[test]
+fn a_curved_rail_to_the_apex_makes_the_solid_of_revolution_of_the_rail() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - (z / 30.0).powi(2)));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 6400.0 * PI;
+    assert!(close(volume(&b), want, 1e-3), "volume {} vs {want}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
+/// Two straight rails up opposite corners of a square of half side 10 to the point 30 mm up: the
+/// pyramid, 20² · 30 / 3 = 4000. The rails meet at the apex, which is where they have to.
+#[test]
+fn two_rails_to_the_apex_of_a_pyramid() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let edge = |s: f64| -> Vec<Vec3> {
+        (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(s * 10.0 * (1.0 - t), s * 10.0 * (1.0 - t), 30.0 * t)).collect()
+    };
+    let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, &[edge(1.0), edge(-1.0)], RailFit::Scale).unwrap();
+    assert!(close(volume(&b), 4000.0, 1e-4), "volume {}", volume(&b));
+}
+
+/// A rail that ends beside the apex does not reach the point the loft goes to: refused.
+#[test]
+fn a_rail_that_misses_the_apex_is_refused() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(20.0 - z * 0.5, 0.0, z)).collect();
+    let e = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, &[r], RailFit::Scale).unwrap_err();
+    assert!(matches!(e, KernelError::Invalid(_)), "{e:?}");
+}
+
+/// A square of half side 10 lofted to a point 30 up along a rail from the middle of one side
+/// curving in as x = 10 (1 − t²), t = z / 30. Stretching widens each section only across to the
+/// rail: 2 · 10 (1 − t²) by 2 · 10 (1 − t), volume 12000 ∫₀¹ (1 − t²)(1 − t) dt = 5000. Scaling
+/// grows it both ways: (2 · 10 (1 − t²))², volume 12000 ∫₀¹ (1 − t²)² dt = 6400.
+#[test]
+fn a_stretching_rail_to_the_apex_widens_one_way_and_a_scaling_one_both() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 10.0 * (1.0 - (z / 30.0).powi(2)));
+    for (fit, want) in [(RailFit::Stretch, 5000.0), (RailFit::Scale, 6400.0)] {
+        let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, std::slice::from_ref(&r), fit).unwrap();
+        assert!(close(volume(&b), want, 1e-3), "{fit:?}: volume {} vs {want}", volume(&b));
+        let m = measure(&b).unwrap();
+        assert!((m.bbox.max.y - 10.0).abs() < 1e-6 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{fit:?}: {:?}", m.bbox);
+    }
+}
+
+/// A closed loop of two cubic Béziers lofted to a point along a straight rail from one of its
+/// points to the apex: the rail lies on the cone over the loop, so the loft is that cone, the
+/// loft to the point without rails (exact ruled walls), area × h / 3.
+#[test]
+fn a_spline_profile_follows_a_straight_rail_to_the_apex() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let (a, b) = (Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0));
+    let lp = Loop2 {
+        segs: vec![
+            Seg2::Cubic { p0: a, p1: Vec2::new(-10.0, 12.0), p2: Vec2::new(10.0, 12.0), p3: b },
+            Seg2::Cubic { p0: b, p1: Vec2::new(10.0, -12.0), p2: Vec2::new(-10.0, -12.0), p3: a },
+        ],
+    };
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(10.0 * (1.0 - t), 0.0, 30.0 * t)).collect();
+    let railed = crate::loft_to_point_with_rails(&at(0.0), &lp, apex, &[r], RailFit::Scale).unwrap();
+    let plain = crate::loft_to_point(&at(0.0), &lp, apex).unwrap();
+    let (v, want) = (volume(&railed), volume(&plain));
+    assert!(close(v, want, 1e-6), "railed {v} vs plain {want}");
 }

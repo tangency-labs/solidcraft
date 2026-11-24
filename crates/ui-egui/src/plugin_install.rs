@@ -7,10 +7,17 @@ use solidcraft_ui_text::{format, tr};
 
 use crate::{SolveApp, ui_kit};
 
+/// The plugin package jobs running now, for `control.pending` and `control.running` (#20814).
+pub fn running_jobs() -> Vec<Value> {
+    crate::plugins::running_jobs()
+}
+
 /// The plugin waiting for the user's answer.
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) ask: Option<Ask>,
+    /// A late folder picker answer belongs only to the review that opened it.
+    generation: u64,
 }
 
 pub(crate) struct Ask {
@@ -46,9 +53,14 @@ pub(crate) fn review(app: &mut SolveApp, path: String) {
     }
 }
 
-/// A checked package from the install command, with initially unfilled host folder paths.
+/// A checked package; updates reuse named folders only for the same or lower access.
 pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
     let permissions = plugin.get("permissions");
+    let stored = plugin
+        .get("replaces")
+        .and_then(Value::as_str)
+        .and_then(|_| plugin.get("id").and_then(Value::as_str))
+        .and_then(|id| app.session.plugin_state.grants.get(id));
     let grants = solidcraft_engine::plugin::Grants {
         package_hash: None,
         command_groups: list(permissions.and_then(|p| p.get("command_groups"))).into_iter().collect(),
@@ -57,16 +69,43 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .map(|folder| solidcraft_engine::plugin::FileGrant {
-                name: text(folder, "name"),
-                folder: Default::default(),
-                read: folder.get("read").and_then(Value::as_bool).unwrap_or(false),
-                write: folder.get("write").and_then(Value::as_bool).unwrap_or(false),
+            .map(|folder| {
+                let mut grant = solidcraft_engine::plugin::FileGrant {
+                    name: text(folder, "name"),
+                    folder: Default::default(),
+                    read: folder.get("read").and_then(Value::as_bool).unwrap_or(false),
+                    write: folder.get("write").and_then(Value::as_bool).unwrap_or(false),
+                };
+                if let Some(previous) = stored
+                    .and_then(|grants| grants.folders.iter().find(|previous| previous.name == grant.name))
+                    .filter(|previous| grant.access() <= previous.access())
+                {
+                    grant.folder = previous.folder.clone();
+                }
+                grant
             })
             .collect(),
+        fuel: fuel_request(&plugin, app.preferences.plugin_max_fuel),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
+        input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
+    // These are editable starting values, not grants for the new package. Install validates
+    // every folder on its worker, including a stored folder that has since disappeared.
+    app.plugin_install.generation = app.plugin_install.generation.wrapping_add(1);
     app.plugin_install.ask = Some(Ask { path, plugin, grants });
+}
+
+fn browse_folder(app: &mut SolveApp, name: String) {
+    let generation = app.plugin_install.generation;
+    app.pick_folder(move |app, path| {
+        if app.plugin_install.generation == generation
+            && let Some(path) = path
+            && let Some(ask) = app.plugin_install.ask.as_mut()
+            && let Some(grant) = ask.grants.folders.iter_mut().find(|grant| grant.name == name)
+        {
+            grant.folder = path.into();
+        }
+    });
 }
 
 /// The memory the plugin asks for, in MiB, when that is more than the user's ceiling for plugins:
@@ -74,6 +113,12 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
 pub(crate) fn memory_request(plugin: &Value, ceiling: usize) -> Option<usize> {
     let asked = plugin.pointer("/limits/memory_mib").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())?;
     (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_MEMORY_MIB).then_some(asked)
+}
+
+/// The manifest's fuel request when it needs approval above Max plugin fuel.
+pub(crate) fn fuel_request(plugin: &Value, ceiling: u64) -> Option<u64> {
+    let asked = plugin.pointer("/limits/fuel").and_then(Value::as_u64)?;
+    (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_APPROVED_FUEL).then_some(asked)
 }
 
 fn text(plugin: &Value, key: &str) -> String {
@@ -104,8 +149,31 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         });
         lines.push(format("prefs.plugin_folder", &[("name", name), ("access", access)]));
     }
+    let opens = list(plugin.get("opens"));
+    if !opens.is_empty() {
+        let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.opens", &[("extensions", &extensions)]));
+    }
+    let writes = list(plugin.get("writes"));
+    if !writes.is_empty() {
+        let extensions = writes.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.writes", &[("extensions", &extensions)]));
+    }
+    if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
+        lines.push(tr("plugin_install.input_folder").to_string());
+    }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
+    }
+    for panel in plugin.get("panels").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(title) = panel.get("title").and_then(Value::as_str) {
+            lines.push(format("plugin_install.panel", &[("title", title)]));
+        }
+    }
+    for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
+            lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
+        }
     }
     let commands = list(plugin.get("commands")).len();
     match commands {
@@ -127,6 +195,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = tr("plugin_install.title").to_string();
     let (install, cancel) = (tr("plugin_install.install").to_string(), tr("plugin_install.cancel").to_string());
     let valid = crate::plugins::valid_grants(&ask.grants) && !crate::plugins::busy(app);
+    let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
+    let mut browse = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_plugin_install"), "import", &title)
         .tone(if replaces.is_some() { ui_kit::Tone::Warning } else { ui_kit::Tone::Info })
         .actions(&install, &cancel, None)
@@ -137,11 +207,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
                 ui_kit::text(ui, tr("plugin_install.asks"), ui_kit::Text::Report("plugin_install_asks", false));
-                if lines.is_empty() && ask.grants.memory_mib.is_none() {
+                if lines.is_empty() && ask.grants.memory_mib.is_none() && ask.grants.fuel.is_none() {
                     ui_kit::text(ui, tr("plugin_install.asks_nothing"), ui_kit::Text::Hint("plugin_install_nothing"));
                 }
                 for (i, line) in lines.iter().enumerate() {
                     ui.push_id(i, |ui| ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_permission")));
+                }
+                if let Some(fuel) = ask.grants.fuel {
+                    let line = format("plugin_install.fuel", &[("fuel", &fuel.to_string()), ("limit", &app.preferences.plugin_max_fuel.to_string())]);
+                    ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_fuel"));
                 }
                 if let Some(memory) = ask.grants.memory_mib {
                     let line = format(
@@ -149,6 +223,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         &[("memory", &memory.to_string()), ("limit", &app.preferences.plugin_max_memory_mib.to_string())],
                     );
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
+                }
+                for warning in list(plugin.get("param_warnings")) {
+                    ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
                 }
                 for grant in &mut ask.grants.folders {
                     let access = tr(match (grant.read, grant.write) {
@@ -158,7 +235,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                     let label = format("prefs.plugin_folder", &[("name", &grant.name), ("access", access)]);
                     let mut path = grant.folder.display().to_string();
-                    ui_kit::text_row(ui, &label, &mut path, tr("prefs.plugin_folder_path"));
+                    ui.push_id(&grant.name, |ui| {
+                        ui_kit::row(ui, &label, |ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if can_browse && ui_kit::button(ui, tr("plugin_install.browse"), ui_kit::Button::Normal).clicked() {
+                                    browse = Some(grant.name.clone());
+                                }
+                                ui_kit::text_field(ui, &mut path, tr("prefs.plugin_folder_path"));
+                            });
+                        });
+                    });
                     grant.folder = path.into();
                 }
                 if !ask.grants.folders.is_empty() {
@@ -207,7 +293,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Action::Ok => install_now(app, &ask),
         ui_kit::Action::Cancel => {}
         _ if closed => {}
-        _ => app.plugin_install.ask = Some(ask),
+        _ => {
+            app.plugin_install.ask = Some(ask);
+            if let Some(name) = browse {
+                browse_folder(app, name);
+            }
+        }
     }
 }
 
@@ -227,7 +318,7 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -257,6 +348,8 @@ mod tests {
                 if frame == 5 {
                     let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
                     assert!(text.contains("Install") && text.contains("exports (write)"), "{text}");
+                    assert!(text.contains("10000000000000 fuel") && text.contains("100000000000"), "{text}");
+                    assert!(text.contains("Browse…"), "{text}");
                     if size.x > 1000.0 {
                         assert!(text.contains("Menu: Plugins") && text.contains("Ribbon: Plugins"), "{text}");
                     }
@@ -271,6 +364,31 @@ mod tests {
     }
 
     #[test]
+    fn install_review_shows_swatch_warnings_and_keeps_install_available() {
+        let mut h = crate::scenario::Harness::new();
+        let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
+        described(&mut h.app, "test.zip".into(), json!({"name":"Finishes","version":"1","param_warnings":[warning]}));
+        let ctx = crate::fonts::test_context();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx())),
+            );
+            output.textures_delta.clear();
+            if frame == 5 {
+                let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                assert!(text.contains(warning), "{text}");
+                assert!(crate::plugins::valid_grants(&h.app.plugin_install.ask.as_ref().unwrap().grants));
+                assert!(crate::scenario::handle_at("dialog:ok").is_some());
+            }
+        }
+    }
+
+    #[test]
     fn plugin_install_permissions_use_plain_words_and_exact_folder_access() {
         // Each test runs in its own process under nextest: load the catalogs, or `tr` returns ids.
         crate::i18n::install();
@@ -278,7 +396,7 @@ mod tests {
             {"name":"source","read":true,"write":false},
             {"name":"output","read":false,"write":true},
             {"name":"project","read":true,"write":true}
-        ]}});
+        ]},"listeners":[{"entry":"refresh","on":["design.changed"]}]});
         let lines = permission_lines(&plugin);
         assert_eq!(
             lines,
@@ -289,7 +407,8 @@ mod tests {
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
                 "output (write)",
-                "project (read and write)"
+                "project (read and write)",
+                "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
     }
@@ -302,13 +421,250 @@ mod tests {
         assert_eq!(memory_request(&json!({}), 128), None);
     }
 
+    fn review_folder_package(h: &mut crate::scenario::Harness, version: &str, files: Value) {
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
+        let manifest = json!({"id":"gears","name":"Gears","version":version,"capabilities":["commands@0.1"],
+            "runtime":{"module":"gears.wasm","entries":[{"name":"make"}],"commands":["file.export_stl"],
+            "permissions":{"command_groups":["file"],"files":files}}});
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in [("plugin.json", serde_json::to_vec(&manifest).unwrap()), ("gears.wasm", b"\0asm".to_vec())] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            std::io::Write::write_all(&mut zip, &bytes).unwrap();
+        }
+        let path = h.dir.join("gears.zip");
+        std::fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
+        review(&mut h.app, path.to_string_lossy().into_owned());
+        crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert!(h.app.plugin_install.ask.is_some(), "{:?}", h.app.status);
+    }
+
+    fn install_folder_package(h: &mut crate::scenario::Harness, folder: &std::path::Path) {
+        install_folder_package_with_access(h, folder, false, true);
+    }
+
+    fn install_folder_package_with_access(h: &mut crate::scenario::Harness, folder: &std::path::Path, read: bool, write: bool) {
+        review_folder_package(h, "0.1.0", json!([{"name":"exports","read":read,"write":write}]));
+        let mut ask = h.app.plugin_install.ask.take().unwrap();
+        ask.grants.folders[0].folder = folder.to_path_buf();
+        install_now(&mut h.app, &ask);
+        crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert!(h.app.session.plugin_state.packages.contains_key("gears"), "{:?}", h.app.status);
+    }
+
+    #[test]
+    fn plugin_install_fresh_folder_starts_empty() {
+        let mut h = crate::scenario::Harness::new();
+        for id in ["gears", "other-plugin"] {
+            h.app.preferences.plugin_grants.insert(
+                id.into(),
+                solidcraft_engine::plugin::Grants {
+                    folders: vec![solidcraft_engine::plugin::FileGrant { name: "exports".into(), folder: h.dir.clone(), read: true, write: true }],
+                    ..Default::default()
+                },
+            );
+        }
+        review_folder_package(&mut h, "0.1.0", json!([{"name":"exports","write":true}]));
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert!(ask.grants.folders[0].folder.as_os_str().is_empty());
+        assert!(!crate::plugins::valid_grants(&ask.grants));
+        assert!(!h.dir.join("plugins/gears").exists());
+    }
+
+    #[test]
+    fn plugin_install_update_read_to_read_prefills() {
+        let mut h = crate::scenario::Harness::new();
+        let folder = h.dir.join("Read inputs");
+        std::fs::create_dir(&folder).unwrap();
+        install_folder_package_with_access(&mut h, &folder, true, false);
+        let approved = h.app.session.plugin_state.grants.clone();
+        review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":true}]));
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert_eq!(ask.grants.folders[0].folder, folder);
+        assert!(ask.grants.folders[0].read && !ask.grants.folders[0].write);
+        assert_eq!(h.app.session.plugin_state.grants, approved);
+        assert_eq!(h.app.preferences.plugin_grants, approved, "prefill does not approve an update");
+    }
+
+    #[test]
+    fn plugin_install_update_write_to_read_prefills() {
+        for read in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            let folder = h.dir.join("Write exports");
+            std::fs::create_dir(&folder).unwrap();
+            install_folder_package_with_access(&mut h, &folder, read, true);
+            let approved = h.app.session.plugin_state.grants.clone();
+            review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":true}]));
+            let ask = h.app.plugin_install.ask.as_ref().unwrap();
+            assert_eq!(ask.grants.folders[0].folder, folder);
+            assert!(ask.grants.folders[0].read && !ask.grants.folders[0].write, "the new package gets only the requested access");
+            assert_eq!(h.app.session.plugin_state.grants, approved);
+            assert_eq!(h.app.preferences.plugin_grants, approved);
+        }
+    }
+
+    #[test]
+    fn plugin_install_update_read_to_write_starts_empty() {
+        let mut h = crate::scenario::Harness::new();
+        let folder = h.dir.join("Read inputs");
+        std::fs::create_dir(&folder).unwrap();
+        install_folder_package_with_access(&mut h, &folder, true, false);
+        let approved = h.app.session.plugin_state.grants.clone();
+        for read in [false, true] {
+            review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","read":read,"write":true}]));
+            let ask = h.app.plugin_install.ask.as_ref().unwrap();
+            assert!(ask.grants.folders[0].folder.as_os_str().is_empty(), "new write access requires choosing the folder again");
+            assert_eq!(ask.grants.folders[0].read, read);
+            assert!(ask.grants.folders[0].write);
+            assert!(!crate::plugins::valid_grants(&ask.grants));
+            assert_eq!(h.app.session.plugin_state.grants, approved);
+            assert_eq!(h.app.preferences.plugin_grants, approved, "review cannot raise the stored grant's access");
+        }
+    }
+
+    #[test]
+    fn plugin_install_update_prefills_stored_folder_by_name() {
+        let mut h = crate::scenario::Harness::new();
+        let old_folder = h.dir.join("Old exports");
+        let chosen = h.dir.join("New exports");
+        std::fs::create_dir(&old_folder).unwrap();
+        std::fs::create_dir(&chosen).unwrap();
+        install_folder_package(&mut h, &old_folder);
+        let approved = h.app.session.plugin_state.grants.clone();
+        review_folder_package(&mut h, "0.2.0", json!([{"name":"source","read":true},{"name":"exports","read":true}]));
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert!(ask.grants.folders[0].folder.as_os_str().is_empty(), "a new name starts empty");
+        let exports = &ask.grants.folders[1];
+        assert_eq!(exports.name, "exports");
+        assert_eq!(exports.folder, old_folder, "match the grant name, not its position");
+        assert!(exports.read && !exports.write, "use this package's requested access");
+        assert_eq!(h.app.session.plugin_state.grants, approved, "review does not approve the update");
+        assert_eq!(h.app.preferences.plugin_grants, approved);
+        let mut ask = h.app.plugin_install.ask.take().unwrap();
+        ask.grants.folders[0].folder = h.dir.clone();
+        ask.grants.folders[1].folder = chosen.clone();
+        install_now(&mut h.app, &ask);
+        crate::plugins::tick(&mut h.app, &h.ctx, true);
+        let installed = &h.app.session.plugin_state.grants["gears"];
+        assert_ne!(installed.package_hash, approved["gears"].package_hash);
+        assert_eq!(installed.folders.iter().find(|f| f.name == "exports").unwrap().folder, chosen);
+    }
+
+    #[test]
+    fn plugin_install_missing_stored_folder_is_not_granted() {
+        let mut h = crate::scenario::Harness::new();
+        let folder = h.dir.join("Removed exports");
+        std::fs::create_dir(&folder).unwrap();
+        install_folder_package(&mut h, &folder);
+        let approved = h.app.session.plugin_state.grants.clone();
+        let manifest_path = h.dir.join("plugins/gears/plugin.json");
+        let original = std::fs::read(&manifest_path).unwrap();
+        std::fs::remove_dir(&folder).unwrap();
+        review_folder_package(&mut h, "0.2.0", json!([{"name":"exports","write":true}]));
+        let ask = h.app.plugin_install.ask.take().unwrap();
+        // A retained missing path must go through the command's existing folder error.
+        assert_eq!(ask.grants.folders[0].folder, folder);
+        install_now(&mut h.app, &ask);
+        crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2), "missing folder must report an error");
+        assert_eq!(h.app.session.plugin_state.grants, approved, "no approval for the new package");
+        assert_eq!(h.app.preferences.plugin_grants, approved);
+        assert_eq!(std::fs::read(manifest_path).unwrap(), original, "the installed package is unchanged");
+    }
+
+    #[test]
+    fn plugin_install_browse_fills_only_the_chosen_field_and_cancel_keeps_it() {
+        let mut h = crate::scenario::Harness::new();
+        let chosen = h.dir.join("Chosen exports");
+        std::fs::create_dir(&chosen).unwrap();
+        let answer = chosen.to_string_lossy().into_owned();
+        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+        review_folder_package(&mut h, "0.1.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
+        h.frames(3);
+        h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert!(ask.grants.folders[0].folder.as_os_str().is_empty());
+        assert_eq!(ask.grants.folders[1].folder, chosen);
+        assert!(h.app.session.plugin_state.grants.is_empty(), "Browse does not approve anything");
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.frames(3);
+        h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[1].folder, chosen);
+    }
+
+    #[test]
+    fn plugin_install_browse_is_hidden_without_a_folder_picker() {
+        let mut h = crate::scenario::Harness::new();
+        review_folder_package(&mut h, "0.1.0", json!([{"name":"exports","write":true}]));
+        h.app.services.pick_folder = None;
+        h.frames(3);
+        assert!(h.widget("Browse…").is_none());
+    }
+
+    #[test]
+    fn plugin_install_browse_waits_and_ignores_a_replaced_review() {
+        let mut h = crate::scenario::Harness::new();
+        let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
+        let response = answer.clone();
+        h.app.services.pick_folder = Some(Box::new(move || {
+            let response = response.clone();
+            Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
+        }));
+        review_folder_package(&mut h, "0.1.0", json!([{"name":"exports","write":true}]));
+        h.frames(3);
+        h.step(&json!({"widget":"Browse…"})).unwrap();
+        h.frames(3);
+        assert!(h.app.file_picker_busy(), "pending picker returns to the event loop");
+        assert!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder.as_os_str().is_empty());
+        *answer.borrow_mut() = Some(Some(h.dir.to_string_lossy().into_owned()));
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder, h.dir);
+        h.frames(3);
+        h.step(&json!({"widget":"Browse…"})).unwrap();
+        let old = h.app.plugin_install.ask.take().unwrap();
+        // Even reopening the very same archive is a separate review.
+        described(&mut h.app, old.path, old.plugin);
+        *answer.borrow_mut() = Some(Some(h.dir.to_string_lossy().into_owned()));
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder.as_os_str().is_empty());
+        assert!(h.app.session.plugin_state.grants.is_empty());
+    }
+
+    #[test]
+    fn plugin_install_folder_accepts_typing_and_pasting() {
+        let mut h = crate::scenario::Harness::new();
+        review_folder_package(&mut h, "0.1.0", json!([{"name":"exports","write":true}]));
+        h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = h.dir.clone();
+        h.frames(3);
+        h.step(&json!({"widget":h.dir.to_string_lossy()})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        let typed = h.dir.join("Typed folder");
+        h.step(&json!({"text":typed.to_string_lossy()})).unwrap();
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder, typed);
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        let pasted = h.dir.join("Pasted folder");
+        h.frame_with(vec![egui::Event::Paste(pasted.to_string_lossy().into_owned())]);
+        assert_eq!(h.app.plugin_install.ask.as_ref().unwrap().grants.folders[0].folder, pasted);
+        assert!(h.app.session.plugin_state.grants.is_empty());
+    }
+
+    #[test]
+    fn plugin_install_asks_for_fuel_only_above_the_default_and_within_the_hard_ceiling() {
+        let default = 100_000_000_000_u64;
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_000_u64}}), default), Some(10_000_000_000_000));
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":default}}), default), None);
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_001_u64}}), default), None);
+        assert_eq!(fuel_request(&json!({}), default), None);
+    }
+
     #[test]
     fn install_plugin_reviews_then_installs_and_says_so() {
         let mut h = crate::scenario::Harness::new();
         let plugins = h.dir.join("plugins");
         h.app.session.plugin_state.plugins_dir = Some(plugins.clone());
         let manifest = json!({"id":"gears","name":"Gears","version":"0.1.0","description":"Spur gears","capabilities":["commands@0.1"],
-            "runtime":{"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
+            "runtime":{"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":64,"deadline_ms":5000},"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
             "permissions":{"command_groups":["file"],"files":[{"name":"exports","write":true}]}}});
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         for (name, bytes) in [("gears/plugin.json", serde_json::to_vec(&manifest).unwrap()), ("gears/gears.wasm", b"\0asm".to_vec())] {
@@ -318,8 +674,14 @@ mod tests {
         let zip = zip.finish().unwrap().into_inner();
         let path = h.dir.join("gears.zip");
         std::fs::write(&path, &zip).unwrap();
-        review(&mut h.app, path.to_string_lossy().into_owned());
+        // Dropping the plugin archive has the same reviewed path as Install plugin...
+        // and never tries to open a design (#18761).
+        let (tabs, before) = (h.app.docs.count(), h.app.session.doc.to_json());
+        h.app.drop_path(&path.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "the ZIP is not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
+        assert_eq!(h.app.docs.count(), tabs);
+        assert_eq!(h.app.session.doc.to_json(), before);
         let ask = h.app.plugin_install.ask.as_ref().expect("asks first");
         assert!(!plugins.join("gears").exists(), "nothing is written before the answer");
         let lines = permission_lines(&ask.plugin);
@@ -327,6 +689,7 @@ mod tests {
         assert!(!crate::plugins::valid_grants(&ask.grants));
         // The screenshot shows a folder a person would pick; the install below uses the test's own folder.
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = std::path::PathBuf::from("/home/maker/Documents/Gear exports");
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
         capture_confirm(&mut h.app);
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = h.dir.clone();
         let ask = h.app.plugin_install.ask.take().unwrap();
@@ -350,11 +713,15 @@ mod tests {
         let grants = &h.app.preferences.plugin_grants["gears"];
         assert!(grants.command_groups.contains("file"));
         assert_eq!(grants.folders[0].folder, h.dir);
+        assert_eq!(serde_json::to_value(grants).unwrap()["fuel"], 10_000_000_000_000_u64);
         // A broken .zip is refused in plain words, with no question.
-        let bad = h.dir.join("bad.zip");
+        let bad = h.dir.join("bad.ZIP");
         std::fs::write(&bad, b"not a zip").unwrap();
-        review(&mut h.app, bad.to_string_lossy().into_owned());
+        h.app.drop_path(&bad.to_string_lossy());
+        assert!(!h.app.file_load.busy(), "a bad ZIP is still a package, not a design");
         crate::plugins::tick(&mut h.app, &h.ctx, true);
-        assert!(h.app.plugin_install.ask.is_none());
+        assert!(h.app.plugin_install.ask.is_none(), "an invalid ZIP never opens an approval dialog");
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2), "the plugin review reports the invalid archive");
+        assert_eq!(h.app.docs.count(), tabs);
     }
 }

@@ -1,0 +1,54 @@
+//! This is a crate that adds some features on top top of [`egui`](https://github.com/emilk/egui).
+//!
+//! This crate are for experimental features, and features that require big dependencies that does not belong in `egui`.
+//!
+//! ## Feature flags
+#![cfg_attr(feature = "document-features", doc = document_features::document_features!())]
+//!
+
+#![expect(clippy::manual_range_contains)]
+#![warn(clippy::std_instead_of_alloc)]
+
+extern crate alloc;
+
+#[cfg(feature = "datepicker")]
+mod datepicker;
+
+pub mod syntax_highlighting;
+
+#[doc(hidden)]
+pub mod image;
+mod layout;
+pub mod loaders;
+mod sizing;
+mod strip;
+#[cfg(feature = "svg")]
+mod svg_glyph;
+mod table;
+
+#[cfg(feature = "datepicker")]
+pub use crate::datepicker::DatePickerButton;
+
+pub(crate) use crate::layout::StripLayout;
+pub use crate::sizing::Size;
+pub use crate::strip::*;
+#[cfg(feature = "svg")]
+pub use crate::svg_glyph::SvgGlyph;
+pub use crate::table::*;
+
+pub use loaders::install_image_loaders;
+
+// ---------------------------------------------------------------------------
+
+/// Panic in debug builds, log otherwise.
+macro_rules! log_or_panic {
+    ($fmt: literal) => {$crate::log_or_panic!($fmt,)};
+    ($fmt: literal, $($arg: tt)*) => {{
+        if cfg!(debug_assertions) {
+            panic!($fmt, $($arg)*);
+        } else {
+            log::error!($fmt, $($arg)*);
+        }
+    }};
+}
+pub(crate) use log_or_panic;

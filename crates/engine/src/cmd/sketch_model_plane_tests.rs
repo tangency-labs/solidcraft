@@ -143,3 +143,61 @@ fn intersect_and_include_on_planes_built_from_the_model() {
         assert!((d.plane.to_world(q.pos).y - 35.0).abs() < 1e-9);
     }
 }
+
+/// #8192: the origin of `sketch.create`'s explicit plane takes length expressions. The sketch
+/// keeps the ones that name parameters and sits where they come to, follows them when they
+/// change, and keeps following after undo and a save; numbers still work; a bad expression is
+/// refused with the design unchanged.
+#[test]
+fn a_sketch_on_a_plane_with_an_origin_given_as_expressions_follows_its_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    let plane = |origin: Value| json!({"origin": origin, "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]});
+    let id = run(&mut s, "sketch.create", json!({"plane": plane(json!(["5 mm", "station + 2 mm", 0]))}))["sketch"].as_u64().unwrap();
+    let origin = |s: &Session| s.model.state().sketch(id).map(|ss| ss.plane.origin).expect("an evaluated sketch");
+    assert!(origin(&s).dist(Vec3::new(5.0, 12.0, 0.0)) < 1e-9, "{:?}", origin(&s));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 3]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "parameters.change", json!({"name": "station", "expression": "30 mm"}));
+    assert!(origin(&s).dist(Vec3::new(5.0, 32.0, 0.0)) < 1e-9, "{:?}", origin(&s));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(origin(&s).dist(Vec3::new(5.0, 12.0, 0.0)) < 1e-9, "{:?}", origin(&s));
+
+    // Saved and opened, it still follows.
+    let mut cold = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    cold.refresh();
+    run(&mut cold, "parameters.change", json!({"name": "station", "expression": "50 mm"}));
+    assert!(cold.model.state().sketch(id).unwrap().plane.origin.dist(Vec3::new(5.0, 52.0, 0.0)) < 1e-9);
+
+    // Numbers, and text that names no parameter, keep working as before and need no parameter.
+    let mut n = Session::default();
+    let id = run(&mut n, "sketch.create", json!({"plane": plane(json!(["5 mm", 12, 0]))}))["sketch"].as_u64().unwrap();
+    assert!(n.model.state().sketch(id).unwrap().plane.origin.dist(Vec3::new(5.0, 12.0, 0.0)) < 1e-9);
+    assert!(matches!(n.doc.features[0].kind, solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Custom { .. }, .. }));
+
+    let before = s.doc.clone();
+    for (origin, expected) in [(json!([0, "nope", 0]), "origin y"), (json!([0, "30 deg", 0]), "origin y"), (json!([0, true, "station"]), "origin")] {
+        let e = s.execute("sketch.create", &json!({"plane": plane(origin)})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
+fn an_expression_in_a_plane_direction_is_named_not_reported_as_missing() {
+    // #19965: `x_dir` was there, so "plane needs x_dir" misled; only `origin` takes expressions.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "30 deg", "unit": "deg"}));
+    let refused = |s: &mut Session, plane: Value| {
+        s.execute("sketch.create", &json!({"plane": plane, "name": "S"})).err().map(|e| e.to_string()).unwrap_or_default()
+    };
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": ["cos(a)", "sin(a)", 0], "y_dir": [0, 0, 1]}));
+    assert!(e.contains("`x_dir` must be three numbers") && !e.contains("needs x_dir"), "{e}");
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": ["0", "0", "1"]}));
+    assert!(e.contains("`y_dir` must be three numbers"), "{e}");
+    // Absent stays "needs", and numbers still make the plane.
+    let e = refused(&mut s, json!({"origin": [0, 0, 0], "x_dir": [1, 0, 0]}));
+    assert!(e.contains("plane needs y_dir"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "S"}));
+}

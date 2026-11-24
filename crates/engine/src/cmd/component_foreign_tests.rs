@@ -96,6 +96,49 @@ fn user_parameters_come_along_renamed_where_taken() {
     assert!((volume(&mut s, part) - 4.0).abs() < 1e-6, "the copy follows w_2");
 }
 
+/// A 3D sketch point placed by a parameter whose name is taken here pastes with the renamed
+/// parameter in its expressions, and follows that one, not this design's own `w` (#10608).
+#[test]
+fn a_3d_point_placed_by_a_taken_parameter_follows_it_renamed() {
+    let mut source = design("Bracket");
+    run(&mut source, "parameters.add", json!({"name": "w", "expression": "4 mm"}));
+    let (_, at) = created(&mut source, "Part");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.point3d", json!({"point": ["w", 0, "2 * w"]}));
+    run(&mut source, "sketch.finish", json!({}));
+
+    let mut s = design("Frame");
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    s.foreign_copy = copied(&source, vec![at]);
+    run(&mut s, "component.paste_from_design", json!({}));
+    let sketch = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
+    let exprs = s
+        .doc
+        .sketch(sketch)
+        .unwrap()
+        .wire_constraints
+        .iter()
+        .find_map(|c| match &c.kind {
+            solidcraft_sketch::WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.clone()),
+            _ => None,
+        })
+        .expect("the point's placing Fix came along");
+    assert_eq!(exprs.x.as_deref(), Some("w_2"), "{exprs:?}");
+    assert!(exprs.z.as_deref().is_some_and(|z| z.contains("w_2")), "{exprs:?}");
+    let point = |s: &Session| {
+        let world = s.world_state().unwrap();
+        world.sketch(sketch).unwrap().sketch.wires[0].fit[0]
+    };
+    let p = point(&s);
+    assert!((p.x - 4.0).abs() < 1e-6 && (p.z - 8.0).abs() < 1e-6, "{p:?}");
+    run(&mut s, "parameters.change", json!({"name": "w_2", "expression": "7 mm"}));
+    let p = point(&s);
+    assert!((p.x - 7.0).abs() < 1e-6 && (p.z - 14.0).abs() < 1e-6, "the copy follows w_2: {p:?}");
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
+    assert!((point(&s).x - 7.0).abs() < 1e-6, "not this design's own w");
+}
+
 /// A component whose features use what isn't in it (here a body outside it) isn't pasted into
 /// another design: it is refused, saying what, and the design is left as it was.
 #[test]
@@ -141,6 +184,56 @@ fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
     let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
     assert!(error.contains("uses feature reference") && error.contains("uses exact face attachment to Post"), "{error}");
     assert_eq!(s.doc.to_json(), saved);
+}
+
+/// A Rotate step in a component, turning a frame member outside it, uses that member: it isn't
+/// pasted into another design, where the member's feature id could name something else.
+#[test]
+fn a_rotate_step_on_a_member_outside_its_component_is_refused_saying_what() {
+    let mut source = design("Rack");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut source, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
+    let index = {
+        let st = source.model.state();
+        let b = st.body("Post").unwrap();
+        (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().x > 0.999 && (pl.origin.x - 20.0).abs() < 1e-6))
+            .unwrap()
+    };
+    // The command refuses a member outside the active component, so the step is made at the
+    // root and moved in, as an old or hand-edited design can hold it.
+    let turn = run(&mut source, "frame.rotate_member", json!({"face": {"body": "Post", "index": index, "face": [20, 0, 150]}, "angle": "30 deg"}));
+    let (turns, at) = created(&mut source, "Turns");
+    source.doc_mut().feature_mut(turn["feature"].as_u64().unwrap()).unwrap().component = turns;
+    source.refresh();
+
+    let mut s = design("Frame");
+    s.foreign_copy = copied(&source, vec![at]);
+    let saved = s.doc.to_json();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses feature reference"), "{error}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+#[test]
+fn construction_plane_with_an_external_face_is_refused_when_pasted_into_another_design() {
+    let mut source = design("Source");
+    run(&mut source, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":"Cube"}));
+    let (_, at) = created(&mut source, "Planes");
+    run(&mut source, "construct.plane.offset", json!({"base":{"face":[1,1,2]},"offset":2,"name":"Above"}));
+
+    let mut s = design("Destination");
+    s.foreign_copy = copied(&source, vec![at]);
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses exact face attachment to Cube"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.undo.len(), undo);
 }
 
 /// A component that bodies were moved into (a body transfer, as Create Components from Bodies

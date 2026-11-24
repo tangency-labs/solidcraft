@@ -42,10 +42,33 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
     }
 }
 
+/// Whether an agent's request runs a plugin's code: `plugin.run` (a `<plugin>.<entry>` call is
+/// one once normalized), `file.import`, `doc.open` of a file an installed importer opens, or
+/// `file.export` through an installed exporter, alone or as a batch step. The chat asks before
+/// such a request in every mode, whatever was allowed before: running a plugin's code needs the
+/// user's go each time.
+pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &str, params: &serde_json::Value) -> bool {
+    let step = |step: &serde_json::Value| {
+        let Some(command) = step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) else { return false };
+        let params = step.get("params").unwrap_or(&serde_json::Value::Null);
+        command.eq_ignore_ascii_case("plugin.run")
+            || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+            || solidcraft_engine::cmd::runs_plugin_exporter(session, command, params)
+    };
+    match method {
+        "engine.execute" | "command" => step(params),
+        "engine.batch" | "engine.script" => {
+            let steps = if params.is_array() { params.as_array() } else { params.get("commands").and_then(serde_json::Value::as_array) };
+            steps.is_some_and(|steps| steps.iter().take(10_000).any(step))
+        }
+        _ => false,
+    }
+}
+
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
 /// `plugin.json` larger than this is refused.
-const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
+const MAX_MANIFEST_BYTES: u64 = solidcraft_engine::plugin::MAX_MANIFEST_BYTES as u64;
 
 /// One installed plugin, as its manifest describes it.
 #[derive(Clone, Debug)]
@@ -60,6 +83,10 @@ pub struct Plugin {
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
+    /// The images its entries name, read from the package (`plugin_images`): each relative path
+    /// with the icon name it is drawn by.
+    pub images: std::collections::BTreeMap<String, String>,
+    pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -95,7 +122,10 @@ fn plain(text: &str, max: usize) -> bool {
 
 fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
     if m.id != folder {
-        return Err(format!("plugin.json id `{}` does not match the folder `{folder}`", m.id));
+        return Err(format!(
+            "plugin.json id `{}` does not match the folder `{folder}`: a package folder is named after its plugin's id, so rename the folder to `{}`",
+            m.id, m.id
+        ));
     }
     if !valid_id(&m.id) {
         return Err("the id must be 1 to 64 lowercase letters, digits and hyphens".into());
@@ -122,6 +152,8 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         disabled: false,
         groups: Default::default(),
         entries: Vec::new(),
+        images: Default::default(),
+        swatches: Default::default(),
     })
 }
 
@@ -129,7 +161,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let path = dir.join("plugin.json");
     let meta = std::fs::symlink_metadata(&path).map_err(|_| "no plugin.json".to_string())?;
     if !meta.is_file() || meta.len() > MAX_MANIFEST_BYTES {
-        return Err("plugin.json is missing or larger than 16 KiB".into());
+        return Err("plugin.json is missing or larger than 64 KiB".into());
     }
     let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
     let parsed = package.manifest;
@@ -141,6 +173,8 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         plugin.entries = runtime.entries;
         plugin.groups = runtime.permissions.command_groups;
     }
+    plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
 
@@ -219,35 +253,54 @@ pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin:
     solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
+    // A failed write is retried by the next sync; the command that changed the grants reports it.
+    if let Err(e) = sync_store(app) {
+        log::warn!("plugins: {e}");
+    }
     app.session.disabled_plugins.clone_from(&app.preferences.disabled_plugins);
     app.session.plugin_limits = host_limits(&app.preferences);
     app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
 }
 /// Mirror successful install/remove command security state into persisted user preferences.
 /// This also covers commands from the control channel, without opening Preferences.
-pub(crate) fn persist_grants(app: &mut SolveApp) {
+/// An error: the shared grant store still holds what it held, so the command line and headless MCP
+/// may still use a grant taken back here; the next sync tries again.
+pub(crate) fn persist_grants(app: &mut SolveApp) -> Result<(), String> {
     for grants in app.session.plugin_state.grants.values_mut() {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
     app.preferences.plugin_grants.clone_from(&app.session.plugin_state.grants);
+    let saved = sync_store(app);
+    app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
+    saved
+}
+
+/// Start sharing grants through the plugins folder's grant store ([`SolveApp::share_plugin_grants`]).
+pub(crate) fn share_grants(app: &mut SolveApp) {
+    let Some(dir) = app.session.plugin_state.plugins_dir() else { return };
+    let mut synced = solidcraft_engine::plugin::grant_store::Synced::default();
+    if let Err(e) = synced.adopt(&dir, &mut app.preferences.plugin_grants) {
+        log::warn!("plugins: approvals could not be shared with the command line: {e}");
+    }
+    app.preferences.plugin_grants.retain(|id, grants| valid_id(id) && valid_grants(grants));
+    app.plugins.grant_store = Some(synced);
+    sync_policy(app);
+}
+
+/// Write the grants changed here to the shared store, then take in what the command line or
+/// headless MCP changed there. Nothing to do unless the app shares its grants.
+fn sync_store(app: &mut SolveApp) -> Result<(), String> {
+    let Some(synced) = app.plugins.grant_store.as_mut() else { return Ok(()) };
+    let Some(dir) = app.session.plugin_state.plugins_dir() else { return Ok(()) };
+    let saved = synced.persist(&dir, &app.preferences.plugin_grants);
+    // A record that could not be written or deleted reads back as last seen: no change here.
+    synced.refresh(&dir, &mut app.preferences.plugin_grants);
+    saved.map_err(|e| format!("approvals could not be shared with the command line: {e}"))
 }
 
 /// Bound persisted grants as strictly as manifest permissions, including host folder paths.
 pub(crate) fn valid_grants(grants: &solidcraft_engine::plugin::Grants) -> bool {
-    let mut names = std::collections::BTreeSet::new();
-    grants.command_groups.len() <= solidcraft_engine::plugin::COMMAND_GROUPS.len()
-        && grants.command_groups.iter().all(|group| solidcraft_engine::plugin::COMMAND_GROUPS.contains(&group.as_str()))
-        && grants.memory_mib.is_none_or(|memory| (1..=solidcraft_engine::plugin::MAX_MEMORY_MIB).contains(&memory))
-        && grants.folders.len() <= 32
-        && grants.folders.iter().all(|grant| {
-            let path = grant.folder.to_string_lossy();
-            valid_id(&grant.name)
-                && names.insert(&grant.name)
-                && (grant.read || grant.write)
-                && grant.folder.is_absolute()
-                && path.len() <= 4096
-                && !path.chars().any(char::is_control)
-        })
+    solidcraft_engine::plugin::grant_store::valid_record(grants)
 }
 
 pub(crate) enum PackageAction {
@@ -259,6 +312,56 @@ pub(crate) enum PackageAction {
 
 type PackageReply = Result<(serde_json::Value, solidcraft_engine::plugin::AppState), String>;
 
+/// How long a package job may run before the app gives up on it and takes the next one (#20814).
+/// Reading, checking and unpacking even the largest package takes seconds; a job still silent after
+/// this long is stuck, and it must not leave the app refusing every install and removal for good.
+pub(crate) const PACKAGE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// What the control channel says about a running package job (`control.pending`, `control.running`).
+struct JobInfo {
+    key: u64,
+    command: &'static str,
+    subject: Option<String>,
+    started: std::time::Instant,
+}
+
+static RUNNING_JOBS: std::sync::Mutex<Vec<JobInfo>> = std::sync::Mutex::new(Vec::new());
+static JOB_KEYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The running package jobs as the control channel lists them: never their parameters, only the
+/// command and the archive or plugin it works on.
+pub(crate) fn running_jobs() -> Vec<serde_json::Value> {
+    let Ok(jobs) = RUNNING_JOBS.lock() else { return Vec::new() };
+    jobs.iter()
+        .map(|job| {
+            let running = job.started.elapsed();
+            let mut row = serde_json::json!({
+                "job": "plugin_package",
+                "command": job.command,
+                "running_s": running.as_secs(),
+                "ends_by_itself_in_s": PACKAGE_DEADLINE.saturating_sub(running).as_secs(),
+                "note": "holds plugin.install and plugin.remove; it is abandoned by itself when its time is up",
+            });
+            if let Some(subject) = &job.subject {
+                row["subject"] = serde_json::json!(subject);
+            }
+            row
+        })
+        .collect()
+}
+
+/// The archive or plugin a package command works on, short enough to repeat in a message.
+#[cfg(not(target_arch = "wasm32"))]
+fn job_subject(command: &str, params: &serde_json::Value) -> Option<String> {
+    let name = if command == "plugin.remove" {
+        params.get("id")?.as_str()?.to_owned()
+    } else {
+        let path = params.get("path")?.as_str()?;
+        Path::new(path).file_name().map_or_else(|| path.to_owned(), |name| name.to_string_lossy().into_owned())
+    };
+    Some(name.chars().take(80).collect())
+}
+
 /// Package I/O keeps running when Preferences closes; only its application policy is adopted.
 pub(crate) struct PackageJob {
     command: &'static str,
@@ -267,6 +370,55 @@ pub(crate) struct PackageJob {
     /// `PrefsWindow::grants_revision` when the job started.
     revision: u64,
     done: std::sync::mpsc::Receiver<PackageReply>,
+    started: std::time::Instant,
+    /// Its entry in [`RUNNING_JOBS`], removed when the job ends.
+    key: u64,
+}
+
+impl Drop for PackageJob {
+    fn drop(&mut self) {
+        if let Ok(mut jobs) = RUNNING_JOBS.lock() {
+            jobs.retain(|job| job.key != self.key);
+        }
+    }
+}
+
+impl PackageJob {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(
+        command: &'static str,
+        subject: Option<String>,
+        action: PackageAction,
+        grants_before: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
+        revision: u64,
+        done: std::sync::mpsc::Receiver<PackageReply>,
+    ) -> Self {
+        let key = JOB_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        if let Ok(mut jobs) = RUNNING_JOBS.lock() {
+            jobs.push(JobInfo { key, command, subject, started });
+        }
+        PackageJob { command, action, grants_before, revision, done, started, key }
+    }
+}
+
+/// What refuses a new install or removal while a package job runs: which, on what, for how long, and
+/// that it ends by itself.
+pub(crate) fn busy_message(app: &SolveApp) -> String {
+    busy_message_at(app, std::time::Instant::now())
+}
+
+fn busy_message_at(app: &SolveApp, now: std::time::Instant) -> String {
+    let Some(job) = app.prefs_window.plugin_job.as_ref() else { return app.tr("prefs.plugin_busy").to_owned() };
+    let subject = RUNNING_JOBS.lock().ok().and_then(|jobs| jobs.iter().find(|info| info.key == job.key).and_then(|info| info.subject.clone()));
+    let what = match subject {
+        Some(subject) => format!("{} ({subject})", job.command),
+        None => job.command.to_owned(),
+    };
+    let running = now.saturating_duration_since(job.started).as_secs().to_string();
+    // The saved language, as `SolveApp::tr` reads it: the control channel has no render scope.
+    solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+        .format("prefs.plugin_busy_running", &[("what", &what), ("seconds", &running), ("limit", &PACKAGE_DEADLINE.as_secs().to_string())])
 }
 
 pub(crate) fn busy(app: &SolveApp) -> bool {
@@ -286,7 +438,7 @@ fn spawn_package(
     action: PackageAction,
 ) -> Result<(), String> {
     if busy(app) {
-        return Err(app.tr("prefs.plugin_busy").to_owned());
+        return Err(busy_message(app));
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -296,6 +448,7 @@ fn spawn_package(
         if let Some(level) = level {
             copy.param_check = level;
         }
+        let subject = job_subject(command, &params);
         let (send, done) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("plugin-package".into())
@@ -306,7 +459,7 @@ fn spawn_package(
                 let _ = send.send(reply);
             })
             .map_err(|e| e.to_string())?;
-        app.prefs_window.plugin_job = Some(PackageJob { command, action, grants_before, revision: app.prefs_window.grants_revision, done });
+        app.prefs_window.plugin_job = Some(PackageJob::new(command, subject, action, grants_before, app.prefs_window.grants_revision, done));
         Ok(())
     }
     #[cfg(target_arch = "wasm32")]
@@ -318,17 +471,26 @@ fn spawn_package(
 
 /// Poll package I/O on every frame, including after Preferences closes. Tests drain deterministically.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
+    tick_at(app, ctx, wait, std::time::Instant::now());
+}
+
+/// [`tick`] at the time `now`. A job still silent after [`PACKAGE_DEADLINE`] is abandoned: it fails
+/// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
+/// the session, so nothing of it reaches this one).
+fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::Instant) {
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
     } else {
         match job.done.try_recv() {
             Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            Err(std::sync::mpsc::TryRecvError::Empty) if now.saturating_duration_since(job.started) < PACKAGE_DEADLINE => {
                 app.prefs_window.plugin_job = Some(job);
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 return;
             }
+            Err(std::sync::mpsc::TryRecvError::Empty) => Err(solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+                .format("prefs.plugin_job_abandoned", &[("command", job.command), ("seconds", &PACKAGE_DEADLINE.as_secs().to_string())])),
             Err(error) => Err(error.to_string()),
         }
     };
@@ -342,6 +504,9 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
             } else {
                 app.session.plugin_state.packages.remove(id);
             }
+            // Take in grants another program changed or revoked in the shared store since the job
+            // started: a revoked record must not come back with this job's grant.
+            sync_policy(app);
             // Preferences can change while package I/O runs. Keep a newer decision for this id.
             // A write to the stored grants during the job counts as a newer decision, unless the record this
             // job started from is still exactly as it was (an unrelated write).
@@ -365,7 +530,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
-            persist_grants(app);
+            persist_grants(app)?;
         }
         if let PackageAction::Describe { path } = &job.action {
             crate::plugin_install::described(app, path.clone(), reply.clone());
@@ -376,7 +541,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
         Ok(reply)
     });
     let result = app.command_completed(job.command, result);
-    if let PackageAction::Control { request, level } = job.action {
+    if let PackageAction::Control { request, level } = &job.action {
         let mut reply = match result {
             Ok(value) => serde_json::json!({"ok":true,"result":value}),
             Err(error) => serde_json::json!({"ok":false,"error":error}),
@@ -537,7 +702,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             crate::plugin_install::start(app);
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);
@@ -599,6 +763,15 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
                 ui.label(RichText::new(format!("{who}: {}", skip.reason)).size(t.font_small).color(t.text_dim));
             }
         }
+        ui.add_space(8.0);
+        resource_controls(app, ui);
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        ui.add_space(8.0);
         if !searching {
             ui.horizontal(|ui| {
                 let button = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("prefs.plugins_show_folder"), "folder", true, false)
@@ -616,6 +789,41 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
     });
     remove_confirmation(app, ui.ctx());
+}
+
+/// What was approved at install for `plugin`'s current package, in plain words: command groups,
+/// folders with their access, fuel and memory. Grants made for another version count for nothing.
+pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
+    use solidcraft_ui_text::{format, tr};
+    let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
+        return tr("prefs.plugin_approved_nothing").to_string();
+    };
+    let mut parts: Vec<String> = grants
+        .command_groups
+        .iter()
+        .map(|group| match group.as_str() {
+            "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    for folder in &grants.folders {
+        let access = tr(match (folder.read, folder.write) {
+            (true, true) => "prefs.plugin_folder_read_write",
+            (false, true) => "prefs.plugin_folder_write",
+            _ => "prefs.plugin_folder_read",
+        });
+        parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+    }
+    if let Some(fuel) = grants.fuel {
+        parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
+    }
+    if let Some(memory) = grants.memory_mib {
+        parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
+    }
+    if parts.is_empty() {
+        return tr("prefs.plugin_approved_nothing").to_string();
+    }
+    format("prefs.plugin_approved", &[("list", &parts.join(", "))])
 }
 
 fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugin) {
@@ -644,6 +852,21 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         .inner;
     let response = card.response;
     let ((folder, check), remove) = card.inner;
+    // What the user approved for this exact package, under its card.
+    ui.add_space(solidcraft_theme::Tokens::get().space_2);
+    let approved = approved_text(app, plugin);
+    let t = solidcraft_theme::Tokens::get();
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(t.space_12);
+        ui.label(RichText::new(approved).size(t.font_small).color(t.text_dim));
+    });
+    if let Some(error) = app.session.plugin_state.listener_failures.get(&plugin.id) {
+        let text = solidcraft_ui_text::format("prefs.plugin_listener_failed", &[("error", error)]);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(t.space_12);
+            ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+        });
+    }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
     crate::scenario::publish_target(&format!("prefs:plugin:{}", plugin.id), check.rect);
     if folder.clicked()
@@ -708,11 +931,15 @@ mod tests {
     }
 
     fn capture_page(app: &mut SolveApp, dir: &Path, name: &str) {
+        capture_page_sized(app, dir, name, egui::vec2(1280.0, 720.0));
+    }
+
+    fn capture_page_sized(app: &mut SolveApp, dir: &Path, name: &str, size: egui::Vec2) {
         let Ok(output_dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") else { return };
         let ctx = crate::fonts::test_context();
         let mut textures = std::collections::HashMap::new();
         for frame in 0..6 {
-            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 1200.0));
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
                 crate::ui_kit::scope(ui, |ui| page_in_dir(app, ui, Some(dir)))
             });
@@ -735,6 +962,49 @@ mod tests {
     }
 
     #[test]
+    fn design_notifications_report_handler_failure_in_plugin_preferences() {
+        fn has_text(shape: &egui::Shape, expected: &str) -> bool {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_text(shape, expected)),
+                egui::Shape::Text(text) => text.galley.job.text.contains(expected),
+                _ => false,
+            }
+        }
+        fn text_bounds(shape: &egui::Shape, expected: &str) -> Option<egui::Rect> {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_bounds(shape, expected)),
+                egui::Shape::Text(text) if text.galley.job.text.contains(expected) => Some(text.visual_bounding_rect()),
+                _ => None,
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let path = package(&h, "workshop-helper");
+        hand_install(&path, &root, "workshop-helper");
+        h.app.session.plugin_state.listener_failures.insert("workshop-helper".into(), "read entries cannot edit the design".into());
+        for size in [egui::vec2(1280.0, 720.0), egui::vec2(640.0, 480.0)] {
+            let ctx = crate::fonts::test_context();
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, |ui| page_in_dir(&mut h.app, ui, Some(&root)))
+            });
+            output.textures_delta.clear();
+            assert!(
+                output.shapes.iter().any(|shape| has_text(&shape.shape, "read entries cannot edit the design")),
+                "diagnostic remains visible at {size:?}"
+            );
+            let (painted, clip) = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_bounds(&shape.shape, "read entries cannot edit the design").map(|rect| (rect, shape.clip_rect)))
+                .unwrap();
+            assert!(bounds.contains_rect(painted) && clip.contains_rect(painted), "diagnostic is fully painted at {size:?}: {painted:?}");
+        }
+        capture_page(&mut h.app, &root, "plugin-design-listener-failure.png");
+        capture_page_sized(&mut h.app, &root, "plugin-design-listener-failure-small.png", egui::vec2(640.0, 480.0));
+    }
+
+    #[test]
     fn plugins_remove_keeps_grants_revoked_after_preferences_cancel() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
@@ -746,7 +1016,7 @@ mod tests {
         let grants = solidcraft_engine::plugin::Grants { command_groups: ["file".into()].into(), ..Default::default() };
         solidcraft_engine::plugin::store_grants(&mut h.app.session, &package, grants).unwrap();
         let grants = h.app.session.plugin_state.grants["workshop-helper"].clone();
-        persist_grants(&mut h.app);
+        persist_grants(&mut h.app).unwrap();
         let ctx = crate::fonts::test_context();
         crate::prefs::control(&mut h.app, &json!({"open":"Plugins"})).unwrap();
         let persisted: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
@@ -908,6 +1178,82 @@ mod tests {
         }
     }
 
+    /// #20814: the refusal follows the saved language even where no render scope is set, as the control
+    /// channel has none.
+    #[test]
+    fn the_busy_message_follows_the_saved_language_without_a_render_scope() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "de".into();
+        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", serde_json::json!({"command":"plugin.remove"}));
+        let (_send, done) = std::sync::mpsc::channel();
+        let job =
+            PackageJob::new("plugin.remove", Some("gears".into()), PackageAction::Control { request, level: None }, Default::default(), 0, done);
+        let started = job.started;
+        h.app.prefs_window.plugin_job = Some(job);
+        let message = busy_message_at(&h.app, started + std::time::Duration::from_secs(7));
+        assert!(message.contains("Plugin-Paketauftrag") && message.contains("plugin.remove (gears)"), "{message}");
+        h.app.preferences.language = "en".into();
+        assert!(busy_message_at(&h.app, started).contains("plugin package job"), "English still reads English");
+    }
+
+    /// #20814: a package job whose thread never answers must not leave the app refusing installs for good.
+    #[test]
+    fn a_package_job_that_never_replies_is_abandoned_and_the_next_install_runs() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("installed"));
+        let (request, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"plugin.install"}));
+        let (send, done) = std::sync::mpsc::channel();
+        let job = PackageJob::new(
+            "plugin.install",
+            Some("stuck-20814.zip".into()),
+            PackageAction::Control { request, level: None },
+            Default::default(),
+            0,
+            done,
+        );
+        let started = job.started;
+        h.app.prefs_window.plugin_job = Some(job);
+        assert!(busy(&h.app));
+
+        // The refusal says what runs, on what, for how long, and that it ends by itself.
+        let message = busy_message_at(&h.app, started + std::time::Duration::from_secs(42));
+        for expected in ["plugin.install", "stuck-20814.zip", "42", &PACKAGE_DEADLINE.as_secs().to_string()] {
+            assert!(message.contains(expected), "{expected}: {message}");
+        }
+        let refused = start_package(&mut h.app, "plugin.install", json!({"path":"x.zip","dry_run":true}), PackageAction::Install).unwrap_err();
+        assert!(refused.contains("plugin.install") && refused.contains("stuck-20814.zip"), "{refused}");
+
+        // `control.pending` and `control.running` list it.
+        let listed = |jobs: Vec<serde_json::Value>| jobs.into_iter().any(|j| j["subject"] == "stuck-20814.zip" && j["command"] == "plugin.install");
+        assert!(listed(running_jobs()));
+
+        // Before its time it keeps running; at its time it is abandoned and reported as failed.
+        tick_at(&mut h.app, &h.ctx, false, started + PACKAGE_DEADLINE - std::time::Duration::from_secs(1));
+        assert!(busy(&h.app));
+        assert!(reply.try_recv().is_err());
+        tick_at(&mut h.app, &h.ctx, false, started + PACKAGE_DEADLINE);
+        assert!(!busy(&h.app));
+        assert!(!listed(running_jobs()));
+        let reply = reply.try_recv().unwrap();
+        assert_eq!(reply["ok"], false, "{reply}");
+        let error = reply["error"].as_str().unwrap();
+        assert!(
+            error.contains("plugin.install") && error.contains("abandoned") && error.contains(&PACKAGE_DEADLINE.as_secs().to_string()),
+            "{error}"
+        );
+
+        // A late reply has nowhere to go: nothing is applied and the next install runs.
+        assert!(send.send(Ok((json!({"installed":true,"id":"late-plugin"}), h.app.session.plugin_state.clone()))).is_err());
+        assert!(!h.app.session.plugin_state.packages.contains_key("late-plugin"));
+        let path = package(&h, "workshop-helper");
+        let zip = zip_package(&path);
+        let archive = zip.to_string_lossy().into_owned();
+        start_package(&mut h.app, "plugin.install", json!({"path":zip,"dry_run":true}), PackageAction::Describe { path: archive }).unwrap();
+        tick(&mut h.app, &h.ctx, true);
+        assert!(!busy(&h.app));
+    }
+
     #[test]
     fn a_scoped_caller_cannot_grant_a_folder_outside_its_scope() {
         use serde_json::json;
@@ -964,6 +1310,78 @@ mod tests {
         let many: serde_json::Map<String, serde_json::Value> = (0..257).map(|i| (format!("plugin-{i}"), grants.clone())).collect();
         assert!(crate::prefs::set(&mut h.app, &json!({"plugin_grants":many})).is_err());
         assert_eq!(crate::prefs::lenient(&json!({"plugin_grants":many})).plugin_grants.len(), MAX_DISABLED);
+    }
+
+    #[test]
+    fn shared_approvals_move_to_the_grant_store_once_and_then_follow_it() {
+        use serde_json::json;
+        use solidcraft_engine::plugin::{Grants, grant_store};
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        let approved = |groups: &[&str]| Grants {
+            package_hash: Some("b".repeat(64)),
+            command_groups: groups.iter().map(|g| g.to_string()).collect(),
+            ..Default::default()
+        };
+        // Approved here before there was a store: they move to it.
+        h.app.preferences.plugin_grants.insert("gears".into(), approved(&["file"]));
+        h.app.share_plugin_grants();
+        assert_eq!(grant_store::read_all(&root), h.app.preferences.plugin_grants);
+        assert_eq!(h.app.session.plugin_state.grants, h.app.preferences.plugin_grants);
+        // The command line approves one plugin and revokes the other: the app follows.
+        grant_store::write(&root, "bolts", &approved(&["doc"])).unwrap();
+        grant_store::delete(&root, "gears").unwrap();
+        let listed = h.app.run("plugin.grants", json!({})).unwrap();
+        assert_eq!(listed["grants"][0]["id"], "bolts");
+        assert_eq!(h.app.preferences.plugin_grants.keys().collect::<Vec<_>>(), ["bolts"]);
+        // Revoked here: gone from the store too.
+        assert_eq!(h.app.run("plugin.revoke", json!({"id":"bolts"})).unwrap()["revoked"], true);
+        assert!(grant_store::read_all(&root).is_empty() && h.app.preferences.plugin_grants.is_empty());
+        // Once the store exists it is the whole truth: a record left in older preferences stays gone.
+        let mut restarted = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restarted.session.plugin_state.plugins_dir = Some(root.clone());
+        restarted.preferences.plugin_grants.insert("gears".into(), approved(&["file"]));
+        restarted.share_plugin_grants();
+        assert!(restarted.preferences.plugin_grants.is_empty() && restarted.session.plugin_state.grants.is_empty());
+    }
+
+    #[test]
+    fn a_shared_revocation_holds_through_a_running_install_and_a_failed_shared_write_fails_the_revoke() {
+        use serde_json::json;
+        use solidcraft_engine::plugin::grant_store;
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        let zip = zip_package(&package(&h, "workshop-helper"));
+        let package = solidcraft_engine::plugin::install::unpack(&std::fs::read(&zip).unwrap()).unwrap();
+        let approved = json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]}}});
+        crate::prefs::set(&mut h.app, &approved).unwrap();
+        h.app.share_plugin_grants();
+        assert!(grant_store::read_all(&root).contains_key("workshop-helper"));
+        start_package(
+            &mut h.app,
+            "plugin.install",
+            json!({"path":zip,"approval":package.approval,"approve":{"command_groups":["file"]}}),
+            PackageAction::Install,
+        )
+        .unwrap();
+        // The command line revokes it while the install runs: the revocation holds.
+        grant_store::delete(&root, "workshop-helper").unwrap();
+        tick(&mut h.app, &h.ctx, true);
+        assert!(root.join("workshop-helper").exists(), "installation finishes");
+        assert!(!h.app.session.plugin_state.grants.contains_key("workshop-helper"));
+        assert!(grant_store::read_all(&root).is_empty(), "the revoked record is not written back");
+        // A shared record the app cannot delete: the revoke fails instead of reporting success.
+        crate::prefs::set(&mut h.app, &approved).unwrap();
+        sync_policy(&mut h.app);
+        assert!(grant_store::read_all(&root).contains_key("workshop-helper"));
+        let elsewhere = h.dir.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let scope = Some(solidcraft_engine::io::vfs::PathScope::new([elsewhere]));
+        let refused = solidcraft_engine::io::vfs::scoped(scope, || h.app.run("plugin.revoke", json!({"id":"workshop-helper"})));
+        assert!(refused.unwrap_err().to_string().contains("shared"));
+        assert!(grant_store::read_all(&root).contains_key("workshop-helper"));
     }
 
     fn page_frame(app: &mut SolveApp, ctx: &egui::Context, dir: &Path, events: Vec<egui::Event>) {
@@ -1393,6 +1811,8 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: Vec::new(),
+            images: Default::default(),
+            swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

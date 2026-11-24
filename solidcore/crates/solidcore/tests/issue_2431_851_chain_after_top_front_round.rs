@@ -40,16 +40,17 @@ const WALL: f64 = 21.0;
 
 /// The three edges rounded R2 together on the in-code part
 /// (`issue_2403_chain_over_end_curve::three_edges_together_end_on_the_corner_ball`);
-/// SolidCraft's grid gives 9524.342896 to 5e-3.
-const THREE_TOGETHER: f64 = 9524.343664763;
+/// SolidCraft's grid gives 9524.342896 to 5e-3. It was 9524.343664763 until `brep_volume`
+/// closed tolerant edges' gaps (#16735), which moved the two bodies apart by 1.5e-8 only
+/// because the old integrator leaked differently through each: they now agree to 1e-11.
+const THREE_TOGETHER: f64 = 9524.343805690;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    let mut f = UpstreamFixes::all();
-    f.geometric_g2_continuity = false;
-    k.fixes = f;
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn read(k: &mut Kernel) -> Brep {

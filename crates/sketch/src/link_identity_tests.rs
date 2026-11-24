@@ -10,6 +10,83 @@ fn face() -> LinkSource {
     LinkSource::Face { body: "Case".into(), at: Vec3::ZERO }
 }
 
+#[test]
+fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same_whole_edge() {
+    for reverse in [false, true] {
+        for change in ["same", "other edge", "split", "trimmed", "unnamed"] {
+            let mut sk = Sketch::new();
+            let mut points = vec![Vec2::new(1., 0.), Vec2::new(1., 1.), Vec2::new(0., 1.)];
+            if reverse {
+                points.reverse();
+            }
+            let saved = [LinkGeom::Spline {
+                pts: points,
+                control: true,
+                degree: 2,
+                periodic: false,
+                nurbs: Some(crate::Nurbs { knots: vec![0., 0., 0., 1., 1., 1.], weights: vec![1., std::f64::consts::FRAC_1_SQRT_2, 1.] }),
+            }];
+            let link = sk.add_link(LinkKind::Project, LinkSource::Edge { body: "Cap".into(), at: Vec3::ZERO }, &saved).unwrap();
+            if change != "unnamed" {
+                sk.links[0].edge_name = Some("cap-edge".into());
+            }
+            let source = sk.curve_index("s1").unwrap();
+            let made = sk.offset_freeform_chain(&[(source, true)], 0.2).unwrap();
+            sk.record_freeform_chain_offset(&[(source, true)], &made, 0.2).unwrap();
+            let outputs = sk.freeform_chain_offsets[0].outputs.clone();
+            // A point of the sketch's own held on the saved spline (#20327 review).
+            let held = sk.add_point(Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2), None).unwrap();
+            let held_id = sk.points[held].id.clone();
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: held, c: source }, None).unwrap();
+            let arc = LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0., 1.) };
+            let (fresh, names) = match change {
+                "split" => (
+                    vec![
+                        LinkGeom::Arc {
+                            c: Vec2::ZERO,
+                            a: Vec2::new(1., 0.),
+                            b: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                        },
+                        LinkGeom::Arc {
+                            c: Vec2::ZERO,
+                            a: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                            b: Vec2::new(0., 1.),
+                        },
+                    ],
+                    vec!["cap-edge".into(), "cap-edge".into()],
+                ),
+                "trimmed" => (
+                    vec![LinkGeom::Arc {
+                        c: Vec2::ZERO,
+                        a: Vec2::new(1., 0.),
+                        b: Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+                    }],
+                    vec!["cap-edge".into()],
+                ),
+                "other edge" => (vec![arc], vec!["different-edge".into()]),
+                _ => (vec![arc], vec!["cap-edge".into()]),
+            };
+            sk.update_link_named(&link, &fresh, &names).unwrap();
+            assert_eq!(sk.freeform_chain_offsets.len(), 1, "a rebuild never silently breaks an offset");
+            assert_eq!(sk.freeform_chain_offsets[0].outputs, outputs);
+            if change == "same" {
+                assert!(matches!(sk.curves[sk.curve_index("s1").unwrap()].kind, CurveKind::Arc { .. }));
+                assert_eq!(sk.freeform_chain_offsets[0].sources, vec![("s1".into(), !reverse)]);
+                let (held, s1) = (sk.point_index(&held_id).unwrap(), sk.curve_index("s1").unwrap());
+                assert!(
+                    sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == held && c == s1)),
+                    "a point held on the spline stays held on the arc it is again"
+                );
+                sk.refresh_offsets().unwrap();
+                assert_eq!(sk.freeform_chain_offsets[0].outputs, outputs);
+            } else {
+                assert!(sk.curve_index("s1").is_none(), "{change} cannot claim the saved source");
+                assert!(sk.refresh_offsets().unwrap_err().to_string().contains("source vanished"));
+            }
+        }
+    }
+}
+
 fn ring(outer_first: bool, outer: f64, inner: f64) -> Vec<LinkGeom> {
     let (first, second) = if outer_first { (outer, inner) } else { (inner, outer) };
     square(first).into_iter().chain(square(second)).collect()
@@ -83,6 +160,84 @@ fn large_face_permutation_is_bounded_and_preserves_geometry() {
     assert!(sk.update_link(&link, &reversed).is_err());
     assert_eq!(sk.points, before.points);
     assert_eq!(sk.curves, before.curves);
+}
+
+#[test]
+fn a_small_ordered_move_of_a_large_face_updates_points_without_losing_identity() {
+    let mut sk = Sketch::new();
+    let geom: Vec<_> = (1..=129).flat_map(|i| square(f64::from(i))).collect();
+    let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+    let points = sk.link_points(&link);
+    let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+    let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+    let free = sk.add_point(Vec2::new(-129.0, -129.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+    let constraint = sk.constraints[0].clone();
+    let shift = Vec2::new(1e-8, -1e-8);
+    let fresh: Vec<_> = geom
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + shift, *b + shift),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(!sk.update_link(&link, &fresh).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(points, sk.link_points(&link));
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.constraints, vec![constraint]);
+    for (i, p) in points.iter().zip(&old) {
+        assert_eq!(sk.points[*i].pos, *p + shift, "the change must be applied, not ignored");
+    }
+    let moved = sk.clone();
+    let large_move: Vec<_> = fresh
+        .iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(*a + Vec2::X, *b + Vec2::X),
+            _ => panic!("line fixture"),
+        })
+        .collect();
+    assert!(sk.update_link(&link, &large_move).is_err());
+    assert_eq!(sk.points, moved.points);
+    assert_eq!(sk.curves, moved.curves);
+}
+
+#[test]
+fn small_moves_of_large_faces_use_relative_scale_and_apply_the_edit() {
+    for (offset, delta) in [(0.0, 1e-8), (1000.0, 1e-5), (100_000.0, 1e-3)] {
+        let origin = Vec2::new(offset, offset);
+        let geom: Vec<_> = (1..=129)
+            .flat_map(|i| square(f64::from(i)))
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + origin, b + origin),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
+        let points = sk.link_points(&link);
+        let ids: Vec<_> = sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect();
+        let old: Vec<_> = points.iter().map(|i| sk.points[*i].pos).collect();
+        let free = sk.add_point(origin, None).unwrap();
+        sk.add_constraint(ConstraintKind::Coincident { p: free, q: points[0] }, None).unwrap();
+        let constraint = sk.constraints[0].clone();
+        let shift = Vec2::new(delta, -delta);
+        let fresh: Vec<_> = geom
+            .into_iter()
+            .map(|g| match g {
+                LinkGeom::Line(a, b) => LinkGeom::Line(a + shift, b + shift),
+                _ => panic!("line fixture"),
+            })
+            .collect();
+        assert!(!sk.update_link(&link, &fresh).unwrap(), "offset={offset}");
+        assert!(!sk.link(&link).unwrap().lost);
+        assert_eq!(points, sk.link_points(&link));
+        assert_eq!(ids, sk.link_curves(&link).iter().map(|i| sk.curves[*i].id.clone()).collect::<Vec<_>>());
+        assert_eq!(sk.constraints, vec![constraint]);
+        for (id, old) in points.iter().zip(old) {
+            assert_eq!(sk.points[*id].pos, old + shift, "offset={offset}: apply the geometry change");
+        }
+    }
 }
 
 #[test]
@@ -218,6 +373,91 @@ fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
         assert_eq!(sk.points, saved.points);
         assert_eq!(sk.curves, saved.curves);
         assert!(sk.link(&link).unwrap().lost);
+    }
+}
+
+/// A plate with a block and a pad joined on it: the pad's corner meets the block's corner
+/// (#20619). Both footprints are inner loops that share one vertex when `pad_x` is 30, and
+/// overlap the block's edge when it is 29.
+fn corner_face(pad_x: f64) -> Vec<LinkGeom> {
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        let p = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
+        (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
+    };
+    let mut g = rect(0.0, 0.0, 50.0, 40.0);
+    g.extend(rect(15.0, 10.0, 30.0, 25.0));
+    g.extend(rect(pad_x, 25.0, pad_x + 6.0, 31.0));
+    g
+}
+
+/// `geom` with every line moved by `by`, so shared corners stay shared.
+fn moved(geom: Vec<LinkGeom>, by: Vec2) -> Vec<LinkGeom> {
+    geom.into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(a + by, b + by),
+            other => other,
+        })
+        .collect()
+}
+
+fn link_positions(sk: &Sketch, link: &str) -> Vec<Vec2> {
+    sk.link_points(link).iter().map(|p| sk.points[*p].pos).collect()
+}
+
+#[test]
+fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
+    assert_eq!(sk.link_curves(&link).len(), 12);
+    // The corner is one shared point: 11 points, not 12.
+    assert_eq!(sk.link_points(&link).len(), 11);
+    // Re-reading the same face is not refused and keeps the link current.
+    assert!(!sk.update_link(&link, &corner_face(30.0)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    // A pad that overlaps the block instead of touching it still refuses.
+    let saved = sk.clone();
+    assert!(sk.update_link(&link, &corner_face(29.0)).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
+}
+
+#[test]
+fn corner_face_reread_within_rounding_keeps_its_saved_points_and_a_real_move_follows() {
+    // The face of a sweep cut that two touching profiles made reads back a few billionths of a
+    // millimetre off what the sketch saved, and the next feature (a sweep from that sketch,
+    // #15049) is built from those coordinates: rounding is not a change there.
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &corner_face(30.0)).unwrap();
+    let saved = link_positions(&sk, &link);
+    let noise = Vec2::new(3e-9, -2e-9);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), noise)).unwrap());
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(link_positions(&sk, &link), saved, "rounding leaves the saved points where they were");
+    // A move beyond that is followed, as for any face.
+    let shift = Vec2::new(5e-7, 0.0);
+    assert!(!sk.update_link(&link, &moved(corner_face(30.0), shift)).unwrap());
+    for (now, before) in link_positions(&sk, &link).into_iter().zip(&saved) {
+        assert!(now.dist(*before + shift) < 1e-12, "{now:?} moved from {before:?}");
+    }
+    // A circle on that face still takes a new radius while its points stay as saved.
+    let mut with_hole = corner_face(30.0);
+    with_hole.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0));
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+    let saved = link_positions(&sk, &link);
+    let mut resized = corner_face(30.0);
+    resized.push(LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.000002));
+    assert!(!sk.update_link(&link, &resized).unwrap());
+    assert_eq!(link_positions(&sk, &link), saved);
+    assert!(sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { r, .. } if (r - 2.000002).abs() < 1e-12)), "the radius follows the face");
+    // A face whose loops do not touch has no such exception: it takes what it is read as.
+    let mut plain = Sketch::new();
+    let rim = plain.add_link(LinkKind::Project, face(), &ring(true, 10.0, 8.0)).unwrap();
+    let was = link_positions(&plain, &rim);
+    assert!(!plain.update_link(&rim, &moved(ring(true, 10.0, 8.0), noise)).unwrap());
+    for (now, before) in link_positions(&plain, &rim).into_iter().zip(&was) {
+        assert!(now.dist(*before + noise) < 1e-12);
     }
 }
 
@@ -424,12 +664,15 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         sk.points[point].link = Some(link.clone());
     }
     sk.links.push(Link {
+        sketch_placements: Vec::new(),
         id: link.clone(),
         kind: LinkKind::Project,
         source: face(),
         face_name: None,
         edge_name: None,
         vertex_name: None,
+        curve_edges: Vec::new(),
+        profile_boundary: Vec::new(),
         auto_face: false,
         lost: false,
         name_dropped: false,
@@ -585,6 +828,157 @@ fn leaving_directions_match_one_to_one() {
     assert!(super::loops::same_leaving(&[], &[]));
 }
 
+/// #17732: a projected outline set to construction stays construction when the link is rebuilt
+/// because the face changed shape (a notch splits its bottom edge). Were it to turn into
+/// profile geometry, a circle drawn around the plate would extrude the disc minus the plate.
+/// The hole's rim, saved as two halves, keeps them (#18250) and stays profile geometry.
+#[test]
+fn a_rebuilt_link_keeps_its_curves_set_to_construction() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let corners = [Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 10.0), Vec2::new(-20.0, 10.0)];
+    let mut saved: Vec<LinkGeom> = (0..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])).collect();
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west });
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east });
+    let face = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, face, &saved).unwrap();
+    let outline: Vec<String> =
+        sk.link_curves(&link).iter().filter(|c| matches!(sk.curves[**c].kind, CurveKind::Line { .. })).map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(outline.len(), 4);
+    for c in sk.link_curves(&link) {
+        if matches!(sk.curves[c].kind, CurveKind::Line { .. }) {
+            sk.curves[c].construction = true;
+        }
+    }
+    let notch = Vec2::new(0.0, -10.0);
+    let mut now = vec![LinkGeom::Line(corners[0], notch), LinkGeom::Line(notch, corners[1])];
+    now.extend((1..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])));
+    now.push(LinkGeom::Circle(Vec2::ZERO, 5.0));
+    assert!(sk.update_link(&link, &now).unwrap());
+    for id in &outline {
+        let c = sk.curves.iter().find(|c| &c.id == id).unwrap_or_else(|| panic!("{id} is still in the sketch"));
+        assert!(c.construction, "{id} is still construction after the rebuild");
+    }
+    let rim: Vec<usize> = sk.link_curves(&link).iter().copied().filter(|c| matches!(sk.curves[*c].kind, CurveKind::Arc { .. })).collect();
+    assert_eq!(rim.len(), 2, "the rim's two halves");
+    assert!(rim.iter().all(|c| !sk.curves[*c].construction));
+}
+
+/// #17172 made a fresh projection of a closed circular edge one circle, not its two halves. A
+/// saved sketch's halves stay halves when the edge is read again as that circle (#18250):
+/// others name each half by id. Both keep their ids, a dimension on the second half stays on
+/// it, and a line drawn to a point where the halves meet keeps its end there.
+#[test]
+fn a_circle_saved_as_two_halves_keeps_its_halves_and_what_was_on_them() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let halves = [LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west }, LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east }];
+    let rim = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, rim, &halves).unwrap();
+    let [first, second] = sk.link_curves(&link)[..] else { panic!("two halves") };
+    let ids = [sk.curves[first].id.clone(), sk.curves[second].id.clone()];
+    let CurveKind::Arc { b: split, .. } = sk.curves[first].kind else { panic!("an arc") };
+    sk.add_constraint(ConstraintKind::Diameter { c: second, value: 10.0 }, None).unwrap();
+    let start = sk.add_point(Vec2::new(-20.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(start, split, None).unwrap();
+    let line = sk.curves[line].id.clone();
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 5.0)]).unwrap();
+    let kept: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(kept, ids, "both halves keep their ids");
+    let second = sk.curve_index(&ids[1]).unwrap();
+    assert!(sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Diameter { c, .. } if c == second)), "{:?}", sk.constraints);
+    let line = sk.curve_index(&line).unwrap();
+    let CurveKind::Line { b: end, .. } = sk.curves[line].kind else { panic!("a line") };
+    let CurveKind::Arc { b: split, .. } = sk.curves[sk.curve_index(&ids[0]).unwrap()].kind else { panic!("an arc") };
+    assert_eq!(end, split, "the line still ends where the halves meet");
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[end].pos.dist(west) < 1e-9);
+}
+
+/// #18250: a saved sketch with a closed offset of a projected circle's two halves. Re-read as
+/// one circle (#17175), the halves would fold into it and the offset lose its sources ("an
+/// offset source vanished or changed shape"). The halves stay, split where they were, and the
+/// offset follows the circle when it grows.
+#[test]
+fn halves_of_a_projected_circle_an_offset_follows_stay_halves() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let halves = [LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west }, LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east }];
+    let rim = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, rim, &halves).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids.len(), 2, "two halves");
+    let (ie, iw) = (Vec2::new(4.0, 0.0), Vec2::new(-4.0, 0.0));
+    let upper = sk.add_arc(Vec2::ZERO, ie, iw, [None; 3], None).unwrap();
+    let CurveKind::Arc { c, a: e, b: w } = sk.curves[upper].kind else { panic!("an arc") };
+    let lower = sk.add_arc(Vec2::ZERO, iw, ie, [Some(c), Some(w), Some(e)], None).unwrap();
+    let outputs = vec![sk.curves[upper].id.clone(), sk.curves[lower].id.clone()];
+    sk.offsets.push(crate::offset::OffsetChain {
+        sources: vec![(ids[0].clone(), true), (ids[1].clone(), true)],
+        outputs: outputs.clone(),
+        distance: 1.0,
+        closed: true,
+        topology: None,
+    });
+    sk.refresh_offsets().unwrap();
+
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 6.0)]).unwrap();
+
+    let kept: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(kept, ids, "both halves keep their ids");
+    sk.refresh_offsets().unwrap();
+    for id in &outputs {
+        let CurveKind::Arc { c, a, .. } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("an arc") };
+        assert!((sk.points[c].pos.dist(sk.points[a].pos) - 5.0).abs() < 1e-9, "the offset follows the larger circle");
+    }
+}
+
+/// #18250: a face's two concentric rims saved as halves, which a feature names as profile loops
+/// by curve id. Read again as two circles, each rim keeps its two halves and their ids.
+#[test]
+fn concentric_rims_saved_as_halves_keep_their_ids_read_again_as_circles() {
+    let mut sk = Sketch::new();
+    let rim = |r: f64| {
+        [
+            LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(r, 0.0), b: Vec2::new(-r, 0.0) },
+            LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(-r, 0.0), b: Vec2::new(r, 0.0) },
+        ]
+    };
+    let saved: Vec<LinkGeom> = rim(10.0).into_iter().chain(rim(4.0)).collect();
+    let link = sk.add_link(LinkKind::Project, face(), &saved).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids.len(), 4, "two rims of two halves");
+
+    sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 4.0), LinkGeom::Circle(Vec2::ZERO, 10.0)]).unwrap();
+
+    let kept: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(kept, ids, "every half keeps its id");
+    let radius = |id: &str| match sk.curves[sk.curve_index(id).unwrap()].kind {
+        CurveKind::Arc { c, a, .. } => sk.points[c].pos.dist(sk.points[a].pos),
+        _ => f64::NAN,
+    };
+    assert!((radius(&ids[0]) - 10.0).abs() < 1e-9 && (radius(&ids[1]) - 10.0).abs() < 1e-9, "the outer rim");
+    assert!((radius(&ids[2]) - 4.0).abs() < 1e-9 && (radius(&ids[3]) - 4.0).abs() < 1e-9, "the inner rim");
+}
+
+#[test]
+fn a_projected_circle_read_again_a_hair_away_takes_the_fresh_reading() {
+    // #12920: a hole's rim saved as it was fitted, 1.3e-6 small and off centre, read again as
+    // the hole's circle exactly. It is the same circle (the same curve and point, so whatever
+    // is drawn on it stays), now where the model puts it.
+    let mut sk = Sketch::new();
+    let edge = LinkSource::Edge { body: "Body3".into(), at: Vec3::ZERO };
+    let fitted = [LinkGeom::Circle(Vec2::new(25.962298020754407, 4.500001583499248), 1.6999986845754604)];
+    let link = sk.add_link(LinkKind::Project, edge, &fitted).unwrap();
+    let curves = sk.link_curves(&link);
+    let points = sk.link_points(&link);
+    let exact = Vec2::new(25.96229670532913, 4.5);
+    assert!(!sk.update_link(&link, &[LinkGeom::Circle(exact, 1.7)]).unwrap());
+    assert_eq!((sk.link_curves(&link), sk.link_points(&link)), (curves.clone(), points));
+    let Some(CurveKind::Circle { c, r }) = curves.first().map(|ci| sk.curves[*ci].kind.clone()) else { panic!("{:?}", sk.curves) };
+    assert_eq!((sk.points[c].pos, r), (exact, 1.7));
+}
+
 /// #14249: a face with two round holes, saved with each hole split where an older build split
 /// it. Read again, the holes come back split at other points and the outline is read in
 /// another order: the projection is rebuilt. Its outline lines are where they were, so they
@@ -685,4 +1079,83 @@ fn a_rebuilt_face_gives_an_unchanged_concentric_circle_its_own_id() {
     let four = id_of(&sk, 4.0).unwrap();
     assert!(sk.update_link(&link, &rings(&[1.0, 4.0, 6.0])).unwrap());
     assert_eq!(id_of(&sk, 4.0), Some(four), "the circle of radius 4 is where it was");
+}
+
+/// #18711: a face recorded with the names of its edges, read again sheared far out of its old
+/// box and with its edges in another order, is the same four lines: each keeps its id and goes
+/// where its edge went, and a point held on a corner follows it. Without the names the reading is
+/// matched by geometry alone, as before.
+#[test]
+fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
+    let names: Vec<String> = ["F1:side:a|F1:top", "F1:side:b|F1:top", "F1:side:c|F1:top", "F1:side:d|F1:top"].map(String::from).to_vec();
+    let shear = |p: Vec2| Vec2::new(p.x + 3.0 * p.y, p.y);
+    let sheared: Vec<LinkGeom> = square(10.0)
+        .into_iter()
+        .map(|g| match g {
+            LinkGeom::Line(a, b) => LinkGeom::Line(shear(a), shear(b)),
+            _ => panic!(),
+        })
+        .collect();
+    // The same edges, the first one read last.
+    let order = [1, 2, 3, 0];
+    let fresh: Vec<LinkGeom> = order.iter().map(|i| sheared[*i].clone()).collect();
+    let fresh_names: Vec<String> = order.iter().map(|i| names[*i].clone()).collect();
+
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    sk.set_link_curve_edges(&link, &square(10.0), &names);
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names);
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, 10.0)).unwrap();
+    let free = sk.add_point(Vec2::new(10.0, 10.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: corner }, None).unwrap();
+    let unnamed = sk.clone();
+
+    assert_eq!(sk.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string()), Ok(false));
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>());
+    assert_eq!(sk.link(&link).unwrap().curve_edges, names, "the names stay with their curves");
+    assert_eq!(sk.points[corner].pos, shear(Vec2::new(10.0, 10.0)));
+    assert_eq!(sk.constraints.len(), 1);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[free].pos.dist(shear(Vec2::new(10.0, 10.0))) < 1e-7);
+
+    // A link saved without the names is read as before: by geometry, and this reading is not one.
+    let mut old = unnamed.clone();
+    old.links.iter_mut().for_each(|l| l.curve_edges.clear());
+    let mut plain = old.clone();
+    let named = old.update_link_named(&link, &fresh, &fresh_names).map_err(|e| e.to_string());
+    let geometric = plain.update_link(&link, &fresh).map_err(|e| e.to_string());
+    assert_eq!(named, geometric);
+    assert_eq!(old.points, plain.points);
+    assert_eq!(old.curves, plain.curves);
+    assert_eq!(old.constraints, plain.constraints);
+}
+
+/// #20280: a face's outer rim and a shelled wall's rim, concentric arcs saved on one centre point,
+/// are read again with the two centres apart by more than the layout merges (5e-7) but within the
+/// rebuild's matching tolerance. The old centre becomes only one of the new ones; the other arc
+/// is still the same arc and keeps its id, which an offset names.
+#[test]
+fn concentric_arcs_read_with_centres_apart_keep_their_ids() {
+    let (r3, s) = (5.0 * 3f64.sqrt(), 5.0 * std::f64::consts::FRAC_1_SQRT_2);
+    let boundary = |inner: Vec2| {
+        vec![
+            LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(r3, -5.), b: Vec2::new(-r3, -5.) },
+            LinkGeom::Line(Vec2::new(-r3, -5.), Vec2::new(r3, -5.)),
+            LinkGeom::Arc { c: inner, a: Vec2::new(s, -s), b: Vec2::new(-s, -s) },
+            LinkGeom::Line(Vec2::new(-s, -s), Vec2::new(s, -s)),
+        ]
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &boundary(Vec2::ZERO)).unwrap();
+    assert_eq!(sk.link_points(&link).len(), 5, "the saved arcs share one centre point");
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|&i| sk.curves[i].id.clone()).collect();
+    assert!(sk.update_link(&link, &boundary(Vec2::new(0., 5e-7))).unwrap());
+    assert_eq!(sk.link_points(&link).len(), 6, "the fresh arcs have a centre each");
+    for id in &ids {
+        assert!(sk.curve_index(id).is_some_and(|i| sk.curves[i].link.as_deref() == Some(link.as_str())), "{id} kept");
+    }
+    let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(&ids[2]).unwrap()].kind else { panic!("the inner rim is an arc") };
+    assert!(sk.points[c].pos.dist(Vec2::new(0., 5e-7)) < 1e-12, "the inner arc keeps its own centre");
 }
