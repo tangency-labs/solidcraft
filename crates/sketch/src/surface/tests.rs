@@ -276,6 +276,67 @@ fn intrinsic_length(chart: &Sphere, a: Vec2, b: Vec2) -> f64 {
     sum / (3.0 * steps as f64)
 }
 
+/// A 40-degree corner on a plane, made a right angle: the residual is the metric angle at the
+/// shared point, not a chart slope.
+#[test]
+fn a_perpendicular_corner_solves() {
+    let chart = Plane;
+    let mut sk = Sketch::new();
+    let o = sk.add_point(Vec2::new(0.0, 0.0), Some("o")).unwrap();
+    let a = sk.add_point(Vec2::new(2.0, 0.0), Some("a")).unwrap();
+    let b = sk.add_point(Vec2::new(1.4, 0.9), Some("b")).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: o }, None).unwrap();
+    let l1 = sk.add_line_pts(o, a, Some("l1")).unwrap();
+    let l2 = sk.add_line_pts(o, b, Some("l2")).unwrap();
+    sk.add_constraint(ConstraintKind::Perpendicular { a: l1, b: l2 }, None).unwrap();
+    let report = surface_solve(&mut sk, &chart).unwrap();
+    assert!(report.solved(), "max_residual {}", report.max_residual);
+    let (po, pa, pb) = (sk.points[o].pos, sk.points[a].pos, sk.points[b].pos);
+    let d1 = [pa.x - po.x, pa.y - po.y];
+    let d2 = [pb.x - po.x, pb.y - po.y];
+    let cosine = (d1[0] * d2[0] + d1[1] * d2[1]) / (d1[0].hypot(d1[1]) * d2[0].hypot(d2[1]));
+    assert!(cosine.abs() < 1e-6, "corner cosine {cosine}");
+}
+
+/// A midpoint on a plane: the point has to travel to the middle of the line.
+#[test]
+fn a_midpoint_solves() {
+    let chart = Plane;
+    let mut sk = Sketch::new();
+    let a = sk.add_point(Vec2::new(0.0, 0.0), Some("a")).unwrap();
+    let b = sk.add_point(Vec2::new(2.0, 0.0), Some("b")).unwrap();
+    let p = sk.add_point(Vec2::new(0.4, 0.3), Some("p")).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: a }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: b }, None).unwrap();
+    let l = sk.add_line_pts(a, b, Some("l")).unwrap();
+    sk.add_constraint(ConstraintKind::Midpoint { p, l }, None).unwrap();
+    let report = surface_solve(&mut sk, &chart).unwrap();
+    assert!(report.solved(), "max_residual {}", report.max_residual);
+    let mid = sk.points[p].pos;
+    assert!((mid.x - 1.0).abs() < 1e-6 && mid.y.abs() < 1e-6, "midpoint {mid:?}");
+}
+
+/// Two lines on a sphere made equal: the intrinsic lengths have to agree, not the chart steps.
+#[test]
+fn equal_lengths_on_a_sphere_solve() {
+    let chart = Sphere { radius: 1.0 };
+    let mut sk = Sketch::new();
+    let a = sk.add_point(Vec2::new(0.0, 0.0), Some("a")).unwrap();
+    let b = sk.add_point(Vec2::new(0.2, 0.0), Some("b")).unwrap();
+    let c = sk.add_point(Vec2::new(0.5, 0.0), Some("c")).unwrap();
+    let d = sk.add_point(Vec2::new(0.9, 0.0), Some("d")).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: a }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: c }, None).unwrap();
+    let l1 = sk.add_line_pts(a, b, Some("l1")).unwrap();
+    let l2 = sk.add_line_pts(c, d, Some("l2")).unwrap();
+    sk.add_constraint(ConstraintKind::Equal { a: l1, b: l2 }, None).unwrap();
+    let report = surface_solve(&mut sk, &chart).unwrap();
+    assert!(report.solved(), "max_residual {}", report.max_residual);
+    let one = intrinsic_length(&chart, sk.points[a].pos, sk.points[b].pos);
+    let two = intrinsic_length(&chart, sk.points[c].pos, sk.points[d].pos);
+    assert!((one - two).abs() < 1e-6, "lengths {one} and {two}");
+}
+
 /// Every deferred constraint kind is refused with the "not supported on a curved face" words.
 #[test]
 fn every_unsupported_kind_is_refused() {
@@ -294,11 +355,8 @@ fn every_unsupported_kind_is_refused() {
         ConstraintKind::DistanceX { p, q, value: 1.0 },
         ConstraintKind::DistanceY { p, q, value: 1.0 },
         ConstraintKind::Parallel { a: l1, b: l2 },
-        ConstraintKind::Symmetric { p, q, l: l1 },
-        ConstraintKind::Equal { a: l1, b: l2 },
-        ConstraintKind::Midpoint { p: r, l: l1 },
         ConstraintKind::Tangent { a: l1, b: l2 },
-        ConstraintKind::Perpendicular { a: l1, b: l2 },
+        ConstraintKind::Symmetric { p, q, l: l1 },
         ConstraintKind::Radius { c: c1, value: 1.0 },
         ConstraintKind::Diameter { c: c1, value: 2.0 },
         ConstraintKind::Concentric { a: c1, b: c2 },

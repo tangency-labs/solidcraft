@@ -2,7 +2,7 @@
 //! in metric-scaled chart coordinates, a damped Gauss–Newton (Levenberg–Marquardt) iteration, and
 //! a rank analysis for the remaining degrees of freedom.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::Vec2;
 
@@ -160,39 +160,84 @@ fn line_length(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, l
     Ok(sum / (3.0 * steps as f64))
 }
 
-/// The signed angle from line a to line b at their shared point, from the metric's signed area
-/// form (the unsigned Metric::angle cannot tell the two sides apart).
-fn angle_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, a: usize, b: usize, value: f64, flip: bool) -> f64 {
-    let (Some(ea), Some(eb)) = (line_ends(sk, a), line_ends(sk, b)) else {
-        return f64::INFINITY;
-    };
-    let shared = [ea.0, ea.1].into_iter().find(|&p| p == eb.0 || p == eb.1);
-    let Some(shared) = shared else {
-        return f64::INFINITY;
-    };
+/// The signed angle from line a to line b at their shared point and the characteristic length
+/// that scales an angular row, from the metric's signed area form (the unsigned Metric::angle
+/// cannot tell the two sides apart).
+fn shared_angle(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, a: usize, b: usize) -> Option<(f64, f64)> {
+    let (ea, eb) = (line_ends(sk, a)?, line_ends(sk, b)?);
+    let shared = [ea.0, ea.1].into_iter().find(|&p| p == eb.0 || p == eb.1)?;
     let other_a = if ea.0 == shared { ea.1 } else { ea.0 };
     let other_b = if eb.0 == shared { eb.1 } else { eb.0 };
     let p = point_pos(sk, lay, x, shared);
-    let ta = match chart.geodesic(p, point_pos(sk, lay, x, other_a)) {
-        Ok(g) => g.tan0,
-        Err(_) => return f64::INFINITY,
-    };
-    let tb = match chart.geodesic(p, point_pos(sk, lay, x, other_b)) {
-        Ok(g) => g.tan0,
-        Err(_) => return f64::INFINITY,
-    };
-    let Some(m) = chart.metric(p[0], p[1]) else {
-        return f64::INFINITY;
-    };
+    let ta = chart.geodesic(p, point_pos(sk, lay, x, other_a)).ok()?.tan0;
+    let tb = chart.geodesic(p, point_pos(sk, lay, x, other_b)).ok()?.tan0;
+    let m = chart.metric(p[0], p[1])?;
     if !(m[0].is_finite() && m[1].is_finite() && m[2].is_finite()) {
-        return f64::INFINITY;
+        return None;
+    }
+    // A collapsed line has no direction: the angle would read as zero and a tangent or parallel
+    // constraint could be "satisfied" by shrinking the line away. Refuse to read it instead.
+    let (na, nb) = (metric_norm(m, ta[0], ta[1]), metric_norm(m, tb[0], tb[1]));
+    if !(na.is_finite() && nb.is_finite() && na > 1e-9 && nb > 1e-9) {
+        return None;
     }
     let ang = metric_cross(m, ta, tb).atan2(metric_dot(m, ta, tb));
-    let target = if flip { value + PI } else { value };
     // Scale by the characteristic length sqrt(E+2F+G), so an angular row cannot be satisfied by
     // shrinking geometry and stays comparable to a millimetre row.
     let scale = metric_norm(m, 1.0, 1.0).max(1e-6);
+    Some((ang, scale))
+}
+
+fn angle_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, a: usize, b: usize, value: f64, flip: bool) -> f64 {
+    let Some((ang, scale)) = shared_angle(sk, lay, x, chart, a, b) else {
+        return f64::INFINITY;
+    };
+    let target = if flip { value + PI } else { value };
     wrap_angle(ang - target) * scale
+}
+
+/// Two lines at right angles: the nearer of the two right angles, so either side satisfies it.
+fn perpendicular_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, a: usize, b: usize) -> f64 {
+    let Some((ang, scale)) = shared_angle(sk, lay, x, chart, a, b) else {
+        return f64::INFINITY;
+    };
+    let right = wrap_angle(ang - FRAC_PI_2);
+    let left = wrap_angle(ang + FRAC_PI_2);
+    if right.abs() <= left.abs() { right * scale } else { left * scale }
+}
+
+/// Two lines whose intrinsic lengths agree.
+fn equal_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, a: usize, b: usize) -> f64 {
+    match (line_length(sk, lay, x, chart, a), line_length(sk, lay, x, chart, b)) {
+        (Ok(la), Ok(lb)) => la - lb,
+        _ => f64::INFINITY,
+    }
+}
+
+/// The point at the middle of a line's drawn chart path, as two rows in a metric-orthonormal frame
+/// there: the along component and the across one, both in millimetres.
+fn midpoint_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn SurfaceChart, p: usize, l: usize, out: &mut Vec<f64>) {
+    let Some((a, b)) = line_ends(sk, l) else {
+        out.extend([f64::INFINITY; 2]);
+        return;
+    };
+    let pa = point_pos(sk, lay, x, a);
+    let pb = point_pos(sk, lay, x, b);
+    let mid = [(pa[0] + pb[0]) * 0.5, (pa[1] + pb[1]) * 0.5];
+    let q = point_pos(sk, lay, x, p);
+    let Some(m) = chart.metric(mid[0], mid[1]) else {
+        out.extend([f64::INFINITY; 2]);
+        return;
+    };
+    let (e, f, g) = (m[0], m[1], m[2]);
+    let se = e.max(0.0).sqrt();
+    let det = (e * g - f * f).max(0.0).sqrt();
+    if !(se.is_finite() && se > 1e-12 && det.is_finite() && det > 1e-12) {
+        out.extend([f64::INFINITY; 2]);
+        return;
+    }
+    let d = [q[0] - mid[0], q[1] - mid[1]];
+    out.extend([(e * d[0] + f * d[1]) / se, det * d[1] / se]);
 }
 
 /// The distance from point p to the drawn line c: the smallest geodesic distance from p to the
@@ -259,6 +304,15 @@ fn constraint_residual(sk: &Sketch, lay: &Layout, x: &[f64], chart: &dyn Surface
         }
         PointOnCurve { p, c } => {
             out.push(point_on_curve_residual(sk, lay, x, chart, p, c));
+        }
+        Perpendicular { a, b } => {
+            out.push(perpendicular_residual(sk, lay, x, chart, a, b));
+        }
+        Equal { a, b } => {
+            out.push(equal_residual(sk, lay, x, chart, a, b));
+        }
+        Midpoint { p, l } => {
+            midpoint_residual(sk, lay, x, chart, p, l, out);
         }
         // Every other kind is refused up front by first_refusal, never reached here.
         _ => {}
@@ -457,6 +511,12 @@ fn unsupported_kind(sk: &Sketch, k: &ConstraintKind) -> Option<String> {
     use ConstraintKind::*;
     match k {
         Coincident { .. } | Fix { .. } | Distance { .. } => None,
+        Equal { a, b } => both_lines(sk, *a, *b, "Equal"),
+        Perpendicular { a, b } => both_lines(sk, *a, *b, "Perpendicular"),
+        Midpoint { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { .. }) => None,
+            _ => Some("Midpoint".to_string()),
+        },
         Length { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
             Some(CurveKind::Line { .. }) => None,
             _ => Some("Length".to_string()),
@@ -472,6 +532,12 @@ fn unsupported_kind(sk: &Sketch, k: &ConstraintKind) -> Option<String> {
         },
         _ => Some(k.name().to_string()),
     }
+}
+
+/// Two curves a constraint joins, both of which must be lines the solver draws intrinsically.
+fn both_lines(sk: &Sketch, a: usize, b: usize, kind: &str) -> Option<String> {
+    let line = |i: usize| matches!(sk.curves.get(i).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+    if line(a) && line(b) { None } else { Some(kind.to_string()) }
 }
 
 /// The first constraint the surface solver cannot solve, if any, with the exact "not supported on
