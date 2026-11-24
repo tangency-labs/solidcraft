@@ -21,14 +21,9 @@
 //!    rebuilt with every entry holding a `new` replaced by its `old` and encoded as the
 //!    golden encodes it: it must equal main's row exactly (every block's sum, absolute sum
 //!    and weighted sum), so no other entry moved and the `old` values are main's.
-//! 2. `topology.face_p1` (37 rows, `MoveSeam` with split on `vase_rev.smb` face 0, and one
-//!    plain `vase_rev.smb` row): every edge end of the body is within half its vertex's
-//!    tolerance (main's body fails this, see `topology_face_p1`'s regression test). The
-//!    edge curve tally and the UV trim tally the row records are the body's own counts of
-//!    edges with a curve and of their edge uses with a UV trim, read again from the body,
-//!    every one its own owner's. The row with the split's edge count one lower, the curve
-//!    tally one higher and the UV trim tally at main's [`MAIN_UV_TRIMS`] encodes exactly to
-//!    main's row.
+//!
+//! The `topology.face_p1` `MoveSeam` rows this change once moved no longer split a seam
+//! (tangency-labs/solidcraft#21381) and do not move.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -106,88 +101,25 @@ const TOLERANCE_ROWS: [ToleranceRow; 8] = [
     ),
 ];
 
-/// The `topology.face_p1` rows that moved.
-const FACE_P1_ROWS: [&str; 37] = [
-    "guard_vase_rev_m0_c01_00",
-    "guard_vase_rev_m0_c01_01",
-    "guard_vase_rev_m0_c01_10",
-    "guard_vase_rev_m0_c01_11",
-    "guard_vase_rev_m0_c10_00",
-    "guard_vase_rev_m0_c10_01",
-    "guard_vase_rev_m0_c10_10",
-    "guard_vase_rev_m0_c10_11",
-    "guard_vase_rev_m0_c11_00",
-    "guard_vase_rev_m0_c11_01",
-    "guard_vase_rev_m0_c11_10",
-    "guard_vase_rev_m0_c11_11",
-    "guard_vase_rev_m1_c01_00",
-    "guard_vase_rev_m1_c01_01",
-    "guard_vase_rev_m1_c01_10",
-    "guard_vase_rev_m1_c01_11",
-    "guard_vase_rev_m1_c10_00",
-    "guard_vase_rev_m1_c10_01",
-    "guard_vase_rev_m1_c10_10",
-    "guard_vase_rev_m1_c10_11",
-    "guard_vase_rev_m1_c11_00",
-    "guard_vase_rev_m1_c11_01",
-    "guard_vase_rev_m1_c11_10",
-    "guard_vase_rev_m1_c11_11",
-    "guard_vase_rev_m3_c01_00",
-    "guard_vase_rev_m3_c01_01",
-    "guard_vase_rev_m3_c01_10",
-    "guard_vase_rev_m3_c01_11",
-    "guard_vase_rev_m3_c10_00",
-    "guard_vase_rev_m3_c10_01",
-    "guard_vase_rev_m3_c10_10",
-    "guard_vase_rev_m3_c10_11",
-    "guard_vase_rev_m3_c11_00",
-    "guard_vase_rev_m3_c11_01",
-    "guard_vase_rev_m3_c11_10",
-    "guard_vase_rev_m3_c11_11",
-    "vase_rev.smb_1_f5_op9",
-];
-
-/// `topology.face_p1`'s `MoveSeam` record (`out`): the index of the split's edge count. The
-/// edge curve tally and its own-owner count are `put_owners`' second group, 8 from the end,
-/// and the UV trim tally its third, 4 from the end.
-const SPLIT_EDGES: usize = 14;
-
-/// Main's UV trim tally (`n` and `own`) on the `topology.face_p1` rows: WR-469's vertex step
-/// (tangency-labs/solidcraft#21273) changed it from 15 to 2 there, and with the merge
-/// covering the edge ends the step grows no vertex on these rows (`wr469_replay`), so the
-/// rows record the body's 15 again.
-const MAIN_UV_TRIMS: f64 = 2.0;
-
 /// One edge end: (vertex index, vertex tolerance, the evaluated end's distance to the
 /// vertex `d`, the certified bound `d + √3·E`, `None` without an error bound).
 type End = (u32, f64, f64, Option<f64>);
 
-/// A body the runner observed: its edge ends, its count of edges with a curve and its count
-/// of those edges' edge uses with a UV trim.
+/// A body the runner observed: its edge ends.
 struct Body {
     ends: Vec<End>,
-    curves: usize,
-    uvs: usize,
 }
 
-/// Every edge end of `b` (see [`End`]) and its edge curve count.
+/// Every edge end of `b` (see [`End`]).
 fn body(b: &Brep) -> Body {
     let k = Kernel::default();
     let mut ends = Vec::new();
-    let mut curves = 0;
-    let mut uvs = 0;
     let edges = solidcore::topology::brep::p1::edges(b, None).unwrap();
     for e in edges {
         let rec = b.edge(e).unwrap();
-        for eu in solidcore::topology::edge::edgeuses(b, e, None, None).unwrap() {
-            if b.edgeuse(eu).unwrap().uv_trim_curve.is_some() {
-                uvs += 1;
-            }
-        }
         let Some(c) = rec.curve.as_ref() else {
             continue;
         };
-        curves += 1;
         let (s, t) = solidcore::topology::edge::start_end_vertices(b, e).unwrap();
         let iv = solidcore::topology::edge::interval(b, e).unwrap();
         for (v, at) in [(s, iv.min()), (t, iv.max())] {
@@ -198,7 +130,7 @@ fn body(b: &Brep) -> Body {
             ends.push((v.index(), vr.tolerance, d, bound));
         }
     }
-    Body { ends, curves, uvs }
+    Body { ends }
 }
 
 /// Runs `case` of `unit`: its output and each body the runner observes.
@@ -261,6 +193,26 @@ fn assert_rebuilds_base(
     );
 }
 
+/// #21340's regression test: every edge end of each body the moved vertex tolerance rows
+/// leave lies within half its vertex's tolerance (`AssertValid`'s test of an edge end). On
+/// main the merge sized those vertices from the merged points alone, and an end at each
+/// sized vertex lay past half its tolerance.
+#[test]
+fn issue_21340_merged_vertices_cover_their_edge_ends() {
+    for (unit, case, _) in TOLERANCE_ROWS {
+        let (_, bodies) = run(unit, case);
+        assert!(!bodies.is_empty(), "{case}: no body observed");
+        for body in &bodies {
+            for (v, tol, d, _) in &body.ends {
+                assert!(
+                    *d <= 0.5 * tol,
+                    "{case}: an end {d} from v{v}, tolerance {tol}"
+                );
+            }
+        }
+    }
+}
+
 /// Rows 1: each moved tolerance is forced (the old one failed the end test), covers its
 /// vertex's farthest end, and is at most twice that end's certified bound plus 16 ulps; and
 /// the row with each new tolerance put back to its old one is main's row.
@@ -306,38 +258,6 @@ fn moved_vertex_tolerances_are_twice_the_certified_farthest_end() {
                 .iter()
                 .find(|(_, new)| new.to_bits() == x.to_bits())
                 .map_or(x, |&(old, _)| old)
-        });
-    }
-}
-
-/// Rows 2: every edge end of each `topology.face_p1` body is within half its vertex's
-/// tolerance, the row's edge curve and UV trim tallies are the body's, and the row with the
-/// split's edge count one lower, the curve tally one higher and the UV trim tally main's is
-/// main's.
-#[test]
-fn moved_move_seam_bodies_cover_every_edge_end() {
-    for case in FACE_P1_ROWS {
-        let (out, bodies) = run("topology.face_p1", case);
-        assert_eq!(bodies.len(), 1, "{case}: one body");
-        let body = &bodies[0];
-        for (v, tol, d, _) in &body.ends {
-            assert!(
-                *d <= 0.5 * tol,
-                "{case}: an end {d} from v{v}, tolerance {tol}"
-            );
-        }
-        let xs = &out.values["out"];
-        let tally = xs.len() - 8;
-        assert_eq!(xs[tally], body.curves as f64, "{case}: curve tally");
-        assert_eq!(xs[tally + 1], body.curves as f64, "{case}: own curves");
-        let uv = tally + 4;
-        assert_eq!(xs[uv], body.uvs as f64, "{case}: UV trim tally");
-        assert_eq!(xs[uv + 1], body.uvs as f64, "{case}: own UV trims");
-        assert_rebuilds_base("topology.face_p1", case, &out, |key, i, x| match (key, i) {
-            ("out", SPLIT_EDGES) => x - 1.0,
-            ("out", i) if i == tally || i == tally + 1 => x + 1.0,
-            ("out", i) if i == uv || i == uv + 1 => MAIN_UV_TRIMS,
-            _ => x,
         });
     }
 }
