@@ -2662,6 +2662,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));
     }
+    if let FeatureKind::SurfaceLoft { faced, .. } = &old.kind
+        && cid == "surface.loft"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
+    }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"
         && let Some(parameters) = params.as_object_mut()

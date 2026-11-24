@@ -2342,6 +2342,12 @@ pub enum FeatureKind {
         /// How the rails reshape the sections between.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// The walls through planar sketch sections face the side Surface Extrude's would at the
+        /// first section: out of the region closed sections bound, as a solid loft's faces do,
+        /// and along an open section's direction crossed with its sketch normal. New surface
+        /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        faced: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
