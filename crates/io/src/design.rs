@@ -134,6 +134,10 @@ const LIMITS: Limits = Limits {
 /// is still written in full, never refused (data loss), and the caller says it is over the limit.
 const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
+/// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since the
+/// bytes don't come from outside and a save may be over that limit (#18686).
+const WRITTEN_LIMITS: Limits = Limits { max_expanded: || usize::MAX, check_size: |_| Ok(()), ..LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
@@ -533,11 +537,9 @@ fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
 fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u8>> {
     let n = cloud.points.len();
     let colored = !cloud.colors.is_empty();
-    let size = n
-        .checked_mul(if colored { 15 } else { 12 })
-        .and_then(|b| b.checked_add(24))
-        .filter(|&b| b <= crate::limits::max_design_bytes())
-        .ok_or_else(|| invalid("point cloud too large"))?;
+    // No open-size filter: a save writes a design over that limit and says so (#18686); a
+    // coloured cloud of the points a cloud may hold can be past it.
+    let size = n.checked_mul(if colored { 15 } else { 12 }).and_then(|b| b.checked_add(24)).ok_or_else(|| invalid("point cloud too large"))?;
     let mut bytes = Vec::with_capacity(size);
     bytes.extend_from_slice(POINTS_MAGIC);
     bytes.extend_from_slice(&(n as u64).to_le_bytes());
@@ -724,10 +726,20 @@ pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
 /// The provenance records a container carries, without verifying them. That is what a save
 /// appends to; verification is [`read_design_provenance`].
 pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
-    if bytes.len() > max_design() || !is_design_container(bytes) {
+    if bytes.len() > max_design() {
         return None;
     }
-    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
+    written_design_provenance_chain(bytes)
+}
+
+/// [`read_design_provenance_chain`] for a container this process just wrote: no open-size limit,
+/// since the bytes don't come from outside. A save over that limit keeps its history for the next
+/// save (#18686).
+pub fn written_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
+    if !is_design_container(bytes) {
+        return None;
+    }
+    provenance::read_chain(&mut PackageReader(Reader::new(Cursor::new(bytes), WRITTEN_LIMITS).ok()?))
 }
 
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
@@ -1735,6 +1747,43 @@ mod tests {
         assert!(bytes.len() > max_design(), "{} bytes is not past the limit", bytes.len());
         assert!(is_design_container(&bytes));
         crate::limits::test_cap::set(None);
+    }
+
+    /// A coloured cloud is 15 bytes a point, so one a cloud may hold can be over the open limit; the
+    /// save encodes it instead of refusing it (#18686). A 1 MB limit for this thread stands in for
+    /// the real one.
+    #[test]
+    fn a_coloured_cloud_over_the_open_limit_is_still_encoded() {
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Complex, PointCloud, Points};
+        crate::limits::test_cap::set(Some(1 << 20));
+        let n = max_design() / 15 + 1;
+        let cloud = PointCloud {
+            id: 1,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: solidcore_record::Vec3::new(0.0, 0.0, 0.0),
+            points: Points::new(vec![0.0; n * 3].into()),
+            colors: Colors(vec![128; n * 3].into()),
+            source_points: n as u64,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex::default(),
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        };
+        let encoded = encode_cloud(&cloud);
+        let limit = max_design();
+        crate::limits::test_cap::set(None);
+        let bytes = encoded.expect("a valid cloud is written whatever the open limit");
+        assert_eq!(bytes.len(), n * 15 + 24);
+        assert!(bytes.len() > limit);
     }
 
     #[test]
@@ -3552,7 +3601,7 @@ mod tests {
 
     /// Printable text that compresses poorly (93 characters: about 6.5 bits each). No `*`, so
     /// it never ends a STEP comment.
-    fn noise(length: usize) -> String {
+    pub(super) fn noise(length: usize) -> String {
         let mut state = 0x2545_f491_4f6c_dd1du64;
         (0..length)
             .map(|_| {
