@@ -1586,87 +1586,39 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
     regions.into_iter().map(|(_, r)| r).collect()
 }
 
-/// How far `p` is from the loop's boundary, when the loop is made of lines and arcs.
+/// How far `p` is from the loop's boundary (the loop drawn as a polyline).
 fn distance_to_loop(loop_: &Loop2, p: Vec2) -> Option<f64> {
-    use solidcore_record::Seg2;
+    let points = loop_.polyline(CURVE_TOLERANCE);
+    let n = points.len();
+    if n < 2 {
+        return None;
+    }
     let mut best = f64::INFINITY;
-    for seg in &loop_.segs {
-        let d = match *seg {
-            Seg2::Line { a, b } => {
-                let (dx, dy) = (b.x - a.x, b.y - a.y);
-                let len2 = dx * dx + dy * dy;
-                let t = if len2 > 0.0 { (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
-                (p.x - (a.x + t * dx)).hypot(p.y - (a.y + t * dy))
-            }
-            Seg2::Arc { center, radius, start, sweep } => {
-                let angle = (p.y - center.y).atan2(p.x - center.x);
-                let rel = (angle - start).rem_euclid(std::f64::consts::TAU);
-                let inside = if sweep >= 0.0 { rel <= sweep } else { rel == 0.0 || std::f64::consts::TAU - rel <= -sweep };
-                if inside {
-                    ((p.x - center.x).hypot(p.y - center.y) - radius).abs()
-                } else {
-                    let end = start + sweep;
-                    let ends = [(start.cos(), start.sin()), (end.cos(), end.sin())];
-                    ends.iter().map(|(c, s)| (p.x - (center.x + radius * c)).hypot(p.y - (center.y + radius * s))).fold(f64::INFINITY, f64::min)
-                }
-            }
-            _ => return None,
-        };
-        best = best.min(d);
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 { (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        let (ex, ey) = (p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+        best = best.min((ex * ex + ey * ey).sqrt());
     }
     best.is_finite().then_some(best)
 }
 
+/// A closed polyline through the loop's points (curves drawn as lines).
 fn loop_to_pline(loop_: &Loop2) -> Option<cavalier_contours::polyline::Polyline<f64>> {
     use cavalier_contours::polyline::{PlineSourceMut, Polyline};
-    use solidcore_record::Seg2;
     let mut pl = Polyline::<f64>::new_closed();
-    for seg in &loop_.segs {
-        match *seg {
-            Seg2::Line { a, .. } => pl.add(a.x, a.y, 0.0),
-            Seg2::Arc { center, radius, start, sweep } => {
-                // A full circle is two half arcs.
-                let parts = if sweep.abs() >= std::f64::consts::TAU - 1e-9 { 2 } else { 1 };
-                let each = sweep / parts as f64;
-                for k in 0..parts {
-                    let a = start + each * k as f64;
-                    pl.add(center.x + radius * a.cos(), center.y + radius * a.sin(), (each / 4.0).tan());
-                }
-            }
-            _ => return None,
-        }
+    for point in loop_.polyline(CURVE_TOLERANCE) {
+        pl.add(point.x, point.y, 0.0);
     }
-    (pl.vertex_count() >= 2).then_some(pl)
+    (pl.vertex_count() >= 3).then_some(pl)
 }
 
 fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop2> {
     use cavalier_contours::polyline::PlineSource;
-    use solidcore_record::Seg2;
-    let n = pl.vertex_count();
-    let mut segs = Vec::with_capacity(n);
-    for i in 0..n {
-        let v = pl.at(i);
-        let w = pl.at(pl.next_wrapping_index(i));
-        let (a, b) = (Vec2::new(v.x, v.y), Vec2::new(w.x, w.y));
-        if (a.x - b.x).abs() < 1e-12 && (a.y - b.y).abs() < 1e-12 {
-            continue;
-        }
-        if v.bulge.abs() < 1e-12 {
-            segs.push(Seg2::Line { a, b });
-        } else {
-            let sweep = 4.0 * v.bulge.atan();
-            let chord = (b.x - a.x).hypot(b.y - a.y);
-            let radius = chord / (2.0 * (sweep.abs() * 0.5).sin());
-            let offset = chord * 0.5 / (sweep * 0.5).tan();
-            let (nx, ny) = (-(b.y - a.y) / chord, (b.x - a.x) / chord);
-            let center = Vec2::new((a.x + b.x) * 0.5 + nx * offset, (a.y + b.y) * 0.5 + ny * offset);
-            if !(radius.is_finite() && center.x.is_finite() && center.y.is_finite()) {
-                return None;
-            }
-            segs.push(Seg2::Arc { center, radius, start: (a.y - center.y).atan2(a.x - center.x), sweep });
-        }
-    }
-    (segs.len() >= 2).then_some(Loop2 { segs }.ccw())
+    let points: Vec<Vec2> = (0..pl.vertex_count()).map(|i| pl.at(i)).map(|v| Vec2::new(v.x, v.y)).collect();
+    (points.len() >= 3).then(|| Loop2::polygon(&points).ccw())
 }
 
 /// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
