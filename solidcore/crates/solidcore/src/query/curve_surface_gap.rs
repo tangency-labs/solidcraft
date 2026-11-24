@@ -49,6 +49,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 use crate::{Result, SolidError};
 
+mod cone_residual;
 pub(crate) mod polynomial_pieces;
 
 /// A direction's knot samples (parameter, spacing, span index) and its slack.
@@ -99,7 +100,9 @@ impl NetSurface {
     /// the agreement only at `probe` (to `1e-9` relative), so it catches a parameterisation
     /// mismatch but is no proof of agreement between the probes. A procedural blend's net
     /// only approximates its definition, by which it evaluates: not exact by construction
-    /// (`query::seam_bound` refuses it).
+    /// (`query::seam_bound` refuses it). A cone (or cylinder) evaluates by its formula, not
+    /// its net: the bounds count the distance between the two over the net's box
+    /// ([`net_to_surface_bound`]), so its net is not continued past its ends.
     pub(crate) fn of(k: &Kernel, surface: &Surface, probe: &[Point2]) -> Result<Option<Self>> {
         let Some(bs) = as_b_spline(k, surface)? else {
             return Ok(None);
@@ -107,8 +110,14 @@ impl NetSurface {
         let Ok(net) = Nurbs::of(&bs) else {
             return Ok(None);
         };
+        // A cone's (or cylinder's) net is bounded against the cone only over its own box
+        // (`cone_residual`): a box run past its end is refused, not continued.
         let ends = EndContinuation::of(surface);
-        let ends = if ends.apex.is_some() {
+        let cone = matches!(
+            surface.kind(),
+            crate::surface::surface::SurfaceKind::Cone(_)
+        );
+        let ends = if cone || ends.apex.is_some() {
             EndContinuation::default()
         } else {
             ends
@@ -1444,7 +1453,7 @@ fn plane_face_gap_bound(
     // (the bound is on the distance to the net: the net's own distance to the surface added)
     let (Some(g), Some(off)) = (
         plane_gap_bound(cn, &net.net, range),
-        net_to_surface_bound(surface, &net.net),
+        net_to_surface_bound(k, surface, &net.net),
     ) else {
         return Ok(None);
     };
@@ -1465,14 +1474,13 @@ fn plane_face_gap_bound(
 /// difference of net and plane is bilinear in `(u, v)` over the box, so each of its values is
 /// a convex combination of its corner values and its length is at most the largest corner
 /// length. A cone (and cylinder) evaluates its point by its STEP formula at the parameters
-/// converted from its net's, its net's point up to the rounding of its stored control points
-/// and of that evaluation, neither enclosed: `0`, the net taken as the surface as
-/// [`NetSurface::of`] and the bisection take it, the two agreeing at the probes to `1e-9`
-/// relative: not enclosed, a pre-existing open item tracked in #20643 (the bisections took the
-/// same net as the surface before this residual was counted). `None` for any other
+/// converted from its net's (#20643): the distance from its net to that point over the whole
+/// net is enclosed in closed form ([`cone_residual::cone_net_residual`]: the net's distance to
+/// the cone's axis and height against the formula's, the polar conversion's angle against the
+/// net's, and the rounding of the evaluation). `None` for any other
 /// surface, any other net of a plane, and a plane whose box is not inside its analytic domain
 /// while it clamps its parameters there (the plane then not affine over the box).
-fn net_to_surface_bound(surface: &Surface, net: &Nurbs) -> Option<f64> {
+fn net_to_surface_bound(k: &Kernel, surface: &Surface, net: &Nurbs) -> Option<f64> {
     use crate::surface::surface::SurfaceKind;
     let plane = match surface.kind() {
         SurfaceKind::BSpline(_)
@@ -1480,8 +1488,8 @@ fn net_to_surface_bound(surface: &Surface, net: &Nurbs) -> Option<f64> {
         | SurfaceKind::Sphere(_)
         | SurfaceKind::Torus(_)
         | SurfaceKind::SurfOfRevolution(_)
-        | SurfaceKind::SurfOfExtrusion(_)
-        | SurfaceKind::Cone(_) => return Some(0.0),
+        | SurfaceKind::SurfOfExtrusion(_) => return Some(0.0),
+        SurfaceKind::Cone(c) => return cone_residual::cone_net_residual(k, c, net),
         SurfaceKind::Plane(p) => p,
         _ => return None,
     };
@@ -1576,12 +1584,23 @@ fn exact_corner_offset(
 /// net [`net_to_surface_bound`] does not bound, and an offset of a base whose net is off it
 /// (the offset's normals are then the base's, not the net's, which no residual of points
 /// bounds).
-fn bisection_residual(surface: &Surface, net: &NetSurface) -> Option<f64> {
+fn bisection_residual(k: &Kernel, surface: &Surface, net: &NetSurface) -> Option<f64> {
     use crate::surface::surface::SurfaceKind;
     match (net.offset, surface.kind()) {
-        (None, _) => net_to_surface_bound(surface, &net.net),
+        (None, _) => net_to_surface_bound(k, surface, &net.net),
         (Some(_), SurfaceKind::OffsetSurface(off)) => {
-            let base = net_to_surface_bound(off.base_surface(), &net.net)?;
+            let base_surface = off.base_surface();
+            if matches!(base_surface.kind(), SurfaceKind::Cone(_)) {
+                // An offset of a cone evaluates its base by its net at a nonzero distance
+                // (`evaluate_simple`), by the cone's formula at a zero one (its point the
+                // base's, its normals unused).
+                return if off.offset_distance() == 0.0 {
+                    net_to_surface_bound(k, base_surface, &net.net)
+                } else {
+                    Some(0.0)
+                };
+            }
+            let base = net_to_surface_bound(k, base_surface, &net.net)?;
             (base == 0.0).then_some(0.0)
         }
         (Some(_), _) => None,
@@ -2229,7 +2248,7 @@ fn bisected_face_gap_bound(
     // (#20373 review r4: the pieces bound the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is taken off `enough` and added to the bound, rounded
     // up, so a bound past the net's is not taken for the surface's)
-    let Some(to_surface) = bisection_residual(&surface, &net) else {
+    let Some(to_surface) = bisection_residual(k, &surface, &net) else {
         return Ok(None);
     };
     let net_enough = if to_surface > 0.0 {
@@ -3371,6 +3390,7 @@ impl TrimPair {
 /// `None` where it does not apply or is not finite, and for an offset surface's pair (its
 /// net is its base's, not the surface's: [`NetSurface::of_exact`]).
 fn structured_pair_bound(
+    k: &Kernel,
     surface: &Surface,
     cn: &NurbsCurve,
     c_slack: f64,
@@ -3384,7 +3404,7 @@ fn structured_pair_bound(
     }
     let g = structured_trim_gap_bound(cn, wn, &net.net, range)?;
     // (the bound is on the net's image: the net's own distance to the surface added)
-    let off = net_to_surface_bound(surface, &net.net)?;
+    let off = net_to_surface_bound(k, surface, &net.net)?;
     let mut bound = Ivl::from(g) + Ivl::from(c_slack);
     if off > 0.0 {
         bound = bound + Ivl::from(off);
@@ -3411,7 +3431,7 @@ pub(crate) fn structured_trim_image_gap_bound(
         return Ok(None);
     };
     Ok(structured_pair_bound(
-        surface, &p.cn, p.c_slack, &p.wn, &p.net, range,
+        k, surface, &p.cn, p.c_slack, &p.wn, &p.net, range,
     ))
 }
 
@@ -3458,7 +3478,7 @@ pub fn trim_image_gap_bound_within(
     // at most `enough` (and `over`) it is the answer, otherwise the bisection runs as without
     // it)
     if enough.is_finite() {
-        if let Some(bound) = structured_pair_bound(surface, &cn, c_slack, &wn, &net, range) {
+        if let Some(bound) = structured_pair_bound(k, surface, &cn, c_slack, &wn, &net, range) {
             if bound <= enough && bound <= over {
                 return Ok(Some(bound));
             }
@@ -3467,7 +3487,7 @@ pub fn trim_image_gap_bound_within(
     // (#20373 review r4: the bisection bounds the net's image; the net's own distance to the
     // surface ([`bisection_residual`]) is added to the curve's slack, so a bound past the
     // net's is not taken for the surface's; a net it does not enclose is not bounded)
-    let Some(to_surface) = bisection_residual(surface, &net) else {
+    let Some(to_surface) = bisection_residual(k, surface, &net) else {
         return Ok(None);
     };
     // (only a positive residual is added: an interval sum rounds outward, so adding `0`
@@ -5088,7 +5108,7 @@ mod tests {
         ];
         let net = NetSurface::of(&k, &surface, &corners).unwrap().unwrap().net;
         assert!(plane_gap_bound(&off, &net, *range).unwrap() < 1e-10);
-        let to_plane = net_to_surface_bound(&surface, &net).unwrap();
+        let to_plane = net_to_surface_bound(&k, &surface, &net).unwrap();
         assert!(to_plane >= lift && to_plane <= lift * 1.01, "{to_plane:e}");
         let g = plane_face_gap_bound(&k, &surface, &off, *range)
             .unwrap()
@@ -5145,7 +5165,7 @@ mod tests {
         let pos = *plane.position();
         let surface = Surface::from(plane);
         let net = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().net;
-        let r = net_to_surface_bound(&surface, &net).unwrap();
+        let r = net_to_surface_bound(&k, &surface, &net).unwrap();
         let (o, x, y) = (pos.origin(), pos.x_axis(), pos.y_axis());
         let mut worst = Exact::of(0.0);
         for (i, u) in [net.u[1], net.u[2]].into_iter().enumerate() {
