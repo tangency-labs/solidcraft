@@ -528,7 +528,9 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) { return cap_color(i); }
-    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
+    // Under surface analysis a selected face shows the selection tint (the one-body highlight's
+    // own pass draws it over the analysis); with every shown body selected, every face does.
+    if (u.ana.x > 0.5 && length(i.n) > 0.5 && u.sel.w < 0.5) {
         return analysis(i, k);
     }
     // Every shown body is selected: an exact copy of what the highlight pipeline's one-body tint
