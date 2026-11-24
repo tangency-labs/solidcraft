@@ -505,9 +505,14 @@ mod tests {
                         // A circular arc as a rational quadratic: its legs to the apex are equal,
                         // its weight is the cosine of half its sweep, and a leg is r tan(sweep/2).
                         Seg2::Conic { a, apex, b, w } => {
+                            assert!(near(dist(a, apex), dist(b, apex)), "{s:?}");
+                            // A piece that is a point (where the outline crosses a tangent
+                            // edge) has no sweep and draws nothing.
+                            if near(dist(a, apex), 0.) {
+                                continue;
+                            }
                             let half = w.acos();
                             let r = dist(a, apex) / half.tan();
-                            assert!(near(dist(a, apex), dist(b, apex)), "{s:?}");
                             assert!(near(dist(a, b), 2. * r * half.sin()), "{s:?}");
                             assert!(near(r, 2.), "conic radius {r}");
                             arcs += 2. * half * r;
