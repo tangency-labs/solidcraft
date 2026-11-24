@@ -873,6 +873,8 @@ pub(crate) struct ExtensionWatch {
     pub(crate) growths: usize,
     /// Mixed-ratio steps among them (the new row).
     pub(crate) mixed: usize,
+    /// Changes certified as a base extended as itself (`crate::as_itself_cert`).
+    pub(crate) as_itself: usize,
 }
 
 impl ExtensionWatch {
@@ -941,6 +943,23 @@ impl ExtensionWatch {
                                 certify_growth(&tb, n)
                                     .or_else(|_| certify_growth(&base, &transposed(n)?))
                                     .map_err(|_| e)
+                            })
+                            .or_else(|e| {
+                                // (an offset's base extended as itself: no G1R replay,
+                                // certified from its own net, `crate::as_itself_cert`)
+                                crate::as_itself_cert::certify_as_itself(k, o.base_surface(), n)
+                                    .or_else(|_| {
+                                        crate::as_itself_cert::certify_as_itself(
+                                            k,
+                                            o.base_surface(),
+                                            &transposed(n)?,
+                                        )
+                                    })
+                                    .map(|_| {
+                                        self.as_itself += 1;
+                                        0
+                                    })
+                                    .map_err(|a| format!("{e}; as itself: {a}"))
                             })
                             .map_err(|e| match other {
                                 Some(Err(p)) => {

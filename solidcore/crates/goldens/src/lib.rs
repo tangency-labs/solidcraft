@@ -8,6 +8,8 @@
 //! defining `pub struct Runner;` that implements [`UnitDiff`]. It is
 //! registered automatically by `build.rs`. See `crates/goldens/README.md`.
 
+#[cfg(test)]
+pub(crate) mod as_itself_cert;
 pub mod case;
 /// Input contracts shared by several unit runners' generators.
 pub mod cases {

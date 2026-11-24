@@ -3549,6 +3549,12 @@ mod wr613_certificates;
 #[path = "wr646_certificates.rs"]
 mod wr646_certificates;
 
+/// WR-458, WR-633 and WR-650 (#18921): the real-solid rows the offset surface's
+/// extension from its base moves, each certified on the body the golden records.
+#[cfg(test)]
+#[path = "wr458_certificates.rs"]
+mod wr458_certificates;
+
 #[cfg(test)]
 mod wr664_near_knot_trims {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
