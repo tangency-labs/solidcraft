@@ -4663,6 +4663,8 @@ fn auto_session_stays_headless_after_new_design() {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use crate::backend::Backend;
+
     let text = |r: &Value| r["result"]["content"].as_array().unwrap().iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
 
     // 1) Headless work followed by `new_design` stays headless even after an app starts.
@@ -4688,6 +4690,28 @@ fn auto_session_stays_headless_after_new_design() {
     let r = raw_tool(&mut s, "inspect_design", json!({}));
     assert!(!s.backend().has_ui());
     assert!(text(&r).contains("headless session because the SolidCraft app was not found"), "{r}");
+
+    // 3) A failing `engine.script` that already ran `file.new` before a later step failed
+    // still commits the session to headless (its `file.new` effect was kept on the session).
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "file.new", "params": {}}, {"command": "no.such.command", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    auto.call("engine.execute", json!({"command": "document.inspect", "params": {}})).unwrap();
+    assert!(!auto.has_ui());
+
+    // 4) A failing `engine.script` that fails *before* `file.new` runs leaves the session clean,
+    // so a desktop app appearing afterward can still take over.
+    let port = Rc::new(Cell::new(None::<u16>));
+    let seen = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || seen.get()), None);
+    let err = auto.call("engine.script", json!({"commands": [{"command": "no.such.command", "params": {}}, {"command": "file.new", "params": {}}]}));
+    assert!(err.is_err(), "expected failing script step: {err:?}");
+    port.set(Some(1));
+    let _ = auto.supports_plugin_tools();
+    assert!(auto.has_ui());
 }
 
 /// A server with no `Auto` backend (`--headless`, `--in`) adds no notice.

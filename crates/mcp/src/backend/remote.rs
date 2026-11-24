@@ -359,17 +359,6 @@ impl Auto {
             || !h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
     }
 
-    fn call_starts_headless_work(method: &str, params: &Value) -> bool {
-        match method {
-            "engine.execute" | "command" => step_command(params) == Some("file.new"),
-            "engine.batch" | "engine.script" => params
-                .as_array()
-                .or_else(|| params.get("commands").and_then(Value::as_array))
-                .is_some_and(|steps| steps.iter().any(|step| step_command(step) == Some("file.new"))),
-            _ => false,
-        }
-    }
-
     /// Switch to the app when the session is still empty and one is running.
     fn look_for_app(&mut self) {
         if self.had_work {
@@ -406,12 +395,12 @@ impl Backend for Auto {
         if self.remote.is_none() {
             self.look_for_app();
         }
-        let starts_work = Self::call_starts_headless_work(method, &params);
         match (&mut self.remote, &mut self.headless) {
             (Some(r), _) => r.call(method, params),
             (None, Some(h)) => {
+                let before_token = h.session.design_token();
                 let out = h.call(method, params);
-                if Self::headless_has_work(h) || (out.is_ok() && starts_work) {
+                if Self::headless_has_work(h) || h.session.design_token() != before_token {
                     self.had_work = true;
                 }
                 out
