@@ -68,9 +68,10 @@ impl egui::Plugin for TabSelects {
     fn input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         // The preceding pass still knows which editor had focus. Focus::begin_pass
         // will clear it before the app can ask egui_wants_keyboard_input().
-        let escape = input.events.iter().any(|event| {
-            matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, modifiers, .. } if !modifiers.any())
-        });
+        let escape = input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, modifiers, .. } if !modifiers.any()));
         if escape
             && let Some(id) = self.last.get(&input.viewport_id).copied().flatten()
             && egui::text_edit::TextEditState::load(ctx, id).is_some()
