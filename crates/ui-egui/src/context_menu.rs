@@ -859,7 +859,14 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     if crate::drawing_workspace::active(app) {
         return drawing_items(app);
     }
-    let sel = &app.session.selection;
+    // After Select All the menu is the bodies' menu: the scope is named once, as the menu opens.
+    let resolved: Vec<Sel>;
+    let sel: &[Sel] = if app.session.all_bodies_selected() {
+        resolved = app.session.selected_items().unwrap_or_default();
+        &resolved
+    } else {
+        &app.session.selection
+    };
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
     if let Some((_, label)) = &app.last_command {
@@ -915,7 +922,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(Item::sep());
         }
         let planar = |s: &&Sel| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some());
-        let one_flat = matches!(sel.as_slice(), [face] if planar(&face));
+        let one_flat = matches!(sel, [face] if planar(&face));
         // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
         // Press Pull offsets them.
         if one_flat {
@@ -932,7 +939,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
-        let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
+        let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
         // The face right-clicked (else the last planar one selected) starts a section on its
         // plane, or its plane joins the one on show.

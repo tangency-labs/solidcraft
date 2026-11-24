@@ -404,7 +404,7 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     if let Some(d) = dialog {
         let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
     }
-    let _ = write!(&mut h, "{:?}", app.session.selection);
+    let _ = write!(&mut h, "{:?}{}", app.session.selection, app.session.all_bodies_selected());
     h.0.finish()
 }
 
@@ -530,6 +530,10 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
                 context.push_str(&block(&debug(&d.extra, 1000)));
             }
         }
+    }
+    if app.session.all_bodies_selected() {
+        let count = app.session.selected_count().unwrap_or(0);
+        let _ = writeln!(&mut context, "\nSelect All: every shown body ({count}) is selected.");
     }
     context.push_str("\nSelected items (including occurrence paths):\n");
     context.push_str(&block(&debug(&app.session.selection.iter().take(32).collect::<Vec<_>>(), 3000)));

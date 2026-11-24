@@ -17,7 +17,7 @@ pub(crate) use solidcraft_engine::selection_context::same_item;
 pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
     // Select All holds every shown body.
     if session.all_bodies_selected() {
-        return !session.visibility.hidden_bodies.iter().any(|h| h == body);
+        return session.body_visible(body);
     }
     session.selection.iter().any(|s| match s {
         Sel::Body { name } => name == body,

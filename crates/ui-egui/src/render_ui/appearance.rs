@@ -78,7 +78,7 @@ fn step_index(step: LookStep) -> usize {
 pub(super) fn targets(app: &SolveApp, step: LookStep) -> Targets {
     let mut targets = Targets::default();
     let state = crate::open_meshing::session_world(&app.session);
-    for selection in &app.session.selection {
+    for selection in &app.session.selected_items().unwrap_or_default() {
         let body = match selection {
             Sel::Body { name } | Sel::Face { body: name, .. } => state.body(name),
             _ => None,

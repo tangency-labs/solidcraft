@@ -1327,6 +1327,9 @@ impl Dialog {
         {
             input.multi = true;
         }
+        // Select All's bodies are distinct already: each is taken without scanning those before it
+        // (56,000 bodies would otherwise be over a billion comparisons as the dialog opens).
+        let distinct_bodies = s.all_bodies_selected();
         for sel in &preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
@@ -1437,7 +1440,7 @@ impl Dialog {
                     _ => vec![sel.clone()],
                 };
                 for x in picked {
-                    if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
+                    if (distinct_bodies && matches!(x, Sel::Body { .. })) || !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                         inp.items.push(x);
                     }
                 }

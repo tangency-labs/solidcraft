@@ -82,7 +82,7 @@ pub fn selected_component(app: &SolveApp) -> Option<u64> {
     }
     let mut bodies = Vec::new();
     let mut component = None;
-    for sel in &app.session.selection {
+    for sel in &app.session.selected_items().unwrap_or_default() {
         match sel {
             Sel::Body { name } => bodies.push(name.clone()),
             Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => bodies.push(body.clone()),

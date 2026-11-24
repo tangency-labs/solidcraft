@@ -2342,7 +2342,8 @@ impl SolveApp {
     /// nothing to act on it says what to pick.
     fn ground_selected_occurrences(&mut self) {
         let mut targets: Vec<(u64, bool)> = Vec::new();
-        for sel in &self.session.selection {
+        // Select All grounds the placements of every shown body.
+        for sel in &self.session.selected_items().unwrap_or_default() {
             use solidcraft_engine::Sel;
             // A body, face, edge or vertex picked in the view stands for the placement that owns
             // it, the one a drag on it would move (the outermost inside the active component).
