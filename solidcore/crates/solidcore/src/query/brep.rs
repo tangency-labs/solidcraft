@@ -604,25 +604,30 @@ pub struct FaceHit {
 /// B-rep's zone tolerance ([`brep_zone_tol_3d`], the tolerance of
 /// [`BrepQuery::first_face_hit`]), and a point found is a hit only where it lies on `b`'s
 /// boundary within that tolerance: a ray passing the body farther off meets nothing, one
-/// crossing a face at a grazing angle meets it at each crossing. A point is a hit of every face
-/// meeting there: the face it lies in, both faces of an edge, every face round a vertex. Points
-/// of one face within twice the tolerance of each other (a crossing solved at both parameters
-/// of a seam or pole, or found again from a neighbouring face) are one hit. So a face the ray
-/// crosses twice (a cylinder's side) gives two hits, a crossing on its seam or a sphere's pole
-/// one, and a ray through an edge or a vertex, or grazing an edge from outside, one hit of each
-/// face there, at one point and distance. Hits at one distance are in the faces' order
-/// (`GetFaces`); [`BrepQuery::first_face_hit`] names one of them, its solve's first. A hit at
-/// the ray's origin is at distance 0. A face the ray lies along over a stretch is no hit,
-/// also at the stretch's ends. Empty when the ray meets no face, including a ray that starts
-/// past the box. The solves may make missing UV trim curves on `b`.
+/// within it touches it, and one crossing a face at a grazing angle meets it at each crossing.
+/// A point is a hit of every face meeting there: the face it lies in, both faces of an edge,
+/// every face round a vertex. Points of one face within twice the tolerance of each other (a
+/// crossing solved at both parameters of a seam or pole, or found again from a neighbouring
+/// face) are one hit. So a face the ray crosses twice (a cylinder's side) gives two hits, a
+/// crossing on its seam or a sphere's pole one, and a ray through an edge or a vertex, or
+/// grazing an edge from outside, one hit of each face there, at one point and distance. Hits
+/// at one distance are in the faces' order (`GetFaces`); [`BrepQuery::first_face_hit`] names
+/// one of them, its solve's first. A hit at the ray's origin is at distance 0. Where the ray
+/// lies along a face within the tolerance over a stretch, that face has no hit along the
+/// stretch, its ends included, except that an end inside the face (not on its edges or its
+/// seam, nor at the segment's ends) is where the ray goes into or out of it: a hit, so a ray
+/// grazing a curved face within the tolerance meets it twice. Empty when the ray meets no
+/// face, including a ray that starts past the box. The solves may make missing UV trim curves
+/// on `b`.
 ///
 /// [`intersect_curve_face`]: crate::intersect::api_intersectors::intersect_curve_face
 ///
 /// # Errors
 ///
 /// Those of the box, the segment and the solves (a face without a surface among them),
-/// except a face's [`IntersectFailure::NoIntersection`], which is no hit; those of the cache
-/// and the boundary solve of each point.
+/// except a face's [`IntersectFailure::NoIntersection`], which is no hit; those of the
+/// stretches' evaluations, the cache, the boundary solve of each point and the faces of its
+/// vertex or edge.
 pub fn face_hits(k: &Kernel, b: &mut Brep, ray: Ray) -> Result<Vec<FaceHit>> {
     let corners = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?.corners();
     let reach = corners
@@ -631,17 +636,29 @@ pub fn face_hits(k: &Kernel, b: &mut Brep, ray: Ray) -> Result<Vec<FaceHit>> {
     if reach <= EFF_ZERO {
         return Ok(Vec::new());
     }
-    let segment: Curve =
-        create_line_segment(ray.origin, ray.origin + ray.direction * (2.0 * reach))?.into();
+    let far = 2.0 * reach;
+    let segment: Curve = create_line_segment(ray.origin, ray.origin + ray.direction * far)?.into();
     let tolerance = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let along_ray = |p: Point3| (p - ray.origin).dot(ray.direction);
     let faces = bp1::faces(b, None)?;
     let mut points = Vec::new();
-    let mut along = Vec::new();
+    // each stretch the ray lies along a face: the face and its range along the ray
+    let mut stretches: Vec<(FaceId, f64, f64)> = Vec::new();
+    let mut ends: Vec<(FaceId, Point3)> = Vec::new();
     for &f in &faces {
         match intersect_curve_face_within(k, &segment, b, f, tolerance) {
             Ok(found) => {
-                if !found.curves.is_empty() {
-                    along.push(f);
+                for curve in &found.curves {
+                    let interval = curve.natural_interval();
+                    let p = curve.evaluate_point(k, interval.min())?;
+                    let q = curve.evaluate_point(k, interval.max())?;
+                    let (s, t) = (along_ray(p), along_ray(q));
+                    stretches.push((f, s.min(t), s.max(t)));
+                    for (end, at) in [(p, s), (q, t)] {
+                        if at > tolerance && at < far - tolerance {
+                            ends.push((f, end));
+                        }
+                    }
                 }
                 points.extend(found.points);
             }
@@ -653,35 +670,63 @@ pub fn face_hits(k: &Kernel, b: &mut Brep, ray: Ray) -> Result<Vec<FaceHit>> {
             Err(e) => return Err(e),
         }
     }
-    if points.is_empty() {
+    if points.is_empty() && ends.is_empty() {
         return Ok(Vec::new());
     }
     // each hit with its face's place in `faces`, for ties
     let mut hits: Vec<(Option<usize>, FaceHit)> = Vec::new();
     let query = BrepQuery::of_brep(b);
+    // a stretch's end inside its face is where the ray goes into or out of it
+    for (f, end) in ends {
+        if query.entity_at(k, b, end, tolerance)? == Some(EntityRef::Face(f)) {
+            add_hit(&mut hits, &faces, f, end, along_ray(end), tolerance);
+        }
+    }
     for point in points {
-        let distance = (point - ray.origin).dot(ray.direction).max(0.0);
-        for face in query.faces_at(k, b, point, tolerance)? {
-            // two solved points of one crossing are each within the tolerance of it
-            let again = along.contains(&face)
-                || hits
-                    .iter()
-                    .any(|(_, h)| h.face == face && h.point.distance(point) <= 2.0 * tolerance);
-            if !again {
-                let rank = faces.iter().position(|&g| g == face);
-                hits.push((
-                    rank,
-                    FaceHit {
-                        face,
-                        point,
-                        distance,
-                    },
-                ));
+        let distance = along_ray(point).max(0.0);
+        let faces_there = match query.entity_at(k, b, point, tolerance)? {
+            Some(EntityRef::Vertex(v)) => vertex::faces(b, v)?,
+            Some(EntityRef::Edge(e)) => edge::faces(b, e, None)?,
+            Some(EntityRef::Face(f)) => vec![f],
+            _ => Vec::new(),
+        };
+        for face in faces_there {
+            let on_stretch = stretches.iter().any(|&(g, s, t)| {
+                g == face && distance >= s - tolerance && distance <= t + tolerance
+            });
+            if !on_stretch {
+                add_hit(&mut hits, &faces, face, point, distance, tolerance);
             }
         }
     }
     hits.sort_by(|(r, p), (s, q)| p.distance.total_cmp(&q.distance).then(r.cmp(s)));
     Ok(hits.into_iter().map(|(_, h)| h).collect())
+}
+
+/// Adds the hit of `face` at `point` to [`face_hits`]' `hits`, with the face's place in
+/// `faces`, unless `face` has one within twice `tolerance` of it: two solved points of one
+/// crossing are each within the tolerance of it.
+fn add_hit(
+    hits: &mut Vec<(Option<usize>, FaceHit)>,
+    faces: &[FaceId],
+    face: FaceId,
+    point: Point3,
+    distance: f64,
+    tolerance: f64,
+) {
+    let again = hits
+        .iter()
+        .any(|(_, h)| h.face == face && h.point.distance(point) <= 2.0 * tolerance);
+    if !again {
+        hits.push((
+            faces.iter().position(|&g| g == face),
+            FaceHit {
+                face,
+                point,
+                distance,
+            },
+        ));
+    }
 }
 
 /// A B-rep's queries over its cache: the identities and the `SM_OC_BREP` cache, which
@@ -909,16 +954,16 @@ impl<'a> BrepQuery<'a> {
         }))
     }
 
-    /// (Not upstream) The faces of `b` meeting at `point`: those of the lowest dimensional
-    /// vertex, edge or face within `tolerance` of it (the boundary solve of
-    /// [`Self::point_3d_classify`]), each once; none when it is on no face.
-    fn faces_at(
+    /// (Not upstream) The lowest dimensional vertex, edge or face of `b` within `tolerance`
+    /// of `point` (the boundary solve of [`Self::point_3d_classify`]); none when it is on no
+    /// face.
+    fn entity_at(
         &self,
         k: &Kernel,
         b: &mut Brep,
         point: Point3,
         tolerance: f64,
-    ) -> Result<Vec<FaceId>> {
+    ) -> Result<Option<EntityRef>> {
         let identity = self.effective_identity();
         let cache = self.cache(k, b)?;
         let solutions = ray::solve_mutable_brep_point_kept(
@@ -940,14 +985,9 @@ impl<'a> BrepQuery<'a> {
             .get(0)
             .and_then(|s| s.objects.first().copied().flatten())
         else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
-        match bp2::cache_entity(object)? {
-            EntityRef::Vertex(v) => vertex::faces(b, v),
-            EntityRef::Edge(e) => edge::faces(b, e, None),
-            EntityRef::Face(f) => Ok(vec![f]),
-            _ => Ok(Vec::new()),
-        }
+        Ok(Some(bp2::cache_entity(object)?))
     }
 
     /// `SmBrep::Point3DClassify`: classifies `point` (zone tolerance
@@ -2017,8 +2057,12 @@ mod tests {
     /// hits, the first where `first_face_hit` lands; the same for the radius-2 sphere at
     /// (0, 0, 20) along +x at y = 1.999, z = 20. Through the axis of the radius-4e-4 cylinder
     /// from 20 away, its two crossings 8e-4 apart are two hits, at 19.9996 and 20.0004, the
-    /// first where `first_face_hit` lands. Along +x in the plane z = 5 of the cube [-5, 5]^3,
-    /// the ray lies along that face: only the sides x = -5 and x = 5, at 15 and 25.
+    /// first where `first_face_hit` lands. At y = 4.99999 the ray is within the tolerance of
+    /// the cylinder's side over a stretch: its two ends, 20 -+ sqrt(25 - y^2), are the hits.
+    /// Through the hole of the torus of radii 10 and 2 about z, along +x at y = 7.99999, the
+    /// outer crossings at 20 -+ sqrt(144 - y^2) and the ends of the stretch past the hole at
+    /// 20 -+ sqrt(64 - y^2): four hits of its one face. Along +x in the plane z = 5 of the cube
+    /// [-5, 5]^3, the ray lies along that face: only the sides x = -5 and x = 5, at 15 and 25.
     #[test]
     fn a_grazing_or_close_pair_of_crossings_are_hits_and_a_stretch_along_a_face_is_none() {
         let mut k = Kernel::default();
@@ -2069,6 +2113,33 @@ mod tests {
                 "{first:?} {hits:?}"
             );
         }
+        let close = |hits: &[FaceHit], want: &[f64]| {
+            assert_eq!(hits.len(), want.len(), "{hits:?}");
+            for (hit, distance) in hits.iter().zip(want) {
+                assert!((hit.distance - distance).abs() < 1e-6, "{hits:?}");
+            }
+        };
+        let (hits, first) = both(&k, &mut tube, [-20.0, 4.99999, 10.0]);
+        let half = (25.0 - 4.99999_f64 * 4.99999).sqrt();
+        close(&hits, &[20.0 - half, 20.0 + half]);
+        assert!(
+            (first.distance - hits[0].distance).abs() < 1e-6,
+            "{first:?} {hits:?}"
+        );
+        let mut ring =
+            crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 10.0, 2.0)
+                .unwrap();
+        let (hits, first) = both(&k, &mut ring, [-20.0, 7.99999, 0.0]);
+        let outer = (144.0 - 7.99999_f64 * 7.99999).sqrt();
+        let inner = (64.0 - 7.99999_f64 * 7.99999).sqrt();
+        close(
+            &hits,
+            &[20.0 - outer, 20.0 - inner, 20.0 + inner, 20.0 + outer],
+        );
+        assert!(
+            (first.distance - hits[0].distance).abs() < 1e-6,
+            "{first:?} {hits:?}"
+        );
 
         let mut cube = crate::primitive::api_primitives::create_box(
             &mut k,
