@@ -1738,8 +1738,7 @@ impl SolidError {
     /// ([`sweep::SweepFailure::replaces_upstream_status`],
     /// [`curve::CurveFailure::replaces_upstream_status`],
     /// [`offset::OffsetFailure::replaces_upstream_status`])). The callers that branch on an
-    /// upstream status use it so that they treat both alike; it goes with `Upstream` in
-    /// the last PR of the typed-errors work.
+    /// upstream status use it so that they treat both alike.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
         match self {
@@ -2037,9 +2036,8 @@ impl SolidError {
 /// [`curve::CurveFailure::replaces_upstream_status`],
 /// [`offset::OffsetFailure::replaces_upstream_status`])).
 ///
-/// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
-/// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
-/// [`Reason`].
+/// For the goldens' and difftest's comparison only. Callers match [`SolidError::kind`] and
+/// the [`Reason`].
 #[must_use]
 pub fn upstream_status(error: &SolidError) -> Option<i32> {
     error.upstream_status()

@@ -13,7 +13,6 @@
 //! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`], [`MassFailure::FaceuseWithoutRegion`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //! | [`MassFailure::FaceWithoutFaceuse`], [`MassFailure::FaceuseWithoutMate`], [`MassFailure::EdgeuseWithoutEdge`], [`MassFailure::EdgeuseWithoutVertexuse`], [`MassFailure::VertexuseWithoutVertex`] | `SM_ERR_NULL_POINTER` |
 //! | [`MassFailure::Integrand`]      | `SM_ERR`                 |
-//! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
 //! | [`MassFailure::StepControl`]    | `SM_ERR`                 |
 //!
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -69,8 +68,6 @@ pub enum MassFailure {
     /// The integrand evaluated to no number (a surface evaluated to a non-finite
     /// point).
     Integrand,
-    /// The integrator took no step over a span of a face.
-    SkippedSpan,
     /// The integrator's step control cannot meet the accuracy: the step shrank below
     /// its minimum, or the steps ran out, or the error owed exceeds the accuracy.
     StepControl,
@@ -89,7 +86,6 @@ impl MassFailure {
             Self::Defect { .. }
             | Self::EdgeCurveSingular
             | Self::Integrand
-            | Self::SkippedSpan
             | Self::StepControl
             | Self::TrimNotFinite => SM_ERR,
             Self::EdgeWithoutCurve
@@ -143,7 +139,6 @@ impl core::fmt::Display for MassFailure {
             Self::FaceuseWithoutMate => f.write_str("the face use has no mate"),
             Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
             Self::Integrand => f.write_str("the integrand is not a finite number"),
-            Self::SkippedSpan => f.write_str("the integrator took no step over a span of a face"),
             Self::StepControl => {
                 f.write_str("the integrator's step control cannot meet the accuracy")
             }
@@ -186,7 +181,6 @@ mod tests {
         let cases = [
             (MassFailure::StepControl, SM_ERR),
             (MassFailure::Integrand, SM_ERR),
-            (MassFailure::SkippedSpan, SM_ERR),
         ];
         for (failure, code) in cases {
             let typed = SolidError::mass("mass::op", failure);

@@ -740,10 +740,6 @@ pub enum LoopCrossing {
     LeaveMoreThanOneWay,
     /// The loops leave a crossing no way.
     LeaveNoWay,
-    /// They meet at a vertex of a loop.
-    MeetAtLoopVertex,
-    /// They run along one another.
-    RunAlong,
     /// The face shares an edge with another face.
     SharesEdge,
     /// A stretch of a loop is neither inside nor outside another loop.
@@ -991,8 +987,7 @@ impl OffsetFailure {
     /// [`ErrorKind::StageFailed`] says it too), or a named failure of the loop-gap search on the offset
     /// loops the kernel built ([`OffsetFailure::LoopGapPassLimit`],
     /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`]). Report it.
-    /// Said per cause, as its class ([`ErrorKind::Failed`]) does not say it, until
-    /// offset failures move onto a class of their own.
+    /// Said per cause, as the class of a loop-gap failure does not say it.
     #[must_use]
     pub const fn is_defect(&self) -> bool {
         match self {
@@ -1291,8 +1286,6 @@ impl core::fmt::Display for LoopCrossing {
             LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
             LoopCrossing::LeaveMoreThanOneWay => "the loops leave a crossing more than one way",
             LoopCrossing::LeaveNoWay => "the loops leave a crossing no way",
-            LoopCrossing::MeetAtLoopVertex => "they meet at a loop vertex",
-            LoopCrossing::RunAlong => "they run along one another",
             LoopCrossing::SharesEdge => "the face shares an edge with another face",
             LoopCrossing::StretchUnclassified => {
                 "a stretch of a loop is neither inside nor outside another loop"

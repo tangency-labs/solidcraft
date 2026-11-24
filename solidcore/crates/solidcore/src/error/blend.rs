@@ -26,8 +26,8 @@
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
 //! names an entity of its own: a failure is at the entity the site it replaces named
-//! (`SolidError::blend_at`), until the site moves onto the typed [`super::Site`]. A check
-//! of a caller's arguments that returned a status is a cause of class
+//! (`SolidError::blend_at`). A check of a caller's arguments that returned a status is a
+//! cause of class
 //! [`ErrorKind::InvalidInput`] keeping that status; the other checks of a caller's arguments
 //! stay [`crate::SolidError::InvalidInput`]. Every cause stands in for the status its site
 //! returned, so the decisions that read an upstream status read these alike.
@@ -1251,10 +1251,6 @@ pub enum BlendFailure {
     /// ([`ErrorKind::TrimLeaks`]).
     /// Status `SM_ERR`.
     TrimLoopDoesNotSeparate,
-    /// The boundary loop of the faces the rails enclose is open: the failure's site vertex
-    /// is where. A defect ([`ErrorKind::TrimLeaks`]).
-    /// Status `SM_ERR`.
-    TrimLoopOpen,
     /// The start or end (or both) of a fillet edge's UV trim curve does not drop onto the
     /// surface: neither the intersecting drops, at seven tolerances growing tenfold from
     /// a billionth of the surface's size, nor the drop that minimises the distance within
@@ -1494,7 +1490,6 @@ impl BlendFailure {
             Self::Trace(t) => t.comparison_status(),
             Self::TraceMissesRailEnd { .. } => SM_ERR,
             Self::TrimLoopDoesNotSeparate => SM_ERR,
-            Self::TrimLoopOpen => SM_ERR,
             Self::UvCurveEndOffSurface { .. } => SM_ERR,
             Self::UvCurveEndsUnresolved { .. } => SM_ERR,
             Self::UvCurveSurfaceNotBSpline { .. } => SM_ERR_NULL_POINTER,
@@ -1659,7 +1654,6 @@ impl BlendFailure {
             Self::Trace(t) => t.class(),
             Self::TraceMissesRailEnd { .. } => ErrorKind::NotFound,
             Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::TrimLoopOpen => ErrorKind::TrimLeaks,
             Self::UvCurveEndOffSurface { .. } => ErrorKind::NotFound,
             Self::UvCurveEndsUnresolved { .. } => ErrorKind::Unsupported,
             Self::UvCurveSurfaceNotBSpline { .. } => ErrorKind::Unsupported,
@@ -2414,7 +2408,6 @@ impl core::fmt::Display for BlendFailure {
                     self.class()
                 )
             }
-            Self::TrimLoopOpen => write!(f, "{}: the trim loop is open", self.class()),
             Self::UvCurveEndOffSurface {
                 start,
                 end,
@@ -2772,7 +2765,6 @@ mod tests {
                 },
                 ErrorKind::StationDidNotConverge,
             ),
-            (BlendFailure::TrimLoopOpen, ErrorKind::TrimLeaks),
             (BlendFailure::TrimLoopDoesNotSeparate, ErrorKind::TrimLeaks),
             (BlendFailure::Defect { why: "x" }, ErrorKind::StageFailed),
         ];
@@ -3294,10 +3286,6 @@ mod tests {
             SolidError::blend("blend::op", BlendFailure::NoRoom(R::OverflowWithRollover))
                 .to_string(),
             "blend::op: cliff_overflow_refused: OverflowWithRollover"
-        );
-        assert_eq!(
-            SolidError::blend("blend::op", BlendFailure::TrimLoopOpen).to_string(),
-            "blend::op: trim_leaks: the trim loop is open"
         );
         // the site and the fit, when known, follow the cause
         let sited = Failure::new("blend::op", BlendFailure::NoRoom(R::BallDoesNotFit))
@@ -4170,7 +4158,7 @@ mod tests {
         assert_eq!(e, other);
         // the helpers record their caller, not themselves
         let before = line!();
-        let helper = SolidError::blend("blend::op", BlendFailure::TrimLoopOpen);
+        let helper = SolidError::blend("blend::op", BlendFailure::TrimLoopDoesNotSeparate);
         let after = line!();
         let at = helper.failure().unwrap().origin().line();
         assert!((before..after).contains(&at), "{at}");

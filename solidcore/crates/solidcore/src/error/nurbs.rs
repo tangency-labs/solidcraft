@@ -947,8 +947,8 @@ impl crate::SolidError {
 
 /// The `NL_*_ERR` number a NURBS failure stands for, when `error` is one.
 ///
-/// For difftest's comparison only: it is removed with `sm_status` in the last PR of the
-/// typed-errors work. Callers match [`crate::SolidError::kind`] and the [`Reason`].
+/// For difftest's comparison only. Callers match [`crate::SolidError::kind`] and the
+/// [`Reason`].
 #[must_use]
 pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
     match error {

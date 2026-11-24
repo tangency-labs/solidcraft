@@ -945,7 +945,7 @@ impl Cone {
         // Build NURB; fail cleanly if degenerate (single zero-radius apex is valid).
         match self.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) => return Err(SolidError::surface_nurb_not_made(operation, SM_ERR, Err(e))),
+            Err(e) => return Err(SolidError::surface_nurb_not_made(operation, SM_ERR, e)),
             Ok(()) => {}
         }
         if self.rev.base.gw_nurb().is_none() {

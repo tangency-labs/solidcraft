@@ -6473,8 +6473,7 @@ mod tests {
         let e = m
             .edge_definition_split(&k, &mut geo, ed, ivl.mid(), Some(v_mid), None)
             .unwrap_err();
-        // the classification's own error (main read the unclassified point and refused
-        // with `SplitDefinitionNotAdded`, caused by `ClassificationOffTopology`)
+        // the classification's own error (main read the unclassified point and refused)
         assert_eq!(e.operation(), "classify", "{e}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
         assert!(!e.is_defect(), "{e}");

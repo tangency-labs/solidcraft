@@ -169,7 +169,6 @@
 //! | [`TopologyFailure::SideUndecided`] | `SM_ERR` |
 //! | [`TopologyFailure::SolveViewWithoutCache`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::SourceIsVertexShell`] | `SM_ERR` |
-//! | [`TopologyFailure::SplitDefinitionNotAdded`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::SteppedOffFace`] | `SM_ERR` |
 //! | [`TopologyFailure::SteppedOutsideUvDomain`] | `SM_ERR` |
 //! | [`TopologyFailure::SurfaceCacheNotMade`] | `SM_ERR_NULL_POINTER` |
@@ -268,16 +267,16 @@ pub enum TopologyFailure {
     /// A B-rep constructor call (`call`, the upstream name) needs `part` open, and it is
     /// not: the caller's call order. [`ErrorKind::InvalidInput`].
     ConstructorNotOpen {
-        /// The constructor call, by its upstream name (`EndBrep`, `StartEdge`, ...).
-        call: &'static str,
+        /// The constructor call.
+        call: ConstructorCall,
         /// What the call works in.
         part: ConstructorPart,
     },
     /// A B-rep constructor call (`call`, the upstream name) needs `part` closed, and it is
     /// still open: the caller's call order. [`ErrorKind::InvalidInput`].
     ConstructorStillOpen {
-        /// The constructor call, by its upstream name.
-        call: &'static str,
+        /// The constructor call.
+        call: ConstructorCall,
         /// What is still open.
         part: ConstructorPart,
     },
@@ -806,10 +805,6 @@ pub enum TopologyFailure {
     /// The shell the caller asked to move members out of is a vertex shell, whose vertex cannot
     /// move to a shell of faces or wires. Its argument, so of kind [`ErrorKind::InvalidInput`].
     SourceIsVertexShell,
-    /// The vertex definition at the split point of an edge definition could not be found
-    /// or added; that failure is the cause. Class `failed`; whether it is a defect or a
-    /// refusal is its cause's.
-    SplitDefinitionNotAdded,
     /// The point stepped off the edge into the face has no foot on the face's surface: the step
     /// left the surface.
     SteppedOffFace,
@@ -949,6 +944,65 @@ pub enum TopologyFailure {
     /// The surface has a zero-length first derivative at the point where the edge's gap to the
     /// face is measured (a pole or a degenerate patch), so the gap function has no value there.
     ZeroSurfaceTangent,
+}
+
+/// A B-rep constructor call, by its upstream name ([`TopologyFailure::ConstructorNotOpen`],
+/// [`TopologyFailure::ConstructorStillOpen`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstructorCall {
+    /// `EndBrep`.
+    EndBrep,
+    /// `EndEdge`.
+    EndEdge,
+    /// `EndFace`.
+    EndFace,
+    /// `EndLoop`.
+    EndLoop,
+    /// `EndRegion`.
+    EndRegion,
+    /// `EndShell`.
+    EndShell,
+    /// `SetEdgeCurve`.
+    SetEdgeCurve,
+    /// `SetLimits`.
+    SetLimits,
+    /// `StartAndEndSingleVertexLoop`.
+    StartAndEndSingleVertexLoop,
+    /// `StartBrep`.
+    StartBrep,
+    /// `StartEdge`.
+    StartEdge,
+    /// `StartFace`.
+    StartFace,
+    /// `StartLoop`.
+    StartLoop,
+    /// `StartRegion`.
+    StartRegion,
+    /// `StartShell`.
+    StartShell,
+}
+
+impl core::fmt::Display for ConstructorCall {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::EndBrep => "EndBrep",
+            Self::EndEdge => "EndEdge",
+            Self::EndFace => "EndFace",
+            Self::EndLoop => "EndLoop",
+            Self::EndRegion => "EndRegion",
+            Self::EndShell => "EndShell",
+            Self::SetEdgeCurve => "SetEdgeCurve",
+            Self::SetLimits => "SetLimits",
+            Self::StartAndEndSingleVertexLoop => "StartAndEndSingleVertexLoop",
+            Self::StartBrep => "StartBrep",
+            Self::StartEdge => "StartEdge",
+            Self::StartFace => "StartFace",
+            Self::StartLoop => "StartLoop",
+            Self::StartRegion => "StartRegion",
+            Self::StartShell => "StartShell",
+        })
+    }
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -1186,7 +1240,6 @@ impl TopologyFailure {
             | Self::RadialRimWithoutEdge
             | Self::ShellHasNoFaceUses
             | Self::SolveViewWithoutCache
-            | Self::SplitDefinitionNotAdded
             | Self::SurfaceCacheNotMade
             | Self::SurfaceWithoutGenerator
             | Self::SurfaceWithoutNurbs { .. }
@@ -1247,7 +1300,6 @@ impl TopologyFailure {
             | Self::NoVertexSector { .. }
             | Self::NotAMatedPair
             | Self::OverlapBelowSplitResolution
-            | Self::SplitDefinitionNotAdded
             | Self::SurfaceCacheNotMade => ErrorKind::Failed,
             Self::AttributeSlotEmpty
             | Self::BrepSideNotOneOrTwo { .. }
@@ -1746,9 +1798,6 @@ impl core::fmt::Display for TopologyFailure {
                 f.write_str("the solve needs the B-rep's cache, and the view has none")
             }
             Self::SourceIsVertexShell => f.write_str("the source is a vertex shell"),
-            Self::SplitDefinitionNotAdded => {
-                f.write_str("the vertex definition at the split could not be added")
-            }
             Self::SteppedOffFace => f.write_str("the stepped-off point does not lie on the face"),
             Self::SteppedOutsideUvDomain => {
                 f.write_str("the stepped-off point is outside the face's UV domain")
@@ -2193,7 +2242,6 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 K::InvalidInput,
             ),
-            (T::SplitDefinitionNotAdded, SM_ERR_NULL_POINTER, K::Failed),
             (T::CurveStoreFull, SM_ERR_NULL_POINTER, K::Unsupported),
             (T::OverlapBelowSplitResolution, SM_ERR, K::Failed),
             (T::IntersectingProtoEdgeEmpty, SM_ERR, K::Failed),
@@ -2207,22 +2255,6 @@ mod tests {
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
-        // the split's vertex definition keeps the failure that kept it out as its cause,
-        // which decides defect or not
-        let why = "a step the kernel got wrong";
-        let cause = SolidError::topology(op, T::Defect { why });
-        let e = Failure::new(op, T::SplitDefinitionNotAdded)
-            .caused_by(cause.clone())
-            .into_error();
-        assert_eq!(e.cause(), Some(&cause));
-        assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
-        let cause = SolidError::topology(op, T::ClassificationOffTopology);
-        let e = Failure::new(op, T::SplitDefinitionNotAdded)
-            .caused_by(cause.clone())
-            .into_error();
-        assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.kind(), K::Failed);
     }
 
     /// The named causes of the B-rep constructor, the file and projection wrappers and the
@@ -2238,11 +2270,11 @@ mod tests {
             fits_below: 3,
         };
         let not_open = T::ConstructorNotOpen {
-            call: "EndShell",
+            call: ConstructorCall::EndShell,
             part: P::Shell,
         };
         let still_open = T::ConstructorStillOpen {
-            call: "EndShell",
+            call: ConstructorCall::EndShell,
             part: P::Face,
         };
         let cases = [
@@ -2285,7 +2317,7 @@ mod tests {
             "topology::op: the B-rep constructor's EndShell: a face is still open"
         );
         let curve = T::ConstructorNotOpen {
-            call: "SetLimits",
+            call: ConstructorCall::SetLimits,
             part: P::EdgeCurve,
         };
         assert_eq!(

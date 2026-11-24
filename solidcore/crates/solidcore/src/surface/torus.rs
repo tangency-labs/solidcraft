@@ -357,13 +357,7 @@ impl Torus {
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match torus.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) => {
-                return Err(SolidError::surface_nurb_not_made(
-                    OP_CANONICAL,
-                    SM_ERR,
-                    Err(e),
-                ))
-            }
+            Err(e) => return Err(SolidError::surface_nurb_not_made(OP_CANONICAL, SM_ERR, e)),
             Ok(()) => {}
         }
         if torus.base.base.gw_nurb().is_none() {

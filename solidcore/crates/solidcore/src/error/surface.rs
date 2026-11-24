@@ -21,7 +21,6 @@
 //! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveWithoutNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`] | `SM_ERR` |
 //! | [`SurfaceFailure::SurfaceCacheNotBuilt`], [`SurfaceFailure::SurfaceCacheTreeNotBuilt`], [`SurfaceFailure::CurveCacheNotBuilt`], [`SurfaceFailure::CurveCacheTreeNotBuilt`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Failed`]; defect-ness follows the cause) |
 //! | [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
-//! | [`SurfaceFailure::SurfaceNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
 //! | the other named causes, from [`SurfaceFailure::ScaleNotUniform`] on | each its own (`comparison_status`), or the site's through `with_status` |
 //! | every other named cause            | `SM_ERR`, with the class its doc names |
 //!
@@ -1318,20 +1317,13 @@ impl crate::SolidError {
     }
 
     /// [`SurfaceFailure::NurbNotMade`] with status `status`, for a routine whose NURB form
-    /// is still missing after `made`, the result of the call that was to make it: its
-    /// error, when it failed, is the cause.
+    /// the call that was to make it failed to make: that call's error is the cause.
     #[must_use]
-    pub(crate) fn surface_nurb_not_made(
-        operation: &'static str,
-        status: i32,
-        made: Result<(), Self>,
-    ) -> Self {
-        let failure = Failure::new(operation, SurfaceFailure::NurbNotMade).with_status(status);
-        match made {
-            Err(e) => failure.caused_by(e),
-            Ok(()) => failure,
-        }
-        .into_error()
+    pub(crate) fn surface_nurb_not_made(operation: &'static str, status: i32, cause: Self) -> Self {
+        Failure::new(operation, SurfaceFailure::NurbNotMade)
+            .with_status(status)
+            .caused_by(cause)
+            .into_error()
     }
 
     /// The surface failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -2028,14 +2020,15 @@ mod tests {
             "surface::op: the NURB is not of the analytic kind: its height is degenerate"
         );
         // a NURB not made keeps the site's status, and its make's defect decides the class
-        let made = Err(SolidError::surface(op, SurfaceFailure::Defect { why: "x" }));
+        let made = SolidError::surface(op, SurfaceFailure::Defect { why: "x" });
         let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made);
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
         assert!(e.is_defect());
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR, Ok(()));
+        let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR, made);
         assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert!(e.cause().is_none() && !e.is_defect());
+        assert!(!e.is_defect());
     }
 
     /// The named causes of the surface extensions and the ball patch have their status (a
@@ -2302,12 +2295,9 @@ mod tests {
         }
         // a NURB that could not be made keeps the site's status and chains the make's error
         let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, Err(made.clone()));
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made.clone());
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
         assert_eq!(e.cause(), Some(&made));
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR, Ok(()));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
-        assert!(e.cause().is_none());
     }
 }
