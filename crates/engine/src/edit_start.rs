@@ -103,13 +103,15 @@ impl Session {
 
     fn edit_receiver_is_focused(&self) -> bool {
         if let Some(entry) = &self.active_sheet_sketch {
-            !self.model_focus && self.open_drawing == Some(entry.drawing)
+            !self.model_focus && self.open_drawing == Some(entry.drawing) && entry.view.is_none_or(|view| view == self.view_context.focused())
         } else {
             (self.model_focus || self.open_drawing.is_none()) && self.sketching_view.is_none_or(|view| view == self.view_context.focused())
         }
     }
 
-    /// Lifecycle commands address the one active edit while preserving the host's receiver.
+    /// Finish and Cancel address the single active edit, independently of the focused tile.
+    /// Scope the receiver before authorization, validation and history capture; the host's
+    /// focus, camera, registry and an unrelated receiver's selection remain live.
     pub(crate) fn with_sketch_exit_receiver<T>(&mut self, command: &str, run: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         if !matches!(command, "sketch.finish" | "sketch.cancel") || (self.active_sketch.is_none() && self.active_sheet_sketch.is_none()) {
             return run(self);
@@ -149,11 +151,9 @@ impl Session {
                 .get("items")
                 .and_then(Value::as_array)
                 .map(|items| items.iter().filter_map(|item| serde_json::from_value::<crate::Sel>(item.clone()).ok()).collect::<Vec<_>>());
-            return selected
-                .as_deref()
-                .unwrap_or(&self.selection)
-                .iter()
-                .any(|item| matches!(item, crate::Sel::Body { .. } | crate::Sel::Feature { .. } | crate::Sel::Occurrence { .. }));
+            return selected.as_deref().unwrap_or(&self.selection).iter().any(|item| {
+                matches!(item, crate::Sel::Body { .. } | crate::Sel::Feature { .. } | crate::Sel::Occurrence { .. } | crate::Sel::Drawing { .. })
+            });
         }
         spec.starts_edit(params)
     }
@@ -169,7 +169,7 @@ impl Session {
         }
         let event = self.prepare_command_edit(spec, params)?;
         if self.command_starts_edit(spec, params) {
-            if let Some(event) = event.as_ref().filter(|event| event.domain == SketchDomain::Model) {
+            if let Some(event) = event.as_ref() {
                 self.prepared_edit_source = Some((spec.id.into(), event.clone()));
             } else if self.prepared_edit_source.as_ref().is_some_and(|(command, _)| command != spec.id) {
                 self.prepared_edit_source = None;
@@ -218,7 +218,7 @@ impl Session {
     pub fn prepare_view_close(&mut self, view: u64) -> Result<Option<SketchFinishEvent>> {
         let spec = crate::find_command("tab.view.close").ok_or_else(|| EngineError::UnknownCommand("tab.view.close".into()))?;
         self.check_command(spec, &json!({"id":view}))?;
-        if self.sketching_view != Some(view) {
+        if self.editing_view() != Some(view) {
             return Ok(None);
         }
         self.cancel_prepared_edit_start();
@@ -256,6 +256,7 @@ impl Session {
                 _ => None,
             })
             && self.doc.find_feature(&key).is_some_and(|feature| Some(feature.id) == self.active_sketch)
+            && params.get("view").is_none_or(|value| value.is_null() || value.as_u64().is_some_and(|view| Some(view) == self.sketching_view))
         {
             return Ok(None);
         }
@@ -264,6 +265,7 @@ impl Session {
             && params.get("sketch").is_some_and(|value| {
                 value.as_u64() == Some(entry.sketch) || value.as_str().is_some_and(|id| solidcraft_doc::ids::decode(id) == Some(entry.sketch))
             })
+            && params.get("view").is_none_or(|value| value.is_null() || value.as_u64().is_some_and(|view| Some(view) == entry.view))
         {
             return Ok(None);
         }
@@ -291,13 +293,14 @@ impl Session {
                 domain: SketchDomain::Model,
             };
             let before = self.doc.clone();
-            crate::cmd::finish_model_edit(self, true)?;
+            crate::cmd::finish_model_edit(self, true, false)?;
             self.sketch_finish_pending |= !Arc::ptr_eq(&before, &self.doc) || self.model.is_stale();
             self.publish_sketch_finish(event.clone());
             event.sequence = self.sketch_finish_sequence;
             first = Some(event);
         }
         if let Some(entry) = self.active_sheet_sketch.clone() {
+            let sheet = entry.sheet(&self.doc).ok_or_else(|| EngineError::Other("the edited sketch's sheet no longer exists".into()))?;
             let (name, empty) = self
                 .doc
                 .drawing(entry.drawing)
@@ -308,8 +311,8 @@ impl Session {
                 sequence: 0,
                 sketch: entry.sketch,
                 name,
-                view: None,
-                domain: SketchDomain::Sheet { drawing: entry.drawing, sheet: entry.sheet },
+                view: entry.view,
+                domain: SketchDomain::Sheet { drawing: entry.drawing, sheet },
             };
             if empty && let Some(drawing) = self.doc_mut().drawings.iter_mut().find(|drawing| drawing.id == entry.drawing) {
                 Arc::make_mut(drawing).sketches.retain(|record| record.id != entry.sketch);

@@ -6382,7 +6382,8 @@ fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
 
 /// An importer plugin's code runs only after the user's answer, in every mode and after "always
 /// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
-/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+/// opens, and `file.export` through an exporter, alone or in a batch. A file SolidCraft reads or
+/// writes itself keeps the mode's answer.
 #[test]
 fn importer_plugins_always_ask_like_plugin_runs() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
@@ -6391,25 +6392,41 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
     std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let exporter = dir.join("plugins").join("out");
+    std::fs::create_dir_all(&exporter).unwrap();
+    let manifest = json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"exporter","extensions":["smp"]}]}});
+    std::fs::write(exporter.join("plugin.json"), manifest.to_string()).unwrap();
     let file = dir.join("part.smp").to_string_lossy().into_owned();
     let (mut app, tx) = app_in_a_turn();
     app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
     app.agent_chat.running_id = "claude".into();
     app.preferences.ai_permissions = agents::Mode::All;
-    for command in ["file.import", "doc.open", "batch"] {
+    for command in ["file.import", "doc.open", "file.export", "batch"] {
         agents::remember(&mut app.preferences, "claude", command);
     }
     let calls = [
         ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
         ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
         ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":file}})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"file.export","params":{"path":file}}]})),
     ];
     pump_tools(&mut app);
-    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert_eq!(app.agent_chat.waiting(), 6, "each plugin import or export waits for an answer");
     assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
     let session = &app.session;
     assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file}})));
+    assert!(crate::plugins::runs_plugin_code(
+        session,
+        "engine.execute",
+        &json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})
+    ));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -4,20 +4,29 @@
 use super::*;
 use crate::schema::plugin::{ImportedDesign, ImporterInfo};
 
-/// An installed, enabled importer entry, read from its manifest alone: no plugin code runs.
+/// An installed, enabled plugin's file-format slot (RFC 0015 §4), read from its manifest alone:
+/// no plugin code runs. Import and export slots share this one model.
 #[derive(Clone, Debug)]
-pub struct Importer {
+pub struct FormatSlot {
     /// `plugin_id.entry`, as `format` names it.
     pub id: String,
     pub plugin_id: String,
     pub entry: String,
-    /// The plugin's name, for the Open dialog and the progress card.
+    pub kind: EntryKind,
+    /// The plugin's name, for the Open and Export lists and the progress card.
     pub name: String,
+    /// The slot's own label, or empty for the plugin's name.
+    pub label: String,
     pub extensions: Vec<String>,
+    /// The options drawn as a form before the import or export.
     pub input_schema: Value,
+    /// Export only: the export would read the design's plugin data (not passed yet).
+    pub needs_plugin_data: bool,
     /// The installed package's folder.
     pub folder: String,
 }
+/// An import slot.
+pub type Importer = FormatSlot;
 
 /// Reads only `plugin.json` from a package folder, through the caller's file scope.
 pub(super) fn read_manifest(folder: &str) -> Result<Manifest> {
@@ -45,24 +54,27 @@ pub(super) fn package_folders(session: &Session) -> BTreeMap<String, String> {
     folders
 }
 
-/// Every installed, enabled importer entry, sorted by id. Disabled plugins claim nothing.
-pub fn importers(session: &Session) -> Vec<Importer> {
+/// Every installed, enabled plugin's slots of `kind`, sorted by id. Disabled plugins claim nothing.
+pub fn format_slots(session: &Session, kind: EntryKind) -> Vec<FormatSlot> {
     let mut found = Vec::new();
     for (id, folder) in package_folders(session) {
         if session.disabled_plugins.contains(&id) {
             continue;
         }
-        // An installed importer is read with the app's authority: a caller names a file, not it.
+        // An installed format slot is read with the app's authority: a caller names a file, not it.
         let Ok(manifest) = with_installed(session, &folder, || read_manifest(&folder)) else { continue };
-        let Some(runtime) = manifest.runtime.as_ref().filter(|r| r.is_importer()) else { continue };
-        for entry in &runtime.entries {
-            found.push(Importer {
+        let Some(runtime) = manifest.runtime.as_ref() else { continue };
+        for entry in runtime.entries.iter().filter(|e| e.kind == kind && kind.is_format()) {
+            found.push(FormatSlot {
                 id: format!("{}.{}", manifest.id, entry.name),
                 plugin_id: manifest.id.clone(),
                 entry: entry.name.clone(),
+                kind,
                 name: manifest.name.clone(),
+                label: entry.label.clone(),
                 extensions: entry.extensions.clone(),
                 input_schema: entry.input_schema.clone(),
+                needs_plugin_data: entry.needs_plugin_data,
                 folder: folder.clone(),
             });
         }
@@ -71,59 +83,43 @@ pub fn importers(session: &Session) -> Vec<Importer> {
     found
 }
 
-/// The importer for `path`: the one `format` names, or else the one that claims its extension.
-/// Two plugins claiming the same extension need `format` to choose.
-pub fn importer_for(session: &Session, path: &str, format: Option<&str>) -> Result<Option<Importer>> {
-    let all = importers(session);
+/// Every installed, enabled importer entry, sorted by id. Disabled plugins claim nothing.
+pub fn importers(session: &Session) -> Vec<Importer> {
+    format_slots(session, EntryKind::Importer)
+}
+
+/// The slot of `kind` that `format` names, or else the one that claims `path`'s extension. Two
+/// plugins claiming the same extension need `format` to choose.
+pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: Option<&str>) -> Result<Option<FormatSlot>> {
+    let what = if kind == EntryKind::Exporter { "exporter" } else { "importer" };
+    let all = format_slots(session, kind);
     if let Some(format) = format {
         return all
             .into_iter()
             .find(|i| i.id == format)
             .map(Some)
-            .ok_or_else(|| HostError::InvalidInput { field: "format".into(), reason: format!("no installed, enabled importer `{format}`") }.into());
+            .ok_or_else(|| HostError::InvalidInput { field: "format".into(), reason: format!("no installed, enabled {what} `{format}`") }.into());
     }
     let extension = Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
     let mut claiming: Vec<_> =
         all.into_iter().filter(|i| !extension.is_empty() && i.extensions.iter().any(|e| e.eq_ignore_ascii_case(extension))).collect();
     if claiming.len() > 1 {
         let ids = claiming.iter().map(|i| i.id.as_str()).collect::<Vec<_>>().join(", ");
+        let verb = if kind == EntryKind::Exporter { "write" } else { "read" };
         return Err(
-            HostError::InvalidInput { field: "format".into(), reason: format!("{ids} all read .{extension} files; name one in `format`") }.into()
+            HostError::InvalidInput { field: "format".into(), reason: format!("{ids} all {verb} .{extension} files; name one in `format`") }.into()
         );
     }
     Ok(claiming.pop())
 }
 
-/// What the Open dialog offers for installed importers: each plugin's name and extensions.
-pub fn open_filters(session: &Session) -> Vec<(String, Vec<String>)> {
-    let mut filters: Vec<(String, Vec<String>)> = Vec::new();
-    for importer in importers(session) {
-        match filters.iter_mut().find(|(name, _)| *name == importer.name) {
-            Some((_, extensions)) => extensions.extend(importer.extensions.into_iter().filter(|e| !extensions.contains(e)).collect::<Vec<_>>()),
-            None => filters.push((importer.name, importer.extensions)),
-        }
-    }
-    filters
-}
-
-/// The importers `plugin.list` and the Open dialog describe.
-pub fn describe(session: &Session) -> Vec<ImporterInfo> {
-    importers(session).into_iter().map(|i| ImporterInfo { id: i.id, name: i.name, extensions: i.extensions, input_schema: i.input_schema }).collect()
-}
-
-/// Run `importer` on `path` and make its design this session's, as a new design that is not saved
-/// anywhere yet. Nothing changes unless the whole import succeeds; a failure starts with the
-/// plugin's name and the file's.
-pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+/// The package behind `slot`, checked as it is now: still enabled, the same plugin, its grants for
+/// this exact package and its limits within the user's.
+pub(super) fn checked_package(session: &mut Session, slot: &FormatSlot) -> Result<Package> {
     session.plugin_state.refresh_stored();
-    let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
-}
-
-fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
-    let package = with_installed(session, &importer.folder, || read_package(&importer.folder))?;
-    if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
-        return Err(error("plugin is disabled or was replaced; open the file again"));
+    let package = with_installed(session, &slot.folder, || read_package(&slot.folder))?;
+    if package.manifest.id != slot.plugin_id || session.disabled_plugins.contains(&slot.plugin_id) {
+        return Err(error("plugin is disabled or was replaced; try again"));
     }
     if let Some(grants) = session.plugin_state.grants.get(&package.manifest.id)
         && grants.package_hash.as_deref() != Some(package.approval.as_str())
@@ -135,6 +131,47 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     }
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&runtime.limits)?;
+    Ok(package)
+}
+
+/// The importer for `path`: the one `format` names, or else the one that claims its extension.
+/// Two plugins claiming the same extension need `format` to choose.
+pub fn importer_for(session: &Session, path: &str, format: Option<&str>) -> Result<Option<Importer>> {
+    slot_for(session, EntryKind::Importer, path, format)
+}
+
+/// What the Open dialog offers for installed importers: each plugin's name and extensions.
+pub fn open_filters(session: &Session) -> Vec<(String, Vec<String>)> {
+    let mut filters: Vec<(String, Vec<String>)> = Vec::new();
+    for importer in importers(session) {
+        // A slot's own label names its group; without one, the plugin's name does.
+        let name = if importer.label.is_empty() { importer.name } else { importer.label };
+        match filters.iter_mut().find(|(group, _)| *group == name) {
+            Some((_, extensions)) => extensions.extend(importer.extensions.into_iter().filter(|e| !extensions.contains(e)).collect::<Vec<_>>()),
+            None => filters.push((name, importer.extensions)),
+        }
+    }
+    filters
+}
+
+/// The importers `plugin.list` and the Open dialog describe.
+pub fn describe(session: &Session) -> Vec<ImporterInfo> {
+    importers(session)
+        .into_iter()
+        .map(|i| ImporterInfo { id: i.id, name: i.name, label: i.label, extensions: i.extensions, input_schema: i.input_schema })
+        .collect()
+}
+
+/// Run `importer` on `path` and make its design this session's, as a new design that is not saved
+/// anywhere yet. Nothing changes unless the whole import succeeds; a failure names the plugin and file.
+pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
+}
+
+fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    let package = checked_package(session, importer)?;
+    let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }

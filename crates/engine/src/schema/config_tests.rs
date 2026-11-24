@@ -155,6 +155,27 @@ fn the_table_editing_schemas_take_what_the_handlers_read() {
     assert_eq!(one_of, Some(6), "{}", column.as_value());
 }
 
+/// #20924: a column given no target, or a key that is none, names the accepted targets and the
+/// key it did not recognise.
+#[test]
+fn a_column_without_a_target_names_the_targets_and_the_unknown_key() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "5 mm"}));
+    let refused = |s: &mut Session, p: Value| s.execute("config.column", &p).unwrap_err().to_string();
+    let message = refused(&mut s, json!({"parameter": "a"}));
+    assert!(
+        message.contains(
+            "give exactly one configuration target: `param`, `feature`, `material`, `appearance`, `component_appearance` or `face_appearance`"
+        ),
+        "{message}"
+    );
+    assert!(message.contains("(`parameter` is not a parameter of config.column)"), "{message}");
+    // Two targets, or none and no stray key: the targets are named, no key is blamed.
+    let message = refused(&mut s, json!({"param": "a", "feature": "F"}));
+    assert!(message.contains("one configuration target: `param`") && !message.contains("is not a parameter"), "{message}");
+    assert!(!refused(&mut s, json!({})).contains("is not a parameter"));
+}
+
 /// A preview runs the activation, whose messages name `config.activate`, where strict names
 /// `config.preview`; the message after the name is the same.
 #[test]

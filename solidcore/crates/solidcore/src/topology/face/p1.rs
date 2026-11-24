@@ -167,7 +167,10 @@ use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::topology::TopologyFailure;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_ASSERT_FAILURE,
+    SM_ERR_NULL_POINTER,
+};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::IdentitySlot;
@@ -201,6 +204,7 @@ use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3 as fp3;
 use crate::topology::face::p4::BrepSeamObjects;
 use crate::topology::loopuse as lu1;
+use crate::topology::loopuse::QueryTopology;
 use crate::topology::trimming_tools as tt;
 use crate::topology::vertex as vx;
 use crate::topology::vertexuse as vu1;
@@ -321,20 +325,41 @@ fn has_seam_problem<O: LoopObject>(
 
 /// `pEU->NormalizedEvaluate(dT, TRUE, rUV)` (UV evaluation; default arguments: no
 /// first derivative, `bOKToMakeUVTrimCurve = TRUE`).
-fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Result<Point3> {
-    Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
+/// Read only ([`QueryTopology::Prepared`]), the UV trim curve must exist: nothing is made.
+fn normalized_evaluate_uv(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
+    eu: EdgeuseId,
+    t: f64,
+) -> Result<Point3> {
+    Ok(match b {
+        QueryTopology::Mutable(b) => eu3::normalized_evaluate(k, b, eu, t, true, false, true)?,
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::normalized_evaluate_existing_uv(k, b, eu, t, false)?
+        }
+    }
+    .point)
 }
 
 /// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (default arguments: no distance or
 /// deviation, `bOKToMakeUVTrimCurve = TRUE`): the returned status, and the edge use's
 /// (or its mate's) UV trim curve afterwards, which a failing status can still leave
-/// attached.
+/// attached. Read only ([`QueryTopology::Prepared`]), the existing curve's fetch, and
+/// [`SolidError::PreparationRequired`] where there is none: nothing is made.
 fn fetch_uv_trim_curve(
     k: &Kernel,
-    b: &mut Brep,
+    b: &mut QueryTopology<'_>,
     eu: EdgeuseId,
 ) -> Result<(std::result::Result<(), SolidError>, Option<Curve>)> {
-    let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
+    let fetch = match b {
+        QueryTopology::Mutable(b) => {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?
+        }
+        QueryTopology::Prepared(b) | QueryTopology::Requested(b, _) => {
+            eu3::existing_uv_trim_curve(b, eu, false)?
+                .ok_or(SolidError::PreparationRequired { operation: OP })?
+        }
+    };
     let curve = eu1::uv_trim_curve(b, eu)?.0.cloned();
     Ok((fetch.status, curve))
 }
@@ -342,10 +367,25 @@ fn fetch_uv_trim_curve(
 /// `SER(pEU->GetOrCreateUVTrimCurve(rpUVCurve))`: the UV trim curve; a failing status
 /// returns, and a missing curve is the null dereference that follows upstream.
 fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
+    uv_trim_curve_in(k, &mut QueryTopology::Mutable(b), eu)
+}
+
+/// [`get_or_create_uv_trim_curve`] through `b`: read only ([`QueryTopology::Prepared`]),
+/// the curve must exist ([`fetch_uv_trim_curve`]).
+fn uv_trim_curve_in(k: &Kernel, b: &mut QueryTopology<'_>, eu: EdgeuseId) -> Result<Curve> {
     let (status, curve) = fetch_uv_trim_curve(k, b, eu)?;
     status?;
     curve.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the edge use's parameter-space trim curve")
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the edge use has no UV trim curve after its fetch reported \
+                    success; the fetch attaches the curve it finds or makes to the \
+                    edge use or its mate before it reports success",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
     })
 }
 
@@ -727,10 +767,37 @@ pub struct OrientedTrimBoundary {
 /// dereferences null; those of the copies, conversions, reversals and evaluations;
 /// [`SolidError::Unported`] (`CreateUVTrimCurves`, and the deferred callees of
 /// `NormalizedEvaluate` / `GetOrCreateUVTrimCurve`).
-#[allow(clippy::too_many_lines)] // one upstream routine
 pub fn create_oriented_trim_boundary(
     k: &Kernel,
     b: &mut Brep,
+    f: FaceId,
+    parameter_space: bool,
+    fill_singularities: bool,
+    loop_to_use: Option<LoopId>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<OrientedTrimBoundary> {
+    oriented_trim_boundary_in(
+        k,
+        &mut QueryTopology::Mutable(b),
+        f,
+        parameter_space,
+        fill_singularities,
+        loop_to_use,
+        key_of,
+    )
+}
+
+/// [`create_oriented_trim_boundary`] through `b`: read only ([`QueryTopology::Prepared`])
+/// every UV trim curve it reads must exist, and nothing is made; where one is missing,
+/// [`SolidError::PreparationRequired`].
+///
+/// # Errors
+///
+/// Those of [`create_oriented_trim_boundary`], and [`SolidError::PreparationRequired`].
+#[allow(clippy::too_many_lines)] // one upstream routine
+pub(crate) fn oriented_trim_boundary_in(
+    k: &Kernel,
+    b: &mut QueryTopology<'_>,
     f: FaceId,
     parameter_space: bool,
     fill_singularities: bool,
@@ -750,7 +817,12 @@ pub fn create_oriented_trim_boundary(
 
     // Create trimCurves for all Face->Edgeuses
     if !have_trimming_curves {
-        create_uv_trim_curves(k, b, f)?;
+        match b {
+            QueryTopology::Mutable(b) => create_uv_trim_curves(k, b, f)?,
+            QueryTopology::Prepared(_) | QueryTopology::Requested(..) => {
+                return Err(SolidError::PreparationRequired { operation: OP });
+            }
+        }
     }
 
     let mut out = OrientedTrimBoundary {
@@ -806,7 +878,7 @@ pub fn create_oriented_trim_boundary(
             // for every edgeuse in this loop
             for &eu in &edgeuses {
                 if eu1::orientation(b, eu)? == OrientType::Same {
-                    let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
+                    let uv_curve = uv_trim_curve_in(k, b, eu)?;
                     let ivl = uv_curve.natural_interval();
 
                     // get trim curve's start UV point
@@ -835,12 +907,28 @@ pub fn create_oriented_trim_boundary(
                     edges_in_loop += 1;
                     if parameter_space {
                         // (status ignored upstream; only NER(pOrig))
-                        let orig = fetch_uv_trim_curve(k, b, eu)?.1.ok_or_else(|| {
-                            SolidError::topology_missing(
-                                OP,
-                                "the edge use's parameter-space trim curve",
-                            )
-                        })?;
+                        let orig = match fetch_uv_trim_curve(k, b, eu)? {
+                            (_, Some(orig)) => orig,
+                            // the fetch failed and left no curve: its error is the cause
+                            (Err(e), None) => {
+                                return Err(Failure::new(OP, TopologyFailure::UvTrimCurveNotMade)
+                                    .caused_by(e)
+                                    .into_error());
+                            }
+                            (Ok(()), None) => {
+                                return Err(Failure::new(
+                                    OP,
+                                    TopologyFailure::Defect {
+                                        why: "the edge use has no UV trim curve after its \
+                                            fetch reported success; the fetch attaches \
+                                            the curve it finds or makes to the edge use \
+                                            or its mate before it reports success",
+                                    },
+                                )
+                                .with_status(SM_ERR_NULL_POINTER)
+                                .into_error());
+                            }
+                        };
                         let mut bsc = orig.copy(k)?;
                         bsc.convert_to_2d(k)?;
                         let _ = bsc.set_owner(Some(key_of(EntityRef::Edgeuse(eu))), None);
@@ -855,7 +943,7 @@ pub fn create_oriented_trim_boundary(
                     out.edgeuses.push(Some(eu));
                 } else {
                     let mut bsc = if parameter_space {
-                        let orig = get_or_create_uv_trim_curve(k, b, eu)?;
+                        let orig = uv_trim_curve_in(k, b, eu)?;
                         let mut bsc = orig.copy(k)?;
                         bsc.convert_to_2d(k)?;
                         let _ = bsc.set_owner(orig.owner(), None);
@@ -1031,10 +1119,13 @@ fn gap_line(start: Point3, end: Point3) -> Result<Curve> {
 fn edge_bspline_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
     match b.edge(e)?.curve.as_ref() {
         Some(c) if c.is_kind_of(BSPLINE_CURVE_TYPE) => Ok(c),
-        _ => Err(SolidError::topology_missing(
+        Some(_) => Err(SolidError::topology(
             OP,
-            "the edge's B-spline curve",
+            TopologyFailure::CurveNotBSpline {
+                entity: Some(EntityRef::Edge(e)),
+            },
         )),
+        None => Err(SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve)),
     }
 }
 
@@ -1128,11 +1219,10 @@ pub fn trim_boundary_rectangle(
     let boundary = match create_oriented_trim_boundary(k, b, f, true, true, None, key_of) {
         Ok(r) => r,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face's trim boundary could not be built",
-            ))
+        Err(e) => {
+            return Err(Failure::new(OP, TopologyFailure::TrimBoundaryNotBuilt)
+                .caused_by(e)
+                .into_error())
         }
     };
 
@@ -1182,22 +1272,54 @@ pub fn trim_boundary_rectangle(
 /// [`fp2::loops`]; [`SolidError::Unported`] (`SmFace::Notify`).
 pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
     face_notify(b, f, NotifyOperation::PreEdit)?;
-    let top = fp2::upward_faceuse(b, f)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let top = fp2::upward_faceuse(b, f)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face has no upward face use; the kernel makes a face \
+                    together with its two face uses and never takes one away while \
+                    the face lives",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the mate of the face's upward face use")
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face's upward face use has no mate; the kernel makes a \
+                    face's two face uses as a mated pair",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
     })?;
 
     // Flip ordering of loopuses within the loops
     for l in fp2::loops(b, f, false, None)? {
-        let lu1_ = b
-            .loop_(l)?
-            .loopuse
-            .ok_or_else(|| SolidError::topology_missing(OP, "the loop's loop use"))?;
-        let lu2_ = b
-            .loopuse(lu1_)?
-            .mate
-            .ok_or_else(|| SolidError::topology_missing(OP, "the mate of the loop's loop use"))?;
+        let lu1_ = b.loop_(l)?.loopuse.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "a loop of the face names no loop use; the kernel makes a loop \
+                        together with its two loop uses",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
+        let lu2_ = b.loopuse(lu1_)?.mate.ok_or_else(|| {
+            Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the loop use of a loop of the face has no mate; the kernel \
+                        makes a loop's two loop uses as a mated pair",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         b.loop_mut(l)?.loopuse = Some(lu2_);
     }
 
@@ -1226,10 +1348,28 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 /// [`SolidError::InvalidInput`] for a face whose uses lie in two shells, or without face use
 /// or mate; those of [`swap_uv`].
 pub fn turn_over(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
-    let top = fp2::upward_faceuse(b, f)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let top = fp2::upward_faceuse(b, f)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face has no upward face use; the kernel makes a face \
+                    together with its two face uses and never takes one away while \
+                    the face lives",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the mate of the face's upward face use")
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face's upward face use has no mate; the kernel makes a \
+                    face's two face uses as a mated pair",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
     })?;
     if b.faceuse(top)?.shell != b.faceuse(bot)?.shell {
         return Err(SolidError::invalid_input(
@@ -1335,18 +1475,19 @@ fn faceuse_post_insert(b: &mut Brep, fu: FaceuseId, lu: LoopuseId) -> Result<()>
 /// `SmFaceuse::Remove(lu)`: unlinks `lu` from `fu`'s loop uses (`SM_ERR` when it is
 /// not there).
 fn faceuse_remove(b: &mut Brep, fu: FaceuseId, lu: LoopuseId) -> Result<()> {
-    if b.loopuse(lu)?.faceuse != Some(fu) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the loop use is not on the face use",
-        ));
-    }
+    // (upstream's check that `lu` names `fu` as its face use cannot fail here: both callers
+    // read `fu` from `lu` in the statement before)
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let Some(at) = list.iter().position(|&x| x == lu) else {
-        return Err(SolidError::topology_failed(
+        return Err(Failure::new(
             OP,
-            "the loop use is not in the face use's loop uses",
-        ));
+            TopologyFailure::Defect {
+                why: "the loop use names this face use as its owner but is not in \
+                    the face use's list of loop uses; the kernel sets a loop use's \
+                    owner and its list entry together",
+            },
+        )
+        .into_error());
     };
     list.remove(at);
     b.loopuse_mut(lu)?.faceuse = None;
@@ -1387,10 +1528,16 @@ pub fn remove_loop(b: &mut Brep, f: FaceId, l: LoopId) -> Result<()> {
     let (lu_1, lu_2) = lu1::loop_loopuses(b, l)?;
     let lu_2 = lu_2.ok_or_else(|| null("loop without second loop use"))?;
     let fu_1 = lu1::faceuse(b, lu_1)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
+        // a loop taken off its face has loop uses on no face use: the caller's loop
+        Failure::new(OP, TopologyFailure::LoopNotOnFace)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     })?;
     let fu_2 = lu1::faceuse(b, lu_2)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
+        // as above, for the loop's other loop use
+        Failure::new(OP, TopologyFailure::LoopNotOnFace)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     })?;
     faceuse_remove(b, fu_1, lu_1)?;
     faceuse_remove(b, fu_2, lu_2)?;
@@ -1431,8 +1578,18 @@ fn remove_uv_trim_curves_notifying(
     notify: &mut impl FnMut(&mut Brep, NotifyOperation) -> Result<()>,
 ) -> Result<()> {
     notify(b, NotifyOperation::PreEdit)?;
-    let fu = fp2::upward_faceuse(b, f)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let fu = fp2::upward_faceuse(b, f)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the face has no upward face use; the kernel makes a face \
+                    together with its two face uses and never takes one away while \
+                    the face lives",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     for eu in eu1::faceuse_edgeuses(b, fu, false, None)? {
         // status ignored upstream
         ignore_status(eu1::set_uv_trim_curve(
@@ -2355,10 +2512,9 @@ pub fn move_seam_notified<O: LoopObject>(
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::topology_failed(
-                        OP,
-                        "the surface could not be split at the new seam parameter",
-                    )
+                    Failure::new(OP, TopologyFailure::SeamSplitFailed)
+                        .caused_by(e)
+                        .into_error()
                 }
             })?;
             // ((SmBSplineSurface*) casts, unchecked in release: the fork's
@@ -2973,10 +3129,16 @@ fn split_at_seam_depth<O: LoopObject>(
 /// `GetSize() > 0` first); an empty one is `SM_ERR_ASSERT_FAILURE`.
 fn last_index(size: usize) -> Result<usize> {
     size.checked_sub(1).ok_or_else(|| {
-        SolidError::topology(
+        Failure::new(
             OP,
-            TopologyFailure::Inconsistent("the classification has no intervals"),
+            TopologyFailure::Defect {
+                why: "the last interval of an empty curve classification is asked \
+                    for; the seam merge reads it only after checking that the \
+                    classification has intervals",
+            },
         )
+        .with_status(SM_ERR_ASSERT_FAILURE)
+        .into_error()
     })
 }
 
@@ -3123,16 +3285,31 @@ fn split_at_seam_merges<O: LoopObject>(
             if !lu1::is_vertex_loopuse(b, lu)? {
                 // AERN(pOuterLoop == NULL, SM_ERR_ASSERT_FAILURE)
                 if outer_loop.is_some() {
-                    return Err(SolidError::topology(
+                    return Err(Failure::new(
                         OP,
-                        TopologyFailure::Inconsistent("the face has two outer loops"),
-                    ));
+                        TopologyFailure::Defect {
+                            why: "the face has two edge loops after the seams were inserted; on \
+                                a closed surface whose loops were all vertex loops the seam \
+                                insertion makes exactly one edge loop, the outer boundary",
+                        },
+                    )
+                    .with_status(SM_ERR_ASSERT_FAILURE)
+                    .into_error());
                 }
                 outer_loop = Some(l);
             }
         }
         let Some(outer_loop) = outer_loop else {
-            return Err(SolidError::topology_missing(OP, "the face's outer loop"));
+            return Err(Failure::new(
+                OP,
+                TopologyFailure::Defect {
+                    why: "the face has no edge loop after the seams were inserted; on a \
+                        closed surface whose loops were all vertex loops the seam \
+                        insertion makes one, the outer boundary",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
         };
         face_notify(b, f, NotifyOperation::PreEdit)?;
         for &l in &loops {
@@ -3225,18 +3402,12 @@ fn delete_inner_loop_in(
     // Outer loop? (for a face without loops upstream reads past its empty array; the
     // port compares with nothing and the membership test below fails)
     if face_loops.first() == Some(&l) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the loop is the face's outer loop",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::LoopIsOuter));
     }
 
     // One of our loops?
     if !face_loops.contains(&l) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the loop is not one of the face's loops",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::LoopNotOnFace));
     }
 
     // Check that there are no other Faces connected to this Loop.
@@ -3246,10 +3417,7 @@ fn delete_inner_loop_in(
         .collect::<Result<Vec<EdgeId>>>()?;
     for &e in &loop_edges {
         if !crate::topology::edge::is_lamina(b, e)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "an edge of the loop is not a lamina edge",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::LoopEdgeNotLamina));
         }
     }
 
@@ -3343,10 +3511,16 @@ fn remove_loop_notified(
     let (lu_1, lu_2) = lu1::loop_loopuses(b, l)?;
     let lu_2 = lu_2.ok_or_else(|| null("loop without second loop use"))?;
     let fu_1 = lu1::faceuse(b, lu_1)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
+        // a loop taken off its face has loop uses on no face use: the caller's loop
+        Failure::new(OP, TopologyFailure::LoopNotOnFace)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     })?;
     let fu_2 = lu1::faceuse(b, lu_2)?.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
+        // as above, for the loop's other loop use
+        Failure::new(OP, TopologyFailure::LoopNotOnFace)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
     })?;
     faceuse_remove(b, fu_1, lu_1)?;
     faceuse_remove(b, fu_2, lu_2)?;
@@ -3608,7 +3782,7 @@ mod tests {
     }
 
     fn is_null_pointer(e: &SolidError) -> bool {
-        e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER)
+        e.upstream_status() == Some(SM_ERR_NULL_POINTER)
     }
 
     /// `plane_face` with the pair of face uses (no loops) the edits walk.
@@ -3802,7 +3976,12 @@ mod tests {
         let (mut b, f) = plane_face();
         let e = shrink_geometry(&k, &mut b, f, &key_of).unwrap_err();
         assert_eq!(e.operation(), OP, "{e}");
-        assert!(e.to_string().contains("the face's upward face use"), "{e}");
+        assert!(
+            e.to_string().contains("the face has no upward face use"),
+            "{e}"
+        );
+        assert!(e.is_defect(), "{e}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
     }
 
     #[test]

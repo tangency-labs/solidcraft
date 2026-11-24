@@ -44,12 +44,16 @@ pub struct ViewPickParams {
     /// Ghosted bodies: the running app's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub include_ghosted: Option<bool>,
+    /// Pick visible point-cloud points too (default: only when `cloud_radius` or `point_px` is
+    /// given, so a call that names neither keeps its earlier answer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clouds: Option<bool>,
     /// Perpendicular radius (mm) around a world ray for picking point-cloud points (default 1 mm;
-    /// 0 disables point-cloud picks for rays).
+    /// 0 disables point-cloud picks for rays). Giving it turns `clouds` on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_radius: Option<f64>,
     /// Screen-space radius (points) around a pixel for picking point-cloud points: the running
-    /// app's.
+    /// app's. Giving it turns `clouds` on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub point_px: Option<f64>,
 }

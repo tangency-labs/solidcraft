@@ -701,14 +701,20 @@ fn selected_button_palette(t: &Tokens) -> (egui::Color32, egui::Color32) {
 pub fn persistent_button_shape(ui: &Ui, response: &Response, rect: egui::Rect) -> egui::Shape {
     let t = Tokens::get();
     let (fill, _) = selected_button_palette(&t);
-    let mut shapes = vec![
+    egui::Shape::Vec(vec![
         egui::Shape::rect_filled(rect, t.radius_sm, fill),
         egui::Shape::rect_stroke(rect, t.radius_sm, egui::Stroke::new(1.0, t.form_primary), egui::StrokeKind::Inside),
-    ];
+        persistent_kept_shape(ui, response, rect),
+    ])
+}
+
+/// [`persistent_button_shape`]'s accent underline alone, for an effect that is on while its tool is closed.
+pub fn persistent_kept_shape(ui: &Ui, response: &Response, rect: egui::Rect) -> egui::Shape {
+    let t = Tokens::get();
     let inset = t.space_8.min(rect.width() / 4.0);
     let y = rect.bottom() - t.space_4;
-    shapes
-        .push(egui::Shape::line_segment([egui::pos2(rect.left() + inset, y), egui::pos2(rect.right() - inset, y)], egui::Stroke::new(2.0, t.accent)));
+    let mut shapes =
+        vec![egui::Shape::line_segment([egui::pos2(rect.left() + inset, y), egui::pos2(rect.right() - inset, y)], egui::Stroke::new(2.0, t.accent))];
     if response.has_focus() {
         shapes.push(native_button_focus(ui, response, rect));
     }

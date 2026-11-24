@@ -7,11 +7,11 @@
 //!
 //! | Rust                             | Status difftest compares  |
 //! |----------------------------------|---------------------------|
-//! | [`HealFailure::Failed`]          | `SM_ERR`                  |
-//! | [`HealFailure::Missing`]         | `SM_ERR_NULL_POINTER`     |
-//! | [`HealFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`   |
-//! | [`HealFailure::NotYetHealable`]  | `SM_ERR_NOTYET_HEAL_FACE` |
 //! | [`HealFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`HealFailure::Failed`]          | `SM_ERR`                  |
+//! | [`HealFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`   |
+//! | [`HealFailure::Missing`]         | `SM_ERR_NULL_POINTER`     |
+//! | [`HealFailure::NotYetHealable`]  | `SM_ERR_NOTYET_HEAL_FACE` |
 //! | the named causes, from [`HealFailure::PairOfDifferentKinds`] on | the status of the phrase each replaced (`comparison_status`) |
 //!
 //! [`HealFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -35,17 +35,12 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum HealFailure {
-    /// The step could not continue, as the phrase says (for example "the faces cannot
-    /// be stitched").
-    Failed(&'static str),
-    /// Something the step needs is missing, as the phrase says (for example "the
-    /// edge").
-    Missing(&'static str),
-    /// A consistency check of the step's own data did not hold, as the phrase says.
-    Inconsistent(&'static str),
-    /// The face has problems the healer does not handle yet; the heal sequence sets it
-    /// aside.
-    NotYetHealable,
+    /// The topology tracker whose changes the caller applies is still tracking.
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    ChangesStillTracked,
+    /// Coincident edges are listed, and the healer has no fix for them (none upstream).
+    /// [`ErrorKind::Unsupported`]; status `SM_ERR`.
+    CoincidentEdgesUnfixed,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -54,13 +49,6 @@ pub enum HealFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// The two entities the stitcher's keep selection is to choose between are not of one
-    /// kind (a vertex and an edge): the caller's arguments. [`ErrorKind::InvalidInput`];
-    /// status `SM_ERR_NULL_POINTER`, of the null pointer upstream reports.
-    PairOfDifferentKinds,
-    /// The edge the caller gave has no curve. [`ErrorKind::InvalidInput`]; status
-    /// `SM_ERR_NULL_POINTER`.
-    EdgeWithoutCurve,
     /// The edge's parameter interval is empty or reversed, so a parameter on the edge
     /// cannot be placed in it. [`ErrorKind::Degenerate`]; status `SM_ERR`.
     DegenerateEdgeInterval,
@@ -68,26 +56,9 @@ pub enum HealFailure {
     /// edge's ends or outside its interval, or the B-rep is not open for editing. Class
     /// `failed`; status `SM_ERR`.
     EdgeNotSplit,
-    /// The caller's lists of faces to keep and to delete are empty or of different
-    /// lengths. [`ErrorKind::InvalidInput`]; status `SM_ERR`.
-    FaceListsDiffer,
-    /// The faces, edges or vertices the caller gave are not part of the B-rep (or the
-    /// lists hold none). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
-    NotInBrep,
-    /// A face to keep and its face to delete do not match: they have different numbers of
-    /// vertices or edges, an edge of the face to keep lacks an end vertex, or an edge of one
-    /// has no edge of the other between the paired vertices. [`ErrorKind::InvalidInput`];
-    /// status `SM_ERR`.
-    FacesDoNotMatch,
-    /// Two vertices to stitch are `distance` apart, farther than `tolerance`.
-    /// [`ErrorKind::NotWithinTolerance`]; status `SM_ERR`.
-    VerticesApart {
-        /// The distance between the vertices (for a vertex with no partner, to the nearest
-        /// one).
-        distance: f64,
-        /// The tolerance they must be within.
-        tolerance: f64,
-    },
+    /// The edge the caller gave has no curve. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_NULL_POINTER`.
+    EdgeWithoutCurve,
     /// Two edges to stitch are `distance` apart, at their ends or along them, farther than
     /// `tolerance`. [`ErrorKind::NotWithinTolerance`]; status `SM_ERR`.
     EdgesApart {
@@ -100,26 +71,80 @@ pub enum HealFailure {
     /// whether it is a defect or a refusal is its cause's
     /// ([`crate::SolidError::is_defect`] follows the chain). Status `SM_ERR`.
     EdgesNotGlued,
+    /// The sample interval the caller gave the gap function holds no knot interval: its
+    /// ends agree to the parametric tolerance. [`ErrorKind::InvalidInput`]; status
+    /// `SM_ERR_ASSERT_FAILURE`, of the assert upstream reports.
+    EmptySampleInterval,
+    /// The caller's lists of faces to keep and to delete are empty or of different
+    /// lengths. [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    FaceListsDiffer,
+    /// A face to keep and its face to delete do not match: they have different numbers of
+    /// vertices or edges, an edge of the face to keep lacks an end vertex, or an edge of one
+    /// has no edge of the other between the paired vertices. [`ErrorKind::InvalidInput`];
+    /// status `SM_ERR`.
+    FacesDoNotMatch,
+    /// The step could not continue, as the phrase says (for example "the faces cannot
+    /// be stitched").
+    Failed(&'static str),
+    /// The gap record the caller gave does not define exactly two end points (one of its
+    /// parameters is undefined). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    GapWithoutTwoEnds,
+    /// The caller asked for properties of a heal step before the heal step they depend on
+    /// has run on the B-rep (the tolerance sizes, or the edge splits at the seams).
+    /// [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    HealStepNotRun,
+    /// A consistency check of the step's own data did not hold, as the phrase says.
+    Inconsistent(&'static str),
+    /// Missed edge intersections are listed, and the healer has no fix for them (none
+    /// upstream). [`ErrorKind::Unsupported`]; status `SM_ERR`.
+    MissedEdgeIntersectionsUnfixed,
+    /// Something the step needs is missing, as the phrase says (for example "the
+    /// edge").
+    Missing(&'static str),
+    /// The faces, edges or vertices the caller gave are not part of the B-rep (or the
+    /// lists hold none). [`ErrorKind::InvalidInput`]; status `SM_ERR`.
+    NotInBrep,
+    /// The face has problems the healer does not handle yet; the heal sequence sets it
+    /// aside.
+    NotYetHealable,
+    /// The two entities the stitcher's keep selection is to choose between are not of one
+    /// kind (a vertex and an edge): the caller's arguments. [`ErrorKind::InvalidInput`];
+    /// status `SM_ERR_NULL_POINTER`, of the null pointer upstream reports.
+    PairOfDifferentKinds,
+    /// Two vertices to stitch are `distance` apart, farther than `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`]; status `SM_ERR`.
+    VerticesApart {
+        /// The distance between the vertices (for a vertex with no partner, to the nearest
+        /// one).
+        distance: f64,
+        /// The tolerance they must be within.
+        tolerance: f64,
+    },
 }
 
 impl HealFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
+            Self::ChangesStillTracked
+            | Self::CoincidentEdgesUnfixed
             | Self::Defect { .. }
             | Self::DegenerateEdgeInterval
             | Self::EdgeNotSplit
-            | Self::FaceListsDiffer
-            | Self::NotInBrep
-            | Self::FacesDoNotMatch
-            | Self::VerticesApart { .. }
             | Self::EdgesApart { .. }
-            | Self::EdgesNotGlued => SM_ERR,
+            | Self::EdgesNotGlued
+            | Self::FaceListsDiffer
+            | Self::FacesDoNotMatch
+            | Self::Failed(_)
+            | Self::GapWithoutTwoEnds
+            | Self::HealStepNotRun
+            | Self::MissedEdgeIntersectionsUnfixed
+            | Self::NotInBrep
+            | Self::VerticesApart { .. } => SM_ERR,
+            Self::Inconsistent(_) | Self::EmptySampleInterval => SM_ERR_ASSERT_FAILURE,
             Self::Missing(_) | Self::PairOfDifferentKinds | Self::EdgeWithoutCurve => {
                 SM_ERR_NULL_POINTER
             }
-            Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::NotYetHealable => SM_ERR_NOTYET_HEAL_FACE,
         }
     }
@@ -128,20 +153,28 @@ impl HealFailure {
     /// [`HealFailure::Missing`], [`ErrorKind::InvalidInput`] for a check of the caller's
     /// arguments or body, [`ErrorKind::Degenerate`] for a degenerate edge interval,
     /// [`ErrorKind::NotWithinTolerance`] for entities to stitch that are too far apart,
+    /// [`ErrorKind::Unsupported`] for problems the healer has no fix for,
     /// [`ErrorKind::Failed`] otherwise. [`HealFailure::Defect`] is
     /// [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::PairOfDifferentKinds
+            Self::ChangesStillTracked
             | Self::EdgeWithoutCurve
+            | Self::EmptySampleInterval
             | Self::FaceListsDiffer
+            | Self::FacesDoNotMatch
+            | Self::GapWithoutTwoEnds
+            | Self::HealStepNotRun
             | Self::NotInBrep
-            | Self::FacesDoNotMatch => ErrorKind::InvalidInput,
+            | Self::PairOfDifferentKinds => ErrorKind::InvalidInput,
+            Self::CoincidentEdgesUnfixed | Self::MissedEdgeIntersectionsUnfixed => {
+                ErrorKind::Unsupported
+            }
+            Self::Defect { .. } => ErrorKind::StageFailed,
             Self::DegenerateEdgeInterval => ErrorKind::Degenerate,
-            Self::VerticesApart { .. } | Self::EdgesApart { .. } => ErrorKind::NotWithinTolerance,
             Self::EdgeNotSplit | Self::EdgesNotGlued => ErrorKind::Failed,
+            Self::VerticesApart { .. } | Self::EdgesApart { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -150,35 +183,16 @@ impl HealFailure {
 impl core::fmt::Display for HealFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Failed(what) => f.write_str(what),
-            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::ChangesStillTracked => {
+                f.write_str("the topology changes are still being tracked")
+            }
+            Self::CoincidentEdgesUnfixed => f.write_str("coincident edges cannot be fixed"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
-            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
-            Self::NotYetHealable => {
-                f.write_str("the face has problems the healer does not handle yet")
-            }
-            Self::PairOfDifferentKinds => {
-                f.write_str("the two entities to choose between are not of one kind")
-            }
-            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
             Self::DegenerateEdgeInterval => {
                 f.write_str("the edge's parameter interval has no length")
             }
             Self::EdgeNotSplit => f.write_str("the edge was not split"),
-            Self::FaceListsDiffer => f.write_str(
-                "the lists of faces to keep and to delete are empty or of different lengths",
-            ),
-            Self::NotInBrep => f.write_str("the topology given is not part of the B-rep"),
-            Self::FacesDoNotMatch => {
-                f.write_str("the face to keep and the face to delete do not match")
-            }
-            Self::VerticesApart {
-                distance,
-                tolerance,
-            } => write!(
-                f,
-                "the vertices are {distance} apart, farther than the tolerance {tolerance}"
-            ),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
             Self::EdgesApart {
                 distance,
                 tolerance,
@@ -187,6 +201,37 @@ impl core::fmt::Display for HealFailure {
                 "the edges are {distance} apart, farther than the tolerance {tolerance}"
             ),
             Self::EdgesNotGlued => f.write_str("the edges could not be glued"),
+            Self::EmptySampleInterval => f.write_str("the sample interval holds no knot interval"),
+            Self::FaceListsDiffer => f.write_str(
+                "the lists of faces to keep and to delete are empty or of different lengths",
+            ),
+            Self::FacesDoNotMatch => {
+                f.write_str("the face to keep and the face to delete do not match")
+            }
+            Self::Failed(what) => f.write_str(what),
+            Self::GapWithoutTwoEnds => f.write_str("the gap does not have two end points"),
+            Self::HealStepNotRun => {
+                f.write_str("the heal step these properties depend on has not run yet")
+            }
+            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::MissedEdgeIntersectionsUnfixed => {
+                f.write_str("missed edge intersections cannot be fixed")
+            }
+            Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::NotInBrep => f.write_str("the topology given is not part of the B-rep"),
+            Self::NotYetHealable => {
+                f.write_str("the face has problems the healer does not handle yet")
+            }
+            Self::PairOfDifferentKinds => {
+                f.write_str("the two entities to choose between are not of one kind")
+            }
+            Self::VerticesApart {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the vertices are {distance} apart, farther than the tolerance {tolerance}"
+            ),
         }
     }
 }
@@ -198,14 +243,6 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn heal(operation: &'static str, failure: HealFailure) -> Self {
         Failure::new(operation, failure).into_error()
-    }
-
-    /// [`crate::SolidError::Failed`] for a healing or stitching step that could not
-    /// continue, as the phrase says, with status [`SM_ERR`] (upstream
-    /// `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn heal_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::heal(operation, HealFailure::Failed(what))
     }
 
     /// The healing failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -261,7 +298,7 @@ mod tests {
             "heal::op: the edge is missing"
         );
         assert_eq!(
-            SolidError::heal_failed("heal::op", "x").kind(),
+            SolidError::heal("heal::op", HealFailure::Failed("x")).kind(),
             ErrorKind::Failed
         );
         assert_eq!(SolidError::sm_err("heal::op").heal_failure(), None);
@@ -306,10 +343,10 @@ mod tests {
         assert_eq!(missing.heal_failure(), Some(&defect));
     }
 
-    /// The named causes of the stitcher keep the status of the phrase each replaced, and
-    /// have their class.
+    /// The named causes of the stitcher and the healer keep the status of the phrase each
+    /// replaced, and have their class.
     #[test]
-    fn the_stitch_causes_keep_their_status_and_have_their_class() {
+    fn the_heal_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
         let (distance, tolerance) = (1.5, 0.25);
         let cases = [
@@ -345,6 +382,20 @@ mod tests {
                 K::NotWithinTolerance,
             ),
             (HealFailure::EdgesNotGlued, SM_ERR, K::Failed),
+            (HealFailure::GapWithoutTwoEnds, SM_ERR, K::InvalidInput),
+            (
+                HealFailure::EmptySampleInterval,
+                SM_ERR_ASSERT_FAILURE,
+                K::InvalidInput,
+            ),
+            (HealFailure::HealStepNotRun, SM_ERR, K::InvalidInput),
+            (HealFailure::CoincidentEdgesUnfixed, SM_ERR, K::Unsupported),
+            (
+                HealFailure::MissedEdgeIntersectionsUnfixed,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (HealFailure::ChangesStillTracked, SM_ERR, K::InvalidInput),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::heal("heal::op", failure);
@@ -387,16 +438,11 @@ mod tests {
                 Builder::Variant("HealFailure", "Failed"),
                 Builder::Variant("HealFailure", "Missing"),
                 Builder::Variant("HealFailure", "Inconsistent"),
-                Builder::Method("heal_failed", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/heal/face_props.rs", 2),
-            ("solidcore/src/heal/gap.rs", 2),
-            ("solidcore/src/heal/heal_data/p2.rs", 2),
-            ("solidcore/src/heal/heal_data/p3.rs", 3),
         ];
         assert_pinned("healing phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
