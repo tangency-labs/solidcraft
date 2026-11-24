@@ -248,6 +248,7 @@ pub use kicad_in::is_kicad_path;
 pub use kicad_in::kicad_board_mesh;
 pub use kicad_in::kicad_board_path;
 pub use kicad_in::kicad_board_thickness;
+pub use kicad_in::kicad_file_thickness;
 pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
@@ -1939,7 +1940,7 @@ pub fn write_design(doc: &Document) -> Result<Vec<u8>> {
             binary.join(" and ")
         )));
     }
-    Ok(doc.to_json().into_bytes())
+    Ok(doc.to_json_checked()?.into_bytes())
 }
 
 /// Parse a binary or ASCII STL (used by tests and round-trip checks): triangles.

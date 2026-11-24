@@ -555,7 +555,11 @@ run, so nothing is queued to apply unseen behind it. `control.pending` belongs t
 connection: a new connection has nothing pending. The bridged MCP server does this itself
 ([mcp.md](mcp.md#long-running-requests)).
 
-`control.pending` answers only for its own connection. `control.running` answers for the whole
+`control.pending` answers only for its own connection, but both it and `control.running` add a
+`background` list while the app runs work no connection owns that holds others out: a plugin package
+job (`plugin.install`, `plugin.remove`) with its `command`, `subject` (the archive or plugin),
+`running_s` and `ends_by_itself_in_s`. Such a job is abandoned after five minutes and the next
+install or removal then runs. `control.running` answers for the whole
 app, the same on every connection, at once (it never waits behind a running request, and a
 connection may ask it while it is `busy`): every request the app has been sent and has not
 answered yet, oldest first, from any connection, including a timed-out one whose connection has

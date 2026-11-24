@@ -906,6 +906,17 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
 }
 
 #[test]
+fn a_command_may_be_a_long_job_and_an_importer_may_not() {
+    let mut long = manifest();
+    long["runtime"]["entries"] = json!([{"name":"make","job":true}, "other"]);
+    let entries = parse(&long).unwrap().runtime.unwrap().entries;
+    assert_eq!((entries[0].job, entries[1].job), (true, false));
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["job"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
+}
+
+#[test]
 fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     let mut keeps = manifest();
     keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
