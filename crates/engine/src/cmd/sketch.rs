@@ -1223,22 +1223,31 @@ fn expressed_plane(s: &Session, v: &Value, cmd: &str) -> Result<PlaneRef> {
 /// [`plane_ref`] for the commands whose explicit plane has an origin of numbers only
 /// (`canvas.insert`, `canvas.decal`, the browser's): length expressions are refused as before.
 pub(super) fn plane_ref_numbers(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    plane_ref_numbers_with(s, p, cmd, face::IndexMode::Exact)
+}
+
+/// [`plane_ref_numbers`], with how a face pick's index is read ([`face::IndexMode`]).
+pub(super) fn plane_ref_numbers_with(s: &Session, p: &Value, cmd: &str, index: face::IndexMode) -> Result<PlaneRef> {
     if let Some(v @ Value::Object(o)) = p.get("plane")
         && !o.contains_key("face")
     {
         custom_plane_form(v).map_err(|why| bad(cmd, why))?;
     }
-    plane_ref(s, p, cmd)
+    plane_ref_with(s, p, cmd, index)
 }
 
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    plane_ref_with(s, p, cmd, face::IndexMode::Exact)
+}
+
+fn plane_ref_with(s: &Session, p: &Value, cmd: &str, index: face::IndexMode) -> Result<PlaneRef> {
     let base = match p.get("plane") {
         None => PlaneRef::Origin { name: "XY".into() },
         // An origin plane, or a construction plane by name or id.
         Some(v @ (Value::String(_) | Value::Number(_))) => super::features::plane_param(s, Some(v), cmd)?,
         Some(v @ Value::Object(o)) => {
             if o.contains_key("face") {
-                face::capture(s, v, cmd)?
+                face::capture_with(s, v, cmd, index)?
             } else if o.get("origin").is_some_and(|origin| origin.as_array().is_some_and(|a| a.iter().any(Value::is_string))) {
                 expressed_plane(s, v, cmd)?
             } else {

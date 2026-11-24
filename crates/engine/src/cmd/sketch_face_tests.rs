@@ -759,10 +759,11 @@ fn a_custom_plane_origin_that_is_not_numbers_is_refused_not_zeroed() {
         assert_eq!(o, json!([20.0, 0.0, 0.0]), "origin [{x}, 0, 0]");
     }
 }
-/// A sketch on a body's face projects that face's edges from the body's display mesh. The body
-/// it projects from is the model's own, not a copy that meshes it again: on a body whose curved
-/// edges are slow to mesh, the copy's mesh was thrown away and the next feature meshed the body
-/// a second time, which made a sketch on a face as slow as a cut.
+/// Capturing a sketch's face reads the body's exact faces and meshes nothing; the projection of the
+/// face's edges then reads the model's own display mesh of the body. The body it projects from is
+/// the model's own, not a copy that meshes it again: on a body whose curved edges are slow to
+/// mesh, the copy's mesh was thrown away and the next feature meshed the body a second time, which
+/// made a sketch on a face as slow as a cut.
 #[test]
 fn a_sketch_on_a_face_meshes_its_body_once() {
     let mut s = Session::default();
@@ -1059,4 +1060,52 @@ fn a_picked_point_names_the_exact_faces_that_hold_it() {
     assert!(body.faces_within(Vec3::new(5.0, 5.0, 12.0), 1e-3).unwrap().is_empty());
     let edge = s.execute("sketch.create", &json!({"plane": {"face": [10, 5, 10], "fixed": true}}));
     assert!(edge.is_err_and(|error| error.to_string().contains("ambiguous")));
+}
+
+/// A face index names a face of the body where the sketch attaches: the index of another face of
+/// that body, with the point on this one, is refused, not followed to the point. Only Redefine
+/// Sketch Plane, which reads its pick off the finished design, retries by the point.
+#[test]
+fn a_valid_index_of_another_face_is_refused_not_followed_to_the_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    let top = top_pick(&s, "Base");
+    let other =
+        s.world_state().unwrap().body("Base").unwrap().body.faces(0.01).unwrap().into_iter().find(|face| json!(face.index) != top["index"]).unwrap();
+    let wrong = json!({"body":"Base","index":other.index,"face":top["face"]});
+    let error = s.execute("sketch.create", &json!({"plane":wrong})).unwrap_err();
+    assert!(error.to_string().contains("no longer exists"), "{error}");
+}
+
+/// A point 0.3 mm from the edge two faces share, on a 100 mm block, is on its own face: the
+/// faces holding a point are those within the model tolerance (0.01 mm here), not within a
+/// hundredth of the body's size.
+#[test]
+fn a_point_near_an_edge_resolves_to_its_own_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":100,"height":100,"body_name":"Block","name":"BlockFeature"}));
+    for (point, normal) in [([99.7, 50.0, 100.0], Vec3::Z), ([100.0, 50.0, 99.7], Vec3::X)] {
+        let id = run(&mut s, "sketch.create", json!({"plane":{"face":point,"fixed":true}}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        let plane = s.model.state().sketch(id).unwrap().plane;
+        assert!(plane.normal().dot(normal) > 1.0 - 1e-9, "{point:?}: {plane:?}");
+    }
+}
+
+/// A body in a component that is moved and turned is picked by a point in world coordinates.
+#[test]
+fn a_face_of_a_moved_and_turned_component_is_picked_by_its_world_point() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[100,20,30],"axis":[0,0,1],"angle":"90 deg"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let pick = top_pick(&s, "Base");
+    assert!(pick["face"][2].as_f64().unwrap() > 39.0, "the pick is in world coordinates: {pick}");
+    for plane in [json!({"face":pick["face"]}), pick] {
+        let id = run(&mut s, "sketch.create", json!({"plane":plane,"project_edges":false}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        let plane = s.model.state().sketch(id).unwrap().plane;
+        assert!((plane.origin.z - 40.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
+    }
 }

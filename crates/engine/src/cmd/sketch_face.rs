@@ -10,13 +10,30 @@ pub(in crate::cmd) fn is_face(p: &Value) -> bool {
     p.get("plane").and_then(|plane| plane.get("face")).is_some()
 }
 
+/// What a pick's face `index` means to [`capture_with`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::cmd) enum IndexMode {
+    /// The index names a face of the body as it is where the sketch attaches: a point on another
+    /// face is refused, never attached to silently.
+    Exact,
+    /// The index was read off the finished design, where a feature after the sketch may have
+    /// numbered the faces differently (Redefine Sketch Plane): when no face of the body has that
+    /// index at the picked point, the point alone names the face on that body.
+    MayBeStale,
+}
+
 pub(in crate::cmd) fn capture(s: &Session, value: &Value, cmd: &str) -> Result<PlaneRef> {
-    capture_attempt(s, value, cmd, false)
+    capture_with(s, value, cmd, IndexMode::Exact)
+}
+
+/// [`capture`], with how the pick's face index is read.
+pub(in crate::cmd) fn capture_with(s: &Session, value: &Value, cmd: &str, index: IndexMode) -> Result<PlaneRef> {
+    capture_attempt(s, value, cmd, false, index)
 }
 
 /// Internal face-profile compatibility only; never exposed as a command parameter.
 pub(in crate::cmd) fn capture_internal(s: &Session, value: &Value, cmd: &str) -> Result<PlaneRef> {
-    capture_attempt(s, value, cmd, true)
+    capture_attempt(s, value, cmd, true, IndexMode::Exact)
 }
 
 /// A planar face pick `{face, fixed?, body?, index?, path?}` as [`capture`] reads it before it
@@ -76,18 +93,27 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
 /// The message when no face holds the picked point (and, given, carries the picked index).
 const NO_SUCH_FACE: &str = "the selected planar face no longer exists; choose another face or an explicit fixed plane";
 
-fn capture_attempt(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
-    let first = capture_impl(s, value, cmd, internal, true);
+/// No face holds the picked point (or carries the picked index): the one refusal a stale face
+/// index is retried after, told apart from every other by its type. Holds the refusal.
+struct NoSuchFace(crate::EngineError);
+
+fn capture_attempt(s: &Session, value: &Value, cmd: &str, internal: bool, index: IndexMode) -> Result<PlaneRef> {
+    let NoSuchFace(refused) = match capture_impl(s, value, cmd, internal, true)? {
+        Ok(plane) => return Ok(plane),
+        Err(none) => none,
+    };
     // A face index counts faces of the body as the picker showed it, which can be the finished
     // design, while a sketch attaches to the design before itself (Redefine Sketch Plane): a
     // feature after the sketch can add or remove faces, so the same face has another index here.
-    // When no face of that body has that index at the picked point, the point on the same body
-    // names the face; two faces holding it is still refused as ambiguous.
-    let missing = value.get("index").is_some() && first.as_ref().is_err_and(|error| error.to_string().contains(NO_SUCH_FACE));
-    if missing { capture_impl(s, value, cmd, internal, false).or(first) } else { first }
+    // Only a caller that says so retries by the point on the same body, and the retry's own
+    // refusal is the answer (two faces holding the point are refused as ambiguous).
+    if index == IndexMode::MayBeStale && value.get("index").is_some() {
+        return capture_impl(s, value, cmd, internal, false)?.map_err(|NoSuchFace(error)| error);
+    }
+    Err(refused)
 }
 
-fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: bool) -> Result<PlaneRef> {
+fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: bool) -> Result<std::result::Result<PlaneRef, NoSuchFace>> {
     let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
         face_pick_form(value).map_err(|why| bad(cmd, why))?;
     let requested_index = requested_index.filter(|_| use_index);
@@ -117,6 +143,8 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
     let mut chosen = None;
     // A face holds the picked point but has no exact plane: a curved face (or a flat one the kernel does not know as a plane), not a missing one.
     let mut curved = false;
+    // The first body whose faces the kernel could not be asked, for when no other body has the face.
+    let mut unread: Option<String> = None;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -142,17 +170,28 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
             let inverse = mat_inverse(&frame).ok_or_else(|| bad(cmd, "invalid selected face frame"))?;
             let local_point = apply_point(&inverse, point);
             let tolerance = (body.body.size() * 1e-4).max(1e-5);
-            // A face of a sheet metal body attaches as every body's does, by the model's name for
-            // the face, in the frame the sheet gives it (a panel's: its flat pattern's, see
-            // `ModelBody::sketch_frame`). The faces holding the point are the body's own exact
-            // faces: each is within the tolerance of the point by its distance to the trimmed
-            // face (its edges and rims, never display triangles), so nothing is meshed to find
-            // them.
-            let holding = body.body.faces_within(local_point, tolerance * 10.0).map_err(|why| bad(cmd, format!("face capture: {why}")))?;
-            work = work.saturating_add(holding.len());
+            // The cost of asking a body for its faces grows with their number (a large body of
+            // B-spline faces is the slow case), so each body is charged by its faces.
+            work = work.saturating_add(body.body.face_count());
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
+            // A face of a sheet metal body attaches as every body's does, by the model's name for
+            // the face, in the frame the sheet gives it (a panel's: its flat pattern's, see
+            // `ModelBody::sketch_frame`). The faces holding the point are the body's own exact
+            // faces: each is within the model tolerance of the point by its distance to the
+            // trimmed face (its edges and rims, never display triangles), so nothing is meshed to
+            // find them. A body with no exact faces (a mesh body) holds none; a body whose faces
+            // the kernel cannot be asked is passed over, so it does not stop a face of another
+            // body from being captured.
+            let holding = match body.body.faces_within(local_point, tolerance) {
+                Ok(holding) => holding,
+                Err(why) => {
+                    unread.get_or_insert_with(|| why.to_string());
+                    continue;
+                }
+            };
+            work = work.saturating_add(holding.len());
             for (index, _) in holding {
                 if requested_index.is_some_and(|requested| requested != index) {
                     continue;
@@ -184,15 +223,17 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
             }
         }
     }
-    let (body, index, path, plane) = chosen.ok_or_else(|| {
+    let Some((body, index, path, plane)) = chosen else {
         if curved {
-            bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane")
-        } else {
-            bad(cmd, NO_SUCH_FACE)
+            return Err(bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane"));
         }
-    })?;
+        if let Some(why) = unread {
+            return Err(bad(cmd, format!("face capture: {why}")));
+        }
+        return Ok(Err(NoSuchFace(bad(cmd, NO_SUCH_FACE))));
+    };
     if fixed {
-        return Ok(PlaneRef::Custom { plane });
+        return Ok(Ok(PlaneRef::Custom { plane }));
     }
     let at = apply_point(&author_inverse, point);
     let name = solidcraft_doc::naming::face_names(body).get(index).cloned();
@@ -227,7 +268,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool, use_index
         }
         Err(error) => return Err(bad(cmd, format!("{error}; choose a supported exact face or explicitly use fixed:true"))),
     };
-    Ok(PlaneRef::Face { plane, at, name, anchor })
+    Ok(Ok(PlaneRef::Face { plane, at, name, anchor }))
 }
 
 /// The sole durable face attachment beneath an offset/angle wrapper.
