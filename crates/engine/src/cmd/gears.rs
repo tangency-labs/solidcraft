@@ -80,8 +80,12 @@ fn spec(p: &Value, cmd: &str) -> Result<(GearSpec, Extent)> {
         Some(Value::String(d)) if d == "thicker" => true,
         Some(_) => return Err(bad(cmd, "`backlash_direction` must be `thinner` or `thicker`")),
     };
-    if let Some(n) = p.get("flank_points").and_then(Value::as_u64) {
-        g.flank_points = u32::try_from(n).unwrap_or(u32::MAX);
+    match p.get("flank_points") {
+        None | Some(Value::Null) => {}
+        Some(v) => match v.as_u64() {
+            Some(n) => g.flank_points = u32::try_from(n).unwrap_or(u32::MAX),
+            None => return Err(bad(cmd, "`flank_points` must be a whole number")),
+        },
     }
     g.internal = match p.get("internal") {
         None | Some(Value::Null) => false,
@@ -110,7 +114,13 @@ fn spec(p: &Value, cmd: &str) -> Result<(GearSpec, Extent)> {
     // The hole must leave a rim of material inside the root circle.
     let room = 0.9 * g.root_radius().min(g.base_radius());
     if bore < 0.0 || (bore > 0.0 && bore / 2.0 + bore_offset.abs() >= room) {
-        return Err(bad(cmd, "the axle hole, with its offset, must stay inside 90% of the gear's root circle"));
+        let limit = if g.base_radius() < g.root_radius() { "base" } else { "root" };
+        return Err(bad(
+            cmd,
+            format!(
+                "the axle hole, with its offset, must stay inside 90% of the gear's {limit} circle (a radius of {room:.3} mm from the gear's centre)"
+            ),
+        ));
     }
     if bore == 0.0 && bore_offset != 0.0 {
         return Err(bad(cmd, "`bore_offset` needs a `bore_diameter`"));
@@ -302,6 +312,27 @@ fn edit_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result)
 }
 
+/// The command values a saved gear stands for.
+fn saved_values(was: &SpurGear) -> Value {
+    json!({
+        "module": was.module, "teeth": was.teeth, "pressure_angle": was.pressure_angle, "face_width": was.face_width,
+        "profile_shift": was.profile_shift, "backlash": was.backlash, "flank_points": was.flank_points,
+        "internal": was.internal, "rim_thickness": was.rim_thickness, "bore_diameter": was.bore_diameter,
+        "bore_offset": was.bore_offset, "helix_angle": was.helix_angle, "double_helical": was.double_helical,
+        "clearance": was.clearance, "root_fillet": was.root_fillet, "tip_round": was.tip_round,
+        "backlash_direction": if was.backlash_thicker { "thicker" } else { "thinner" },
+    })
+}
+
+/// How many features building this gear makes: built in a throwaway copy of the session.
+fn own_feature_count(s: &Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<usize> {
+    let mut probe = s.scratch();
+    let c = probe.execute("component.create", &json!({"name": "probe", "grounded": false}))?;
+    let comp = c["component"].as_u64().unwrap_or(0);
+    build(&mut probe, g, e, cmd)?;
+    Ok(probe.doc.features.iter().filter(|f| f.component == comp).count())
+}
+
 /// Change a gear's values and rebuild its teeth in place; the component, its placement and its
 /// joints stay.
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -314,14 +345,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let comp = s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?;
     let was = s.doc.gears.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not a gear"))?;
     // The values given replace the saved ones.
-    let mut merged = json!({
-        "module": was.module, "teeth": was.teeth, "pressure_angle": was.pressure_angle, "face_width": was.face_width,
-        "profile_shift": was.profile_shift, "backlash": was.backlash, "flank_points": was.flank_points,
-        "internal": was.internal, "rim_thickness": was.rim_thickness, "bore_diameter": was.bore_diameter,
-        "bore_offset": was.bore_offset, "helix_angle": was.helix_angle, "double_helical": was.double_helical,
-        "clearance": was.clearance, "root_fillet": was.root_fillet, "tip_round": was.tip_round,
-        "backlash_direction": if was.backlash_thicker { "thicker" } else { "thinner" },
-    });
+    let mut merged = saved_values(&was);
     for k in [
         "module",
         "teeth",
@@ -347,6 +371,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Turning a gear inside out drops what only the other kind has, unless it is given too.
     let absent = |k: &str| p.get(k).is_none_or(Value::is_null);
+    if merged["internal"] == json!(true) && absent("profile_shift") {
+        merged["profile_shift"] = json!(0);
+    }
     if merged["internal"] == json!(true) && absent("bore_diameter") {
         merged["bore_diameter"] = json!(0);
     } else if merged["internal"] != json!(true) && absent("rim_thickness") {
@@ -361,6 +388,17 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(&g, comp, occ, name);
     }
     let ids: Vec<u64> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| f.id).collect();
+    // The gear's own features are all this deletes. Anything else made in the component (a sketch,
+    // a cut) would go with them and take its dependents along, so refuse instead.
+    let (was_g, was_ext) = spec(&saved_values(&was), cmd)?;
+    if ids.len() != own_feature_count(s, &was_g, &was_ext, cmd)? {
+        return Err(bad(
+            cmd,
+            "this gear's component holds features that are not the gear's own; edit it by hand, or insert a new gear",
+        ));
+    }
+    s.refresh();
+    let before: Vec<(u64, String)> = s.model.results.iter().filter_map(|r| r.error.clone().map(|e| (r.id, e))).collect();
     for id in ids.iter().rev() {
         let _ = s.doc_mut().delete_feature(*id);
     }
@@ -376,7 +414,8 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.execute("component.activate", &json!({"component": active}))?;
     s.refresh();
-    if let Some(e) = s.model.results.iter().find_map(|r| r.error.clone()) {
+    // An error the design already had elsewhere is not this edit's.
+    if let Some(e) = s.model.results.iter().find_map(|r| r.error.clone().filter(|e| !before.contains(&(r.id, e.clone())))) {
         return Err(crate::EngineError::Other(e));
     }
     let occ = s.doc.occurrences.iter().find(|o| o.component == comp).map(|o| o.id).unwrap_or(0);

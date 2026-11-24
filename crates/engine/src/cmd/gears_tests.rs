@@ -185,7 +185,37 @@ fn an_external_gear_takes_an_axle_hole_and_edit_can_turn_it_into_a_ring() {
     // Inside out: the saved axle hole is dropped and the name follows.
     let r = run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "internal": true, "teeth": 40}));
     assert_eq!(r["name"], "Internal Gear M2 Z40");
-    assert!(volume(&mut s) < 8.0 * 10.0 * PI * 46.5 * 46.5);
+    // One ring: its area is the pitch-circle annulus out to the default rim (outer radius 46.5), not zero and not a disc.
+    let bodies = run(&mut s, "inspect.measure", json!({}))["bodies"].as_array().map_or(0, Vec::len);
+    assert_eq!(bodies, 1);
+    let v = volume(&mut s);
+    assert!((v / 10.0 - PI * (46.5 * 46.5 - 40.0 * 40.0)).abs() < 0.06 * PI * 46.5 * 46.5, "{v}");
+}
+
+#[test]
+fn turning_a_shifted_gear_into_a_ring_drops_the_shift_and_a_fraction_of_flank_points_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "profile_shift": 0.3}));
+    run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "internal": true, "teeth": 40}));
+    assert!(s.doc.gears.values().all(|g| g.internal && g.profile_shift == 0.0));
+    let before = s.doc.gears.clone();
+    for bad in [json!(2.5), json!(-3), json!("8")] {
+        assert!(s.execute("gear.insert", &json!({"module": 2, "teeth": 20, "flank_points": bad})).is_err());
+    }
+    assert_eq!(s.doc.gears, before);
+}
+
+#[test]
+fn edit_gear_refuses_when_the_component_holds_features_that_are_not_the_gears() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    run(&mut s, "component.activate", json!({"component": g["component"]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let features = s.doc.features.len();
+    assert!(s.execute("gear.edit", &json!({"component": g["component"], "teeth": 24})).is_err());
+    assert_eq!(s.doc.features.len(), features);
+    assert_eq!(s.doc.gears[&g["component"].as_u64().unwrap_or(0)].teeth, 20);
 }
 
 #[test]

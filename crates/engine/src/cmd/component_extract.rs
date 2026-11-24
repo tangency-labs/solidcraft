@@ -585,7 +585,8 @@ fn clear_history(s: &mut Session, sc: &Scope) {
     d.body_components.retain(|_, c| !sc.subtree.contains(c));
     d.body_offsets.retain(|b, _| !sc.bodies.contains(b));
     d.parts.retain(|c, _| !children.contains(c));
-    d.gears.retain(|c, _| !children.contains(c));
+    // The component keeps its link but not the gear's teeth: Edit Gear would delete the link with them.
+    d.gears.retain(|c, _| !children.contains(c) && *c != comp);
     d.links.retain(|c, _| !children.contains(c));
     d.appearances.components.retain(|c, _| !children.contains(c));
     d.canvases.retain(|c| !sc.subtree.contains(&c.component));

@@ -223,8 +223,11 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
         number(ui, "gear.rim_thickness", "dialog:gear:rim_thickness", &mut g.rim_thickness, 0.001..=1e6, 0.5, " mm");
     } else {
         form_row(ui, "", |ui| {
-            let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.double_helical"), &mut g.double_helical);
-            crate::scenario::publish_handle("dialog:gear:double_helical", r.rect.center());
+            // Two mirrored helical halves need a helix angle to mirror.
+            ui.add_enabled_ui(g.helix_angle != 0.0, |ui| {
+                let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.double_helical"), &mut g.double_helical);
+                crate::scenario::publish_handle("dialog:gear:double_helical", r.rect.center());
+            });
         });
         number(ui, "gear.bore_diameter", "dialog:gear:bore_diameter", &mut g.bore_diameter, 0.0..=1e6, 0.5, " mm");
         if g.bore_diameter > 0.0 {
@@ -285,7 +288,7 @@ pub fn commands(g: &Gear) -> Result<Vec<(String, Value)>, String> {
         "pressure_angle": g.pressure_angle,
         "face_width": g.face_width,
         "backlash": g.backlash,
-        "backlash_direction": if g.backlash_thicker && g.backlash > 0.0 { "thicker" } else { "thinner" },
+        "backlash_direction": if g.backlash_thicker { "thicker" } else { "thinner" },
         "clearance": g.clearance,
         "root_fillet": g.root_fillet,
         "tip_round": g.tip_round,
