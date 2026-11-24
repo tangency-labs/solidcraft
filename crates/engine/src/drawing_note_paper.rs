@@ -5,23 +5,28 @@
 //! rule ([`Text::set`]), with its own line breaks only. A note that points at the model has a leader
 //! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
 //! landing on the side of the text it comes from: drawn once on each side, where the other leaders
-//! from that side meet it. A lost reference has no leader; the text stays where it is. A note on a view is centred on the view, as the view's lines are, and the scene moves it to
-//! the view's centre; one on a sheet sits from the sheet's corner. A view's label is set the same way,
-//! without a leader ([`label_group`]).
+//! from that side meet it. A lost reference has no leader; the text stays where it is. A note on a
+//! view is centred on the view, as the view's lines are, and the scene moves it to the view's
+//! centre; one on a sheet sits from the sheet's corner. Where its parts sit, as drawn, is its
+//! layout, which `drawing.note.inspect` answers with. A view's label is set the same way, without
+//! a leader ([`label_group`]).
 
 use solidcore_record::Vec2;
-use solidcraft_doc::drawing::note::Note;
+use solidcraft_doc::drawing::note::{Note, Resolved};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::HAlign;
+use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{PaperFonts, TextAlign, TextStyle};
 
-use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
+use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, LineRole, OnPaper, TEXT_MM, Text, placed};
 
 /// `note`, reading `text` (its content with its fields read), at its place (from its sheet's corner,
 /// or from its view's centre as its view's lines are), in lines `line_mm` wide, a leader ending at
-/// each of `tips`, the ends it points at that are found: its group.
+/// each of `tips`, the ends it points at that are found: its group, and where its leaders, their
+/// arrowheads and its text's box sit.
 pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, lettering: &PaperFonts) -> OnPaper {
     let cap_mm = note.cap_mm.unwrap_or(TEXT_MM);
     let text = Text::set(Some(text), cap_mm, lettering, &style(note));
@@ -29,23 +34,38 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
     // and its group are laid out from the box.
     let centre = box_centre(note, text.half);
     let mut why = text.why;
-    let mut items = Vec::new();
+    let (mut items, mut layout) = (Vec::new(), Layout::default());
     // Whether a leader has drawn the landing on the text's left and on its right.
     let mut landed = [false; 2];
     for tip in tips {
-        match leader(*tip, centre, text.half, line_mm, &mut landed) {
-            Some(leader) => items.extend(leader),
-            None => why = why.or_else(|| Some("its leader ends too near its text to draw".to_string())),
-        }
+        let Some(drawn) = leader(*tip, centre, text.half, line_mm, &mut landed) else {
+            why = why.or_else(|| Some("its leader ends too near its text to draw".to_string()));
+            continue;
+        };
+        let points = leader_points(*tip, &drawn);
+        // Its arrowhead points at its tip from the next point, as the arrowhead is placed.
+        layout.arrows.extend(points.get(1).and_then(|next| (*tip - *next).normalized()).map(|dir| (*tip, dir)));
+        layout.lines.push((LineRole::Leader, points));
+        items.extend(drawn);
+    }
+    if !text.runs.is_empty() {
+        layout.text_boxes.push(crate::drawing_dimension_paper::text_box(centre, Vec2::X, text.half));
     }
     items.extend(placed(text.runs, text.half, cap_mm, centre, Vec2::X));
-    OnPaper {
-        group: Group { object: note.id, kind: ObjectKind::Note, items },
-        fonts: text.fonts,
-        why,
-        pending: text.pending,
-        layout: Layout::default(),
-    }
+    OnPaper { group: Group { object: note.id, kind: ObjectKind::Note, items }, fonts: text.fonts, why, pending: text.pending, layout }
+}
+
+/// Where the ends `r` points at that are found are on paper through `frame` (centred on its view): its
+/// anchor's, then its branches', in order. A note's leaders end there, on the sheet and in its layout.
+pub fn note_tips(r: &Resolved, frame: &ViewFrame) -> Vec<Vec2> {
+    std::iter::once(&r.anchor).chain(&r.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect()
+}
+
+/// A leader's points as `items` ([`Leader::items`]) draw its line, its landing's end included, from
+/// `tip`, where its arrowhead points, rather than the arrowhead's base, where the line starts.
+fn leader_points(tip: Vec2, items: &[Item]) -> Vec<Vec2> {
+    let line = items.iter().find_map(|item| if let Item::Stroke { path, .. } = item { Some(path) } else { None });
+    std::iter::once(tip).chain(line.into_iter().flatten().map(|seg| seg.end())).collect()
 }
 
 /// How `note`'s lines stand in its box: by its alignment, or from the box's left edge for a note with none.

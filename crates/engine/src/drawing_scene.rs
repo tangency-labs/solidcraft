@@ -1223,8 +1223,7 @@ fn drawn_notes(
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
         let text =
             d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
-        let tips: Vec<Vec2> =
-            std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
+        let tips = crate::drawing_note_paper::note_tips(resolved, &frame);
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
         let paper = crate::drawing_note_paper::note_group(note, &text, &tips, LineKind::Thin.width_mm(group), lettering);
         DrawnDimension { group: Some(Arc::new(paper.group)), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
@@ -1329,7 +1328,7 @@ fn sheet_texts(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     let Some(at) = d.sheets.iter().position(|one| one.id == sheet).filter(|_| !on.is_empty() || !tags.is_empty()) else {
         return (Vec::new(), false);
     };
-    let line_mm = LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group));
+    let line_mm = sheet_note_line_mm(d, at);
     let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
     let mut pending = false;
     let mut set = |object: u64, paper: crate::drawing_dimension_paper::OnPaper| {
@@ -1472,6 +1471,12 @@ pub(crate) fn label_box(s: &Session, sessions: &mut ViewSessions, d: &Drawing, i
     let boundary = Aabb2 { min: placed.boundary.min - centre, max: placed.boundary.max - centre };
     let at = centre + label_place(label.offset, label.half, Some(boundary), &beside);
     Some(group_bounds(&moved(&label.group, at), &label.fonts))
+}
+
+/// How wide a note or a revision tag on sheet `at` of `d` draws its lines: its sheet's line group's
+/// thin lines, or the drawing's.
+pub(crate) fn sheet_note_line_mm(d: &Drawing, at: usize) -> f64 {
+    LineKind::Thin.width_mm(d.sheets.get(at).and_then(|one| one.line_group).unwrap_or(d.line_group))
 }
 
 /// The dimensions, the notes and the balloons of `views` of `d`, by view and id.

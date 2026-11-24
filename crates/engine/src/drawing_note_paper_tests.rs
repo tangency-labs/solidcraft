@@ -1,7 +1,6 @@
 use solidcraft_doc::drawing::note::Anchor;
 use solidcraft_geom::cell::{Content, HAlign, Part};
 use solidcraft_geom::paper::text::TextRun;
-use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{TextMetrics, TextStyle, font_data};
 
 use super::*;
@@ -224,6 +223,34 @@ fn a_leader_too_short_for_its_arrowhead_is_left_out() {
         assert_eq!(on.why.as_deref(), Some("its leader ends too near its text to draw"));
         assert_eq!(runs(&on.group).len(), 1);
     }
+}
+
+/// A note's layout is its group's. Each leader's points are those it draws, the landing's end
+/// included, from the arrowhead's tip where its line starts at the arrowhead's base; each arrow is at
+/// its leader's tip, pointing there from the next point. Its text's box is as wide as the text
+/// measures and as tall as its lines, a descender included, round its place, and starts where its
+/// text starts. A text that isn't set has no box.
+#[test]
+fn a_notes_layout_is_its_groups() {
+    let tips = [Vec2::new(-40.0, -30.0), Vec2::new(-50.0, 10.0), Vec2::new(60.0, 25.0)];
+    let on = note_group(&note([0.0, 0.0], None), "ROUND", &tips, LINE_MM, &PaperFonts::new("", "en", true));
+    let (lines, _) = leaders_of(&on.group);
+    assert!(on.layout.lines.len() == 3 && on.layout.lines.iter().all(|(role, _)| *role == LineRole::Leader), "{:?}", on.layout);
+    for (((_, leader), line), tip) in on.layout.lines.iter().zip(&lines).zip(tips) {
+        assert!(leader[0] == tip && leader[1..] == line[1..], "{leader:?} {line:?}");
+    }
+    let arrows: Vec<(Vec2, Vec2)> = on.layout.lines.iter().map(|(_, leader)| (leader[0], (leader[0] - leader[1]).normalized().unwrap())).collect();
+    assert_eq!(on.layout.arrows, arrows);
+
+    let fonts = PaperFonts::new("", "en", true);
+    let two = note_group(&note([20.0, 10.0], None), "ROUND\nedge", &[], LINE_MM, &fonts);
+    let text = Text::set(Some("ROUND\nedge"), TEXT_MM, &fonts, &TextStyle::default());
+    assert!(text.half.y > TEXT_MM, "two lines and a descender: {:?}", text.half);
+    let [[a, b, c, d]] = two.layout.text_boxes[..] else { panic!("one box: {:?}", two.layout) };
+    assert!(close(b.x - a.x, 2.0 * text.half.x) && close(d.y - a.y, 2.0 * text.half.y) && c == Vec2::new(b.x, d.y), "{a:?} {b:?} {c:?} {d:?}");
+    assert!(close((a.x + b.x) / 2.0, 20.0) && close((a.y + d.y) / 2.0, 10.0), "{a:?} {d:?}");
+    assert!(close(runs(&two.group)[0].origin.x, a.x));
+    assert!(drawn(&note([0.0, 0.0], None), "", None).layout.text_boxes.is_empty());
 }
 
 /// Hostile places and tips never panic: each is a group, with or without its leader.
