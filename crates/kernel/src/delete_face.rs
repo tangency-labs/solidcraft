@@ -834,6 +834,42 @@ mod tests {
     }
 
     #[test]
+    fn deleting_a_round_between_curved_supports_restores_the_sharp_rim() {
+        use crate::history::{EdgeOrigin, FaceOrigin};
+
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 4.0, 6.0).unwrap();
+        let ball = crate::sphere(Vec3::new(0.0, 0.0, 3.0), 5.0).unwrap();
+        let upper = box_solid(Vec3::new(-6.0, -6.0, 6.0), Vec3::new(6.0, 6.0, 12.0)).unwrap();
+        let cap = boolean(&ball, &upper, BoolOp::Intersect).unwrap().unwrap();
+        // Rotating the spherical cap splits its common rim with the post at the two seams.
+        let cap = crate::transform(&cap, Vec3::ZERO, Vec3::ZERO, Vec3::Z, 1.5).unwrap();
+        let sharp = boolean(&post, &cap, BoolOp::Union).unwrap().unwrap();
+        let rim = crate::tangent_chain(&sharp, &[Vec3::new(0.0, 4.0, 6.0)]).unwrap();
+        let rounded = fillet(&sharp, &rim, 1.0).unwrap();
+        let rounds: Vec<_> = rounded
+            .history()
+            .unwrap()
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.origins.iter().any(|o| matches!(o, FaceOrigin::Edge { .. })))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(rounds.len(), 2);
+
+        let input = crate::Body::from_record(rounded.record().clone()).unwrap();
+        let healed = delete_faces(&input, &rounds).unwrap();
+        // A fillet-chain removal records a new sharp edge between the two surviving supports.
+        let edges = &healed.history().unwrap().edges;
+        assert!(edges.iter().any(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Meet { .. }])));
+        assert_eq!(healed.face_count(), sharp.face_count());
+        // The R4 by 6 post contributes 96π and the R5 cap of height 2 contributes 52π/3.
+        let expected = 340.0 * std::f64::consts::PI / 3.0;
+        let actual = crate::measure_mass(&healed).unwrap().volume;
+        assert!((actual - expected).abs() < 1e-7, "restored volume {actual}, expected {expected}");
+    }
+
+    #[test]
     fn issue1557_delete_closed_fillet_ring_keeps_the_floor() {
         let b = box_solid(Vec3::ZERO, Vec3::new(25.0, 25.0, 10.0)).unwrap();
         let picks = [Vec3::new(12.5, 0.0, 0.0), Vec3::new(25.0, 12.5, 0.0), Vec3::new(12.5, 25.0, 0.0), Vec3::new(0.0, 12.5, 0.0)];

@@ -41,7 +41,7 @@ use solidcore::topology::brep::p5::remove_faces_notified;
 use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme, VertexId};
-use solidcore::EntityRef;
+use solidcore::{EntityRef, SolidError};
 
 use crate::body::{finish, finish_proved, Body, Expect};
 use crate::error::status;
@@ -552,7 +552,8 @@ fn validate_face_indices(order: &Order, faces: &[usize]) -> Result<()> {
 }
 
 /// Remove a selected groove whose two rims the kernel can close together. Returns the new
-/// solid and its face and edge history in record order. Other selections give `None`.
+/// solid and its face and edge history in record order. If the two annular supports cannot
+/// be identified, the selection gives `None` so another removal can try it.
 /// The operand is unchanged, including when the kernel refuses the construction.
 ///
 /// # Errors
@@ -569,40 +570,64 @@ pub fn remove_ring_groove(
         .iter()
         .map(|&i| order::face(&mapped, i))
         .collect::<Result<Vec<_>>>()?;
-    let selection: HashSet<_> = picked.iter().copied().collect();
-    let mut removed = false;
-    let history = history::recorded(&result, &mapped, Made::Plain, || {
-        removed = with_body("remove_ring_groove", &result, |k, b| {
-            let mut feature = FeatureExecutive::new(k, b)?;
-            let Some(i) = feature.add_feature(
-                k,
-                &picked,
-                RebuildBrepType::ExtendSurface,
-                RebuildBrepType::FromOtherBrep,
-            )?
-            else {
-                return Ok(false);
-            };
-            // add_feature partitions from the first selected face. Never accept a subset
-            // of a disconnected selection as the requested groove.
-            if !feature.features().get(i).is_some_and(|f| {
-                f.faces.len() == selection.len()
-                    && f.faces.iter().all(|face| selection.contains(face))
-            }) || feature.annular_supports(k, i)?.is_none()
-            {
-                return Ok(false);
-            }
-            Ok(feature.do_defeature(k)?.is_empty())
-        })?;
-        Ok(())
+    let history = history::recorded_if_changed(&result, &mapped, Made::Plain, || {
+        with_body("remove_ring_groove", &result, |k, b| {
+            remove_selected_ring(k, b, &picked)
+        })
     })?;
-    if !removed {
+    let Some(history) = history else {
         return Ok(None);
-    }
+    };
     // Recording materializes missing UV trims and clears the history tags.
     // Prove the resulting B-rep after those edits and return it with that proof.
     let (solid, proof) = run_taking("finish_ring_groove", &[("brep", &result)], |k| {
         finish_proved(k, result.take_held().0, Expect::SOLID)
     })??;
     Ok(Some((Body::held(solid, proof), history)))
+}
+
+/// Try an annular closure on the selected faces of the copy.
+pub(crate) fn remove_selected_ring(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[FaceId],
+) -> solidcore::Result<bool> {
+    match recognize_ring_groove(k, b, picked) {
+        Ok(Some(mut groove)) => Ok(groove.do_defeature(k)?.is_empty()),
+        Err(e)
+            if e.is_unported_or_cancelled()
+                || matches!(e, SolidError::PreparationRequired { .. }) =>
+        {
+            Err(e)
+        }
+        // A failed probe says nothing about whether an ordinary fillet chain can come off.
+        Ok(None) | Err(_) => Ok(false),
+    }
+}
+
+fn recognize_ring_groove<'a>(
+    k: &mut Kernel,
+    b: &'a mut Brep,
+    picked: &[FaceId],
+) -> solidcore::Result<Option<FeatureExecutive<'a>>> {
+    let mut feature = FeatureExecutive::new(k, b)?;
+    let Some(i) = feature.add_feature(
+        k,
+        picked,
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::FromOtherBrep,
+    )?
+    else {
+        return Ok(None);
+    };
+    let selection: HashSet<_> = picked.iter().copied().collect();
+    // add_feature partitions from the first selected face. Never accept a subset
+    // of a disconnected selection as the requested groove.
+    if !feature.features().get(i).is_some_and(|f| {
+        f.faces.len() == selection.len() && f.faces.iter().all(|face| selection.contains(face))
+    }) || feature.annular_supports(k, i)?.is_none()
+    {
+        return Ok(None);
+    }
+    Ok(Some(feature))
 }

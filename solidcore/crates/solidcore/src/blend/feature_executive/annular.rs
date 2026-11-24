@@ -446,7 +446,9 @@ impl Closure {
         let faces = bp1::faces(&patch, None)?;
         let (added, copied) = copy_faces_carrying(k, &mut patch, &faces, base, true)?;
         if !copied {
-            return Err(defect("copying the annular patch to the base left out a patch face"));
+            return Err(defect(
+                "copying the annular patch to the base left out a patch face",
+            ));
         }
         stitch_and_orient(k, base)?;
         let supports = self.supports();
@@ -497,10 +499,15 @@ impl Closure {
         p3::rebind_geometry_owners(base, crate::topology::loopuse::notify_ref, |e| {
             crate::topology::scheme_owner_identity(naming, e)
         })?;
-        let feature = f.fbrep.as_mut().ok_or_else(|| defect(super::FEATURE_BREP_GONE))?;
+        let feature = f
+            .fbrep
+            .as_mut()
+            .ok_or_else(|| defect(super::FEATURE_BREP_GONE))?;
         let (_, copied) = copy_faces_carrying(k, &mut patch, &faces, feature, true)?;
         if !copied {
-            return Err(defect("copying the annular patch to the partitioned feature left out a patch face"));
+            return Err(defect(
+                "copying the annular patch to the partitioned feature left out a patch face",
+            ));
         }
         stitch_and_orient(k, feature)?;
         if !brep_is_manifold_solid(base)? || !brep_is_manifold_solid(feature)? {

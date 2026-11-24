@@ -26,6 +26,43 @@ fn a_box_measures_exactly() {
     assert!((v - 6000.0).abs() < 6000.0 * 1e-9, "{v}");
 }
 
+/// A failed face lookup in feature discovery cannot confirm a groove. Public record
+/// indices are checked before this step; here the executive itself refuses the selection.
+#[test]
+fn a_failed_feature_lookup_leaves_ring_removal_unmatched() {
+    let mut k = solidcore::Kernel::default();
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let face = solidcore::FaceId::from_index(0);
+    assert!(!crate::trim::remove_selected_ring(&mut k, &mut b, &[face]).unwrap());
+}
+
+#[test]
+fn an_unmatched_ring_does_not_export_the_input_for_history() {
+    use solidcore::curve::line::Line;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::topology::brep::p5::create_wire_edge_from_curve;
+    use solidcore::{Kernel, Vec3};
+
+    let body = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let (_, order) = body.to_record().unwrap();
+    let mut brep = body.into_inner();
+    // The box faces keep their indices. The separate wire is valid in the kernel,
+    // but the record exporter cannot represent it.
+    let line = Line::create_canonical(Vec3::new(4.0, 4.0, 4.0), Vec3::new(1.0, 0.0, 0.0));
+    create_wire_edge_from_curve(
+        &mut Kernel::default(),
+        &mut brep,
+        line.into(),
+        Extent1d::from_min_max(0.0, 1.0),
+    )
+    .unwrap();
+    let body = Body::new(brep);
+    assert!(body.to_record().is_err());
+    assert!(crate::trim::remove_ring_groove(&body, &order, &[0])
+        .unwrap()
+        .is_none());
+}
+
 /// The accuracy goes to the kernel as given: one it refuses is its status.
 #[test]
 fn a_volume_accuracy_is_the_kernels_to_refuse() {
