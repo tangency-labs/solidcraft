@@ -525,7 +525,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         let at = triad.map(|t| t.center).or_else(|| anchor(app, &d).map(|(base, _)| base));
         move_box_tab(ui, &mut d);
         let focus = take_focus(ui.ctx(), &mut d);
-        if let Some(bs) = at.and_then(|base| proj.to_screen(base))
+        if crate::dialogs_move::can_edit_values(app, &d)
+            && let Some(bs) = at.and_then(|base| proj.to_screen(base))
             && let Some((label, _, value)) = d.primary()
         {
             // Clear of the triad: its arrows reach LEN_PX and its rings RING of that, so a box

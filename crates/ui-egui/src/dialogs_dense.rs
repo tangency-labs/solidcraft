@@ -1213,6 +1213,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     let through_point = offset_through_point(d).is_some();
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
     let placing = !crate::dialogs_move::placements(d).is_empty();
+    let move_constraint = if placing { crate::dialogs_move::constraint(app, d) } else { crate::dialogs_move::MoveConstraint::Free };
     let shared = placing && crate::dialogs_move::moves_shared(app, d);
     // A component just pasted is placed, not copied.
     let pasted = crate::dialogs_move::pasted(d);
@@ -1526,7 +1527,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
         }
         k @ Kind::Move { .. } => {
-            enter |= crate::dialogs_move::rows(ui, k);
+            enter |= crate::dialogs_move::rows(ui, k, &move_constraint);
             crate::dialogs_move::kept_axis_note(ui, &d.inputs, &d.extra);
             if shared {
                 ui_kit::text(
