@@ -33,9 +33,9 @@
 //!   distance from one after orienting both parameters; a start is judged from zero.
 //!   A root near the other endpoint cannot collapse the range.
 //! - **Shortest tested span (WR-21657).** `ApproximateCurve` force-passes a span
-//!   shorter than 1/1500 of the interval it fits (first to last break), where
-//!   `sm_TestSpanAccuracy` takes 1/1500 of the curve's natural interval. A fit no
-//!   longer depends on the parameter's scale.
+//!   shorter than 1/1500 of the range its breaks cover, where `sm_TestSpanAccuracy`
+//!   takes 1/1500 of the curve's natural interval. That limit no longer depends on
+//!   the parameter's scale.
 //! - **Objects.** Solutions name the caller's handles: `GlobalPointSolve` takes the
 //!   handle of the curve (named by the line drop and the tree solutions, upstream
 //!   `this`) and of its analytic replacement ([`GlobalPointSolveOptions`]; upstream
@@ -72,13 +72,13 @@
 //!   span order, but stops with `SM_ERR` after 8192 subdivisions
 //!   (`CurveFailure::SubdivisionCap`) or when the native midpoint formula cannot
 //!   produce a finite, distinct parameter (`CurveFailure::IntervalNotSplittable`). The subdivision
-//!   count is total across break intervals: upstream's natural-interval / 1500
-//!   stopping rule permits at most 2047 subdivisions for one in-domain interval.
-//!   Across a partition of the natural interval, the total stays below roughly
-//!   2 x 1500 plus the break count, rather than 2047 per break, leaving margin under
-//!   the 8192 cap. Far-outside breaks can otherwise require trillions of
-//!   spans. The bound limits the pending stack and generated polygon growth, not
-//!   the supplied breaks (including duplicates), which are still visited in order.
+//!   count is total across break intervals: the 1/1500 stopping rule, relative to the
+//!   range the breaks cover (see the shortest tested span below), permits at most 2047
+//!   subdivisions for one interval. Across the break intervals the total stays below
+//!   roughly 2 x 1500 plus the break count, rather than 2047 per break, leaving margin
+//!   under the 8192 cap. The bound limits the pending stack and generated polygon
+//!   growth, not the supplied breaks (including duplicates), which are still visited
+//!   in order.
 //! - **Output allocation.** The separate [`MAX_APPROX_SPANS`] appended-span bound
 //!   is retained and returns `InvalidInput` before unbounded control-polygon growth
 //!   (upstream fuzz `curve.curve_p1` fuzz01255 aborted on a 6 GiB allocation).
@@ -591,9 +591,13 @@ impl Curve {
             });
         }
 
-        // the length of the interval being fitted: test_span_accuracy's shortest
-        // tested span is relative to it (upstream: to the curve's natural interval)
-        let fit_length = (last - first).abs();
+        // the length of the range the breaks cover (first to last, for breaks in
+        // order): test_span_accuracy's shortest tested span is relative to it
+        // (upstream: to the curve's natural interval)
+        let (lo, hi) = breaks
+            .iter()
+            .fold((first, first), |(lo, hi), &b| (lo.min(b), hi.max(b)));
+        let fit_length = hi - lo;
 
         // locals
         let mut stack: Vec<f64> = Vec::with_capacity(256 * 4 * 2);
