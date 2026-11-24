@@ -402,7 +402,8 @@ impl ExpressedMove {
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
 
-fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
+/// `p` moved by `m` (as [`FeatureKind::transform_geometry`] moves a feature's planes).
+pub fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
     match p {
         PlaneRef::Custom { plane } => *plane = map_plane(m, plane).unwrap_or(*plane),
         PlaneRef::Placed { origin, x_dir, y_dir } => {
