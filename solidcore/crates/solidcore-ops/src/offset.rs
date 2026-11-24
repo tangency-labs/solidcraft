@@ -612,8 +612,8 @@ fn moved_faces(b: &mut Brep) -> solidcore::Result<bool> {
 
 /// A face the kernel cannot draft, as the operation's error: a pull in the neutral plane is
 /// the draft's own argument ([`Error::Argument`]); any other refusal names what the face is
-/// ([`Error::Unsupported`]).
-fn refused(r: DraftRefusal) -> Error {
+/// ([`Error::Unsupported`]). The app's own draft words the same refusals with it.
+pub fn draft_refused(r: DraftRefusal) -> Error {
     Error::Unsupported(match r {
         DraftRefusal::PullInNeutralPlane => return Error::Argument,
         DraftRefusal::NotPlaneOrCone => "a drafted face is neither a plane nor a cone or cylinder",
@@ -688,7 +688,7 @@ pub fn draft(
         for &f in &picked {
             match draft_surface(k, b, f, &the_draft) {
                 Ok(Ok(s)) => surfaces.push(s),
-                Ok(Err(r)) => return Ok(Err(refused(r))),
+                Ok(Err(r)) => return Ok(Err(draft_refused(r))),
                 Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
         }

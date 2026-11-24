@@ -372,6 +372,21 @@ sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
 operation (`solidcore-ops/src/offset.rs`, `draft`).
 
+**A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
+about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
+material region and no cavity), the draft removes the set W = { r_new(z) ≤ ρ ≤ r_old(z) } over
+the wall's slab by the boolean difference B − W [5] (`contract_complete_cone`,
+`topology/brep/local_operation.rs`). The drafted cone must be the old one's axis and slab to the
+body's tolerance (`coaxial_slab`: the axes' offset and tilt over the slab, the seams' twist, the
+drafted net's end rows on the old end planes), both radii positive and r_new nowhere past r_old;
+both are affine in height, so their ends decide. An end where r_new is below r_old by more than the
+tolerance gets an annular cap drawn on the old end plane, in the old frame; the other end is the
+hinge. The boolean cuts every wall W passes through, so holes or pockets the drafted side reaches
+break out through it, where the local operation's offset faces would cross loops it cannot
+resolve (`LoopCrossing::Unmerged`, `offset_executive/crossing_loops.rs`). Only the static entry
+point (`local_operation_simple`) takes this path; a partial wall, a plane, or a draft that moves a
+wall outward still goes through the local operation.
+
 **A draft into another shell.** A cone or cylinder drafted about the pull sweeps, at each height h
 above its hinge circle, the points whose ψ = atan t − atan((ρ − r0) / h) lies between 0 and the
 lean (`largest_clear_angle`, `offset/draft.rs`). A cavity's wall (or another lump) bounded by cones,

@@ -2860,6 +2860,67 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+
+    /// A frustum r 100 at z = 0 to r 40 at z = 200 (its side leaning atan 0.3, 16.70 degrees,
+    /// inward) with six blind holes r 5, from z = 150 up through the top, their centres on the
+    /// circle r 32 (each reaching out to r 37). Its side drafted to lean 18 degrees, about its
+    /// base, is r(z) = 100 - z tan 18 degrees, which passes r 37 at z0 = 193.89 and is r 35.02
+    /// at the top: every hole breaks out through the drafted side near the top, its wall and
+    /// the cone's passing through each other between the two points where the hole's rim
+    /// crosses the top's new rim. The body is the frustum less the holes: pi int r^2 less
+    /// 6 int lens(r(z), 5, 32) over z 150 to 200, the lens the discs' closed-form overlap,
+    /// 25 pi below z0. The lens integral above z0, after z = z0 + s^2 (which makes it
+    /// analytic), by Gauss-Legendre: 20, 40 and 80 nodes agree to every digit printed,
+    /// 3061182.2920648409. (At this size the drafted cone's stored top height, recovered from
+    /// its net, is 200 plus a rounding, though its top row lies in the top's plane.)
+    #[test]
+    fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+        /// 18 degrees less atan 0.3, radians: the turn that leaves the side at 18 degrees.
+        const TURN: f64 = 0.022_702_470_881_112_213;
+        /// The drafted frustum less the six holes (the quadrature above).
+        const DRAFTED: f64 = 3_061_182.292_064_841;
+        /// sqrt 3, the double nearest it (ops computes no geometry, its tests included).
+        const SQRT_3: f64 = 1.732_050_807_568_877_2;
+        all_fixes();
+        let mut b = make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+        let s = SQRT_3;
+        for (x, y) in [
+            (32.0, 0.0),
+            (16.0, 16.0 * s),
+            (-16.0, 16.0 * s),
+            (-32.0, 0.0),
+            (-16.0, -16.0 * s),
+            (16.0, -16.0 * s),
+        ] {
+            let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let side = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[side], [0.0; 3], Z, Z, TURN).unwrap();
+        let got = volume(&b);
+        assert!(rel(got, DRAFTED) < 1e-9, "{got} vs {DRAFTED}");
+        // r(190) = 38.27 and the old side's r(190) = 43: (40 cos 30, 40 sin 30, 190), between
+        // two holes, is cut away; r 30 there stays; the hole's centre line and its outer reach
+        // past the new side near the top are void.
+        for (point, wanted) in [
+            ([20.0 * s, 20.0, 190.0], crate::PointClass::Outside),
+            ([15.0 * s, 15.0, 195.0], crate::PointClass::Inside),
+            ([32.0, 0.0, 170.0], crate::PointClass::Outside),
+            ([36.0, 0.0, 199.5], crate::PointClass::Outside),
+            ([30.0, 0.0, 100.0], crate::PointClass::Inside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops

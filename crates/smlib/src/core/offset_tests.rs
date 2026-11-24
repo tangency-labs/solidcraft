@@ -791,6 +791,32 @@ fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
     }
 }
 
+/// A frustum r 100 at z = 0 to r 40 at z = 200 with six blind holes r 5 from z = 150 up through
+/// the top on the circle r 32, its side drafted about its base to lean 18 degrees, through the
+/// kernel wrapper's draft (the cone solidcore's draft gives, carrying its definition). The drafted
+/// side, r(z) = 100 - z tan 18 degrees, is r 35.02 at the top and passes the holes' outer reach,
+/// r 37, at z = 193.89, so every hole breaks out through it. The kernel's test (solidcore-ops
+/// `offset/tests.rs`, `a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out`)
+/// derives the volume: the frustum less the holes, the discs' closed-form overlap integrated
+/// over z, 3061182.2920648409. Here the side's cone comes back from the hole cuts with its
+/// frame at the top of its axis, so the drafted cone's frame and stored heights differ from it.
+#[test]
+fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+    // 18 degrees less atan 0.3, radians
+    const TURN: f64 = 0.022_702_470_881_112_213;
+    const DRAFTED: f64 = 3_061_182.292_064_841;
+    let z = [0.0, 0.0, 1.0];
+    let s = 3.0_f64.sqrt();
+    let mut body = super::make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+    for (x, y) in [(32.0, 0.0), (16.0, 16.0 * s), (-16.0, 16.0 * s), (-32.0, 0.0), (-16.0, -16.0 * s), (16.0, -16.0 * s)] {
+        let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+        body = super::boolean::boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let drafted = draft(&body, &[[70.0, 0.0, 100.0]], TOL, [0.0; 3], z, z, TURN).unwrap();
+    let got = volume(&drafted, 1e-8).unwrap();
+    assert!(rel(got, DRAFTED) < 1e-8, "{got}");
+}
+
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).
 #[test]
 fn an_l_sheet_thickens() {

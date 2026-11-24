@@ -2269,8 +2269,8 @@ pub fn offset_brep_simple(
 /// with notification identities of its own, as [`offset_brep_simple`]: for a caller that
 /// keeps no notification stores (`SmBrep::LocalOperation` on a B-rep of the caller's).
 /// The B-rep's attributes stay on its faces as upstream's notifications carry them; its
-/// [`Brep::key`] is restored. A complete inward cylindrical draft with fixed axial
-/// end planes uses its exact closed radial removal volume before the executive;
+/// [`Brep::key`] is restored. A complete inward cylindrical or conical draft with fixed
+/// axial end planes uses its exact closed radial removal volume before the executive;
 /// this also trims intervening walls against the drafted support.
 ///
 /// # Errors
@@ -2282,10 +2282,8 @@ pub fn local_operation_simple(
     faces: &[FaceId],
     surfaces: Vec<crate::surface::surface::Surface>,
 ) -> Result<()> {
-    if crate::topology::brep::local_operation::contract_complete_cylinder(
-        kernel, b, faces, &surfaces,
-    )?
-    .is_some()
+    if crate::topology::brep::local_operation::contract_complete_cone(kernel, b, faces, &surfaces)?
+        .is_some()
     {
         return Ok(());
     }
