@@ -233,7 +233,6 @@ pub use params::ParamRow;
 pub use params::ParamUser;
 pub use params::cycles;
 pub use params::name_words_match;
-pub use surface_sketch::{SurfaceChart, SurfaceRef, SurfaceSketch};
 pub use points::Dir;
 pub use points::FacePick;
 pub use points::Position;
@@ -241,6 +240,7 @@ pub use points::plain;
 pub use solidcraft_develop as develop;
 pub use solidcraft_kernel as kernel;
 pub use solidcraft_sketch as sketch;
+pub use surface_sketch::{SurfaceChart, SurfaceRef, SurfaceSketch};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum DocError {

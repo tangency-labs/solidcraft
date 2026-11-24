@@ -25,13 +25,7 @@ impl SurfaceChart {
     /// Whether every number is finite and the tolerance is positive.
     #[must_use]
     pub fn is_valid(&self) -> bool {
-        self.origin
-            .iter()
-            .chain(&self.u_axis)
-            .chain(&self.v_axis)
-            .all(|v| v.is_finite())
-            && self.tolerance.is_finite()
-            && self.tolerance > 0.0
+        self.origin.iter().chain(&self.u_axis).chain(&self.v_axis).all(|v| v.is_finite()) && self.tolerance.is_finite() && self.tolerance > 0.0
     }
 }
 
@@ -90,12 +84,7 @@ mod tests {
     use super::*;
 
     fn chart() -> SurfaceChart {
-        SurfaceChart {
-            origin: [0.3, 1.2],
-            u_axis: [0.6, 0.8],
-            v_axis: [-0.8, 0.6],
-            tolerance: 1e-6,
-        }
+        SurfaceChart { origin: [0.3, 1.2], u_axis: [0.6, 0.8], v_axis: [-0.8, 0.6], tolerance: 1e-6 }
     }
 
     #[test]

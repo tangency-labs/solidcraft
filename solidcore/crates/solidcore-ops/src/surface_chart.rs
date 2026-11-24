@@ -141,9 +141,8 @@ impl<'a> SurfaceChart<'a> {
             if domain.period[k].is_some() {
                 return true;
             }
-            domain.range[k].is_none_or(|(a, b)| {
-                uv[k] >= a - self.tolerance && uv[k] <= b + self.tolerance
-            })
+            domain.range[k]
+                .is_none_or(|(a, b)| uv[k] >= a - self.tolerance && uv[k] <= b + self.tolerance)
         })
     }
 
