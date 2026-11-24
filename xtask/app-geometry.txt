@@ -1500,6 +1500,7 @@ crates/ui-egui/src/viewport.rs:build_shared_tris triangles
 crates/ui-egui/src/viewport.rs:build_sketch_scene cross,dot
 crates/ui-egui/src/viewport.rs:current_face dot
 crates/ui-egui/src/viewport.rs:edge_normals dot
+crates/ui-egui/src/viewport.rs:feature_parts triangles
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot
 crates/ui-egui/src/viewport.rs:keeps_distances dot
