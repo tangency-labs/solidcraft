@@ -862,9 +862,12 @@ pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Result<
 /// [`cone_net_residual`] over the net's parameters whose sweep coordinate is in `window`'s
 /// (`[[u0, u1], [v0, v1]]`, the net's `(u, v)`; the sweep direction's range taken, the
 /// linear direction's whole range kept): the distance from the net to the cone at every
-/// parameter of the net in that box. The whole net where `window` is `None`, or where its
-/// sweep range does not meet the net's in an interval of positive length (a bound over the
-/// whole net holds over any part of it).
+/// parameter of the net in that box. It is taken over the pieces of the whole net's sweep
+/// partition (its knots, the polar knots and the snap windows' cuts) that meet that range, so
+/// a piece is never cut inside a snap window. A piece reaching past that range is halved
+/// toward it (halves outside it dropped), each half's bound capped by the piece's own, so
+/// the bound is at most the whole net's. The whole net where `window` is `None`, or where its sweep range
+/// does not meet the net's (a bound over the whole net holds over any part of it).
 pub(super) fn cone_net_residual_within(
     k: &Kernel,
     cone: &Cone,
@@ -1060,11 +1063,6 @@ fn enclose(
     if !(d0 < d1 && d0.is_finite() && d1.is_finite()) {
         return None;
     }
-    // (#20643: the sweep range of the caller's box, where it meets the net's in an interval)
-    let (d0, d1) = match window.map(|[u, v]| if swap { v } else { u }) {
-        Some([w0, w1]) if w0.max(d0) < w1.min(d1) => (w0.max(d0), w1.min(d1)),
-        _ => (d0, d1),
-    };
     let mut cuts: Vec<f64> = vec![d0, d1];
     cuts.extend(sk.iter().copied());
     cuts.extend(setup.polar.u.iter().copied());
@@ -1075,10 +1073,25 @@ fn enclose(
         .collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
-    let mut stack: Vec<([f64; 2], u32)> = cuts
+    // (#20643: only the whole net's pieces that meet the sweep range of the caller's box, so
+    // each piece is one the whole net's partition has, never one cut inside a snap window)
+    let sweep = window.map(|[u, v]| if swap { v } else { u });
+    if let Some([w0, w1]) = sweep {
+        let first = cuts.iter().rposition(|c| *c <= w0).unwrap_or(0);
+        let last = cuts
+            .iter()
+            .position(|c| *c >= w1)
+            .unwrap_or(cuts.len().saturating_sub(1));
+        if let Some(kept) = cuts.get(first..=last).filter(|kept| kept.len() >= 2) {
+            cuts = kept.to_vec();
+        }
+    }
+    // (each piece with `cap`, the least bound of the pieces it was cut from because they
+    // reach past the window: the distance over the piece's part in the window is under both)
+    let mut stack: Vec<([f64; 2], u32, f64)> = cuts
         .windows(2)
         .filter_map(|w| match w {
-            [a, b] if a < b => Some(([*a, *b], 0)),
+            [a, b] if a < b => Some(([*a, *b], 0, f64::INFINITY)),
             _ => None,
         })
         .collect();
@@ -1087,22 +1100,34 @@ fn enclose(
     if stack.len() >= MAX_PIECES {
         return setup.loose.is_finite().then_some(setup.loose);
     }
+    // a piece meets the window's sweep range (closed), or there is none
+    let meets = |[s0, s1]: [f64; 2]| sweep.is_none_or(|[w0, w1]| s0 <= w1 && w0 <= s1);
+    // a piece reaches past it
+    let reaches_past = |[s0, s1]: [f64; 2]| sweep.is_some_and(|[w0, w1]| s0 < w0 || w1 < s1);
     let mut worst = 0.0_f64;
     let mut pieces = stack.len();
-    while let Some(([s0, s1], depth)) = stack.pop() {
+    while let Some(([s0, s1], depth, cap)) = stack.pop() {
         if k.check_cancelled(OP).is_err() {
             *cancelled = true;
             return None;
         }
         let m = 0.5 * (s0 + s1);
         let can_split = depth < MAX_DEPTH && pieces + 1 < MAX_PIECES && s0 < m && m < s1;
-        match setup.piece([s0, s1], can_split) {
-            Piece::Bound(b) => worst = worst.max(b),
-            Piece::Loose => worst = worst.max(setup.loose),
-            Piece::Split => {
+        let (b, cut_cap) = match setup.piece([s0, s1], can_split) {
+            Piece::Bound(b) if can_split && reaches_past([s0, s1]) => (None, cap.min(b)),
+            Piece::Bound(b) => (Some(b), cap),
+            Piece::Loose => (Some(setup.loose), cap),
+            Piece::Split => (None, cap),
+        };
+        match b {
+            Some(b) => worst = worst.max(b.min(cap)),
+            None => {
                 pieces += 1;
-                stack.push(([s0, m], depth + 1));
-                stack.push(([m, s1], depth + 1));
+                for half in [[s0, m], [m, s1]] {
+                    if meets(half) {
+                        stack.push((half, depth + 1, cut_cap));
+                    }
+                }
             }
         }
     }
@@ -1420,6 +1445,48 @@ mod tests {
         let gap = (p - n).length();
         assert!(gap > 1.0e-8, "the snap tears {gap:e}");
         assert!(gap <= b, "{gap:e} over the bound {b:e}");
+    }
+
+    #[test]
+    fn a_window_edge_at_a_knot_takes_no_more_than_the_whole_net() {
+        // #20643: a window is taken as the whole net's pieces that meet it, so a window edge
+        // just off a knot or a polar end (inside a snap window) is no piece of its own: the
+        // windowed bound is a maximum over a subset of the whole net's pieces, at most the
+        // whole net's (a window cut inside a snap window took the snap's constant: 6 for a
+        // whole-net bound of 1.5e-11 in heal.stitch file_extrusion2).
+        let k = Kernel::default();
+        let mut checked = 0;
+        for (name, s, _, _) in cones(&k) {
+            let crate::surface::surface::SurfaceKind::Cone(c) = s.kind() else {
+                unreachable!()
+            };
+            let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap().net;
+            let whole = super::cone_net_residual(&k, c, &net).unwrap().unwrap();
+            let (u0, u1) = (net.u[net.p], net.u[net.nu]);
+            let (v0, v1) = (net.v[net.q], net.v[net.nv]);
+            let mut edges: Vec<f64> = net.u.iter().chain(net.v.iter()).copied().collect();
+            edges.sort_by(f64::total_cmp);
+            edges.dedup();
+            for &e in &edges {
+                for t in [0.0, 5.0e-13, 3.6e-12] {
+                    for at in [e - t, e + t] {
+                        for w in [
+                            [[at, u1], [v0, v1]],
+                            [[u0, at], [v0, v1]],
+                            [[u0, u1], [at, v1]],
+                            [[u0, u1], [v0, at]],
+                        ] {
+                            let b = super::cone_net_residual_within(&k, c, &net, Some(w))
+                                .unwrap()
+                                .unwrap_or_else(|| panic!("{name} {w:?}: no bound"));
+                            assert!(b <= whole, "{name} {w:?}: {b:e} over the whole {whole:e}");
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000, "{checked}");
     }
 
     /// A net with a NaN control point gives no bound (`f64::max` would drop it from the
