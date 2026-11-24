@@ -64,6 +64,7 @@ mod keep;
 mod law_corner;
 mod no_room;
 mod overflow;
+mod rational;
 mod removal;
 mod rib;
 mod section;
@@ -90,6 +91,9 @@ pub use law_corner::LawCornerSearch;
 pub use no_room::no_room_class;
 pub use overflow::OverflowDrop;
 pub use overflow::OverflowInput;
+pub use rational::NodalArc;
+pub use rational::SectionShape;
+pub use rational::WeightStep;
 pub use removal::removal_class;
 pub use removal::RemovalInput;
 pub use removal::RemovalRefusal;
@@ -373,6 +377,16 @@ pub enum BlendFailure {
         edge: crate::topology::EdgeId,
         /// The curve's kind, as its type string.
         kind: &'static str,
+    },
+    /// The closest-point solve onto the edge curve found no solution for this query
+    /// point ([`ErrorKind::NotFound`]); status `SM_ERR`, not a refusal.
+    CurveProjectionEmpty {
+        /// The query point's x coordinate.
+        x: f64,
+        /// The query point's y coordinate.
+        y: f64,
+        /// The query point's z coordinate.
+        z: f64,
     },
     /// A curve the step needs as a B-spline curve, a curve of edge `edge` (its 3D curve, or
     /// a UV trim curve of one of its uses; `None` where the step names no edge), is of kind `kind` (its type string), which is not of
@@ -769,6 +783,17 @@ pub enum BlendFailure {
     /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER` (upstream
     /// dereferences it).
     NoVertexGiven,
+    /// The nodal quartic has no usable regular arc for the reason named. The reason
+    /// decides the class ([`NodalArc::class`]); status `SM_ERR`, not a phrase cause or
+    /// refusal.
+    NodalArcUnavailable {
+        /// Why the nodal arc is unavailable.
+        reason: NodalArc,
+        /// The tangent cone's discriminant, where computed.
+        discriminant: Option<f64>,
+        /// Candidate arcs examined (zero before the candidate search).
+        candidates: usize,
+    },
     /// A blend surface not certified within its tolerance in the work its certificate is
     /// allowed: the G^n section's certificate would halve spans past its budget
     /// ([`crate::blend::fillet_section::section::GN_HALVING_BUDGET`]), or has more stations
@@ -959,6 +984,28 @@ pub enum BlendFailure {
         /// The rail.
         rail: crate::topology::EdgeId,
     },
+    /// The sampled rational round is farther from its ball or supports than the body's
+    /// tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`, not a refusal.
+    RationalRoundOutOfTolerance {
+        /// The sample's absolute radius error (zero for a chamfer).
+        radius_error: f64,
+        /// The sample's distance from its support (zero away from a rail).
+        support_error: f64,
+        /// The body's tolerance.
+        tolerance: f64,
+    },
+    /// The rational representation cannot be formed at the named weight step
+    /// ([`ErrorKind::Unsupported`]); status `SM_ERR`, not a refusal.
+    RationalWeightsUnavailable {
+        /// The weight construction that stopped.
+        step: WeightStep,
+        /// Required segments, smaller endpoint weight, least coefficient, or weight ratio
+        /// (the minimum weight instead when not positive), according to `step`.
+        observed: f64,
+        /// Segment cap, zero endpoint bound, subdivision depth reached, or ratio cap,
+        /// according to `step`.
+        limit: f64,
+    },
     /// A thing of the body a fillet removal reads lacks the topology link named
     /// ([`RemovalInput`]). The removal reads the caller's body and the topology its own
     /// edits leave alike, so the cause names what is missing and leaves the blame open, as
@@ -1037,6 +1084,19 @@ pub enum BlendFailure {
     /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
     /// `SM_ERR`.
     SectionInputInvalid(SectionInput),
+    /// A plane's section of a natural quadric is not a conic the rational round can use.
+    /// The reason decides the class ([`SectionShape::class`]); status `SM_ERR`, not a
+    /// phrase cause or refusal.
+    SectionNotConic {
+        /// The shape of the unusable section.
+        reason: SectionShape,
+        /// The largest absolute eigenvalue of the plane's quadratic form.
+        quadratic_scale: f64,
+        /// The remaining one-variable quadratic's discriminant, where computed.
+        discriminant: Option<f64>,
+        /// The quadratic's value at its centre, where the section is centred.
+        centered_value: Option<f64>,
+    },
     /// A G^n section's certificate could not prove what it must (a weight or the radius
     /// positive over a box, an enclosure, a bound finite): its
     /// interval enclosures were too wide. Not a fact of the geometry, which a narrower box
@@ -1404,6 +1464,7 @@ impl BlendFailure {
             Self::CrossingInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::CrossingNotFinite => SM_ERR,
             Self::CurveKindNotBuilt { .. } => SM_ERR,
+            Self::CurveProjectionEmpty { .. } => SM_ERR,
             Self::CurveWithoutNet { .. } => SM_ERR,
             Self::Defect { .. } => SM_ERR,
             Self::EaseGeometryNotBSpline(_) => SM_ERR_NULL_POINTER,
@@ -1461,6 +1522,7 @@ impl BlendFailure {
             Self::NoFirstBody => SM_ERR_INVALID_INPUT,
             Self::NoRoom(_) => SM_ERR,
             Self::NoVertexGiven => SM_ERR_NULL_POINTER,
+            Self::NodalArcUnavailable { .. } => SM_ERR,
             Self::NotCertified { .. } => SM_ERR,
             Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -1483,6 +1545,8 @@ impl BlendFailure {
             Self::RailEndNotDropped => SM_ERR,
             Self::RailMissesEndSurface { .. } => SM_ERR,
             Self::RailNotBlending { .. } => SM_ERR,
+            Self::RationalRoundOutOfTolerance { .. } => SM_ERR,
+            Self::RationalWeightsUnavailable { .. } => SM_ERR,
             Self::RemovalInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::RemovalRefused(_) => SM_ERR,
             Self::RemovalStopped(stop) => stop.status(),
@@ -1494,6 +1558,7 @@ impl BlendFailure {
             Self::SeamSurfaceNotClosed => SM_ERR,
             Self::SectionDegenerate(_) => SM_ERR,
             Self::SectionInputInvalid(_) => SM_ERR,
+            Self::SectionNotConic { .. } => SM_ERR,
             Self::SectionNotProved(_) => SM_ERR,
             Self::SectionUnsupported(_) => SM_ERR,
             Self::SequenceCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
@@ -1576,6 +1641,7 @@ impl BlendFailure {
             Self::CrossingInputMissing(_) => ErrorKind::Missing,
             Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::CurveKindNotBuilt { .. } => ErrorKind::Unsupported,
+            Self::CurveProjectionEmpty { .. } => ErrorKind::NotFound,
             Self::CurveWithoutNet { .. } => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
@@ -1633,6 +1699,7 @@ impl BlendFailure {
             Self::NoFirstBody => ErrorKind::InvalidInput,
             Self::NoRoom(reason) => no_room_class(*reason),
             Self::NoVertexGiven => ErrorKind::InvalidInput,
+            Self::NodalArcUnavailable { reason, .. } => reason.class(),
             Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
             Self::NotConverged(_) => ErrorKind::of_status(self.comparison_status()),
             Self::NotWithinTolerance(_) => ErrorKind::of_status(self.comparison_status()),
@@ -1655,6 +1722,8 @@ impl BlendFailure {
             Self::RailEndNotDropped => ErrorKind::Failed,
             Self::RailMissesEndSurface { .. } => ErrorKind::NotFound,
             Self::RailNotBlending { .. } => ErrorKind::InvalidInput,
+            Self::RationalRoundOutOfTolerance { .. } => ErrorKind::NotWithinTolerance,
+            Self::RationalWeightsUnavailable { .. } => ErrorKind::Unsupported,
             Self::RemovalInputMissing(_) => ErrorKind::Missing,
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::RemovalStopped(stop) => stop.class(),
@@ -1666,6 +1735,7 @@ impl BlendFailure {
             Self::SeamSurfaceNotClosed => ErrorKind::InvalidInput,
             Self::SectionDegenerate(_) => ErrorKind::Degenerate,
             Self::SectionInputInvalid(_) => ErrorKind::InvalidInput,
+            Self::SectionNotConic { reason, .. } => reason.class(),
             Self::SectionNotProved(_) => ErrorKind::NotWithinTolerance,
             Self::SectionUnsupported(_) => ErrorKind::Unsupported,
             Self::SequenceCurveNotBSpline { .. } => ErrorKind::Unsupported,
@@ -1761,6 +1831,7 @@ impl BlendFailure {
             Self::CrossingInputMissing(_) => true,
             Self::CrossingNotFinite => true,
             Self::CurveKindNotBuilt { .. } => true,
+            Self::CurveProjectionEmpty { .. } => true,
             Self::CurveWithoutNet { .. } => true,
             Self::Defect { .. } => true,
             Self::EaseGeometryNotBSpline(_) => true,
@@ -1818,6 +1889,7 @@ impl BlendFailure {
             Self::NoFirstBody => true,
             Self::NoRoom(_) => true,
             Self::NoVertexGiven => true,
+            Self::NodalArcUnavailable { .. } => true,
             Self::NotCertified { .. } => true,
             Self::NotConverged(_) => true,
             Self::NotWithinTolerance(_) => true,
@@ -1840,6 +1912,8 @@ impl BlendFailure {
             Self::RailEndNotDropped => true,
             Self::RailMissesEndSurface { .. } => true,
             Self::RailNotBlending { .. } => true,
+            Self::RationalRoundOutOfTolerance { .. } => true,
+            Self::RationalWeightsUnavailable { .. } => true,
             Self::RemovalInputMissing(_) => true,
             Self::RemovalRefused(_) => true,
             Self::RemovalStopped(_) => true,
@@ -1851,6 +1925,7 @@ impl BlendFailure {
             Self::SeamSurfaceNotClosed => true,
             Self::SectionDegenerate(_) => true,
             Self::SectionInputInvalid(_) => true,
+            Self::SectionNotConic { .. } => true,
             Self::SectionNotProved(_) => true,
             Self::SectionUnsupported(_) => true,
             Self::SequenceCurveNotBSpline { .. } => true,
@@ -2043,6 +2118,10 @@ impl core::fmt::Display for BlendFailure {
                 f,
                 "{}: the tangent seam {edge:?}'s curve is a {kind}, which is not of a B-spline class: no cap edge is copied from it",
                 self.class()
+            ),
+            Self::CurveProjectionEmpty { x, y, z } => write!(
+                f,
+                "the edge curve has no closest-point solution for ({x}, {y}, {z})"
             ),
             Self::CurveWithoutNet { edge, kind } => {
                 write!(f, "{}: the curve", self.class())?;
@@ -2289,6 +2368,14 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::NoRoom(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::NoVertexGiven => write!(f, "{}: no vertex given", self.class()),
+            Self::NodalArcUnavailable {
+                reason,
+                discriminant,
+                candidates,
+            } => write!(
+                f,
+                "the nodal quartic has no usable arc: {reason:?} (discriminant {discriminant:?}, {candidates} candidates examined)"
+            ),
             Self::NotCertified { halvings, stations } => write!(
                 f,
                 "the blend could not be certified within its tolerance in the work allowed \
@@ -2399,6 +2486,22 @@ impl core::fmt::Display for BlendFailure {
                 self.class(),
                 rail.index()
             ),
+            Self::RationalRoundOutOfTolerance {
+                radius_error,
+                support_error,
+                tolerance,
+            } => write!(
+                f,
+                "the rational round misses its definition: radius error {radius_error}, support error {support_error}, tolerance {tolerance}"
+            ),
+            Self::RationalWeightsUnavailable {
+                step,
+                observed,
+                limit,
+            } => write!(
+                f,
+                "the rational weights cannot be formed at {step:?}: observed {observed}, limit {limit}"
+            ),
             Self::RemovalInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
             Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::RemovalStopped(stop) => write!(f, "{}: {}", self.class(), stop.what()),
@@ -2440,6 +2543,15 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::SectionDegenerate(what) => write!(f, "{}: {}", self.class(), what.what()),
             Self::SectionInputInvalid(what) => write!(f, "{}: {}", self.class(), what.what()),
+            Self::SectionNotConic {
+                reason,
+                quadratic_scale,
+                discriminant,
+                centered_value,
+            } => write!(
+                f,
+                "the plane's quadric section is not a usable conic: {reason:?} (quadratic scale {quadratic_scale}, discriminant {discriminant:?}, centred value {centered_value:?})"
+            ),
             Self::SectionNotProved(what) => write!(
                 f,
                 "{}: the section's certificate did not prove {}",
@@ -3165,6 +3277,102 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "blend::op: the quadric read off the support surface does not match it: distance 0.25 (tolerance 0.01), normal dot 0.9 (minimum 0.99)"
+        );
+    }
+
+    fn assert_rational_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
+        assert_eq!(cause.class(), class);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), class);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.to_string(), format!("blend::op: {message}"));
+    }
+
+    #[test]
+    fn unusable_quadric_sections_name_the_shape_and_measurements() {
+        for (reason, quadratic_scale, discriminant, centered_value, class, message) in [
+            (SectionShape::NoQuadraticForm, 0.0, None, None, ErrorKind::Unsupported,
+             "the plane's quadric section is not a usable conic: NoQuadraticForm (quadratic scale 0, discriminant None, centred value None)"),
+            (SectionShape::Empty, 1.0, Some(-336.0), None, ErrorKind::NotFound,
+             "the plane's quadric section is not a usable conic: Empty (quadratic scale 1, discriminant Some(-336.0), centred value None)"),
+            (SectionShape::Lines, 1.0, Some(64.0), None, ErrorKind::Degenerate,
+             "the plane's quadric section is not a usable conic: Lines (quadratic scale 1, discriminant Some(64.0), centred value None)"),
+            (SectionShape::Point, 1.0, None, Some(0.0), ErrorKind::Degenerate,
+             "the plane's quadric section is not a usable conic: Point (quadratic scale 1, discriminant None, centred value Some(0.0))"),
+        ] {
+            assert_rational_cause(
+                BlendFailure::SectionNotConic {
+                    reason,
+                    quadratic_scale,
+                    discriminant,
+                    centered_value,
+                },
+                class,
+                message,
+            );
+        }
+    }
+
+    #[test]
+    fn unavailable_nodal_arcs_name_the_reason_discriminant_and_candidates() {
+        for (reason, discriminant, candidates, class, message) in [
+            (NodalArc::IsolatedNode, Some(-4.0), 0, ErrorKind::Degenerate,
+             "the nodal quartic has no usable arc: IsolatedNode (discriminant Some(-4.0), 0 candidates examined)"),
+            (NodalArc::HigherOrderContact, Some(0.0), 0, ErrorKind::Degenerate,
+             "the nodal quartic has no usable arc: HigherOrderContact (discriminant Some(0.0), 0 candidates examined)"),
+            (NodalArc::BothEndsAtNode, None, 0, ErrorKind::Degenerate,
+             "the nodal quartic has no usable arc: BothEndsAtNode (discriminant None, 0 candidates examined)"),
+            (NodalArc::NoFiniteRegularArc, None, 4, ErrorKind::NotFound,
+             "the nodal quartic has no usable arc: NoFiniteRegularArc (discriminant None, 4 candidates examined)"),
+        ] {
+            assert_rational_cause(
+                BlendFailure::NodalArcUnavailable { reason, discriminant, candidates },
+                class,
+                message,
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_curve_projection_names_its_query_point() {
+        assert_rational_cause(
+            BlendFailure::CurveProjectionEmpty {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            ErrorKind::NotFound,
+            "the edge curve has no closest-point solution for (1, 2, 3)",
+        );
+    }
+
+    #[test]
+    fn unavailable_rational_weights_are_unsupported_at_every_step() {
+        for (step, observed, limit, message) in [
+            (
+                WeightStep::SegmentPartition,
+                200000.0,
+                100000.0,
+                "the rational weights cannot be formed at SegmentPartition: observed 200000, limit 100000",
+            ),
+            (WeightStep::EndpointWeights, -0.5, 0.0, "the rational weights cannot be formed at EndpointWeights: observed -0.5, limit 0"),
+            (WeightStep::PositiveWeights, -0.25, 6.0, "the rational weights cannot be formed at PositiveWeights: observed -0.25, limit 6"),
+            (WeightStep::WeightRange, 20000.0, 10000.0, "the rational weights cannot be formed at WeightRange: observed 20000, limit 10000"),
+        ] {
+            assert_rational_cause(BlendFailure::RationalWeightsUnavailable { step, observed, limit }, ErrorKind::Unsupported, message);
+        }
+    }
+
+    #[test]
+    fn a_rational_round_out_of_tolerance_names_both_errors_and_the_tolerance() {
+        assert_rational_cause(
+            BlendFailure::RationalRoundOutOfTolerance { radius_error: 0.25, support_error: 0.125, tolerance: 0.01 },
+            ErrorKind::NotWithinTolerance,
+            "the rational round misses its definition: radius error 0.25, support error 0.125, tolerance 0.01",
         );
     }
 
@@ -5327,6 +5535,7 @@ mod tests {
             ("blend/law_corner.rs", include_str!("blend/law_corner.rs")),
             ("blend/no_room.rs", include_str!("blend/no_room.rs")),
             ("blend/overflow.rs", include_str!("blend/overflow.rs")),
+            ("blend/rational.rs", include_str!("blend/rational.rs")),
             ("blend/removal.rs", include_str!("blend/removal.rs")),
             ("blend/rib.rs", include_str!("blend/rib.rs")),
             ("blend/section.rs", include_str!("blend/section.rs")),
