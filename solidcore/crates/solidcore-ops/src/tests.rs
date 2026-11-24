@@ -1276,7 +1276,7 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
             tolerance: 1e-6,
             uses: vec![EdgeUseRef {
                 face: 0,
-                r#loop: top as u32,
+                r#loop: u32::from(top),
                 position: if top { i - 4 } else { i } as u32,
                 upper: top,
             }],
