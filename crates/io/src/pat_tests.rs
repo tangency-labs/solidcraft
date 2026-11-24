@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use crate::{IoError, PatImportOptions, PatUnits, read_pat};
-use solidcore_ops::hatch::{self, Mark};
+use solidcraft_kernel::services::hatch::{self, Mark};
 use solidcore_record::hatch::{Family, Pattern};
 use solidcore_record::{Loop2, Region2, Vec2};
 use solidcraft_geom::prelude::*;

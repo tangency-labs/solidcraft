@@ -6,7 +6,7 @@
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use solidcore_ops::curve::CubicStanding;
+use solidcraft_kernel::services::curve::CubicStanding;
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
@@ -256,7 +256,7 @@ impl Out {
         // is that line; one the kernel's curve check refuses is split exactly into pieces it keeps
         // (lines where a piece lies within the zone tolerance of its chord). Only a cubic that no
         // such split serves stays as drawn, with a warning naming it (#16190).
-        let pieces = match solidcore_ops::curve::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
+        let pieces = match solidcraft_kernel::services::curve::cubic_pieces(p.map(|q| [q.x, q.y, 0.0])) {
             Ok(pieces) => pieces,
             Err(e) => {
                 let number = self.g.len() + 1;
