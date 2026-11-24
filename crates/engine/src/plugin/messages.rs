@@ -8,10 +8,11 @@ use craft_plugin::HostError;
 pub const MESSAGES: &[(&str, &str)] = &[
     ("plugin_error.design_too_large", "the design it made is larger than {allowed} MiB, the most a plugin can hand over."),
     ("plugin_error.failed", "{plugin}: {reason}"),
+    ("plugin_error.failed_export", "{plugin} could not export {file}: {reason}"),
     ("plugin_error.failed_file", "{plugin} could not open {file}: {reason}"),
     (
         "plugin_error.fuel_ceiling",
-        "it asks for {requested} fuel, and plugins may use {allowed}. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
+        "it asks for {requested} fuel, and plugins may use {allowed}. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
     ),
     (
         "plugin_error.memory_ceiling",
@@ -24,6 +25,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ),
     ("plugin_error.out_of_stack", "it ran out of its {allowed} KiB stack and was stopped. Ask its author to raise its stack size."),
     ("plugin_error.out_of_time", "it ran longer than its time limit of {seconds} s and was stopped. Ask its author to raise its time limit."),
+    (
+        "plugin_error.stale_revision",
+        "the design changed since this edit was calculated (expected {expected}; current {actual}). Run the calculation again.",
+    ),
     ("plugin_error.trap", "it stopped on an error inside the plugin ({reason}). Report this to its author."),
     ("plugin_error.unsupported", "{plugin} does not support this: {reason}"),
     ("plugin_error.unsupported_file", "{plugin} does not support {file}: {reason}"),
@@ -36,6 +41,8 @@ pub struct PluginFailure {
     pub plugin: String,
     /// The file's name, without its folder.
     pub file: Option<String>,
+    /// The file is being exported, rather than opened.
+    pub exporting: bool,
     pub error: HostError,
 }
 
@@ -46,7 +53,34 @@ fn say(id: &str, args: &[(&str, &str)]) -> String {
         return text;
     }
     let english = MESSAGES.iter().find(|(known, _)| *known == id).map_or(id, |(_, english)| english);
-    args.iter().fold(english.to_string(), |text, (name, value)| text.replace(&format!("{{{name}}}"), value))
+    fill(english, args)
+}
+
+/// Fills the `{name}` placeholders in `template` in one pass, so the text put in for one (a file
+/// named `part{reason}.smp`) is never read as another.
+fn fill(template: &str, args: &[(&str, &str)]) -> String {
+    let mut text = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let (before, after) = rest.split_at(open);
+        text.push_str(before);
+        let filled = after.find('}').and_then(|close| {
+            let name = after.get(1..close)?;
+            args.iter().find(|(known, _)| *known == name).map(|(_, value)| (*value, close))
+        });
+        match filled {
+            Some((value, close)) => {
+                text.push_str(value);
+                rest = after.get(close + 1..).unwrap_or_default();
+            }
+            None => {
+                text.push('{');
+                rest = after.get(1..).unwrap_or_default();
+            }
+        }
+    }
+    text.push_str(rest);
+    text
 }
 
 /// Seconds, as a person reads them: 300, or 0.05.
@@ -59,6 +93,10 @@ impl PluginFailure {
     fn reason(&self) -> String {
         let number = |n: u64| n.to_string();
         match &self.error {
+            HostError::StaleRevision { expected, actual } => {
+                let token = |token: &craft_plugin::DesignToken| format!("{}@{}", token.document_id, token.revision);
+                say("plugin_error.stale_revision", &[("expected", &token(expected)), ("actual", &token(actual))])
+            }
             HostError::OverCeiling { limit, requested, allowed } if limit == "memory_mib" => {
                 say("plugin_error.memory_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
             }
@@ -86,7 +124,10 @@ impl PluginFailure {
         let unsupported = matches!(self.error, HostError::Unsupported { .. });
         match (&self.file, unsupported) {
             (Some(file), true) => say("plugin_error.unsupported_file", &[("plugin", &self.plugin), ("file", file), ("reason", &reason)]),
-            (Some(file), false) => say("plugin_error.failed_file", &[("plugin", &self.plugin), ("file", file), ("reason", &reason)]),
+            (Some(file), false) => say(
+                if self.exporting { "plugin_error.failed_export" } else { "plugin_error.failed_file" },
+                &[("plugin", &self.plugin), ("file", file), ("reason", &reason)],
+            ),
             (None, true) => say("plugin_error.unsupported", &[("plugin", &self.plugin), ("reason", &reason)]),
             (None, false) => say("plugin_error.failed", &[("plugin", &self.plugin), ("reason", &reason)]),
         }
@@ -96,15 +137,28 @@ impl PluginFailure {
 /// Names `plugin` (and `file`) in a failure of its run. A cancel is not the plugin's failure, and
 /// an error that is not the plugin's (a design that failed to rebuild) is kept as it is.
 pub(crate) fn named(plugin: &str, file: Option<&str>) -> impl Fn(crate::EngineError) -> crate::EngineError {
+    named_for(plugin, file, false)
+}
+
+/// Names the plugin and output file using the same error reasons as an import.
+pub(crate) fn named_export(plugin: &str, file: &str) -> impl Fn(crate::EngineError) -> crate::EngineError {
+    named_for(plugin, Some(file), true)
+}
+
+fn named_for(plugin: &str, file: Option<&str>, exporting: bool) -> impl Fn(crate::EngineError) -> crate::EngineError {
     move |error| match error {
         crate::EngineError::Plugin(HostError::Cancelled) => crate::EngineError::Plugin(HostError::Cancelled),
         crate::EngineError::Plugin(error) => {
-            crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), error }))
+            crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), exporting, error }))
         }
-        crate::EngineError::Other(text) => {
+        e @ (crate::EngineError::Other(_) | crate::EngineError::Feature(_)) => {
+            let text = e.to_string();
             let text = text.strip_prefix("plugin: ").unwrap_or(&text);
             match file {
-                Some(file) => crate::EngineError::Other(say("plugin_error.failed_file", &[("plugin", plugin), ("file", file), ("reason", text)])),
+                Some(file) => crate::EngineError::Other(say(
+                    if exporting { "plugin_error.failed_export" } else { "plugin_error.failed_file" },
+                    &[("plugin", plugin), ("file", file), ("reason", text)],
+                )),
                 None => crate::EngineError::Other(say("plugin_error.failed", &[("plugin", plugin), ("reason", text)])),
             }
         }

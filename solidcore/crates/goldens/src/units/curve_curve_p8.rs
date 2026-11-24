@@ -954,7 +954,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore::curve::curve::p8::curves_stay_within;
+    use solidcore::curve::curve::p8::{curves_meet_at_most_once, curves_stay_within};
 
     #[test]
     fn coincidence_splits_stop_at_the_call_bound() {
@@ -976,6 +976,27 @@ mod tests {
         assert_eq!(out.ints["status"], vec![1007], "{out:?}");
     }
 
+    /// The #527 case: before WR-647 the answer here was a point at t 3.372 and two ranges
+    /// within the tolerance (0.5), the head [5.4153, 6.1104] and the tail [6.1104, 6.3447],
+    /// meeting at t 6.1104 (the head's end 7.4e-15 apart); the faulty range end check
+    /// collapsed the tail onto its start and discarded it. The tail is half of a
+    /// transversal crossing: the line `c1` crosses the quadratic `c2` there, once, at
+    /// 27.7 degrees, and the answer is the first point, unchanged, and that crossing (the
+    /// junction of the two ranges). The certificate, closed form on `c2`'s span [a, 1]
+    /// (a = 0.062) holding the whole base stretch u in [0.2950, 0.5053], where `c2` is the
+    /// quadratic polynomial `A0 + A1 u + A2 u^2`: the separation across the line,
+    /// `s(u) = |v|^2 (c2(u) - p) - ((c2(u) - p) . v) v`, is the quadratic `a0 + b u + c u^2`
+    /// and `s(u) - s(u0) = (u - u0) (b + c (u + u0))`, so the distance from the line,
+    /// `dist(c2(u), line) = |s(u)| / |v|^2`, is at least `m |u - u0| - dist(c2(u0), line)`
+    /// with `m = min |b + c (u + u0)| / |v|^2` over the stretch, the least of a convex
+    /// quadratic's square root (exact value 2.9413). With `m >= 2.9` and the curves
+    /// meeting at u0 (within 1e-14), they meet nowhere else in
+    /// the stretch and part linearly from u0: no part of it is a coincidence. The margins
+    /// (0.04 on m, against relative roundings near 1e-15 of quantities of order 10) cover
+    /// the f64 evaluation. Base's range ends are not where the gap reaches the tolerance
+    /// either (gaps 0.408 and 0.332 there; the band is u in [0.2244, 0.5359]): they are
+    /// subdivision cuts. The end check stays covered by the `issue_527_refine_cc_range_end`
+    /// tests in `curve/curve/p1.rs`.
     #[test]
     fn range_end_refinement_keeps_the_noncollapsed_tail() {
         let fixtures: Value = serde_json::from_str(include_str!(
@@ -991,28 +1012,251 @@ mod tests {
         let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
         let out = rust(&op).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
-        let values = &out.values["out"];
-        assert_eq!(values[0], 3.0);
-        let tail = &values[20..];
-        assert_eq!(tail.len(), 11);
-        assert_eq!(tail[0], f64::from(SolutionType::RangeOfValues as i32));
-        assert!(tail[9] - tail[6] > 0.2);
-        assert!(tail[10] - tail[7] > 0.07);
+        let sols = solutions(&out.values["out"]);
+        assert_eq!(sols.len(), 2, "{sols:?}");
+        let point = f64::from(SolutionType::SingleValue as i32);
+        assert!(sols.iter().all(|s| s.0 == point && s.3.is_none()), "{sols:?}");
         let OpIn::Gci { c1, c2, tol, .. } = &op;
         let a = build(c1).unwrap();
         let b = build(c2.as_ref().unwrap()).unwrap();
         let k = Kernel::default();
-        // This tail is a legitimate approximate range at the requested tolerance.
-        // The faulty end check collapsed it onto its start and discarded it.
-        for i in 0..=10 {
-            let fraction = f64::from(i) / 10.0;
-            let t = tail[6] + fraction * (tail[9] - tail[6]);
-            let u = tail[7] + fraction * (tail[10] - tail[7]);
-            let deviation = a
-                .evaluate_point(&k, t)
+        let gap = |[t, u]: [f64; 2]| {
+            a.evaluate_point(&k, t)
                 .unwrap()
-                .distance(b.evaluate_point(&k, u).unwrap());
-            assert!(deviation <= *tol, "{deviation}");
+                .distance(b.evaluate_point(&k, u).unwrap())
+        };
+        // the first point, as before (base: t 3.372, gap 0.343)
+        let first = sols[0].2;
+        assert!((first[0] - FIRST_POINT[0]).abs() <= 1e-12, "{first:?}");
+        assert!((first[1] - FIRST_POINT[1]).abs() <= 1e-12, "{first:?}");
+        assert!((gap(first) - 0.3425015021152742).abs() <= 1e-12 && gap(first) <= *tol, "{}", gap(first));
+        // the crossing: the junction of base's two ranges
+        let cross = sols[1].2;
+        assert!((cross[0] - 6.11037890900769).abs() < 1e-9, "{cross:?}");
+        assert!((cross[1] - 0.4336618890164721).abs() < 1e-9, "{cross:?}");
+        assert!(gap(cross) <= 1e-14, "{}", gap(cross));
+
+        // the certificate (closed form, the fixture's numbers): c1 = p + t v, c2 on its
+        // span [a, 1] the Bezier B0 = (1 - a) P1 + a P2, B1 = P2, B2 = P3
+        let p = [6.098857644963928, -2.2980844387684263, 5.994654986536718];
+        let v = [0.7192049634037998, 0.7518257905395851, 0.8058093976362284];
+        let ctrl = [
+            [7.923012416432937, 0.44146585656140136, 12.257578300686282],
+            [9.496220911906097, 1.741463844073742, 9.711941328323071],
+            [15.832019357361077, 7.542626411219543, 15.004192756697275],
+            [10.176474275753549, 1.967128180209896, 16.807617331155946],
+        ];
+        let knot = 0.061999436959862465;
+        // the fixture is these numbers: c1 runs along the line p + s v, c2 is the Bezier
+        // on [a, 1]
+        let xyz = |q: Vec3| [q.x, q.y, q.z];
+        let dot = |x: [f64; 3], y: [f64; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+        let vv = dot(v, v);
+        let across = |w: [f64; 3]| {
+            let t = dot(w, v);
+            [0, 1, 2].map(|i| vv * w[i] - t * v[i])
+        };
+        for t in [first[0], cross[0]] {
+            let q = xyz(a.evaluate_point(&k, t).unwrap());
+            let off = across([0, 1, 2].map(|i| q[i] - p[i]));
+            assert!(dot(off, off).sqrt() / vv <= 1e-12, "{t}: {off:?}");
+        }
+        let b0: [f64; 3] = [0, 1, 2].map(|i| (1.0 - knot) * ctrl[1][i] + knot * ctrl[2][i]);
+        let mid = |x: f64| {
+            let s = (x - knot) / (1.0 - knot);
+            [0, 1, 2].map(|i| {
+                (1.0 - s) * (1.0 - s) * b0[i]
+                    + 2.0 * s * (1.0 - s) * ctrl[2][i]
+                    + s * s * ctrl[3][i]
+            })
+        };
+        for u in [knot, 0.2949661473355207, cross[1], 0.5053108900962493, 1.0] {
+            let (q, want) = (xyz(b.evaluate_point(&k, u).unwrap()), mid(u));
+            for i in 0..3 {
+                assert!((q[i] - want[i]).abs() <= 1e-12 * (1.0 + want[i].abs()), "{u}: {q:?}");
+            }
+        }
+        let d = 1.0 - knot;
+        let (c1v, c2v) = (
+            [0, 1, 2].map(|i| 2.0 * (ctrl[2][i] - b0[i])),
+            [0, 1, 2].map(|i| b0[i] - 2.0 * ctrl[2][i] + ctrl[3][i]),
+        );
+        let a2 = [0, 1, 2].map(|i| c2v[i] / (d * d));
+        let a1 = [0, 1, 2].map(|i| c1v[i] / d - 2.0 * knot * c2v[i] / (d * d));
+        let (bq, cq) = (across(a1), across(a2));
+        let u0 = cross[1];
+        // m^2 |v|^4 = min over the stretch of |h + c u|^2, h = b + c u0, a convex quadratic
+        let h = [0, 1, 2].map(|i| bq[i] + cq[i] * u0);
+        let (q2, q1, q0) = (dot(cq, cq), 2.0 * dot(h, cq), dot(h, h));
+        let (lo, hi) = (0.2949661473355207, 0.5053108900962493);
+        let vertex = -q1 / (2.0 * q2);
+        let mut least = f64::INFINITY;
+        for x in [lo, hi, vertex] {
+            if (lo..=hi).contains(&x) {
+                least = least.min(q0 + q1 * x + q2 * x * x);
+            }
+        }
+        let m = least.sqrt() / vv;
+        assert!((2.9..=2.95).contains(&m), "linear parting bound {m}");
+        // and they meet at u0: c2(u0), closed form, within 1e-14 of the line
+        let at = mid(u0);
+        let off = across([0, 1, 2].map(|i| at[i] - p[i]));
+        let meet = dot(off, off).sqrt() / vv;
+        assert!(meet <= 1e-14, "{meet:e}");
+        // the base stretch lies in the polynomial span [a, 1]
+        assert!(knot < lo && hi < 1.0);
+
+        // base's range ends are subdivision cuts, not where the curves part to the
+        // tolerance: the band where c2 is within `tol` of the line is u in [0.2244, 0.5359]
+        // and holds both ends strictly inside. Over each of 128 pieces of [0.2245, 0.5358],
+        // the separation across the line is the quadratic Bezier `S0, S1, S2` (the blossom
+        // of `c2` at the piece's ends, mapped by the linear `across`), so its square length
+        // is the quartic with Bernstein coefficients `S0.S0, S0.S1, (S0.S2 + 2 S1.S1) / 3,
+        // S1.S2, S2.S2`, at most their greatest: all below `(tol |v|²)²` with a relative
+        // margin of 1e-6 (roundings near 1e-15 of quantities of order 10). Just outside
+        // the band, at 0.2243 and 0.5360, the curves are farther than `tol` apart.
+        let blossom = |x: f64, y: f64| {
+            let (s, r) = ((x - knot) / d, (y - knot) / d);
+            [0, 1, 2].map(|i| {
+                (1.0 - s) * (1.0 - r) * b0[i]
+                    + ((1.0 - s) * r + s * (1.0 - r)) * ctrl[2][i]
+                    + s * r * ctrl[3][i]
+            })
+        };
+        let rel = |q: [f64; 3]| across([0, 1, 2].map(|i| q[i] - p[i]));
+        let limit = (*tol * vv) * (*tol * vv);
+        let (band_lo, band_hi) = (0.2245, 0.5358);
+        let pieces = 128;
+        for j in 0..pieces {
+            let x = band_lo + (band_hi - band_lo) * f64::from(j) / f64::from(pieces);
+            let y = band_lo + (band_hi - band_lo) * f64::from(j + 1) / f64::from(pieces);
+            let (s0, s1, s2) = (rel(blossom(x, x)), rel(blossom(x, y)), rel(blossom(y, y)));
+            let coef = [
+                dot(s0, s0),
+                dot(s0, s1),
+                (dot(s0, s2) + 2.0 * dot(s1, s1)) / 3.0,
+                dot(s1, s2),
+                dot(s2, s2),
+            ];
+            let most = coef.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            assert!(most <= limit * (1.0 - 1e-6), "piece [{x}, {y}]: {most} against {limit}");
+        }
+        let line_gap = |u: f64| {
+            let q = rel(mid(u));
+            dot(q, q).sqrt() / vv
+        };
+        for u in [0.2243, 0.5360] {
+            assert!(line_gap(u) > *tol, "{u}: {}", line_gap(u));
+        }
+        assert!(band_lo < lo && hi < band_hi);
+        // and the ends themselves are well inside the tolerance (0.408 and 0.332)
+        assert!((line_gap(lo) - 0.408).abs() < 1e-3 && (line_gap(hi) - 0.332).abs() < 1e-3);
+    }
+
+    /// The first point of `range_end_preserves_noncollapsed_tail`: main's `rust()` output
+    /// at bcfb4b98e, bit for bit (its gap 0.3425015021152742).
+    const FIRST_POINT: [f64; 2] = [3.3718978624497415, 0.043587963803108414];
+
+    /// WR-647 (#18392): the rows that moved from a coincidence range (or two that meet)
+    /// to one point. Each entry is the base stretch's two outer ends `(t, u)` and a bound
+    /// on the new point's gap. For each row: the curves' separations at the two base ends
+    /// point to opposite sides of the first curve's tangent (they pass each other inside
+    /// the stretch), the library's certificate holds that they meet at most once over it
+    /// (`curves_meet_at_most_once`: their derivative cones part, over the stretch or
+    /// over the pieces left near the meeting), the answer has exactly one point inside
+    /// the base stretch and no range there, the curves evaluated at that point are within
+    /// the bound, nearer than at either base end, and no nearer anywhere on a small
+    /// stencil round it (a local least distance). The base ends are main's `rust()`
+    /// output at bf685d1b3; they only locate the stretch. gen1319 (a stretch 3e-5 long
+    /// whose curves stay within 1e-7 of each other at tolerance 1e-6) is not here: no
+    /// certificate holds over it, so it keeps base's range.
+    const MOVED_TO_A_CROSSING: &[(&str, [[f64; 2]; 2], f64)] = &[
+        ("gen0288", [[0.5889163102251564, 0.3125], [0.5971703850480781, 0.34375]], 7.2e-9),
+        (
+            "gen0940",
+            [[1.2005275935429998, 2.843463402260655], [1.201446010152373, 2.8694399443792538]],
+            9.3e-10,
+        ),
+        (
+            "gen1137",
+            [[-3.9949193356312236, 0.7461964362806278], [-3.9597630856312236, 0.765625]],
+            9.1e-11,
+        ),
+        (
+            "gen2141",
+            [[0.45762273379679974, 0.46875], [0.47290908128538817, 0.484375]],
+            5.7236e-4,
+        ),
+        (
+            "gen2160",
+            [[5.415269021279051, 0.2949661473355207], [6.344696713196761, 0.5053108900962493]],
+            4e-15,
+        ),
+        (
+            "gen2904",
+            [[0.47615857544818196, -1.079724867827329], [0.859375, 0.2142854442943709]],
+            7.1e-16,
+        ),
+    ];
+
+    #[test]
+    fn moved_contacts_lie_in_their_base_ranges() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = Kernel::default();
+        for &(name, base, bound) in MOVED_TO_A_CROSSING {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: OpIn = case.parse().unwrap();
+            let OpIn::Gci { c1, c2, .. } = &op;
+            let a = build(c1).unwrap();
+            let b = build(c2.as_ref().unwrap()).unwrap();
+            let at = |[t, u]: [f64; 2]| {
+                (
+                    a.evaluate_point(&k, t).unwrap(),
+                    b.evaluate_point(&k, u).unwrap(),
+                )
+            };
+            let gap = |p: [f64; 2]| {
+                let (x, y) = at(p);
+                x.distance(y)
+            };
+            let across = |p: [f64; 2]| {
+                let (x, y) = at(p);
+                let tangent = a.evaluate(&k, p[0], 1, false, true).unwrap()[1];
+                let unit = tangent * (1.0 / tangent.length());
+                let s = y - x;
+                s - unit * s.dot(unit)
+            };
+            assert!(across(base[0]).dot(across(base[1])) < 0.0, "{name}");
+            let out = rust(&op).unwrap();
+            assert_eq!(out.ints["status"], vec![0], "{name}");
+            let lo = [base[0][0].min(base[1][0]), base[0][1].min(base[1][1])];
+            let hi = [base[0][0].max(base[1][0]), base[0][1].max(base[1][1])];
+            let within = |p: [f64; 2]| (0..2).all(|i| lo[i] <= p[i] && p[i] <= hi[i]);
+            // the certificate that the curves meet at most once over the stretch
+            assert!(
+                curves_meet_at_most_once(&k, &a, (lo[0], hi[0]), &b, (lo[1], hi[1])),
+                "{name}: no certificate"
+            );
+            let sols = solutions(&out.values["out"]);
+            let inside: Vec<_> = sols.iter().filter(|s| within(s.2)).collect();
+            assert_eq!(inside.len(), 1, "{name}: {sols:?}");
+            assert!(inside[0].3.is_none(), "{name}: {sols:?}");
+            let p = inside[0].2;
+            let g = gap(p);
+            assert!(g <= bound, "{name}: {g:e}");
+            assert!(g < gap(base[0]) && g < gap(base[1]), "{name}");
+            for (dt, du) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                let h = 1e-7;
+                let q = [
+                    p[0] + dt * h * (hi[0] - lo[0]),
+                    p[1] + du * h * (hi[1] - lo[1]),
+                ];
+                assert!(gap(q) >= g, "{name}: {q:?} {:e} < {g:e}", gap(q));
+            }
         }
     }
 

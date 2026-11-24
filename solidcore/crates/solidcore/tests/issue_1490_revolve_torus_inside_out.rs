@@ -48,10 +48,9 @@ fn flags(t: &Torus) -> (bool, bool) {
 
 #[test]
 fn issue_1490_inside_out_torus_keeps_its_flag() {
-    let mut k = Kernel::default();
-    // as the rig runs: the recognised torus keeps the tested NURB (SetFromGwNurb,
-    // whose rebuild sets the flag)
-    k.fixes.found_torus_sphere_keep_tested_nurb = true;
+    let k = Kernel::default();
+    // the recognised torus keeps the tested NURB (SetFromGwNurb, whose rebuild sets
+    // the flag)
     let mut t = Torus::new(
         &k,
         Point3::new(0.0, 0.0, 0.0),

@@ -7,13 +7,15 @@
 //!   title block. Strokes are flattened within a fifth of a pixel and stroked at their paper width
 //!   (never under a pixel); fills, and text as its glyphs' outlines, are triangulated, a glyph at a
 //!   time. That work is done once per scene generation and zoom octave ([`Marks`]); a frame only
-//!   moves and scales it, and skips what lies off the canvas. A picture shows only its frame here.
+//!   moves and scales it, and skips what lies off the canvas. A picture (a shaded view's) shows the
+//!   pixels the provider drew for it, uploaded once each ([`PictureTextures`]); until it has them, its
+//!   frame.
 //! - **Pan and zoom** are the shared navigation with orbit off, on the page's own camera, so the
 //!   Design camera stays where it was. Zoom stays between 5 % and 3200 %.
 //! - **100 % is true size**: one paper millimetre is (96 / 25.4) × calibration / UI zoom points, so
 //!   the UI scale never changes it ([`true_size`]). The calibration is a preference, set against a
 //!   100 mm bar ([`calibration_bar`]).
-//! - **Sheet colour** (Follows the theme, White, Blueprint, Prussian Blue) is a screen preference
+//! - **Sheet colour** (White unless chosen: Follows the theme, Blueprint, Prussian Blue) is a screen preference
 //!   (D25 of `docs/design/drawing-ui/decisions.md`). The paper keeps its colour on a neutral stage
 //!   that moves away from it to stand off ([`stage_and_paper`]), and has a very slight rounded corner
 //!   (D29). Nothing here
@@ -21,19 +23,22 @@
 //! - **A view's state shows in words and shape**, never colour alone (D26): needs update (dashed),
 //!   nothing to draw (dotted) and can't be drawn (a cross), each with its words beside the view's
 //!   boundary.
-//! - **Hover**: a view's boundary shows only while the pointer is near its edge, so the sheet stays
-//!   clean (D17); any other object shows its box while the pointer is over it.
+//! - **Hover and selection** look as they do in a sketch: what the pointer is over, and what is
+//!   selected, is drawn in the accent colour, with no box round it.
 
 mod view_tools;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-use solidcraft_engine::drawing_scene::{self, SheetObject, Status};
+use solidcraft_engine::drawing_scene::{self, SheetObject, SheetPicture, Status};
 use solidcraft_engine::geom::paper::text::TextRun;
-use solidcraft_engine::geom::paper::{Dashes, Item, ObjectKind, Scene};
+use solidcraft_engine::geom::paper::{Clip, Dashes, Item, ObjectKind, Scene};
+use solidcraft_engine::geom::pixel_grid::{GridWindow, PixelGrid};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::geom::{Aabb2, Region2Geom, Seg2Geom};
 use solidcraft_viewport::Camera;
@@ -55,7 +60,8 @@ const HOVER_BAND: f64 = 6.0;
 /// The paper's corner radius on screen, in points: very slight (D29).
 const PAPER_CORNER: u8 = 4;
 
-/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour).
+/// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour). White unless
+/// another is chosen: paper is white, whatever the theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SheetColour {
     /// Follows the theme: White in a light theme, the theme's dark paper in a dark one (a theme
@@ -71,14 +77,19 @@ impl SheetColour {
     /// In the order Preferences lists them.
     pub const ALL: [SheetColour; 4] = [SheetColour::Auto, SheetColour::White, SheetColour::Blueprint, SheetColour::PrussianBlue];
 
+    /// The colour stored as `s`. `auto` was the default's name while the default followed the
+    /// theme: a setting saved then was never chosen, and reads as today's default, White.
     pub fn parse(s: &str) -> Option<SheetColour> {
+        if s == "auto" {
+            return Some(SheetColour::White);
+        }
         SheetColour::ALL.into_iter().find(|c| c.id() == s)
     }
 
     /// Its stored name.
     pub fn id(self) -> &'static str {
         match self {
-            SheetColour::Auto => "auto",
+            SheetColour::Auto => "theme",
             SheetColour::White => "white",
             SheetColour::Blueprint => "blueprint",
             SheetColour::PrussianBlue => "prussian_blue",
@@ -113,8 +124,11 @@ fn lightness(c: Color32) -> f32 {
 /// How far apart in [`lightness`] the paper and the backdrop must be for the sheet's edge to show.
 pub const STAND_OFF: f32 = 0.06;
 
+/// The lightest colour; as a picture's tint, it keeps the picture's own colours.
+const WHITE: Color32 = Color32::WHITE;
+
 /// Lightest and darkest: what the stage, or failing that the paper, moves toward.
-const ENDS: [Color32; 2] = [Color32::WHITE, Color32::BLACK];
+const ENDS: [Color32; 2] = [WHITE, Color32::BLACK];
 
 /// The first of twenty steps from `from` toward `to`, at most `steps` of them, that stands off `other`.
 fn toward(from: Color32, to: Color32, other: Color32, steps: u8) -> Option<Color32> {
@@ -148,7 +162,7 @@ pub fn stage_and_paper(paper: Color32, backdrop: Color32) -> (Color32, Color32) 
 /// The stage, paper and ink the page draws in, now.
 pub fn sheet_colours(app: &SolveApp) -> (Color32, Color32, Color32) {
     let t = Tokens::get();
-    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let (paper, ink) = colour.paper(&t, solidcraft_theme::is_dark());
     let (stage, paper) = stage_and_paper(paper, t.viewport_top);
     (stage, paper, ink)
@@ -182,7 +196,12 @@ pub struct Page {
     sheet: Option<u64>,
     drawing: Option<(u64, u64)>,
     marks: Option<Marks>,
+    /// The sheet's pictures' pixels on the GPU: they change apart from the marks, as each is drawn.
+    pictures: PictureTextures,
     view_tools: view_tools::State,
+    /// The object under the pointer on the last frame, as the selection names it: what a
+    /// right-click's menu is about.
+    hover: Option<solidcraft_engine::Sel>,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -198,10 +217,119 @@ impl Default for Page {
             sheet: None,
             drawing: None,
             marks: None,
+            pictures: PictureTextures::default(),
             view_tools: Default::default(),
+            hover: None,
             shown: None,
         }
     }
+}
+
+/// Load one view's camera/cache without copying its authored sheet or selection.
+pub(crate) fn activate_view(app: &mut SolveApp, id: u64) {
+    let open: Vec<_> = crate::view_windows::layout_views(app)
+        .into_iter()
+        .filter(|(_, view)| view.kind == solidcraft_views::ViewKind::Sheet)
+        .map(|(_, view)| view.id)
+        .collect();
+    let mut sheets: Vec<_> = crate::view_windows::layout_views(app)
+        .into_iter()
+        .filter(|(_, view)| view.kind == solidcraft_views::ViewKind::Sheet)
+        .filter_map(|(_, view)| crate::sheet_views::resolve_for_session(&app.session, view.subject.as_deref()))
+        .collect();
+    if app.drawing_workspace.page_view == 0
+        && let Some(((_, drawing), sheet)) = app.drawing_workspace.page.drawing.zip(app.drawing_workspace.page.sheet)
+    {
+        sheets.push((drawing, sheet));
+    }
+    let state = &mut app.drawing_workspace;
+    if state.page_view != id {
+        let outgoing = std::mem::take(&mut state.page);
+        state.pages.insert(state.page_view, outgoing);
+        state.page = state.pages.remove(&id).unwrap_or_default();
+        state.page_view = id;
+    }
+    state.pages.retain(|view, _| *view == 0 || open.contains(view));
+    state.sheet_selection.retain(|key, _| sheets.contains(key));
+    state.sheet_picks.retain(|key, _| sheets.contains(key));
+}
+
+pub(crate) fn retire_closed(app: &mut SolveApp) {
+    let current = app.drawing_workspace.page_view;
+    let survives = current == 0
+        || crate::view_windows::layout_views(app).into_iter().any(|(_, view)| view.id == current && view.kind == solidcraft_views::ViewKind::Sheet);
+    activate_view(app, if survives { current } else { 0 });
+}
+
+/// Scope passive painting to an exact sheet. Focus, history and the command receiver return intact.
+pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool {
+    let descriptor = crate::view_windows::layout_views(app)
+        .into_iter()
+        .find(|(_, view)| view.id == id && view.kind == solidcraft_views::ViewKind::Sheet)
+        .map(|(_, view)| view.clone());
+    let Some(descriptor) = descriptor else {
+        message(ui, ui.max_rect(), app.tr("sheet_views.missing"), Tokens::get().error);
+        return true;
+    };
+    let subject = descriptor.subject;
+    let (drawing, sheet) = match crate::sheet_views::resolve(app, subject.as_deref()) {
+        Ok(owner) => owner,
+        Err(error) => {
+            message(ui, ui.max_rect(), &error, Tokens::get().error);
+            return true;
+        }
+    };
+    let previous = (
+        app.drawing_workspace.page_view,
+        app.session.open_drawing,
+        app.ui.tab.clone(),
+        app.session.model_focus,
+        app.ui.ribbon_context.clone(),
+        app.ui.sketch_return_tab.clone(),
+    );
+    // Navigation is still a command, and its receiver prunes foreign drawing picks.
+    // Only the actual focused view may change the authoritative selection.
+    let focused_selection = (app.session.view_context.focused() != id).then(|| app.session.selection.clone());
+    activate_view(app, id);
+    app.session.open_drawing = Some(drawing);
+    app.session.model_focus = false;
+    select_sheet(app, sheet);
+    if !crate::drawing_workspace::active(app) {
+        app.ui.tab = "DRAWING LAYOUT".into();
+    }
+    if focused_selection.is_none() {
+        // The focused view's selected object shows its options, as on the classic Drawing canvas.
+        crate::drawing_workspace::follow_selection(app);
+    }
+    let shown = show(app, ui);
+    app.session.open_drawing = previous.1;
+    app.session.model_focus = previous.3;
+    app.ui.tab = previous.2;
+    app.ui.ribbon_context = previous.4;
+    app.ui.sketch_return_tab = previous.5;
+    if let Some(selection) = focused_selection {
+        app.session.selection = selection;
+    }
+    activate_view(app, previous.0);
+    shown
+}
+
+pub(crate) fn view_badge(app: &SolveApp, id: u64, ctx: &egui::Context) -> Option<(String, String)> {
+    let view = app.docs.views.get(id).filter(|view| view.kind == solidcraft_views::ViewKind::Sheet)?;
+    let (drawing, sheet) = crate::sheet_views::resolve(app, view.subject.as_deref()).ok()?;
+    let sheet = app.session.doc.drawing(drawing)?.sheets.iter().find(|record| record.id == sheet)?;
+    let paper = match sheet.sheet.size {
+        solidcraft_engine::geom::drawing_sheet::SheetSize::Standard(size) => format!("{size:?}"),
+        solidcraft_engine::geom::drawing_sheet::SheetSize::Custom { sides_mm } => format!("{} × {}", sides_mm[0], sides_mm[1]),
+    };
+    let page = if app.drawing_workspace.page_view == id { Some(&app.drawing_workspace.page) } else { app.drawing_workspace.pages.get(&id) };
+    let state = match page {
+        Some(page) if page.fitted_on.is_none() && page.fitted.is_some() => {
+            solidcraft_ui_text::format("sheet_views.zoom", &[("value", &shown_percent(page.scale / true_size_now(app, ctx)).to_string())])
+        }
+        _ => app.tr("sheet_views.fit").to_owned(),
+    };
+    Some((paper, state))
 }
 
 /// The canvas sheet, also used by actions that need a default sheet.
@@ -226,9 +354,16 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.fitted = None;
         page.fitted_on = None;
         page.marks = None;
+        page.pictures = PictureTextures::default();
         page.view_tools = Default::default();
+        page.hover = None;
         page.shown = None;
     }
+}
+
+/// The object of the open drawing under the pointer on the last frame, as the selection names it.
+pub(crate) fn hovered(app: &SolveApp) -> Option<solidcraft_engine::Sel> {
+    app.drawing_workspace.page.hover.clone()
 }
 
 /// Fit Sheet: the sheet is framed again on the next frame.
@@ -239,6 +374,20 @@ pub fn fit(app: &mut SolveApp) {
 /// Clear the selected view or cancel its drag.
 pub(crate) fn clear_view_selection(app: &mut SolveApp) -> bool {
     view_tools::clear(app)
+}
+
+/// The sheet's selected drawing view, shared by every camera that shows that sheet.
+pub(crate) fn selected_drawing_view(app: &SolveApp) -> Option<u64> {
+    let sheet = active_sheet(app)?;
+    let drawing = app.session.drawing(drawing_scene::CMD).ok()?;
+    match app.session.selection.as_slice() {
+        [solidcraft_engine::Sel::Drawing { drawing: owner, object }]
+            if *owner == drawing.id && drawing.view(*object).is_some_and(|view| view.sheet == sheet) =>
+        {
+            Some(*object)
+        }
+        _ => None,
+    }
 }
 
 /// The sheet at true size, about the canvas's centre.
@@ -296,6 +445,12 @@ pub(crate) struct OnScreen {
 }
 
 impl OnScreen {
+    /// A sheet shown one point a millimetre round its origin, for a tool's test.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> OnScreen {
+        OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 1.0 }
+    }
+
     fn of(cam: &Camera, canvas: Rect) -> OnScreen {
         let scale = f64::from(canvas.height().max(1.0)) / (2.0 * cam.half_height());
         OnScreen { centre: canvas.center(), target: Vec2::new(cam.target.x, cam.target.y), scale }
@@ -320,7 +475,8 @@ impl OnScreen {
     pub(crate) fn paint_preview(self, painter: &egui::Painter, marks: &Marks, position: Vec2, ink: Color32) {
         let shifted = Self { centre: self.screen(position), target: Vec2::ZERO, scale: self.scale };
         let clip = painter.clip_rect();
-        marks.paint(painter, &shifted, shifted.visible(clip), ink, painter.ctx().pixels_per_point());
+        // A preview shows the frames of its pictures: its pixels aren't drawn until it is placed.
+        marks.paint(painter, &shifted, shifted.visible(clip), ink, painter.ctx().pixels_per_point(), &PictureTextures::default());
     }
 
     fn visible(&self, canvas: Rect) -> Aabb2 {
@@ -335,17 +491,66 @@ impl OnScreen {
 /// [`ZOOM`] of `true_size`: its target and the scale, in points per millimetre.
 fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
     let margin = Tokens::get().space_24;
-    let w = f64::from((area.width() - 2.0 * margin).max(1.0));
-    let h = f64::from((area.height() - 2.0 * margin).max(1.0));
-    let scale = (w / size.x.max(1e-3)).min(h / size.y.max(1e-3)).clamp(true_size * ZOOM.start(), true_size * ZOOM.end());
+    let (_, scale) = sheet_fit(area, size, None, true_size, margin).unwrap_or((Vec2::ZERO, true_size.max(1e-9)));
     let x = size.x / 2.0 - f64::from(area.center().x - canvas.center().x) / scale;
     let y = size.y / 2.0 + f64::from(area.center().y - canvas.center().y) / scale;
     (Vec2::new(x, y), scale)
 }
 
+/// Pure cell fit; manual pan/zoom is preserved. Fitted paper may shrink below manual zoom limits.
+pub(crate) fn sheet_fit(cell: Rect, paper: Vec2, manual: Option<(Vec2, f64)>, true_size: f64, padding: f32) -> Option<(Vec2, f64)> {
+    if !cell.is_finite()
+        || !cell.is_positive()
+        || !paper.x.is_finite()
+        || !paper.y.is_finite()
+        || paper.x <= 0.0
+        || paper.y <= 0.0
+        || !true_size.is_finite()
+        || true_size <= 0.0
+        || !padding.is_finite()
+        || padding < 0.0
+    {
+        return None;
+    }
+    if let Some((target, scale)) = manual {
+        return (target.x.is_finite() && target.y.is_finite() && scale.is_finite() && scale > 0.0).then_some((target, scale));
+    }
+    let padding = padding.min(cell.width().min(cell.height()) * 0.25);
+    let scale =
+        (f64::from(cell.width() - 2.0 * padding) / paper.x).min(f64::from(cell.height() - 2.0 * padding) / paper.y).min(true_size * ZOOM.end());
+    (scale.is_finite() && scale > 0.0).then_some((paper * 0.5, scale))
+}
+
 /// The part of the canvas no ribbon, Browser, History or navigation bar covers.
 fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
-    let area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
+    let mut area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
+    // The ribbon, the Browser and the History float over the canvas in the classic layout: the
+    // sheet is framed beside them, not under them (#19070). Each takes the side that costs the paper the least room.
+    let around = area;
+    for cover in app.shell.cards.iter().copied().chain(app.shell.browser.filter(|_| app.ui.show_browser)).chain(app.shell.history) {
+        if !cover.is_finite() || !cover.is_positive() || !cover.intersects(area) {
+            continue;
+        }
+        // The cover takes the side that costs the paper the least room, whatever its shape: a
+        // short or folded side Browser is wider than tall, yet still takes the left, and the
+        // ribbon, which reaches the right edge too, takes the top.
+        let cost = [
+            (cover.right() - area.min.x).max(0.0) * area.height(),
+            (area.max.x - cover.left()).max(0.0) * area.height(),
+            (cover.bottom() - area.min.y).max(0.0) * area.width(),
+            (area.max.y - cover.top()).max(0.0) * area.width(),
+        ];
+        let nearest = (0..4).min_by(|&a, &b| cost[a].total_cmp(&cost[b])).unwrap_or(0);
+        match nearest {
+            0 => area.min.x = area.min.x.max(cover.right()),
+            1 => area.max.x = area.max.x.min(cover.left()),
+            2 => area.min.y = area.min.y.max(cover.bottom()),
+            _ => area.max.y = area.max.y.min(cover.top()),
+        }
+    }
+    if !area.is_positive() {
+        area = around;
+    }
     // Nor the navigation bar: Fit sheet puts the paper above it (below it when the bar is at the
     // top), as the design's layout board does. The compass's corner stays free: the sheet has none.
     let Some(bar) = app.viewport.layout.as_ref().map(|l| l.navigation).filter(|r| r.is_positive() && r.intersects(area)) else {
@@ -393,7 +598,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let canvas = ui.max_rect();
     let (stage, paper, ink) = sheet_colours(app);
     ui.painter().rect_filled(canvas, 0.0, stage);
-    let backdrop = SheetBackdrop::parse(&app.preferences.drawing_sheet_backdrop).unwrap_or_default();
     app.viewport.rect = Some(canvas);
     crate::viewport::refresh_layout(app, ui.ctx());
     let response = ui.allocate_rect(canvas, Sense::click_and_drag());
@@ -410,6 +614,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     }
     let size = view.scene.size_mm;
     let base = true_size_now(app, ui.ctx());
+    let owns_tools = app.drawing_workspace.page_view == 0 || app.session.view_context.focused() == app.drawing_workspace.page_view;
     let key = (sheet, [size.x.to_bits(), size.y.to_bits()]);
     let page = &mut app.drawing_workspace.page;
     if page.fitted_on.is_some_and(|size| size != canvas.size()) {
@@ -429,14 +634,28 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let page = &mut app.drawing_workspace.page;
     page.cam.distance = distance_for(page.scale, canvas.height());
     let before_navigation = OnScreen::of(&page.cam, canvas);
-    if !view_tools::owns_drag(app, &response, before_navigation, &view.objects) {
+    // As in the model, a primary drag the navigation does not take is a box selection.
+    let mut box_free = true;
+    if !owns_tools || !view_tools::owns_drag(app, &response, before_navigation, &view.objects) {
         with_sheet_camera(app, |app| {
-            crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            let input = crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+            box_free = input.primary_nav.is_none() && input.mode.is_none();
         });
+    } else {
+        box_free = false;
     }
     let page = &mut app.drawing_workspace.page;
     let scale = OnScreen::of(&page.cam, canvas).scale;
-    page.scale = if scale.is_finite() && scale > 0.0 { scale.clamp(base * ZOOM.start(), base * ZOOM.end()) } else { base };
+    page.scale = if scale.is_finite() && scale > 0.0 {
+        if page.fitted_on.is_some() {
+            scale.min(base * ZOOM.end())
+        } else {
+            // A tiny cell can fit below the manual zoom floor. Panning must retain that scale.
+            scale.clamp(page.scale.min(base * ZOOM.start()), base * ZOOM.end())
+        }
+    } else {
+        base
+    };
     page.cam.distance = distance_for(page.scale, canvas.height());
     // Moved by the user, not only worked out again from its distance.
     if page.cam.target != framed_as.0 || (page.scale / framed_as.1 - 1.0).abs() > 1e-9 {
@@ -447,48 +666,152 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     // One flattening per zoom octave: finer than a fifth of a pixel at its most zoomed out.
     let wanted = (TOLERANCE_PX / (at.scale * ppp)).max(1e-5);
     let tolerance = 2f64.powi(wanted.log2().floor() as i32);
-    if page.marks.as_ref().is_none_or(|m| m.generation != view.generation || m.tolerance != tolerance) {
-        page.marks = Some(Marks::of(&view.scene, view.generation, tolerance));
+    let detail = canvas.width() >= 160.0;
+    if page.marks.as_ref().is_none_or(|m| m.generation != view.generation || m.tolerance != tolerance || m.detail != detail) {
+        page.marks = Some(if detail {
+            Marks::of(&view.scene, view.generation, tolerance)
+        } else {
+            Marks::of_detail(&view.scene, view.generation, tolerance, false)
+        });
     }
+    let max_side = ui.ctx().input(|i| i.max_texture_side);
+    page.pictures.sync(ui.ctx(), &view.pictures, max_side);
     let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
     let sheet_rect = at.rect(&Aabb2 { min: Vec2::ZERO, max: size });
-    backdrop.paint(&painter, canvas, sheet_rect.center(), &t);
     // A very slight rounded corner, on screen only (D29): an export stays square.
-    painter.add(t.shell_shadow().as_shape(sheet_rect, PAPER_CORNER));
+    let mut shadow = ui_kit::Container::popup_frame(&ui.ctx().global_style()).shadow;
+    shadow.color = shadow.color.gamma_multiply(0.3);
+    painter.add(shadow.as_shape(sheet_rect, PAPER_CORNER));
     painter.rect_filled(sheet_rect, PAPER_CORNER, paper);
+    painter.rect_stroke(sheet_rect, PAPER_CORNER, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     let visible = at.visible(canvas);
-    if let Some(marks) = &app.drawing_workspace.page.marks {
-        marks.paint(&painter, &at, visible, ink, ppp as f32);
+    let page = &app.drawing_workspace.page;
+    if let Some(marks) = &page.marks {
+        marks.paint(&painter, &at, visible, ink, ppp as f32, &page.pictures);
     }
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
+    if app.drawing_workspace.page_view != 0 {
+        crate::scenario::publish_rect(&format!("sheet:paper:{}", app.drawing_workspace.page_view), sheet_rect);
+    }
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
     let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
     let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
-    let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
-    view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
-        .show(app, ui, placing);
-    let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    let placing =
+        owns_tools && crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    if owns_tools && crate::drawing_workspace::placing_detail(app) {
+        crate::drawing_workspace::detail::follow_sheet(app, sheet);
+        if let Some(point) = on_paper {
+            crate::drawing_workspace::detail::on_sheet(app, &placement_painter, at, &view.objects, sheet, point, response.clicked());
+        }
+    }
+    let placing_note = owns_tools && crate::drawing_workspace::placing_note(app);
+    if placing_note && let Some(point) = on_paper {
+        crate::drawing_workspace::note::on_sheet(app, &placement_painter, at, point, sheet, response.clicked());
+    }
+    let placing_dimension = owns_tools && crate::drawing_workspace::placing_dimension(app);
+    // A placed dimension's text, or a note, under the pointer comes before the tool's pick, as a
+    // sketch dimension's text does: it lights up and drags, and nothing under it is picked. Not
+    // once the picks are made, when a click anywhere places the new dimension.
+    let band = HOVER_BAND / at.scale;
+    let annotation = hover
+        .filter(|_| placing_dimension && !crate::drawing_workspace::dimension::has_picks(app))
+        .and_then(|p| drawing_scene::hit(&view.objects, p, band).map(|hit| (p, hit)))
+        .filter(|(_, hit)| matches!(hit.kind, ObjectKind::Dimension | ObjectKind::Note) && drawing.has_object(hit.object))
+        .filter(|(p, hit)| hit.kind == ObjectKind::Note || view_tools::over_text(app, hit.object, *p, band))
+        .map(|(_, hit)| hit);
+    if placing_dimension
+        && annotation.is_none()
+        && !view_tools::dragging_dimension()
+        && let Some(point) = on_paper
+    {
+        // The second click of a double-click is not a click of the tool's: it would place the
+        // dimension where the first click picked its edge, on top of the edge.
+        let clicked = response.clicked() && !response.double_clicked();
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, clicked);
+    }
+    // With the tool in hand a double-click on a placed dimension's text edits it where it is, as
+    // the sketch's Dimension tool does, and the tool stays in hand; anywhere else it changes nothing.
     if response.double_clicked()
+        && let Some(hit) = annotation.filter(|hit| hit.kind == ObjectKind::Dimension)
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        crate::drawing_workspace::edit_in_place(app, hit.object, pointer);
+    }
+    let placing = placing || placing_note || placing_dimension || (owns_tools && crate::drawing_workspace::placing_detail(app));
+    view_tools::Canvas {
+        interactive: owns_tools,
+        at,
+        painter: &painter,
+        response: &response,
+        drawing: &drawing,
+        sheet,
+        objects: &view.objects,
+        free: free_area(app, canvas),
+    }
+    .show(app, ui, placing);
+    if owns_tools {
+        view_tools::box_select(app, ui, &painter, &response, at, &drawing, &view.objects, canvas, box_free && !placing);
+    }
+    let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale)).or(annotation);
+    app.drawing_workspace.page.hover =
+        hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| solidcraft_engine::Sel::Drawing { drawing: drawing.id, object: hit.object });
+    // A right-click, as in the model and a sketch: it finishes the tool in hand, or else opens the
+    // menu on what is under the pointer.
+    if owns_tools
+        && response.secondary_clicked()
+        && !crate::mouse_gesture::took_press(app)
+        && let Some(point) = response.interact_pointer_pos().filter(|point| !crate::shell::covered(app, *point))
+    {
+        if placing {
+            crate::drawing_workspace::close_panel(app);
+        } else {
+            let held = crate::tool_modifiers::Held::from_modifiers(ui.input(|input| input.modifiers));
+            crate::context_menu::open(app, point, held);
+        }
+    }
+    if owns_tools
+        && response.double_clicked()
+        && !placing
         && let Some(hit) = hit
     {
         let kind = match hit.kind {
             ObjectKind::View => Some("view"),
             ObjectKind::Dimension => Some("dimension"),
+            ObjectKind::Note => Some("note"),
             ObjectKind::PartsList => Some("parts_list"),
             _ => None,
         };
-        if let Some(kind) = kind {
+        // A dimension's or a note's text is edited where it is, as a sketch dimension's value is.
+        let at = response.interact_pointer_pos().or_else(|| response.hover_pos());
+        if let Some(kind) = kind
+            && !at.is_some_and(|at| crate::drawing_workspace::edit_in_place(app, hit.object, at))
+        {
             crate::drawing_workspace::edit_object(app, kind, hit.object);
         }
     }
-    if let Some(hit) = hit
-        && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
+    // A text cell of the title block likewise: what it shows is typed where it is.
+    if owns_tools
+        && response.double_clicked()
+        && !placing
+        && !hit.is_some_and(|hit| drawing.has_object(hit.object) || hit.kind == ObjectKind::PartsList)
+        && let (Some(point), Some(at)) = (on_paper, response.interact_pointer_pos())
     {
-        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
-        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
-        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(t.space_2 * 0.5, t.accent), t.space_4, t.space_2));
+        crate::drawing_workspace::edit_title_cell(app, sheet, point, at);
+    }
+    if owns_tools {
+        crate::dim_view::show_sheet_editor(app, ui.ctx());
+    }
+    // What is hovered or selected is drawn again in the accent colour, as a sketch draws its
+    // hovered and selected dimensions and curves: no box round it.
+    let mut lit = view_tools::selected(app, drawing.id);
+    lit.extend(hit.filter(|hit| drawing.has_object(hit.object)).map(|hit| hit.object));
+    if !lit.is_empty()
+        && let Some(marks) = &app.drawing_workspace.page.marks
+    {
+        marks.paint_lit(&painter, &at, visible, ppp as f32, &app.drawing_workspace.page.pictures, &lit, t.accent);
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
+    let first_lines = waiting_views(&painter, &at, &drawing, &view);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
@@ -521,10 +844,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "ink": hex(ink),
         "generation": view.generation,
         "views": states,
+        "waiting_views": first_lines.iter().copied().map(encode).collect::<Vec<_>>(),
+        "pictures": app.drawing_workspace.page.pictures.inspect(),
         "working": working,
-        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": true})),
+        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "lit": lit.contains(&h.object)})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
+    // The shared toasts, as the model and render pages show them: what a command or an export or
+    // print just said, which the sheet would otherwise leave unseen.
+    crate::viewport::transient_messages(app, ui, canvas, None);
     true
 }
 
@@ -633,15 +961,43 @@ fn view_states(painter: &egui::Painter, at: &OnScreen, views: &[drawing_scene::V
         }
         // D26's shape for Needs update, ahead of the words.
         let mark = if out_of_date { "⟳ " } else { "" };
-        let text = format!("{mark}{}", words.join(" · "));
-        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
-        let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
-        let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
-        painter.rect_filled(chip, chip.height() / 2.0, t.panel);
-        painter.galley(at, galley, colour);
-        crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(state.view)), chip);
+        say(painter, r, format!("{mark}{}", words.join(" · ")), colour, state.view);
     }
     out
+}
+
+/// A view's state in words on a chip above its box `r`, for every state alike.
+fn say(painter: &egui::Painter, r: Rect, text: String, colour: Color32, view: u64) {
+    let t = Tokens::get();
+    let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
+    let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
+    let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
+    painter.rect_filled(chip, chip.height() / 2.0, t.panel);
+    painter.galley(at, galley, colour);
+    crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(view)), chip);
+}
+
+/// The views placed on the sheet whose first lines are still being worked out: each says
+/// "Projecting…" at its place on the sheet, from the frame it is placed, so a view that takes long
+/// is never silence. Their ids, for `ui.inspect`. Where it says so is the view's centre, which the
+/// drawing has without measuring anything: the window never works a view's extents out for it. A
+/// view drawn before keeps its last lines and says Needs update instead ([`view_states`]).
+fn waiting_views(
+    painter: &egui::Painter,
+    at: &OnScreen,
+    drawing: &solidcraft_engine::doc::drawing::Drawing,
+    view: &drawing_scene::SheetView,
+) -> Vec<u64> {
+    let t = Tokens::get();
+    let waiting: Vec<u64> =
+        view.stale.iter().copied().filter(|id| !view.objects.iter().any(|o| o.kind == ObjectKind::View && o.object == *id)).collect();
+    for id in &waiting {
+        let Ok(centre) = drawing.view_centre(*id) else { continue };
+        // The words alone, on the chip the other states use: no outline round an empty place.
+        let place = Rect::from_center_size(at.screen(centre), egui::Vec2::ZERO);
+        say(painter, place, solidcraft_ui_text::tr("ui.sheet_page.projecting").to_owned(), t.text_dim, *id);
+    }
+    waiting
 }
 
 /// What is said beside a view: why it draws nothing, and whether it needs an update (D26's
@@ -678,11 +1034,13 @@ pub(crate) fn shown_percent(zoom: f64) -> f32 {
     shown as f32
 }
 
+/// What older versions could draw on the stage round the sheet: nothing is drawn there now, ever
+/// (it didn't zoom with the sheet). The preference is still read, so a saved one still loads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum SheetBackdrop {
-    #[default]
     DatumCloud,
     Grid,
+    #[default]
     None,
 }
 
@@ -696,61 +1054,12 @@ impl SheetBackdrop {
     pub(crate) fn parse(id: &str) -> Option<Self> {
         Self::ALL.iter().find_map(|(pattern, value, _)| (*value == id).then_some(*pattern))
     }
-
-    fn paint(self, painter: &egui::Painter, canvas: Rect, sheet_centre: Pos2, t: &Tokens) {
-        if self == Self::None || !canvas.is_finite() || !canvas.is_positive() {
-            return;
-        }
-
-        // Keep spacing readable while the datum cloud follows the sheet's position.
-        // Bound the number of marks even on very wide or tall displays.
-        let step = t.space_24.max(canvas.width().max(canvas.height()) / 96.0);
-        let columns = (canvas.width() / step).floor() as usize;
-        let rows = (canvas.height() / step).floor() as usize;
-        let origin = canvas.min + egui::vec2((sheet_centre.x - canvas.left()).rem_euclid(step), (sheet_centre.y - canvas.top()).rem_euclid(step));
-        let x = |column| origin.x + column as f32 * step;
-        let y = |row| origin.y + row as f32 * step;
-        match self {
-            Self::DatumCloud => {
-                let ink = t.text.gamma_multiply(0.16);
-                for row in 0..=rows {
-                    for column in 0..=columns {
-                        painter.circle_filled(egui::pos2(x(column), y(row)), t.space_2 * 0.5, ink);
-                    }
-                }
-            }
-            Self::Grid => {
-                let stroke = egui::Stroke::new(t.space_2 * 0.5, t.text.gamma_multiply(0.09));
-                for column in 0..=columns {
-                    painter.vline(x(column), canvas.y_range(), stroke);
-                }
-                for row in 0..=rows {
-                    painter.hline(canvas.x_range(), y(row), stroke);
-                }
-            }
-            Self::None => {}
-        }
-    }
-}
-
-pub(crate) fn backdrop_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let labels = SheetBackdrop::ALL.map(|(_, _, label)| app.tr(label));
-    let current = SheetBackdrop::parse(&app.preferences.drawing_sheet_backdrop).unwrap_or_default();
-    let initial = SheetBackdrop::ALL.iter().position(|(pattern, _, _)| *pattern == current).unwrap_or_default();
-    let mut selected = initial;
-    let response = ui_kit::dropdown(ui, "pref_drawing_sheet_backdrop", &mut selected, &labels);
-    crate::scenario::publish_target("prefs:drawing_sheet_backdrop", response.rect);
-    if selected != initial
-        && let Some((_, id, _)) = SheetBackdrop::ALL.get(selected)
-    {
-        app.preferences.drawing_sheet_backdrop = (*id).into();
-    }
 }
 
 /// Preferences' Sheet colour choice.
 pub(crate) fn colour_choice(app: &mut SolveApp, ui: &mut egui::Ui) {
     let labels: Vec<&str> = SheetColour::ALL.iter().map(|c| app.tr(c.label())).collect();
-    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
+    let current = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::White);
     let mut selected = SheetColour::ALL.iter().position(|c| *c == current).unwrap_or(3);
     let response = ui_kit::dropdown(ui, "pref_drawing_sheet_colour", &mut selected, &labels);
     crate::scenario::publish_target("prefs:drawing_sheet_colour", response.rect);
@@ -790,7 +1099,14 @@ pub(crate) fn calibration_bar(app: &SolveApp, ui: &mut egui::Ui) {
 pub(crate) struct Marks {
     generation: u64,
     tolerance: f64,
+    detail: bool,
     pub(crate) marks: Vec<Mark>,
+    /// The object each mark draws, by index: what is hovered or selected is drawn in the accent
+    /// colour, as a sketch draws its hovered and selected dimensions and curves.
+    owners: Vec<u64>,
+    /// Whether each mark, by index, is a detail view's callout: its outline and letter, drawn on the
+    /// parent view. It belongs to the parent's place on the sheet, so dragging the detail leaves it.
+    on_parent: Vec<bool>,
     /// Why the sheet is drawn coarser than asked, or not at all.
     error: Option<String>,
 }
@@ -810,32 +1126,110 @@ pub(crate) enum Mark {
         outlines: Vec<Vec<Vec2>>,
         bounds: Aabb2,
     },
-    /// A picture's frame: its pixels aren't drawn on the page yet.
-    Picture(Aabb2),
+    /// A picture: its pixels from [`PictureTextures`] over `rect` at `opacity`, else its frame. Only
+    /// what lies `within` (the sheet, inside its object's clip's box) is drawn, and inside `clip`'s
+    /// circle, as every writer cuts it.
+    Picture {
+        source: u64,
+        rect: Aabb2,
+        opacity: f64,
+        clip: Option<Clip>,
+        within: Aabb2,
+    },
 }
 
 impl Marks {
     /// `scene`'s marks within `tolerance` millimetres, or coarser when that would be more than
     /// [`MAX_POINTS`]; a scene that can't be checked draws nothing and says why.
     pub(crate) fn of(scene: &Scene, generation: u64, tolerance: f64) -> Marks {
-        let mut tol = tolerance;
-        for _ in 0..8 {
-            match marks(scene, tol) {
-                Ok(marks) => {
-                    let error = (tol != tolerance).then(|| solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned());
-                    return Marks { generation, tolerance, marks, error };
-                }
-                Err(Fault::TooMany) => tol *= 8.0,
-                Err(Fault::Invalid(why)) => return Marks { generation, tolerance, marks: Vec::new(), error: Some(why) },
-            }
-        }
-        Marks { generation, tolerance, marks: Vec::new(), error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()) }
+        Self::of_detail(scene, generation, tolerance, true)
     }
 
-    fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32) {
+    fn of_detail(scene: &Scene, generation: u64, tolerance: f64, detail: bool) -> Marks {
+        let mut tol = tolerance;
+        for _ in 0..8 {
+            match if detail { marks(scene, tol) } else { marks_owned_detail(scene, tol, false) } {
+                Ok((marks, owners, on_parent)) => {
+                    let error = (tol != tolerance).then(|| solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned());
+                    return Marks { generation, tolerance, detail, marks, owners, on_parent, error };
+                }
+                Err(Fault::TooMany) => tol *= 8.0,
+                Err(Fault::Invalid(why)) => {
+                    return Marks { generation, tolerance, detail, marks: Vec::new(), owners: Vec::new(), on_parent: Vec::new(), error: Some(why) };
+                }
+            }
+        }
+        Marks {
+            generation,
+            tolerance,
+            detail,
+            marks: Vec::new(),
+            owners: Vec::new(),
+            on_parent: Vec::new(),
+            error: Some(solidcraft_ui_text::tr("ui.sheet_page.coarse").to_owned()),
+        }
+    }
+
+    fn paint(&self, painter: &egui::Painter, at: &OnScreen, visible: Aabb2, ink: Color32, ppp: f32, pictures: &PictureTextures) {
+        self.paint_some(painter, at, visible, ink, ppp, pictures, None, false);
+    }
+
+    /// The marks of the objects in `lit` again, over the sheet, in `accent`: a hovered or selected
+    /// object, as a sketch shows its hovered and selected dimensions and curves, with no box round it.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn paint_lit(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ppp: f32,
+        pictures: &PictureTextures,
+        lit: &[u64],
+        accent: Color32,
+    ) {
+        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(lit), false);
+    }
+
+    /// The marks of the objects in `moving` in `accent`, as a drag shows them where they go: a detail
+    /// view's callout on its parent is left out, since it stays where the parent is drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn paint_moving(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ppp: f32,
+        pictures: &PictureTextures,
+        moving: &[u64],
+        accent: Color32,
+    ) {
+        self.paint_some(painter, at, visible, accent, ppp, pictures, Some(moving), true);
+    }
+
+    /// Every mark, or with `only` the marks of those objects, in `ink`.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_some(
+        &self,
+        painter: &egui::Painter,
+        at: &OnScreen,
+        visible: Aabb2,
+        ink: Color32,
+        ppp: f32,
+        pictures: &PictureTextures,
+        only: Option<&[u64]>,
+        skip_callouts: bool,
+    ) {
         let hair = 1.0 / ppp.max(0.1);
         let mut mesh = egui::Mesh::default();
-        for mark in &self.marks {
+        for (index, mark) in self.marks.iter().enumerate() {
+            if skip_callouts && self.on_parent.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(only) = only
+                && !self.owners.get(index).is_some_and(|owner| only.contains(owner))
+            {
+                continue;
+            }
             match mark {
                 Mark::Line { points, closed, width_mm, bounds } => {
                     if !bounds.inflated(*width_mm).meets(&visible) {
@@ -862,32 +1256,269 @@ impl Marks {
                         painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
                     }
                 }
-                Mark::Picture(rect) => {
-                    if rect.meets(&visible) {
-                        let r = at.rect(rect);
-                        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
-                        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(hair, ink.gamma_multiply(0.6)), 6.0, 4.0));
+                Mark::Picture { source, rect, opacity, clip, within } => {
+                    // The fills before it lie under it, as in the scene; those after it, on it.
+                    flush(painter, &mut mesh);
+                    let uploaded = pictures.get(*source);
+                    match uploaded.filter(|u| !u.tiles.is_empty()) {
+                        Some(u) => {
+                            // Cut to its place, as the writers cut it; a stale picture is its last one,
+                            // shown over its own grid, where it was drawn, until the new one comes.
+                            let (x0, y0, x1, y1) = u.grid.covers();
+                            let over = if u.stale { Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) } } else { *rect };
+                            let shown = within.intersection(&over);
+                            if shown.is_empty() || !shown.meets(&visible) {
+                                continue;
+                            }
+                            // A fifth of a pixel, in millimetres, for a circle clip's edge.
+                            let tol = (TOLERANCE_PX / (at.scale * f64::from(ppp))).max(1e-5);
+                            for tile in &u.tiles {
+                                if let Some(mesh) = tile_mesh(at, &u.grid, tile, shown, clip.as_ref(), *opacity, tol) {
+                                    painter.add(egui::Shape::mesh(mesh));
+                                }
+                            }
+                        }
+                        None if !rect.meets(&visible) => {}
+                        None => {
+                            let r = at.rect(rect);
+                            let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                            let dim = ink.gamma_multiply(0.6);
+                            painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(hair, dim), 6.0, 4.0));
+                            // Can't be drawn: why, in words beside the frame (D26), not colour alone.
+                            if let Some(why) = uploaded.and_then(|u| u.why.as_deref()) {
+                                let t = Tokens::get();
+                                let text = solidcraft_ui_text::format("ui.sheet_page.picture_failed", &[("reason", why)]);
+                                let at = r.left_top() + vec2(t.space_4, t.space_4);
+                                painter.text(at, egui::Align2::LEFT_TOP, text, egui::FontId::proportional(t.font_label), dim);
+                            }
+                        }
                     }
                 }
             }
         }
-        if !mesh.is_empty() {
-            painter.add(egui::Shape::mesh(mesh));
-        }
+        flush(painter, &mut mesh);
     }
 }
 
+/// Paints the fills gathered so far into `mesh`, and empties it.
+fn flush(painter: &egui::Painter, mesh: &mut egui::Mesh) {
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(std::mem::take(mesh)));
+    }
+}
+
+/// The pixels of a sheet's pictures as textures, by picture source, kept between frames. The
+/// provider makes a new `rows` for each new picture, so a picture is uploaded once when its rows are
+/// new (another `Arc`) and never again for the same rows; one that leaves the sheet is let go.
+#[derive(Default)]
+pub(crate) struct PictureTextures {
+    pictures: HashMap<u64, Uploaded>,
+    /// Pictures uploaded so far: one each time a picture's rows are new.
+    uploads: u64,
+}
+
+/// One picture as the page has it.
+struct Uploaded {
+    view: u64,
+    /// The rows its textures were made from, to tell new rows by their address.
+    rows: Option<Arc<[u8]>>,
+    grid: PixelGrid,
+    /// Its textures, each at most the GPU's largest side: none until it is drawn, or when it can't be.
+    tiles: Vec<Tile>,
+    stale: bool,
+    why: Option<String>,
+}
+
+/// Columns and rows `window` of a picture's grid, as one texture.
+struct Tile {
+    texture: egui::TextureHandle,
+    window: GridWindow,
+}
+
+impl PictureTextures {
+    /// Brings the textures up to `pictures`, the sheet's answer this frame: textures at most
+    /// `max_side` pixels a side.
+    fn sync(&mut self, ctx: &egui::Context, pictures: &[SheetPicture], max_side: usize) {
+        self.pictures.retain(|source, _| pictures.iter().any(|p| p.source == *source));
+        for p in pictures {
+            if let Some(u) = self.pictures.get_mut(&p.source)
+                && same_rows(&u.rows, &p.rows)
+            {
+                // The same pixels; the engine moves their grid with their view, stale or not.
+                (u.grid, u.stale, u.why) = (p.grid, p.stale, p.why.clone());
+                continue;
+            }
+            let tiles = p.rows.as_ref().map(|rows| tiles(ctx, p.source, &p.grid, rows, max_side)).unwrap_or_default();
+            self.uploads += u64::from(!tiles.is_empty());
+            let uploaded = Uploaded { view: p.view, rows: p.rows.clone(), grid: p.grid, tiles, stale: p.stale, why: p.why.clone() };
+            self.pictures.insert(p.source, uploaded);
+        }
+    }
+
+    fn get(&self, source: u64) -> Option<&Uploaded> {
+        self.pictures.get(&source)
+    }
+
+    /// Each picture, for `ui.inspect`: how it shows where it is on screen, as its pixels, its frame (not
+    /// drawn yet) or failed (with why). Off screen, none of them is painted.
+    fn inspect(&self) -> Vec<Value> {
+        let mut out: Vec<(u64, Value)> = self
+            .pictures
+            .iter()
+            .map(|(source, u)| {
+                let shown = if !u.tiles.is_empty() {
+                    "pixels"
+                } else if u.why.is_some() {
+                    "failed"
+                } else {
+                    "frame"
+                };
+                let view = solidcraft_engine::doc::ids::encode(u.view);
+                (*source, json!({"source": source, "view": view, "shown": shown, "tiles": u.tiles.len(), "stale": u.stale, "why": u.why}))
+            })
+            .collect();
+        out.sort_by_key(|(source, _)| *source);
+        out.into_iter().map(|(_, v)| v).collect()
+    }
+}
+
+/// The same rows: both none, or the same allocation (the provider's new picture is a new one).
+fn same_rows(a: &Option<Arc<[u8]>>, b: &Option<Arc<[u8]>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// `rows` (straight alpha sRGB RGBA, top row first, `grid`'s size) as textures of at most `max_side`
+/// a side, left to right then top to bottom. None when the rows aren't the grid's size.
+fn tiles(ctx: &egui::Context, source: u64, grid: &PixelGrid, rows: &[u8], max_side: usize) -> Vec<Tile> {
+    let (width, height) = (grid.width as usize, grid.height as usize);
+    if max_side == 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)) != Some(rows.len()) {
+        return Vec::new();
+    }
+    // Zoomed out, mipmaps keep a picture smooth rather than speckled where the renderer makes them
+    // (egui_glow); egui-wgpu makes one level only, so there it is filtered linearly (H5-F4).
+    let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
+    let mut out = Vec::new();
+    for y0 in (0..height).step_by(max_side) {
+        for x0 in (0..width).step_by(max_side) {
+            let (x1, y1) = ((x0 + max_side).min(width), (y0 + max_side).min(height));
+            let mut pixels = Vec::with_capacity((x1 - x0) * (y1 - y0) * 4);
+            for row in y0..y1 {
+                let start = (row * width + x0) * 4;
+                let Some(part) = rows.get(start..start + (x1 - x0) * 4) else { return Vec::new() };
+                pixels.extend_from_slice(part);
+            }
+            let image = egui::ColorImage::from_rgba_unmultiplied([x1 - x0, y1 - y0], &pixels);
+            let texture = ctx.load_texture(format!("sheet-picture-{source}-{x0}-{y0}"), image, options);
+            let window = GridWindow { x0: x0 as u32, y0: y0 as u32, x1: x1 as u32, y1: y1 as u32 };
+            out.push(Tile { texture, window });
+        }
+    }
+    out
+}
+
+/// The part of `tile` inside `shown` (and inside a circle `clip`) as a textured mesh, at `opacity`;
+/// a circle's edge within `tol` millimetres. None when nothing of it shows.
+fn tile_mesh(at: &OnScreen, grid: &PixelGrid, tile: &Tile, shown: Aabb2, clip: Option<&Clip>, opacity: f64, tol: f64) -> Option<egui::Mesh> {
+    // The tile's paper rectangle: its first column's left edge to its last's right, its last row's
+    // bottom edge to its first row's top (a tile is never empty).
+    let w = tile.window;
+    let tile_rect = Aabb2 {
+        min: Vec2::new(grid.column(w.x0).0, grid.row(w.y1.saturating_sub(1)).0),
+        max: Vec2::new(grid.column(w.x1.saturating_sub(1)).1, grid.row(w.y0).1),
+    };
+    let area = tile_rect.intersection(&shown);
+    if area.is_empty() {
+        return None;
+    }
+    let corners = vec![area.min, Vec2::new(area.max.x, area.min.y), area.max, Vec2::new(area.min.x, area.max.y)];
+    let outline = match clip {
+        Some(Clip::Circle { center, radius }) => cut_to(circle(*center, *radius, tol), &area),
+        _ => corners,
+    };
+    if outline.len() < 3 {
+        return None;
+    }
+    let size = tile_rect.size();
+    let uv = |q: Vec2| pos2(((q.x - tile_rect.min.x) / size.x) as f32, ((tile_rect.max.y - q.y) / size.y) as f32);
+    // The texture is premultiplied, so the tint scales every channel.
+    let tint = WHITE.gamma_multiply(opacity.clamp(0.0, 1.0) as f32);
+    let mut mesh = egui::Mesh::with_texture(tile.texture.id());
+    for q in &outline {
+        mesh.vertices.push(egui::epaint::Vertex { pos: at.screen(*q), uv: uv(*q), color: tint });
+    }
+    for i in 1..outline.len() as u32 - 1 {
+        mesh.add_triangle(0, i, i + 1);
+    }
+    Some(mesh)
+}
+
+/// A circle as a polygon whose edges stray at most `tol` from it, counter-clockwise.
+fn circle(center: Vec2, radius: f64, tol: f64) -> Vec<Vec2> {
+    let step = 2.0 * (1.0 - (tol / radius.max(tol)).min(1.0)).acos();
+    let n = (std::f64::consts::TAU / step.max(1e-3)).ceil().clamp(16.0, 1024.0) as usize;
+    (0..n).map(|i| center + Vec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * radius).collect()
+}
+
+/// `polygon` (convex) cut to the rectangle `b`: what lies inside both (Sutherland and Hodgman).
+fn cut_to(polygon: Vec<Vec2>, b: &Aabb2) -> Vec<Vec2> {
+    // How far inside each side a point is: each side keeps its points and adds where an edge crosses it.
+    let sides: [fn(Vec2, &Aabb2) -> f64; 4] = [|q, b| q.x - b.min.x, |q, b| b.max.x - q.x, |q, b| q.y - b.min.y, |q, b| b.max.y - q.y];
+    let mut out = polygon;
+    for inside in sides {
+        let input = std::mem::take(&mut out);
+        let Some(&last) = input.last() else { return out };
+        let mut prev = last;
+        for &q in &input {
+            let (dq, dp) = (inside(q, b), inside(prev, b));
+            if (dq >= 0.0) != (dp >= 0.0) {
+                out.push(prev + (q - prev) * (dp / (dp - dq)));
+            }
+            if dq >= 0.0 {
+                out.push(q);
+            }
+            prev = q;
+        }
+    }
+    out
+}
+
+#[derive(Debug)]
 enum Fault {
     TooMany,
     Invalid(String),
 }
 
 /// Every mark of `scene`'s groups, in paint order, cut to their clips as every writer reads them.
-fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
+fn marks(scene: &Scene, tol: f64) -> Result<(Vec<Mark>, Vec<u64>, Vec<bool>), Fault> {
+    marks_owned_detail(scene, tol, true)
+}
+
+#[cfg(test)]
+fn marks_detail(scene: &Scene, tol: f64, detail: bool) -> Result<Vec<Mark>, Fault> {
+    marks_owned_detail(scene, tol, detail).map(|(marks, _, _)| marks)
+}
+
+fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark>, Vec<u64>, Vec<bool>), Fault> {
     let prepared = scene.prepare().map_err(|e| Fault::Invalid(e.to_string()))?;
     let mut budget = MAX_POINTS;
     let mut out = Vec::new();
+    let mut owners = Vec::new();
+    let mut on_parent = Vec::new();
+    let sheet = Aabb2 { min: Vec2::ZERO, max: scene.size_mm };
+    // `prepare` checked there is one clip an object.
+    let clips: HashMap<u64, Clip> = scene.clips.iter().copied().collect();
     for group in prepared.groups() {
+        if !detail && group.kind == ObjectKind::Fill {
+            continue;
+        }
+        // Pixels aren't geometry: `prepare` leaves a picture whole and each writer cuts it to the clip.
+        let clip = clips.get(&group.object).copied();
+        // A detail view's callout on its parent is the one label group that strokes an outline.
+        let callout = group.kind == ObjectKind::ViewLabel && group.items.iter().any(|item| matches!(item, Item::Stroke { .. }));
         for item in &group.items {
             match item {
                 Item::Stroke { path, closed, width_mm, pattern } => {
@@ -903,6 +1534,9 @@ fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
                 }
                 Item::Fill { region } => out.extend(fill(&region.loops().cloned().collect::<Vec<_>>(), tol, &mut budget)?),
                 Item::Text(run) => {
+                    if !detail {
+                        continue;
+                    }
                     let Some(font) = prepared.font(run) else { continue };
                     // A glyph at a time: one run's slabs across every glyph would be far more triangles.
                     for glyph in &run.glyphs {
@@ -921,11 +1555,16 @@ fn marks(scene: &Scene, tol: f64) -> Result<Vec<Mark>, Fault> {
                         out.extend(fill(&loops, tol, &mut budget)?);
                     }
                 }
-                Item::Picture(picture) => out.push(Mark::Picture(picture.rect)),
+                Item::Picture(picture) => {
+                    let within = clip.map_or(sheet, |clip| sheet.intersection(&clip.bounds()));
+                    out.push(Mark::Picture { source: picture.source, rect: picture.rect, opacity: picture.opacity, clip, within });
+                }
             }
+            owners.resize(out.len(), group.object);
+            on_parent.resize(out.len(), callout);
         }
     }
-    Ok(out)
+    Ok((out, owners, on_parent))
 }
 
 fn bounds_of(points: &[Vec2]) -> Aabb2 {

@@ -585,6 +585,7 @@ impl WinitApp for GlowWinitApp<'_> {
                     running.app.as_mut(),
                     &event,
                     true,
+                    glutin.viewport_from_window.get(&window_id).copied(),
                 )
             {
                 return Ok(EventResult::RepaintNext(window_id));
@@ -1117,6 +1118,7 @@ impl GlowWinitRunning<'_> {
             self.app.as_mut(),
             event,
             event_response.repaint,
+            viewport_id,
         );
 
         if repaint {

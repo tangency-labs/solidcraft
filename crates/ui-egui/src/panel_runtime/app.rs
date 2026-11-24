@@ -18,15 +18,18 @@ pub trait AppPanelServices {
 }
 
 pub struct AppPanelRuntime {
+    pub(super) plugins: super::plugin::PluginState,
     pub(super) production: Option<super::production::ProductionState>,
-    runtime: PanelRuntime,
+    pub(super) runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
     desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
+    sync_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
     pub(super) preferences: Option<super::preferences::PreferenceSession>,
@@ -38,6 +41,7 @@ impl AppPanelRuntime {
             return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
         }
         Ok(Self {
+            plugins: Default::default(),
             production: None,
             runtime,
             services,
@@ -46,7 +50,9 @@ impl AppPanelRuntime {
             desktop: None,
             host: None,
             last_tick_frame: None,
+            detached_content: Default::default(),
             last_error: None,
+            sync_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
             preferences: None,
@@ -94,7 +100,7 @@ impl AppPanelRuntime {
     }
 
     pub fn last_error(&self) -> Option<&PanelError> {
-        self.last_error.as_ref()
+        self.sync_error.as_ref().or(self.last_error.as_ref())
     }
     pub fn runtime(&self) -> &PanelRuntime {
         &self.runtime
@@ -590,6 +596,7 @@ impl AppPanelRuntime {
                                 return Err(error(Rule::Capability, "desktop viewport became unavailable"));
                             }
                             desktop.observe(ui.ctx(), &host, active);
+                            let _blur = content.app.blur.begin(ui.ctx());
                             solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             })
@@ -1133,9 +1140,13 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
+        (!self.view_windows.is_child() || self.view_windows.painting_panels)
+            && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        if self.view_windows.is_child() && !self.view_windows.painting_panels {
+            return None;
+        }
         self.panel_runtime
             .as_ref()
             .and_then(|integration| integration.host.as_ref())
@@ -1209,14 +1220,21 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = Some(reason);
         }
     }
-    if let Err(reason) = super::production::drain_production_actions(app)
+    if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
+        return;
+    }
+    let plugin_error = super::plugin::sync(app).err();
+    let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
         .and_then(|()| super::production::refresh_production(app))
-        && let Some(integration) = &mut app.panel_runtime
-    {
-        integration.last_error = Some(reason);
+        .err();
+    if let Some(integration) = &mut app.panel_runtime {
+        // Context reconciliation and painting cannot resolve an earlier sync failure.
+        integration.sync_error = plugin_error.or(production_error);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
+    // The Browser's search field takes its title's place while it is open (#1634).
+    let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1228,6 +1246,9 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            host.set_header_content(InstanceId("browser".into()), browser_header);
+            // The open search box holds the magnifier.
+            host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {
@@ -1308,6 +1329,125 @@ pub(crate) fn reserve_host_input(app: &mut crate::SolveApp, ctx: &egui::Context)
     if host.wants_escape(&integration.runtime) && crate::ui_kit::Container::reserve_host_escape(ctx) {
         host.request_escape();
         app.esc_handled = true;
+    }
+}
+
+/// State for one detached window. Swap it in only during that viewport's pass;
+/// root paint, focus, layout commands and preference saves keep their own host.
+#[derive(Default)]
+pub(crate) struct PopOutPanels {
+    runtime: Option<AppPanelRuntime>,
+    frame: Option<HostFrame>,
+    seen_layout: Option<u64>,
+    record: Option<serde_json::Value>,
+}
+
+impl PopOutPanels {
+    pub(crate) fn load(&mut self, record: &Option<serde_json::Value>) {
+        if &self.record != record {
+            self.runtime = None;
+            self.frame = None;
+            self.seen_layout = None;
+            self.record.clone_from(record);
+        }
+    }
+
+    pub(crate) fn swap(&mut self, app: &mut crate::SolveApp) {
+        std::mem::swap(&mut self.runtime, &mut app.panel_runtime);
+        std::mem::swap(&mut self.frame, &mut app.panel_content_frame);
+    }
+
+    pub(crate) fn save(&mut self, app: &crate::SolveApp, remembered: &mut Option<serde_json::Value>) {
+        let Some(integration) = &app.panel_runtime else { return };
+        if integration.preferences.as_ref().is_some_and(|settings| settings.pending.is_some()) {
+            return;
+        }
+        let revision = integration.runtime().layout().inspect().revision;
+        if self.seen_layout == Some(revision) {
+            return;
+        }
+        if let Ok(record) = integration.preference_record()
+            && let Some(record) = solidcraft_views::ViewSet::read_panel_layout(&record.value())
+        {
+            *remembered = Some(record.clone());
+            self.record = Some(record);
+            self.seen_layout = Some(revision);
+        }
+    }
+}
+
+pub(crate) fn panel_workspace(app: &crate::SolveApp) -> Option<WorkspaceId> {
+    app.panel_runtime.as_ref().map(|integration| integration.runtime().layout().layout().workspace.clone())
+}
+
+pub(crate) fn prepare_pop_out_panels(
+    app: &mut crate::SolveApp,
+    ui: &egui::Ui,
+    domain: egui::Rect,
+    workspace: Option<&WorkspaceId>,
+    owner: &str,
+    remembered: &Option<serde_json::Value>,
+) -> bool {
+    if !domain.is_finite() || !domain.is_positive() {
+        return false;
+    }
+    let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
+    let mut capacity = domain.shrink(gap.min(domain.width().min(domain.height()) / 4.0));
+    let chrome: Vec<_> = app.shell.ribbon_overlay.into_iter().map(logical_rect).collect();
+    if let Some(ribbon) = app.shell.ribbon_overlay {
+        capacity.min.y = ribbon.bottom().clamp(capacity.min.y, capacity.max.y);
+    }
+    let force_opaque = app.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
+    let language_direction = crate::i18n::panel_direction(&app.preferences.language);
+    let shortcuts = crate::keymap::panel_shortcuts(app);
+    let result: PanelResult<()> = (|| {
+        if app.panel_runtime.is_none() {
+            super::production::enable_pop_out_production(app, owner, remembered.clone())?;
+        }
+        super::production::sync_production_visibility(app)?;
+        super::production::refresh_production(app)?;
+        let runtime = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "detached panel host unavailable"))?;
+        runtime.sync_native_direction(language_direction)?;
+        let frame = ui.ctx().cumulative_frame_nr();
+        if runtime.last_tick_frame != Some(frame) {
+            runtime.tick(&app.session)?;
+            runtime.last_tick_frame = Some(frame);
+        }
+        runtime.set_keyboard_shortcuts(shortcuts);
+        if let Some(host) = &mut runtime.host {
+            host.note_egui_context(ui.ctx(), force_opaque);
+            host.set_gap(gap)?;
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
+        }
+        runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        if let Some(workspace) = workspace
+            && &runtime.runtime().layout().layout().workspace != workspace
+            && runtime.preferences.as_ref().is_some_and(|settings| settings.pending.is_none())
+        {
+            runtime.command(&app.session, "layout.workspace.select", &serde_json::json!({"workspace": workspace}))?;
+            runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        }
+        Ok(())
+    })();
+    if let Err(reason) = &result
+        && let Some(runtime) = &mut app.panel_runtime
+    {
+        runtime.last_error = Some(reason.clone());
+    }
+    result.is_ok()
+}
+
+pub(crate) fn paint_pop_out_panels(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
+    if let Some(mut integration) = app.panel_runtime.take() {
+        let mut content = std::mem::take(&mut integration.detached_content);
+        content.show(app, ui, |app, ui| {
+            if let Err(reason) = integration.show_production_host(app, ui) {
+                integration.last_error = Some(reason);
+            }
+        });
+        integration.detached_content = content;
+        app.panel_content_frame = None;
+        app.panel_runtime = Some(integration);
     }
 }
 

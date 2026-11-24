@@ -24,6 +24,8 @@
 //! | [`eff_zero`], [`eff_zero_sq`], [`eff_zero_param`], [`eff_zero_ang_rad`] | `SmTol::GetEffZero`, `GetEffZeroSq`, `GetEffZeroParam`, `GetEffZeroAngRad` |
 //! | [`xsect_tol_3d_from_zones`]            | `SmTol::GetXSectTol3d(const SmZoneTol3d&, const SmZoneTol3d&)` |
 //! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
+//! | [`within_contact_tol`]                 | not upstream: the one reading of a contact at the tolerance, shared by every contact site |
+//! | [`coincidence_tol_3d`], [`coincidence_reach_3d`], [`within_coincidence_tol`] | not upstream: when two places are one, the larger of the contact tolerance and the two zone tolerances |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -46,6 +48,7 @@
 //! | [`scaled_zero_of_curve`]               | `SmTol::GetScaledZero(const SmCurve&)` (CO-PORTED by `intersect.surface_drop_lib_p3`) |
 //! | [`brep_model_size_estimate`], [`set_brep_model_size_estimate`] | `SmTol::GetModelSizeEstimate(const SmBrep&)`, `SmTol::SetModelSizeEstimate(SmBrep&, double)` |
 //! | [`brep_large_small_size_ratio`], [`set_brep_large_small_size_ratio`] | `SmTol::GetLargeSmallSizeRatio(const SmBrep&)`, `SmTol::SetLargeSmallSizeRatio(SmBrep&, double)` |
+//! | [`brep_size_zone_tol_3d`], [`brep_size_calc_gap_zone_tol_3d`] | not upstream: `SmTol::GetZoneTol3d(const SmContext*, ..)`, `CalcEdgeZoneTol3d` and `CalcVertexZoneTol3d(.., const SmContext*)` asked of a B-rep's context, from the B-rep's own model size estimate |
 //! | [`brep_zone_tol_3d`], [`brep_approx_tol_3d`], [`brep_xsect_tol_3d`] | `SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`, `GetApproxTol3d(const SmBrep*, ..)`, `GetXSectTol3d(const SmBrep*, ..)` |
 //! | [`brep_calc_face_zone_tol_3d`], [`brep_calc_edge_zone_tol_3d`], [`brep_calc_vertex_zone_tol_3d`] | `SmTol::CalcFaceZoneTol3d(SmBrep*)`, `CalcEdgeZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)`, `CalcVertexZoneTol3d(double, double, SmBrep*, SmZoneTol3d*)` |
 //! | [`scaled_zero_of_brep`]                | `SmTol::GetScaledZero(const SmBrep&)`          |
@@ -103,6 +106,10 @@
 //!   not change results in the release build).
 //! - The `SmBrep` overloads take the [`Brep`] by reference (a null `SmBrep*`
 //!   dereferences upstream); the B-rep's context is the kernel context.
+//! - A B-rep's model size estimate and size ratio are its own: setting them does not
+//!   write the kernel context (upstream's `SmBrep::SetThisModelSizeEstimate` and
+//!   `SetThisLargeSmallSizeRatio` pass them on to the B-rep's context, there one
+//!   model's; the kernel context is every B-rep's default, set only by its caller).
 //!   [`scaled_zero_of_brep`] returns the error of `SmBrep::CalculateBoundingBox`
 //!   (`query::brep::calculate_bounding_box`) where upstream ignores the status and
 //!   takes the scaled zero of whatever box the call left.
@@ -123,6 +130,7 @@ use crate::math::{
     max2, max3, max4, rad_to_deg, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ,
     EFF_ZERO_SQRT, PI,
 };
+use crate::nurbs::math::gamma;
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
@@ -426,8 +434,9 @@ pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
     xsect_tol3d(k, zone1 + zone2)
 }
 
-/// The tolerance below which two circles or parallel cylinders, or a circle and a line in
-/// its plane, that overlap past touching touch on the boolean's path: the system zone
+/// The tolerance up to which two circles or parallel cylinders, or a circle and a line in
+/// its plane, that overlap past touching touch on the boolean's path (read by
+/// [`within_contact_tol`]): the system zone
 /// tolerance, 1e-5 by default. Not upstream (WR-787, #15429, #14599): one value for every
 /// site that decides the contact (the walls, the rims, the curve/surface classifier),
 /// whatever tolerances earlier operations grew the edges and faces to, so the same two
@@ -439,6 +448,104 @@ pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
 #[must_use]
 pub fn contact_tol_3d(k: &Kernel) -> f64 {
     zone_tol_3d(k, SmallTopoType::NormalSize)
+}
+
+/// Whether `distance`, a length that decides a contact (how far two circles, or a circle
+/// and a line in its plane, overlap past touching; how far a plane dips into a cylinder or
+/// stands off a cone's generator; how far apart such curves lie all round), is within the
+/// contact tolerance `contact`: not proved past it. Not upstream: the one reading of the
+/// contact rule, shared by every site that decides a contact
+/// (`circle_coplanar_circle_intersect_in_contact` and
+/// `line_coplanar_circle_intersect_distinct` in `geom::geom_utility`, which the walls, the
+/// rims and the curve/surface classifier call with [`contact_tol_3d`]; a plane's section
+/// of a cylinder or a cone touching a side of the plane's domain,
+/// `Plane::make_new_plane_ellipse_in_contact`, with it too; and the plane's tangent line
+/// on a cylinder or a cone, `Cone::intersect_with_plane`, with the faces' zone
+/// tolerance), as two points are one unless proved apart
+/// (`ProtoTopologyManager::find_proto_vertex_within`).
+///
+/// Each site decides one contact from its own copies of the two curves: an edge's curve,
+/// a face pair's intersection curve, a surface's osculating circle. They are the same
+/// curves computed by different constructions, so their coordinates differ by a few
+/// roundings of their size, and a length read off them differs by that much from site to
+/// site. Read sharply, a contact at the tolerance (a boss placed exactly the tolerance over
+/// a rim) touched at one site and crossed at another, 9.99999999962e-6 against
+/// 1.0000000000673e-5; and where every site crossed, the vertices on the two sides of the
+/// lens were one point by their tolerances while the curves between them crossed. So a
+/// distance at the tolerance is within it, and so is one up to `γ_32` of `size` past it,
+/// `size` the largest coordinate a point of either curve has: the overlap's own arithmetic
+/// (a projection, a distance and two sums, about fifteen roundings) and as many again for
+/// the constructions of the copies (sixteen failing booleans of the stress corpus read
+/// their copies at most 3.3 unit roundoffs of `size` apart). A distance proved past the
+/// tolerance by more than that is past it at every site.
+#[must_use]
+pub fn within_contact_tol(distance: f64, contact: f64, size: f64) -> bool {
+    distance <= contact + rounding_of_copies(size)
+}
+
+/// How far a distance read off two copies of the same geometry can stand past the true
+/// one by rounding alone: `γ_32` of `size`, the largest coordinate a point of either copy
+/// has ([`within_contact_tol`] derives it). Shared by the contact and the coincidence rule,
+/// so both read a length at their tolerance the same way.
+fn rounding_of_copies(size: f64) -> f64 {
+    gamma(32) * size.abs()
+}
+
+/// The tolerance within which two places coincide (are one place), for two objects with
+/// zone tolerances `zone1` and `zone2`: the larger of the contact tolerance
+/// ([`contact_tol_3d`]) and the two zone tolerances. Not upstream: one rule for every site
+/// that decides whether two places are one (a point on a side of a surface's domain, and,
+/// as the sites move to it, a curve along an edge and two points one vertex), in place of
+/// the intersection tolerance, the two zone tolerances' sum, that upstream reads there.
+///
+/// A zone tolerance is how far an object's stored geometry may stand from the place it
+/// stands for: within it of an object, a place is on the object, by that object's own
+/// statement. Two places farther apart than both objects' zone tolerances are on neither
+/// by either object's statement, so nothing makes them one; the sum makes them one up to
+/// twice the tolerance, where neither object says so. The contact rule already reads two
+/// circles that far into each other (past the contact tolerance, the system zone
+/// tolerance) as two crossings, two places; at the sum, an edge and a curve 1.5e-5 beside
+/// it are one place where the tolerance is 1e-5, and a groove that deep cut into a block
+/// comes out as no groove at all while a site still reads the sum (docs/booleans.md §10,
+/// the coincidence rule in migration). With every site on the larger
+/// tolerance, a place is decided once: within the larger of the two objects' tolerances
+/// (and never under the contact tolerance, so a contact and a coincidence agree), one;
+/// past it, two. An object whose tolerance an earlier operation grew keeps it: whatever
+/// lies within it is on it. Read by [`within_coincidence_tol`], at the tolerance or a
+/// rounding of the copies past it, as [`within_contact_tol`] reads a contact.
+#[must_use]
+pub fn coincidence_tol_3d(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
+    // A NaN zone tolerance stays NaN (`f64::max` would pass over it and let the other
+    // tolerance stand): no distance is within it, so an object whose tolerance is unknown
+    // is never made one with another place, as the two tolerances' sum read it before
+    if zone1.is_nan() || zone2.is_nan() {
+        return f64::NAN;
+    }
+    contact_tol_3d(k).max(zone1).max(zone2)
+}
+
+/// The largest distance at which two places coincide ([`coincidence_tol_3d`]): the
+/// tolerance and the rounding of the copies past it, `size` the largest coordinate of
+/// either place, as [`within_contact_tol`] reads a contact. For a site that compares in
+/// its own measure (a band mapped onto a surface's parameters) rather than a distance.
+#[must_use]
+pub fn coincidence_reach_3d(k: &Kernel, zone1: f64, zone2: f64, size: f64) -> f64 {
+    coincidence_tol_3d(k, zone1, zone2) + rounding_of_copies(size)
+}
+
+/// Whether two places `distance` apart, on objects with zone tolerances `zone1` and
+/// `zone2`, coincide: `distance` is within [`coincidence_reach_3d`]. Not upstream: the
+/// one reading of the coincidence rule ([`coincidence_tol_3d`]). A NaN distance, or a NaN
+/// zone tolerance, is apart.
+#[must_use]
+pub fn within_coincidence_tol(
+    k: &Kernel,
+    distance: f64,
+    zone1: f64,
+    zone2: f64,
+    size: f64,
+) -> bool {
+    distance <= coincidence_reach_3d(k, zone1, zone2, size)
 }
 
 /// The system angle tolerance in radians (`SmTol::GetAngTolRad()`, `SM_ANG_TOL_RAD`).
@@ -544,11 +651,48 @@ pub fn brep_model_size_estimate(k: &Kernel, b: &Brep) -> f64 {
     b.this_model_size_estimate(k, true)
 }
 
-/// Sets a B-rep's model size estimate (and its context's) and returns the B-rep's new
+/// Sets a B-rep's model size estimate, on that B-rep alone, and returns the B-rep's new
 /// zone tolerance (`SmTol::SetModelSizeEstimate(SmBrep&, double)`; upstream default
 /// [`USE_DEFAULT`]).
-pub fn set_brep_model_size_estimate(k: &mut Kernel, b: &mut Brep, model_size_estimate: f64) -> f64 {
-    b.set_this_model_size_estimate(k, model_size_estimate)
+pub fn set_brep_model_size_estimate(b: &mut Brep, model_size_estimate: f64) -> f64 {
+    b.set_this_model_size_estimate(model_size_estimate)
+}
+
+/// The zone tolerance of a B-rep's model size estimate (not upstream, which reads it
+/// from the B-rep's context, there one model's): [`size_estimate_to_zone_tol_3d`] of
+/// the estimate the B-rep stores, and the context zone tolerance
+/// ([`context_zone_tol_3d`] of the kernel context, what the caller configured) for a
+/// B-rep that stores [`USE_DEFAULT`] (and while the system zone tolerance is
+/// uninitialised, as the context form answers then). Unlike [`brep_zone_tol_3d`] it
+/// does not follow the B-rep tolerance where it was set apart from the estimate.
+#[must_use]
+pub fn brep_size_zone_tol_3d(k: &Kernel, b: &Brep) -> f64 {
+    let stored = b.this_model_size_estimate(k, false);
+    if stored == USE_DEFAULT || k.tolerances.zone_tol_3d == UNINIT_TOL {
+        context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize)
+    } else {
+        size_estimate_to_zone_tol_3d(stored)
+    }
+}
+
+/// An edge's or a vertex's zone tolerance from its largest gaps, in a B-rep, before
+/// the B-rep tolerance is settled: as [`calc_edge_zone_tol_3d`] and
+/// [`calc_vertex_zone_tol_3d`] with [`brep_size_zone_tol_3d`] as the default.
+#[must_use]
+pub fn brep_size_calc_gap_zone_tol_3d(
+    k: &Kernel,
+    max_gap_1d: f64,
+    max_gap_2d: f64,
+    b: &Brep,
+    max_up_zone_tol: Option<f64>,
+) -> f64 {
+    calc_gap_zone_tol(
+        k,
+        max_gap_1d,
+        max_gap_2d,
+        max_up_zone_tol,
+        brep_size_zone_tol_3d(k, b),
+    )
 }
 
 /// A B-rep's large/small size ratio, its context's (else the system's) when it has
@@ -558,11 +702,11 @@ pub fn brep_large_small_size_ratio(k: &Kernel, b: &Brep) -> f64 {
     b.this_large_small_size_ratio(k, true)
 }
 
-/// Sets a B-rep's large/small size ratio and its context's
+/// Sets a B-rep's large/small size ratio, on that B-rep alone
 /// (`SmTol::SetLargeSmallSizeRatio(SmBrep&, double)`; upstream default
 /// [`USE_DEFAULT`]).
-pub fn set_brep_large_small_size_ratio(k: &mut Kernel, b: &mut Brep, large_small_size_ratio: f64) {
-    b.set_this_large_small_size_ratio(k, large_small_size_ratio);
+pub fn set_brep_large_small_size_ratio(b: &mut Brep, large_small_size_ratio: f64) {
+    b.set_this_large_small_size_ratio(large_small_size_ratio);
 }
 
 /// A B-rep's zone tolerance (`SmTol::GetZoneTol3d(const SmBrep*, SmSmallTopoType)`):
@@ -1157,9 +1301,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             Cardinality::ManyToMany => false,
         };
         if violates {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::relate_pair",
-                "the pair would break the relation's cardinality",
+                GeomFailure::PairBreaksCardinality,
             ));
         }
         self.first_to_second
@@ -1201,9 +1345,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
         if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
         {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::remove_pair",
-                "the pair is not related",
+                GeomFailure::PairNotRelated,
             ));
         }
         if let Some(seconds) = self.first_to_second.get_mut(&first) {
@@ -1302,16 +1446,40 @@ mod tests {
     fn brep_model_size_estimate_and_ratio_chase_the_context() {
         let mut k = Kernel::default();
         let mut b = Brep::new();
+        let other = Brep::new();
         assert_eq!(brep_model_size_estimate(&k, &b), MODEL_SIZE_ESTIMATE);
         assert_eq!(brep_large_small_size_ratio(&k, &b), LARGE_SMALL_SIZE_RATIO);
-        // 500..50000 -> 1e-4; the context gets the estimate too
-        assert_eq!(set_brep_model_size_estimate(&mut k, &mut b, 5000.0), 1e-4);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-5);
+        // 500..50000 -> 1e-4, on this B-rep alone: the context and another B-rep
+        // keep the default
+        assert_eq!(set_brep_model_size_estimate(&mut b, 5000.0), 1e-4);
         assert_eq!(brep_model_size_estimate(&k, &b), 5000.0);
-        assert_eq!(context_model_size_estimate(&k, &k.context), 5000.0);
+        assert_eq!(
+            context_model_size_estimate(&k, &k.context),
+            MODEL_SIZE_ESTIMATE
+        );
+        assert_eq!(k.context.this_zone_tol_3d(), 1e-5);
+        assert_eq!(brep_model_size_estimate(&k, &other), MODEL_SIZE_ESTIMATE);
         assert_eq!(brep_zone_tol_3d(&k, &b, SmallTopoType::NormalSize), 1e-4);
-        set_brep_large_small_size_ratio(&mut k, &mut b, 10.0);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-4);
+        assert_eq!(brep_size_zone_tol_3d(&k, &other), 1e-5);
+        assert_eq!(brep_size_calc_gap_zone_tol_3d(&k, 0.0, 0.0, &b, None), 1e-4);
+        set_brep_large_small_size_ratio(&mut b, 10.0);
         assert_eq!(brep_large_small_size_ratio(&k, &b), 10.0);
-        assert_eq!(k.context.stored_large_small_size_ratio(), 10.0);
+        assert_eq!(k.context.stored_large_small_size_ratio(), USE_DEFAULT);
+        assert_eq!(
+            brep_large_small_size_ratio(&k, &other),
+            LARGE_SMALL_SIZE_RATIO
+        );
+        // what the caller configures on the context is every defaulting B-rep's
+        set_context_model_size_estimate(&mut k.context, 0.05);
+        k.context.set_this_large_small_size_ratio(3.0);
+        assert_eq!(brep_model_size_estimate(&k, &other), 0.05);
+        assert_eq!(brep_size_zone_tol_3d(&k, &other), 1e-6);
+        assert_eq!(brep_large_small_size_ratio(&k, &other), 3.0);
+        assert_eq!(brep_model_size_estimate(&k, &b), 5000.0);
+        assert_eq!(brep_size_zone_tol_3d(&k, &b), 1e-4);
+        assert_eq!(brep_large_small_size_ratio(&k, &b), 10.0);
     }
 
     #[test]
@@ -1582,6 +1750,35 @@ mod tests {
             SmallTopoType::from_code(3).map(SmallTopoType::code),
             Some(3)
         );
+    }
+
+    #[test]
+    fn coincidence_is_the_larger_tolerance_and_a_nan_tolerance_is_apart() {
+        let k = Kernel::default();
+        let contact = contact_tol_3d(&k);
+        assert_eq!(coincidence_tol_3d(&k, 0.0, 0.0), contact);
+        assert_eq!(
+            coincidence_tol_3d(&k, 4.0 * contact, contact),
+            4.0 * contact
+        );
+        assert!(within_coincidence_tol(&k, contact, 0.0, 0.0, 1.0));
+        assert!(!within_coincidence_tol(
+            &k,
+            2.0 * contact,
+            contact,
+            contact,
+            1.0
+        ));
+        // an unknown tolerance never makes two places one, however near they are
+        for (zone1, zone2) in [
+            (f64::NAN, contact),
+            (contact, f64::NAN),
+            (f64::NAN, f64::NAN),
+        ] {
+            assert!(coincidence_tol_3d(&k, zone1, zone2).is_nan());
+            assert!(!within_coincidence_tol(&k, 0.0, zone1, zone2, 1.0));
+        }
+        assert!(!within_coincidence_tol(&k, f64::NAN, contact, contact, 1.0));
     }
 }
 

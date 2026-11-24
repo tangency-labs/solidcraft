@@ -823,7 +823,11 @@ fn a_design_keeps_its_drawings_inline_in_plain_json() {
     assert_eq!(crate::Document::from_json(&saved).unwrap().to_json(), saved, "save, open, save: the same bytes");
     let v: Value = serde_json::from_str(&saved).unwrap();
     assert_eq!(v["drawings"][3], file(&plate()));
-    assert!(v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
+    // Drawings in a design are a change of design format 59 (folded for 0.45.0-rc.1): a design
+    // that holds drawings is written at 59 or later, and no longer names the change as pending.
+    let format = v["format"].as_str().and_then(crate::format::version_of);
+    assert!(format.is_some_and(|n| n >= 59), "{}", v["format"]);
+    assert!(!v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
     let empty: Value = serde_json::from_str(&crate::Document::new("Plate").to_json()).unwrap();
     assert_eq!(empty.get("drawings"), None);
 }
@@ -953,16 +957,17 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     // A field and a second sheet it can't read stay out, named, and go back.
     file["future_views"] = json!([{"id": "a"}]);
     let mut future_sheet = file["sheets"][0].clone();
+    future_sheet["id"] = json!(ids::encode(3));
     future_sheet["name"] = json!("Future");
     future_sheet["future_layers"] = json!([1]);
-    file["sheets"].as_array_mut().unwrap().push(future_sheet);
+    file["sheets"].as_array_mut().unwrap().insert(1, future_sheet);
     let opened = Drawing::from_json(&file.to_string()).unwrap();
     assert_eq!(opened.sheets, d.sheets);
     let said = &opened.newer_file.as_ref().unwrap().not_understood;
     assert!(said.iter().any(|what| what.contains("future_views")) && said.iter().any(|what| what.contains("Future")), "{said:?}");
     let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
     assert_eq!(again["future_views"], file["future_views"]);
-    assert_eq!(again["sheets"].as_array().unwrap().len(), d.sheets.len() + 1);
+    assert_eq!(again["sheets"], file["sheets"], "an unreadable sheet keeps its place");
     assert_eq!(again["format"], json!(newer));
     // A source of another design's file reads; one it can't read (a field a later build adds) stays
     // out, named by its path, and goes back.
@@ -979,6 +984,244 @@ fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
     assert_eq!(again["sources"].as_array().unwrap().last(), Some(&bolt));
 }
 
+#[test]
+fn newer_drawing_list_elements_are_reported_and_restored() {
+    use table::{Kind, Place, SheetTable};
+
+    let mut with_annotations = plate();
+    let sheet = with_annotations.sheets[0].id;
+    let kind = Kind::Revision;
+    with_annotations.tables.add([Arc::new(SheetTable { id: 52, sheet, table: kind.default_table(), place: Place::At([10.0, 20.0]), kind })]);
+    with_annotations.symbols.add([Arc::new(Symbol {
+        id: 53,
+        name: "Mark".into(),
+        pieces: vec![symbol::Piece::Text {
+            at: [0.0, 0.0],
+            content: serde_json::from_value(json!([{"text": "Mark"}])).unwrap(),
+            cap_mm: None,
+            align: Default::default(),
+        }],
+    })]);
+    let mut annotated = file(&with_annotations);
+    annotated["notes"] = json!([{"id": ids::encode(54), "anchor": {"sheet": ids::encode(sheet)}, "at": [4, 6], "content": [{"text": "Note"}]}]);
+    let (doc, drawing, _) = w38d_record_fixture(false);
+    let filled = file(doc.drawing(drawing).unwrap());
+
+    for (original, key, kind) in [
+        (&annotated, "views", "view"),
+        (&annotated, "dimensions", "dimension"),
+        (&annotated, "balloons", "balloon"),
+        (&annotated, "notes", "note"),
+        (&annotated, "tables", "table"),
+        (&annotated, "symbols", "symbol"),
+        (&filled, "sketches", "sketch"),
+        (&filled, "fills", "fill"),
+        (&filled, "patterns", "pattern"),
+    ] {
+        assert!(read(original).is_ok(), "{key}: {}", refusal(original));
+        let mut future = original.clone();
+        future[key][0]["future_field"] = json!({"mode": "v2", "inset": [2, 5]});
+        assert!(read(&future).is_err(), "{key}");
+        future["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+        let opened = read(&future).unwrap_or_else(|why| panic!("{key}: {why}"));
+        let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+        assert!(notice.iter().any(|entry| entry.starts_with(kind)), "{key}: {notice:?}");
+        let round_trip = file(&opened);
+        assert_eq!(round_trip[key], future[key], "{key}");
+        if key == "sketches" {
+            assert!(opened.fills.is_empty());
+            assert_eq!(round_trip["fills"], future["fills"]);
+        }
+    }
+}
+
+#[test]
+fn a_newer_drawing_counts_retained_sources_towards_the_edit_limit() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let source = |i: u64| json!({"id": ids::encode(1000 + i), "path": format!("source-{i}.sc")});
+    let mut sources: Vec<_> = (0..MAX_SOURCES as u64).map(source).collect();
+    sources[0]["future_source"] = json!(true);
+    saved["sources"] = json!(sources);
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.sources.len(), MAX_SOURCES - 1);
+    opened.name = "Renamed at the limit".into();
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().name, opened.name);
+    opened.sources.push(serde_json::from_value(source(MAX_SOURCES as u64)).unwrap());
+    let expected = format!("sources must be a list of at most {MAX_SOURCES} records");
+    assert!(opened.validate().unwrap_err().to_string().contains(&expected));
+    assert!(opened.to_json().unwrap_err().to_string().contains(&expected));
+}
+
+#[test]
+fn a_newer_drawing_refuses_a_sketch_edit_over_the_combined_entity_budget() {
+    use solidcraft_sketch::{MAX_CONSTRAINTS, MAX_CURVES, MAX_POINTS, Sketch};
+
+    let mut d = bare();
+    d.sketches.push(Arc::new(SheetSketch { id: 1000, owner: Owner::Sheet(d.sheets[0].id), name: "Editable sketch".into(), sketch: Sketch::new() }));
+    let mut saved = file(&d);
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    // The readable origin and the unknown sketch entities together use the full budget.
+    let mut remaining = MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS - d.sketches[0].sketch.points.len();
+    for id in 1001.. {
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(MAX_POINTS);
+        saved["sketches"].as_array_mut().unwrap().push(json!({
+            "id": ids::encode(id), "sketch": {"points": vec![Value::Null; take]}, "future_geometry": true
+        }));
+        remaining -= take;
+    }
+
+    let mut open = read(&saved).unwrap();
+    let before = open.to_json().unwrap();
+    let original = open.sheet_sketch(1000).unwrap().clone();
+    let change = |sketch: &mut Sketch| {
+        sketch.add_point(Vec2::new(3.0, 4.0), Some("extra"))?;
+        Ok(())
+    };
+    let error = open.edit_sheet_sketch(&crate::Document::default(), 1000, change).unwrap_err().to_string();
+    assert!(error.contains("drawing sketch entity limit exceeded"), "{error}");
+    assert!(Arc::ptr_eq(open.sheet_sketch(1000).unwrap(), &original));
+    assert_eq!(open.to_json().unwrap(), before);
+    assert_eq!(Drawing::from_json(&before).unwrap().sketches.len(), 1);
+    let mut candidate = (*original).clone();
+    change(&mut candidate.sketch).unwrap();
+    open.sketches[0] = Arc::new(candidate);
+    assert!(open.validate().unwrap_err().to_string().contains("drawing sketch entity limit exceeded"));
+}
+
+#[test]
+fn a_newer_drawing_refuses_a_fill_edit_over_the_combined_region_budget() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let d = doc.drawing(id).unwrap();
+    let live_pieces: usize = d.fills[0].last_region.loops().map(|boundary| boundary.segs.len()).sum();
+    let mut saved = file(d);
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    saved["fills"].as_array_mut().unwrap().push(json!({
+        "id": ids::encode(1000), "future_fill": true,
+        "last_region": {"outer": {"segs": vec![Value::Null; MAX_FILL_REGION_PIECES - live_pieces]}}
+    }));
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.fills.len(), 1);
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().fills.len(), 1);
+    let mut another = (*opened.fills[0]).clone();
+    another.id = 1001;
+    opened.fills.push(Arc::new(another));
+    let error = opened.validate().unwrap_err().to_string();
+    assert!(error.contains("raw retained regions exceed"), "{error}");
+}
+
+#[test]
+fn a_newer_drawing_keeps_an_unreadable_sheet_before_its_surviving_neighbour() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let a = saved["sheets"][0].clone();
+    let mut future = a.clone();
+    future["id"] = json!(ids::encode(1000));
+    future["name"] = json!("Future");
+    future["future_layers"] = json!([1]);
+    let mut b = a.clone();
+    b["id"] = json!(ids::encode(1001));
+    b["name"] = json!("B");
+    saved["sheets"] = json!([a, future, b]);
+    let mut opened = read(&saved).unwrap();
+    let first = opened.sheets[0].id;
+    opened.remove_sheet(first);
+    assert_eq!(file(&opened)["sheets"], json!([future, b]));
+    assert_eq!(Drawing::from_json(&opened.to_json().unwrap()).unwrap().sheets[0].name, "B");
+}
+
+#[test]
+fn a_newer_drawing_withholds_an_unsupported_sketch_and_its_fill() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let mut saved = file(doc.drawing(id).unwrap());
+    let curve = saved["sketches"][0]["sketch"]["curves"][0]["id"].clone();
+    saved["sketches"][0]["sketch"]["equations"] = json!([{
+        "curve": curve, "y": "x", "start": "0", "end": "1", "tolerance": 0.01, "variable_unit": "number"
+    }]);
+    assert!(refusal(&saved).contains("not supported yet: sheet sketch equations"));
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+
+    let opened = read(&saved).unwrap();
+    assert!(!opened.sheets.is_empty());
+    assert!(opened.sketches.is_empty() && opened.fills.is_empty());
+    let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(notice.iter().any(|item| item.contains("sheet sketch equations")), "{notice:?}");
+    assert!(notice.iter().any(|item| item.starts_with("fill ") && item.contains("unavailable object")), "{notice:?}");
+    let written = file(&opened);
+    assert_eq!(written["sketches"], saved["sketches"]);
+    assert_eq!(written["fills"], saved["fills"]);
+}
+
+#[test]
+fn a_newer_drawing_leaves_out_a_view_and_its_dependents() {
+    let drawing = plate();
+    let mut saved = file(&drawing);
+    let front = drawing.views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. }) && v.sheet == drawing.sheets[0].id).unwrap();
+    let front_id = json!(ids::encode(front.id));
+    let views = saved["views"].as_array_mut().unwrap();
+    views.iter_mut().find(|v| v["id"] == front_id).unwrap()["future_settings"] = json!({"curves": [1, 2, 3]});
+    let note = json!({"id": ids::encode(42), "anchor": {"view": front_id}, "at": [5.0, 12.0], "content": [{"text": "On the front"}]});
+    saved["notes"] = json!([note]);
+    assert!(read(&saved).is_err(), "this version's drawings are still strict");
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+
+    let mut opened = read(&saved).unwrap();
+    assert_eq!(opened.sheets, drawing.sheets);
+    assert_eq!(opened.views.len(), 1, "both projected generations follow their parent");
+    assert!(opened.dimensions.is_empty() && opened.balloons.is_empty() && opened.notes.is_empty());
+    let notice = &opened.newer_file.as_ref().unwrap().not_understood;
+    for kind in ["view", "dimension", "balloon", "note"] {
+        assert!(notice.iter().any(|entry| entry.starts_with(kind)), "{notice:?}");
+    }
+    opened.name = "Renamed drawing".into();
+    let again = file(&opened);
+    assert_eq!(again["name"], "Renamed drawing");
+    for key in ["views", "dimensions", "balloons", "notes"] {
+        assert_eq!(again[key], saved[key], "{key}");
+    }
+    assert_eq!(file(&read(&again).unwrap()), again);
+}
+
+#[test]
+fn a_newer_revision_row_and_its_tag_round_trip_with_the_readable_rows() {
+    let mut saved = file(&bare());
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    let row = json!({"id": ids::encode(41), "revision": "A", "future_approval": ["CAD"]});
+    let tag = json!({"id": ids::encode(42), "row": row["id"], "sheet": saved["sheets"][0]["id"], "at": [5.0, 10.0], "size_mm": 8.3});
+    saved["revisions"] = json!({"rows": [row, {"id": ids::encode(43), "revision": "B"}], "tags": [tag]});
+
+    let opened = read(&saved).unwrap();
+    assert_eq!(opened.revisions.rows()[0].revision, "B");
+    assert!(opened.revisions.tags().is_empty());
+    let written = file(&opened);
+    assert_eq!(written["revisions"]["rows"][0], row);
+    assert_eq!(written["revisions"]["tags"][0], tag);
+    assert!(read(&written).is_ok());
+}
+
+#[test]
+fn a_newer_drawing_keeps_unknown_references_valid_when_edited() {
+    let drawing = plate();
+    let mut saved = file(&drawing);
+    let sheet = drawing.sheets[1].id;
+    let view = drawing.views.iter().find(|v| v.sheet == sheet).unwrap().id;
+    let mut seed = IdSource::seeded(17);
+    let placement = drawing.allocate_id(&mut seed).unwrap();
+    saved["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    saved["placed_symbols"] = json!([{"id": ids::encode(placement), "on": {"view": ids::encode(view)}}]);
+    let mut opened = read(&saved).unwrap();
+    assert_ne!(opened.allocate_id(&mut IdSource::seeded(17)).unwrap(), placement);
+    Arc::make_mut(&mut opened.sheets[1]).name = "Renamed sheet".into();
+    assert_eq!(file(&opened)["placed_symbols"], saved["placed_symbols"]);
+    opened.sheets.retain(|s| s.id != sheet);
+    opened.views.retain(|v| v.id != view);
+    let why = opened.to_json().unwrap_err().to_string();
+    assert!(why.contains(&ids::encode(view)) && why.contains("newer SolidCraft"), "{why}");
+}
+
 // W38a: original paper-mm payload, independent of any Drawing UI or model solver.
 fn paper_sketch_file() -> Value {
     let mut d = file(&plate());
@@ -992,7 +1235,7 @@ fn paper_sketch_file() -> Value {
     }
     sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: 0, value: 40.0 }, Some("Width".into())).unwrap();
     sketch.points[1].exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("Inset + 5 mm".into()), y: None }));
-    d["sketches"] = json!([{"id": ids::encode(41), "sheet": d["sheets"][0]["id"], "name":"Detail outline", "sketch": sketch}]);
+    d["sketches"] = json!([{"id": ids::encode(41), "owner": {"sheet": d["sheets"][0]["id"]}, "name":"Detail outline", "sketch": sketch}]);
     d
 }
 
@@ -1014,7 +1257,7 @@ fn sheet_sketch_records_are_ordered_by_id_without_reordering_sheets_or_geometry(
     let mut input = paper_sketch_file();
     let mut second = input["sketches"][0].clone();
     second["id"] = json!(ids::encode(40));
-    second["sheet"] = input["sheets"][1]["id"].clone();
+    second["owner"] = json!({"sheet": input["sheets"][1]["id"]});
     input["sketches"].as_array_mut().unwrap().push(second);
     let d = read(&input).unwrap();
     assert_eq!(d.sketches.iter().map(|s| s.id).collect::<Vec<_>>(), [40, 41]);
@@ -1023,7 +1266,7 @@ fn sheet_sketch_records_are_ordered_by_id_without_reordering_sheets_or_geometry(
     reverse.sketches.reverse();
     assert_eq!(reverse.to_json().unwrap(), d.to_json().unwrap());
     assert_eq!(reverse.sketches[0].id, 41, "saving must not mutate the live record");
-    assert_eq!(d.sheet_sketch(41).unwrap().sheet, d.sheets[0].id);
+    assert_eq!(d.sheet_sketch(41).unwrap().owner, Owner::Sheet(d.sheets[0].id));
     assert!(bare().sheet_sketch(41).is_none(), "lookup must not fall back to another drawing");
 }
 
@@ -1036,9 +1279,9 @@ fn sheet_sketch_ids_share_the_drawing_namespace_and_owners_must_resolve() {
         assert!(read(&v).is_err());
     }
     let mut v = good.clone();
-    v["sketches"][0]["sheet"] = good["sources"][0]["id"].clone();
-    assert!(refusal(&v).contains("owner does not exist"));
-    v["sketches"][0]["sheet"] = json!(ids::encode(999));
+    v["sketches"][0]["owner"] = json!({"sheet": good["sources"][0]["id"]});
+    assert!(refusal(&v).contains("owner"));
+    v["sketches"][0]["owner"] = json!({"sheet": ids::encode(999)});
     assert!(read(&v).is_err());
     let mut duplicate = good;
     let record = duplicate["sketches"][0].clone();
@@ -1050,6 +1293,122 @@ fn sheet_sketch_ids_share_the_drawing_namespace_and_owners_must_resolve() {
     let taken = generator.next(&BTreeSet::new()).unwrap();
     Arc::make_mut(&mut d.sketches[0]).id = taken;
     assert_ne!(d.allocate_id(&mut IdSource::seeded(777)).unwrap(), taken);
+}
+
+// W38b: a drawing sketch belongs to a sheet (paper millimetres) or to a view (model millimetres in
+// the view's plane). The iso view on the second sheet has no projected views, dimensions or balloons.
+fn iso_view(d: &Drawing) -> (u64, u64) {
+    let view = d.views.iter().find(|view| view.sheet == d.sheets[1].id).unwrap();
+    (view.id, view.sheet)
+}
+
+/// `paper_sketch_file` with a second sketch, id 40, owned by the iso view.
+fn view_sketch_file() -> Value {
+    let mut v = paper_sketch_file();
+    let (view, _) = iso_view(&read(&v).unwrap());
+    let mut on_view = v["sketches"][0].clone();
+    on_view["id"] = json!(ids::encode(40));
+    on_view["owner"] = json!({"view": ids::encode(view)});
+    on_view["name"] = json!("Weld symbol outline");
+    v["sketches"].as_array_mut().unwrap().insert(0, on_view);
+    v
+}
+
+#[test]
+fn drawing_sketches_belong_to_a_sheet_or_a_view_and_owners_must_resolve() {
+    let good = view_sketch_file();
+    let d = read(&good).unwrap();
+    let (view, view_sheet) = iso_view(&d);
+    assert_eq!(d.sketches.iter().map(|record| record.owner).collect::<Vec<_>>(), [Owner::View(view), Owner::Sheet(d.sheets[0].id)]);
+    assert_eq!(d.sketches.iter().map(|record| d.sketch_sheet(record)).collect::<Vec<_>>(), [Some(view_sheet), Some(d.sheets[0].id)]);
+    assert_eq!(file(&d)["sketches"], good["sketches"]);
+
+    // An owner names one of this drawing's sheets or views, of the kind its tag says.
+    let id = |n: u64| json!(ids::encode(n));
+    let dimension = d.dimensions[0].id;
+    let balloon = d.balloons.iter().next().unwrap().id;
+    let wrong = [
+        ("sheet", id(view)),
+        ("sheet", id(dimension)),
+        ("view", id(d.sheets[0].id)),
+        ("view", id(dimension)),
+        ("view", id(balloon)),
+        ("view", good["sources"][0]["id"].clone()),
+        ("view", good["id"].clone()),
+        ("view", id(999)),
+    ];
+    for (tag, named) in wrong {
+        let mut v = good.clone();
+        v["sketches"][0]["owner"] = Value::Object(serde_json::Map::from_iter([(tag.to_string(), named.clone())]));
+        let why = refusal(&v);
+        assert!(why.contains("owner"), "{tag} {named}: {why}");
+    }
+    // A damaged owner is refused, never guessed: missing, two tags, an unknown tag, a bare id, and
+    // the older `sheet` field beside or instead of it in a current file.
+    let sheet = good["sheets"][0]["id"].clone();
+    for broken in [json!({}), json!({"sheet": sheet, "view": id(view)}), json!({"note": sheet}), sheet.clone(), Value::Null] {
+        let mut v = good.clone();
+        v["sketches"][1]["owner"] = broken.clone();
+        assert!(read(&v).is_err(), "{broken}");
+    }
+    let mut both = good.clone();
+    both["sketches"][1]["sheet"] = sheet.clone();
+    assert!(read(&both).is_err());
+    let mut older_field = good;
+    let record = older_field["sketches"][1].as_object_mut().unwrap();
+    record.remove("owner");
+    record.insert("sheet".into(), sheet);
+    assert!(read(&older_field).is_err(), "a current file never takes the older field");
+}
+
+#[test]
+fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
+    let d = read(&view_sketch_file()).unwrap();
+    let (view, view_sheet) = iso_view(&d);
+    let with = d.with_contents(vec![view]);
+    assert_eq!(with.sketches, [40]);
+    assert_eq!(d.on_sheet(view_sheet).sketches, [40]);
+    assert_eq!(d.on_sheet(d.sheets[0].id).sketches, [41]);
+
+    let mut without_view = d.clone();
+    without_view.remove_objects(&with);
+    assert_eq!(without_view.sketches.iter().map(|record| record.id).collect::<Vec<_>>(), [41]);
+    without_view.validate().unwrap();
+
+    let mut without_sheet = d.clone();
+    let on = without_sheet.remove_sheet(view_sheet);
+    assert_eq!((on.views, on.sketches), (vec![view], vec![40]));
+    without_sheet.validate().unwrap();
+
+    // The view taken out without its sketch leaves an owner that doesn't resolve.
+    let mut dangling = d.clone();
+    let mut only_the_view = d.with_contents(vec![view]);
+    only_the_view.sketches.clear();
+    dangling.remove_objects(&only_the_view);
+    let why = dangling.validate().unwrap_err().to_string();
+    assert!(why.contains("owner"), "{why}");
+}
+
+/// A drawing saved before view sketches (its `format_pending` lacks `view-sketches`) opens with each
+/// sheet sketch's `sheet` as its owner, keeps its id and geometry, and saves the same bytes again.
+#[test]
+fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
+    let current = file(&read(&view_sketch_file()).unwrap());
+    let mut older = current.clone();
+    older["format_pending"] = json!(DRAWING.pending_names().into_iter().filter(|name| name != "view-sketches").collect::<Vec<_>>());
+    let mut record = current["sketches"][1].clone();
+    let object = record.as_object_mut().unwrap();
+    object.remove("owner");
+    object.insert("sheet".into(), current["sheets"][0]["id"].clone());
+    older["sketches"] = json!([record]);
+
+    let d = read(&older).unwrap();
+    assert_eq!(d.sketches.iter().map(|record| (record.id, record.owner)).collect::<Vec<_>>(), [(41, Owner::Sheet(d.sheets[0].id))]);
+    let saved = file(&d);
+    assert_eq!(saved["sketches"], json!([current["sketches"][1]]));
+    assert_eq!(saved["format_pending"], current["format_pending"]);
+    let text = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&text).unwrap().to_json().unwrap(), text);
 }
 
 #[test]
@@ -1078,7 +1437,7 @@ fn sheet_sketches_keep_current_views_dimensions_balloons_and_revisions() {
         assert!(Drawing::from_json(&serde_json::to_string(&duplicate).unwrap()).is_err());
     }
     let mut without = d.clone();
-    let sheet = d.sketches[0].sheet;
+    let sheet = d.sketch_sheet(&d.sketches[0]).unwrap();
     let on = without.remove_sheet(sheet);
     assert_eq!(on.sketches, vec![d.sketches[0].id]);
     assert!(!on.is_empty());
@@ -1094,7 +1453,8 @@ fn drawings_without_sketches_keep_their_old_shape_and_gain_only_the_pending_form
     let v = file(&old);
     assert!(v.get("sketches").is_none());
     assert!(read(&v).unwrap().sketches.is_empty());
-    assert!(DRAWING.pending_names().iter().any(|n| n == "sheet-sketches"));
+    // Sheet sketches are a change of drawing format 2 (folded for 0.45.0-rc.1), no longer pending.
+    assert!(DRAWING.current() >= 2 && !DRAWING.pending_names().iter().any(|n| n == "sheet-sketches"));
     let mut explicit_empty = v;
     explicit_empty["sketches"] = json!([]);
     assert!(file(&read(&explicit_empty).unwrap()).get("sketches").is_none());
@@ -1511,7 +1871,7 @@ fn staged_sheet_sketch_edit_changes_only_the_given_drawing_not_the_source_design
     assert_eq!(doc.to_json(), source, "a staged Drawing operation never publishes to the source design");
     assert!(Arc::ptr_eq(doc.drawing(id).unwrap().sheet_sketch(41).unwrap(), &old_record));
     assert_eq!(staged.sheet_sketch(41).unwrap().sketch.points[0].pos, solidcore_record::Vec2::ZERO);
-    assert_eq!(staged.sheet_sketch(41).unwrap().sheet, staged.sheets[0].id);
+    assert_eq!(staged.sheet_sketch(41).unwrap().owner, Owner::Sheet(staged.sheets[0].id));
 }
 
 #[test]
@@ -1523,7 +1883,12 @@ fn staged_sheet_sketch_edit_checks_the_cumulative_entity_cap_before_solving() {
         payload.add_point(solidcore_record::Vec2::new(i as f64, 10.0), Some(&format!("p{i}"))).unwrap();
     }
     for i in 0..1000 {
-        d.sketches.push(Arc::new(SheetSketch { id: 1000 + i, sheet: d.sheets[0].id, name: format!("Sketch {i}"), sketch: payload.clone() }));
+        d.sketches.push(Arc::new(SheetSketch {
+            id: 1000 + i,
+            owner: Owner::Sheet(d.sheets[0].id),
+            name: format!("Sketch {i}"),
+            sketch: payload.clone(),
+        }));
     }
     assert_eq!(d.sketches.len(), MAX_SHEET_SKETCHES);
     assert_eq!(d.sketches.iter().map(|s| s.sketch.points.len()).sum::<usize>(), MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS);
@@ -1562,7 +1927,7 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     assert_eq!(sk.constraints.len(), 706);
     assert_eq!(4 * sk.constraints.len().pow(2) + sk.constraints.len() - 1, 1_994_449);
     let mut d = bare();
-    d.sketches.push(Arc::new(SheetSketch { id: 41, sheet: d.sheets[0].id, name: "Slot".into(), sketch: sk }));
+    d.sketches.push(Arc::new(SheetSketch { id: 41, owner: Owner::Sheet(d.sheets[0].id), name: "Slot".into(), sketch: sk }));
     // 705 ordinary charges plus 4*706^2 for the one slot: 1,994,449.
     d.validate().unwrap();
     let before = d.clone();
@@ -1640,7 +2005,7 @@ fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
     let mut collision = reopened.clone();
     Arc::make_mut(&mut collision.patterns[0]).id = 70;
     assert!(collision.validate().unwrap_err().to_string().contains("two objects have the id"));
-    let sheet = reopened.sketches[0].sheet;
+    let sheet = reopened.sketch_sheet(&reopened.sketches[0]).unwrap();
     let mut removed = reopened.clone();
     let on = removed.remove_sheet(sheet);
     assert_eq!(on.fills, [70, 73]);
@@ -1648,6 +2013,20 @@ fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
     assert_eq!(removed.patterns, reopened.patterns, "patterns belong to the drawing, not a removed sheet");
     removed.validate().unwrap();
     assert_eq!(file(&reopened), value);
+}
+
+/// A fill's region is in its sketch's units and goes on paper as it is. A view sketch's are model
+/// millimetres in its view, so a fill on one is refused until fills are placed through their view.
+#[test]
+fn a_fill_on_a_view_sketch_is_refused_until_fills_go_through_their_view() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let (view, _) = iso_view(&drawing);
+    Arc::make_mut(&mut drawing.sketches[0]).owner = Owner::View(view);
+    let why = drawing.validate().unwrap_err().to_string();
+    assert!(why.contains("not supported yet: a fill on a view sketch"), "{why}");
+    drawing.fills.clear();
+    drawing.validate().unwrap();
 }
 
 #[test]
@@ -1902,4 +2281,29 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
         let raw = serde_json::to_value(&drawing).unwrap();
         assert!(refusal(&raw).contains(expected));
     }
+}
+
+/// A drawing saved with a projection cell at the old smallest room (15.4 by 7.35 mm, which held the
+/// 3.5 mm symbol before it grew to 5.5 h by 2.5 h) opens as before, and its cell holds the 2.5 mm symbol.
+#[test]
+fn a_drawing_saved_with_the_old_smallest_symbol_cell_opens() {
+    let mut d = Drawing::new(
+        "Old block",
+        "en",
+        "Sheet",
+        drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape),
+        Some(DrawingBorderProfile::iso()),
+        &BTreeSet::new(),
+        &mut IdSource::seeded(SEED),
+    )
+    .unwrap();
+    let mut block = solidcraft_geom::title_block::default_block();
+    let cell = &mut block.cells[11];
+    assert_eq!(cell.name, "projection");
+    cell.label = Some(solidcraft_geom::title_block::Label { text: "Projection".into(), cap_mm: 4.125 });
+    cell.rect_mm[0] = -17.925;
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(block);
+    let read = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    let layout = read.sheets[0].title_block_layout().unwrap().unwrap();
+    assert_eq!(layout.cells.iter().filter_map(|c| c.symbol_mm).collect::<Vec<_>>(), [2.5]);
 }
