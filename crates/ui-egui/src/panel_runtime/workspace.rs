@@ -89,6 +89,9 @@ pub struct HostOptions {
     /// Content toolbar space, separate from the shared title and tabs. The
     /// content/body split may fit transiently within the bounded outer host.
     pub content_header_height: f32,
+    /// Panels that Float leaves where they show, at their shown size; any other
+    /// panel floats at the free area's top-left corner at its saved size.
+    pub float_in_place: Vec<InstanceId>,
 }
 impl Default for HostOptions {
     fn default() -> Self {
@@ -96,6 +99,7 @@ impl Default for HostOptions {
             metrics: HostMetrics { inline_max_height: solidcraft_theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
             geometry: HostGeometryPolicy::default(),
             content_header_height: solidcraft_theme::Tokens::get().control_height,
+            float_in_place: Vec::new(),
         }
     }
 }
@@ -325,6 +329,21 @@ fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
 }
 
 impl WorkspacePanelHost {
+    #[cfg(test)]
+    pub(crate) fn set_float_in_place(&mut self, panels: Vec<InstanceId>) {
+        self.options.float_in_place = panels;
+    }
+
+    /// Where Float starts from for `instance`: its card as shown, while it is expanded and
+    /// listed in `HostOptions::float_in_place`.
+    fn float_from(&self, runtime: &PanelRuntime, instance: &InstanceId, layout: &HostLayout) -> Option<LogicalRect> {
+        if !self.options.float_in_place.contains(instance) {
+            return None;
+        }
+        let section = runtime.layout().layout().containing(instance).ok()?;
+        layout.sections.iter().find(|card| card.section == section.id && !card.collapsed).map(|card| card.outer)
+    }
+
     /// Override host paint opacity for this runtime only, without changing saved layout.
     pub fn set_requested_opacity(&mut self, opacity: Option<f32>) -> PanelResult<()> {
         validate_requested_opacity(opacity)?;
@@ -335,6 +354,14 @@ impl WorkspacePanelHost {
             self.options.geometry.surface_alpha = None;
         }
         Ok(())
+    }
+
+    /// Puts the panel's `action` at the right end of its header, next to the menu, also when
+    /// the header is one row with the content (the bottom History).
+    pub(crate) fn set_header_action_trailing(&mut self, instance: InstanceId, action: ControlId) {
+        if self.options.geometry.trailing_header_actions.entry(instance).or_default().insert(action) {
+            self.invalidate_geometry();
+        }
     }
 
     pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
@@ -601,6 +628,7 @@ impl WorkspacePanelHost {
                     &HostSharedAction::Collapse,
                     &self.native_capabilities,
                     frame.layout.capacity,
+                    None,
                     &frame.layout.geometry_policy.identity_reservations,
                 )?;
                 prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone())?;
@@ -621,6 +649,7 @@ impl WorkspacePanelHost {
                         &HostSharedAction::Move(zone),
                         &self.native_capabilities,
                         frame.layout.capacity,
+                        self.float_from(runtime, &instance, &frame.layout),
                         &frame.layout.geometry_policy.identity_reservations,
                     ) && prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone()).is_ok()
                     {
@@ -2798,13 +2827,16 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 apply_action(self.layout.revision, vec![Mutation::Close { instance: instance.clone() }]),
                                 control.id,
                             )),
-                            HostPointerTarget::HeaderAction { instance, action } if clicked => self.commands.push(HostCommand::WidgetLayout(
-                                apply_action(
-                                    self.layout.revision,
-                                    vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
-                                ),
-                                control.id,
-                            )),
+                            HostPointerTarget::HeaderAction { instance, action } if clicked => {
+                                self.frame_content.header_action_clicked(instance, action, response.rect);
+                                self.commands.push(HostCommand::WidgetLayout(
+                                    apply_action(
+                                        self.layout.revision,
+                                        vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
+                                    ),
+                                    control.id,
+                                ))
+                            }
                             HostPointerTarget::HeaderAction { instance, .. } if secondary => {
                                 if let Some(at) = response.interact_pointer_pos() {
                                     self.frame_content.header_action_context_menu(instance, at);
@@ -3332,6 +3364,7 @@ impl WorkspacePanelHost {
                                 &shared,
                                 &native,
                                 frame.layout.capacity,
+                                self.float_from(runtime, instance, &frame.layout),
                                 &frame.layout.geometry_policy.identity_reservations,
                             )
                             .ok()?;
@@ -3667,12 +3700,21 @@ fn shared_label(
         .to_owned()
 }
 
+/// A card floated from `shown`: lifted up and in by a step so it reads as floating, as wide
+/// as it was but leaving that step free on both sides of `capacity`. Allocation clamps it in.
+fn floated(shown: LogicalRect, capacity: LogicalRect) -> (Point, Size) {
+    let step = solidcraft_theme::Tokens::get().space_24;
+    let width = shown.size.width.min(capacity.size.width - 2.0 * step).max(1.0);
+    (Point { x: shown.origin.x + step, y: shown.origin.y - step }, Size { width, height: shown.size.height })
+}
+
 fn shared_action(
     runtime: &PanelRuntime,
     instance: &InstanceId,
     action: &HostSharedAction,
     native: &HostCapabilities,
     capacity: LogicalRect,
+    float_from: Option<LogicalRect>,
     reservations: &HostIdentityReservations,
 ) -> PanelResult<LayoutAction> {
     let service = runtime.layout();
@@ -3705,11 +3747,14 @@ fn shared_action(
             let location = if zone.docked() {
                 SectionLocation::Dock { zone: *zone }
             } else if *zone == Zone::Floating {
-                SectionLocation::Floating { origin: capacity.origin }
+                SectionLocation::Floating { origin: float_from.map_or(capacity.origin, |shown| floated(shown, capacity).0) }
             } else {
                 return Err(error(Rule::Capability, "window movement needs native pop-out"));
             };
-            let size = section.size;
+            let size = match float_from {
+                Some(shown) if *zone == Zone::Floating => floated(shown, capacity).1,
+                _ => section.size,
+            };
             vec![
                 Mutation::Move { instance: instance.clone(), destination: Destination::NewSection { section: id, index, location, size } },
                 Mutation::Focus { instance: instance.clone() },
@@ -3720,7 +3765,7 @@ fn shared_action(
                 return Err(error(Rule::FeatureDisabled, "panel cannot pop out"));
             }
             if cfg!(target_arch = "wasm32") {
-                return shared_action(runtime, instance, &HostSharedAction::Move(Zone::Floating), native, capacity, reservations);
+                return shared_action(runtime, instance, &HostSharedAction::Move(Zone::Floating), native, capacity, float_from, reservations);
             }
             if !native.native_windows {
                 return Err(error(Rule::Capability, "native panel windows unavailable"));

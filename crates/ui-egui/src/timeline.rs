@@ -364,6 +364,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::FrameGusset { .. } => "gusset",
         FeatureKind::FrameMember { .. } => "frame_member",
         FeatureKind::FrameMemberTurn { .. } => "rotate_member",
+        FeatureKind::FrameTrim { .. } => "frame_trim",
         FeatureKind::FramePlate { .. } => "frame_plate",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
