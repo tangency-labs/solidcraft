@@ -6394,6 +6394,50 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
 
+/// A task the agent could not finish (the provider's usage limit, or any other error) is kept,
+/// so the user can continue it when the agent can work again (#16318).
+#[test]
+fn a_task_interrupted_by_the_providers_usage_limit_can_be_continued() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::Error("usage limit reached, try again later".into()));
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert!(app.agent_chat.unfinished.is_some(), "the task waits to be continued");
+    // The user continues it: the task goes again, with a note that says it was cut short.
+    continue_task(&mut app);
+    assert_eq!(script.calls(), ["prompt: make a gearbox".to_string(), format!("prompt: {CONTINUE_NOTE}\n\nmake a gearbox")]);
+    assert!(app.agent_chat.unfinished.is_none(), "the task is under way again");
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    let users = app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count();
+    assert_eq!(users, 1, "the conversation does not repeat the task");
+}
+
+/// A turn that ends badly leaves the task to be continued; a turn that ends well leaves nothing
+/// to continue, and a task the user sends in between replaces the one that waits.
+#[test]
+fn only_a_failed_turn_leaves_a_task_to_continue() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_none(), "a turn that ended well has nothing to continue");
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    // Another task replaces the one that waits.
+    send(&mut app, &ctx, "make a lid".into());
+    assert!(app.agent_chat.unfinished.is_none(), "the new task replaces the one that waited");
+    // New chat throws it away.
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    new_chat(&mut app);
+    assert!(app.agent_chat.unfinished.is_none(), "a new chat keeps nothing to continue");
+}
+
 #[test]
 fn plugin_runs_always_keep_per_run_consent() {
     for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
