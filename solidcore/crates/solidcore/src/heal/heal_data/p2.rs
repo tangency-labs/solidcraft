@@ -94,9 +94,11 @@
 //!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
 //!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
 //!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
-//!   gap to absorb).
+//!   gap to absorb). From that limit up it grows only where the check's clearance proof of
+//!   Test #82 shows the ball reaching no topology the vertex does not bound.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
+use crate::error::heal::HealFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -105,17 +107,16 @@ use crate::geom::hash_table::{
 };
 use crate::geom::tol::{
     approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
-    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
-    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d, gap_gain,
-    set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
-    LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
+    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, brep_size_calc_gap_zone_tol_3d,
+    brep_size_zone_tol_3d, context_model_size_estimate, gap_gain, set_brep_model_size_estimate,
+    size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType, LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
-use crate::topology::brep::validation::GROWTH_PAST_RATIO;
+use crate::topology::brep::validation::{vertex_ball_reaches, GROWTH_PAST_RATIO};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -503,16 +504,18 @@ impl EdgeProps {
         }
 
         // locals - Edge Tols and gaps
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (upstream asks the B-rep's context, there this model's: the zone tolerance
+        // of this B-rep's own model size estimate)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let edge_edge_max_gap_length_3d = self.max_edge_edge_gap_length(b)?;
         let edge_face_max_gap_length_3d = self.max_edge_face_gap_length(b)?;
         // Don't send MaxFaceZoneTol, as those Tols haven't been set yet.
-        let calc_zone_tol_3d = calc_edge_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             edge_edge_max_gap_length_3d,
             edge_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // check - CalcZoneTol3d should = OrigZoneTol3d
@@ -747,16 +750,17 @@ impl VertexProps {
         }
 
         // locals for Problem gap checks
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (the zone tolerance of this B-rep's own model size estimate, as for edges)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let vertex_edge_max_gap_length_3d = self.max_vtx_edge_gap_length(b)?;
         let vertex_face_max_gap_length_3d = self.max_vtx_face_gap_length(b)?;
         // EdgeTol not yet set, so unreliable for this test
-        let calc_zone_tol_3d = calc_vertex_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             vertex_edge_max_gap_length_3d,
             vertex_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // ZoneTol3d for current Gap3d sizes
@@ -3060,10 +3064,12 @@ impl<O: LoopObject> HealData<O> {
 
         // When The BrepTolerance needs to be set - set it based on ModelSizeEstimate
         if this_est_zone_tol_3d != brep_est_zone_tol_3d {
+            // (the context's is the kernel's configured default, which no B-rep
+            // writes: the B-rep stores the default where that already fits it)
             if this_est_zone_tol_3d == context_est_zone_tol_3d {
-                set_brep_model_size_estimate(k, b, USE_DEFAULT);
+                set_brep_model_size_estimate(b, USE_DEFAULT);
             } else {
-                set_brep_model_size_estimate(k, b, this_model_size);
+                set_brep_model_size_estimate(b, this_model_size);
             }
         }
         set_brep_tolerance(k, b, this_est_zone_tol_3d)?;
@@ -3217,10 +3223,15 @@ impl<O: LoopObject> HealData<O> {
             // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
             // with the gap gain, as the edge branch above covers the edge/face gap, unless that
             // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            // From the limit up, Test #82 also refuses a ball that reaches topology the vertex
+            // does not bound (validity-and-tolerances.md §8: a tolerance grows only while it
+            // stays clear), so the cover is taken there only where the check proves it clear.
             let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
             let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
             let zone_tol_3d = if twice_gap > zone_tol_3d
-                && covered < GROWTH_PAST_RATIO * LARGE_SMALL_SIZE_RATIO * b.tolerance()
+                && covered < GROWTH_PAST_RATIO * limit
+                && (covered < limit || ball_clears(k, b, bad_tol_vertex, covered)?)
             {
                 covered
             } else {
@@ -3444,13 +3455,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when coincident edges are listed.
+    /// [`HealFailure::CoincidentEdgesUnfixed`] (`SM_ERR`) when coincident edges are
+    /// listed.
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
-                "coincident edges cannot be fixed",
+                HealFailure::CoincidentEdgesUnfixed,
             ));
         }
         Ok(())
@@ -3467,13 +3479,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when missed intersections are listed.
+    /// [`HealFailure::MissedEdgeIntersectionsUnfixed`] (`SM_ERR`) when missed
+    /// intersections are listed.
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
-                "missed edge intersections cannot be fixed",
+                HealFailure::MissedEdgeIntersectionsUnfixed,
             ));
         }
         Ok(())
@@ -3512,6 +3525,26 @@ impl<O: LoopObject> HealData<O> {
     /// `Fix_BadGaps` (not implemented upstream: does nothing).
     pub fn fix_bad_gaps(&self, this_healer_op: HealerOpType) {
         let _ = this_healer_op;
+    }
+}
+
+/// Whether vertex `v` at tolerance `radius` passes the clearance half of Test #82
+/// ([`vertex_ball_reaches`]): its ball provably reaches no face or edge it does not bound. The
+/// vertex keeps its tolerance; a query that cannot be had proves nothing, so the ball counts as
+/// reaching, as in the check.
+///
+/// # Errors
+///
+/// A cancelled pass and a dangling vertex.
+fn ball_clears(k: &Kernel, b: &mut Brep, v: VertexId, radius: f64) -> Result<bool> {
+    let kept = vertex::tolerance(b, v)?;
+    vertex::set_tolerance(b, v, radius, false, false)?;
+    let reaches = vertex_ball_reaches(k, b, v);
+    vertex::set_tolerance(b, v, kept, false, false)?;
+    match reaches {
+        Ok(reaches) => Ok(!reaches),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(_) => Ok(false),
     }
 }
 

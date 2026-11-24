@@ -339,8 +339,9 @@ pub fn paint_focus(painter: &Painter, rect: Rect, radius: u8) {
 
 /// App-owned edit responses share the native item's paint offsets, including hover lift.
 pub fn paint_item_outline(ui: &egui::Ui, id: &str, rect: Rect, radius: u8, width: f32) {
-    let lift =
-        ui.ctx().data(|d| d.get_temp::<HoverLift>(egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id)))).map_or(0.0, |s| s.drawn);
+    // The id outside `data`: a context lock taken inside another can freeze the window (#21091).
+    let lift_id = egui::Id::unique(("appbar_hover_lift", ui.ctx().viewport_id(), id));
+    let lift = ui.ctx().data(|d| d.get_temp::<HoverLift>(lift_id)).map_or(0.0, |s| s.drawn);
     paint_outline(ui.painter(), drawn_rect(ui.ctx(), id, rect).translate(vec2(0.0, lift)), radius, width);
 }
 
@@ -1405,6 +1406,8 @@ pub struct ViewTab<'a> {
     pub accent: egui::Color32,
     /// The colour of the shown view's underline.
     pub underline: egui::Color32,
+    /// Preserve the sketch accent underline in every visibility state.
+    pub sketch_mode: bool,
     pub state: ViewState,
     /// The design shows this view.
     pub active: bool,
@@ -1966,10 +1969,10 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view while views are sub-tabs: its
-/// tab carries a small + after its name. With a switcher the tab stays as it was before views.
+/// Whether tab `i` is the shown, selected design with a single view: its plain tab carries a
+/// small + after its name, regardless of the preference for sub-tabs or a view switcher.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    strip.views_as_tabs && i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -2151,6 +2154,85 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     for line in glyph_lines(icon) {
         p.add(egui::Shape::line(line.iter().map(|&point| at(point)).collect(), stroke));
     }
+}
+
+/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
+/// The caller supplies a rectangle excluding its menu and window controls.
+pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(rect, 0, t.sketch_soft);
+    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let chip_width = (chip.size().x + 16.0).min(rect.width());
+    let leading = (rect.width() - chip_width - 6.0).max(0.0);
+    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
+    if glyph_width > 0.0 {
+        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
+    }
+    let name_x = rect.left() + glyph_width;
+    let name_width = (leading - glyph_width).max(0.0);
+    let mut after = name_x;
+    if name_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
+        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let name = painter.layout_job(job);
+        after += name.size().x.min(name_width);
+        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
+    }
+    let chip_x = (after + 6.0).min(rect.right() - chip_width);
+    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
+    painter.rect_filled(chip_rect, 9, t.chip);
+    let padding = 8.0_f32.min(chip_width / 2.0);
+    let text_width = (chip_width - 2.0 * padding).max(0.0);
+    if text_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let chip = painter.layout_job(job);
+        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
+    }
+}
+
+/// The same sketch header with a separate, translated sheet/drawing-view owner chip.
+pub fn paint_sketch_header_owner(painter: &Painter, rect: Rect, name: &str, editing: &str, owner: Option<&str>) {
+    let Some(owner) = owner else {
+        paint_sketch_header(painter, rect, name, editing);
+        return;
+    };
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let text = painter.layout_no_wrap(owner.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let width = (text.size().x + 16.0).min(rect.width() * 0.45);
+    let left = Rect::from_min_max(rect.min, pos2((rect.right() - width - 6.0).max(rect.left()), rect.bottom()));
+    paint_sketch_header(painter, left, name, editing);
+    let chip = Rect::from_min_size(pos2(rect.right() - width, rect.center().y - 9.0), vec2(width, 18.0));
+    painter.with_clip_rect(rect).rect_filled(chip, 9, t.chip);
+    painter.with_clip_rect(chip.shrink2(vec2(8.0, 0.0))).galley(chip.left_center() + vec2(8.0, -text.size().y / 2.0), text, t.text);
+}
+
+/// Quiet, right-aligned metadata chips in a view header. Returns the width they occupy.
+pub fn paint_view_chips(painter: &Painter, rect: Rect, labels: &[&str]) -> f32 {
+    if !rect.is_finite() || !rect.is_positive() {
+        return 0.0;
+    }
+    let t = Tokens::get();
+    let mut right = rect.right();
+    for label in labels.iter().rev() {
+        let galley = painter.layout_no_wrap((*label).to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        let width = galley.size().x + t.space_12;
+        if right - width < rect.left() {
+            break;
+        }
+        let chip = Rect::from_center_size(pos2(right - width * 0.5, rect.center().y), vec2(width, 18.0));
+        painter.rect_filled(chip, t.radius_sm, t.chip);
+        painter.with_clip_rect(chip).galley(chip.center() - galley.size() * 0.5, galley, t.text);
+        right -= width + t.space_6;
+    }
+    rect.right() - right
 }
 
 /// The rows of a menu: the id of the one chosen. Keys show with `keys`, rows that need others are
@@ -2413,6 +2495,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         } else {
             std::borrow::Cow::Borrowed(view.name)
         };
+        let name = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &name)]).into() } else { name };
         egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
     });
     if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
@@ -2477,7 +2560,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         paint_view_glyph(&painter, rect, crate::icons::window_icon(false), ink);
         solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
-    if view.active {
+    if view.active || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(vr.left() + 7.0, vr.bottom() - 2.0), pos2(vr.right() - 7.0, vr.bottom()));
         painter.rect_filled(underline, 2u8, view.underline);
     }
@@ -2642,6 +2725,7 @@ fn draw_clear_view(
     } else {
         format!("{}, {}", view.name, view_status(view))
     };
+    let title = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &title)]) } else { title };
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, title.as_str()));
     solidcraft_ui_registry::publish_target(&format!("{}{k}", strip.handles.view), rect);
     if let Some(window) = view.to_window {
@@ -2715,7 +2799,7 @@ fn draw_clear_view(
             painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
         }
     }
-    if look == ViewLook::Ground {
+    if look == ViewLook::Ground || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.0), pos2(rect.right() - 8.0, rect.bottom()));
         painter.rect_filled(underline, 1, view.underline);
     }
@@ -3192,7 +3276,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                         .collect();
                     menu_rows(ui, &rows, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
-                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
+                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, Some(&mut flyout)).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
                 Popup::More => {
                     if strip.clear_view_tabs
@@ -3223,6 +3307,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         let id = sub?.inner?;
         match which {
             Popup::View(view) => Some(TabAction::ViewMenu { view, id }),
+            Popup::Plus => Some(TabAction::PlusMenu { id }),
             Popup::Switcher => Some(TabAction::SwitcherMenu { id }),
             _ => None,
         }

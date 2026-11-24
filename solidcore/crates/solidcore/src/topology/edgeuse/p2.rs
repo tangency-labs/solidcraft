@@ -77,6 +77,7 @@
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::Context;
@@ -431,12 +432,14 @@ fn step_off_into(
     }
 
     // edgeuse locals
-    let f = face(b, eu)?.ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?;
+    // an edge use of a wire has no face to step into: the caller's edge use
+    let f =
+        face(b, eu)?.ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeUseNotOnFace))?;
     let face_rec = b.face(f)?;
     let surface = face_rec
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
     let uv_domain = face_rec.uv_domain;
 
     // evaluate surface at edge point
@@ -477,18 +480,18 @@ fn step_off_into(
         )?;
         let Some(first) = solutions.first() else {
             // stepoffdistance stepped off face UVDomain
-            return Ok(Some(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology(
                 OP,
-                "the stepped-off point does not lie on the face",
+                TopologyFailure::SteppedOffFace,
             )));
         };
         uv_guess = Point2::new(first.param(0)?, first.param(1)?);
 
         // still stepping off face UVDomain
         if !uv_domain.contains_point(uv_guess, 0.0) {
-            return Ok(Some(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology(
                 OP,
-                "the stepped-off point is outside the face's UV domain",
+                TopologyFailure::SteppedOutsideUvDomain,
             )));
         }
     }
@@ -1698,9 +1701,7 @@ mod tests {
         assert_eq!(step_err.upstream_status(), Some(1001));
         assert_eq!(
             step_err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         // Default (`false`): `SER` inside `SmBoolean` falsely classifies the concave
@@ -1715,9 +1716,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         // Without step-off (`step_off_dist == 0.0`), the concave sector still evaluates
@@ -1786,9 +1785,7 @@ mod tests {
         assert_eq!(radial_err.upstream_status(), Some(1001));
         assert_eq!(
             radial_err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         assert!(is_convex_radial_sector(
@@ -1805,9 +1802,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
     }
 
