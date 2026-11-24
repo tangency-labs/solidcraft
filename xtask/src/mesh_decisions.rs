@@ -235,7 +235,7 @@ fn scan_skipping(root: &Path, modules: &[(&str, &str)], functions: &[(&str, &str
     Ok(found)
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+pub(crate) fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
@@ -254,6 +254,23 @@ fn module(file: &Path, owns_dir: bool, model_body: bool) -> Result<(Sites, Vec<(
     let mut children = Vec::new();
     declared_modules(&ast.items, here, &dir, &mut children);
     Ok((sites_in(&ast, model_body), children))
+}
+
+/// The source files of the module at `file` and of every non-test module below it, into `out`.
+/// `owns_dir` is whether `file` is a `lib.rs` or `mod.rs` (its submodules sit beside it) rather
+/// than `name.rs` (its submodules sit in `name/`).
+pub(crate) fn module_files(file: &Path, owns_dir: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let source = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let ast = syn::parse_file(&source).map_err(|e| format!("{}: cannot parse Rust source: {e}", file.display()))?;
+    out.push(file.to_path_buf());
+    let here = file.parent().unwrap_or(Path::new("."));
+    let dir = if owns_dir { here.to_path_buf() } else { here.join(file.file_stem().unwrap_or_default()) };
+    let mut children = Vec::new();
+    declared_modules(&ast.items, here, &dir, &mut children);
+    for (child, owns) in children {
+        module_files(&child, owns, out)?;
+    }
+    Ok(())
 }
 
 /// The files of the out-of-line modules `items` declare, each with whether it owns its directory.
@@ -306,7 +323,7 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
 
 /// Whether `attrs` keep an item to test builds: `#[test]`, `#[cfg(test)]` or
 /// `#[cfg(all(.., test, ..))]`.
-fn test_only(attrs: &[syn::Attribute]) -> bool {
+pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         if a.path().is_ident("test") {
             return true;
@@ -378,7 +395,7 @@ impl Finder {
     }
 }
 
-fn type_name(ty: &syn::Type) -> String {
+pub(crate) fn type_name(ty: &syn::Type) -> String {
     match ty {
         syn::Type::Path(p) => p.path.segments.last().map_or_else(|| "<type>".to_owned(), |s| s.ident.to_string()),
         syn::Type::Reference(r) => type_name(&r.elem),

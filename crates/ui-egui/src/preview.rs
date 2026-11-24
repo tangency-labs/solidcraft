@@ -667,6 +667,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
             "solid.chamfer" => &["distance", "distance2", "angle"],
+            // Every value is its own setup: a count, spacing or extent typed on the way to
+            // another (a spacing of 1 on the way to 15 over an 80 mm extent makes 81 copies) is
+            // left behind as soon as the next is typed, not waited for (#8523).
+            "solid.pattern.rectangular" => &[],
             _ => return None,
         };
         let params = params.as_object_mut()?;

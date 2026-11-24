@@ -1492,6 +1492,11 @@ impl Actions {
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    // The rows above a hovered or selected body are marked from its placement's path: a large
+    // assembly names its placements beside the window, so the first hover never waits for them.
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let render = crate::render_workspace::active(app);
     if render {
         // Render has its own search, and its tree never filters by this one.
@@ -1547,9 +1552,16 @@ fn prepare_model(app: &mut SolveApp) {
 /// Walk the placements once for this model, so [`placed_body_path`] can answer without `&mut`
 /// (the Parts and Components selection modes pick while the view draws).
 pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_body_paths_with(app, None);
+}
+
+/// [`prepare_body_paths`] with the window to wake when a large design's names land: naming a
+/// 100-printer assembly's placements took 14 s, so a large design names them on a worker.
+pub(crate) fn prepare_body_paths_with(app: &mut SolveApp, ctx: Option<&egui::Context>) {
     prepare_model(app);
     if let Some(model) = app.tree.model.as_mut() {
-        model.body_path(&app.session, "");
+        model.start_body_paths(&app.session, ctx);
+        model.poll_body_paths();
     }
 }
 
@@ -1682,6 +1694,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
 /// Existing semantic rows, reusable by either presentation without a panel host.
 pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: crate::semantic_content::ContentRequest) -> Actions {
     crate::semantic_content::ensure_session(app, ui.ctx());
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
