@@ -22,8 +22,9 @@ pub mod p6;
 pub mod p7;
 pub mod p8;
 pub mod p9;
+#[cfg(feature = "wr57-replay")]
+pub mod replay;
 
 pub use p1::StepSurface;
-pub use p2::{
-    CacheTreeState, Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType,
-};
+pub use p2::{Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType};
+pub(crate) use p6::SurfaceContinuities;

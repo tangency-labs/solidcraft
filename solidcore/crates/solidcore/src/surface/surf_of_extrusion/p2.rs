@@ -75,10 +75,21 @@
 //!   `RegionBoundary`, cut to the plane domain; `plane_patch`), when a control-net
 //!   certificate shows the patch in the plane; else the general intersection as
 //!   upstream.
+//! - **Plane-parallel sweep.** Classify against the supplied plane using the sweep
+//!   displacement over the full sweep interval and the generator's control-net
+//!   certificate before reducing to intersecting planes.
+//!   A normal inferred from a thin generator triangle can lose accuracy when its
+//!   points are far from the origin. The in-plane route's deviations include this
+//!   displacement plus the profile's residual, including after domain clipping.
+//! - **Unresolved zero-tolerance crossing.** If sweep drift rules out the parallel
+//!   construction, the general fallback must not claim empty when a positive-weight
+//!   control net proves a crossing inside both requested domains. Return an explicit
+//!   failure when that crossing cannot be resolved at zero tolerance.
 //! - **Debug code.** The `SM_DEBUG_CODE` drawing and dumps are omitted.
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
-use crate::curve::curve::{Curve, CurvePropertyType};
+use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -96,7 +107,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest as SurfaceBoxRequest, IsoCurveOptions, SurfParamType,
 };
-use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::cone::Cone;
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
@@ -112,12 +123,16 @@ use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 use super::p1::{
     gen_base, gen_with_out_of_bounds, intersect_generators, CurveOrientType, SurfOfExtrusion,
 };
-use super::plane_patch::{coincident_patch, PatchInputs};
+use super::plane_patch::{
+    coincident_patch, curve_plane_deviation, curve_source_deviation, generator_crosses_plane,
+    generator_in_plane, PatchInputs,
+};
 
 const OP_PLANE: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_plane";
 const OP_CYL: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_cylinder";
 const OP_EXT: &str =
     "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_surf_of_extrusion";
+const OP_GLOBAL: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::global_surface_intersect";
 const OP_IS_NURB: &str =
     "surface::surf_of_extrusion::p2::SurfOfExtrusion::is_nurb_surface_surf_of_extrusion";
 const OP_TRIM: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::trim_with_domain";
@@ -145,7 +160,8 @@ pub struct ExtrusionIntersection {
     pub surface2_uv_curves: Vec<Option<Curve>>,
     /// `pOptCurveTypes`: the kind of each intersection.
     pub curve_types: Vec<TsectCurveType>,
-    /// `pOptDeviations`: the distance of each curve from the surfaces (`0`).
+    /// `pOptDeviations`: distance bounds from the surfaces. Coincident patch
+    /// boundaries carry their certified control-net bound.
     pub deviations: Vec<f64>,
 }
 
@@ -292,6 +308,85 @@ impl SurfOfExtrusion {
             .ok_or_else(|| SolidError::surface_missing(op, "the generator curve"))
     }
 
+    /// Maps only the sweep coordinate, including for a lazy associated NURB.
+    fn plane_sweep_interval(&self, k: &Kernel, uv_domain: &Extent2d) -> Option<Extent1d> {
+        let natural = self.base_with_nurb(k).ok()?.natural_uv_domain();
+        let (caller, nurb) = if self.swap_uv {
+            (uv_domain.u_interval(), natural.u_interval())
+        } else {
+            (uv_domain.v_interval(), natural.v_interval())
+        };
+        if !nurb.length().is_finite() || nurb.length() <= 0.0 {
+            return None;
+        }
+        let full = self.anal_uv_domain.v_interval();
+        let a = full.evaluate((caller.min() - nurb.min()) / nurb.length());
+        let b = full.evaluate((caller.max() - nurb.min()) / nurb.length());
+        (a.is_finite() && b.is_finite()).then(|| Extent1d::from_min_max(a.min(b), a.max(b)))
+    }
+
+    /// Bounds normal drift over both the directrix and caller patch intervals.
+    fn plane_sweep_displacement(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        normal: Vec3,
+    ) -> Option<f64> {
+        let caller = self.plane_sweep_interval(k, uv_domain)?;
+        let full = self.anal_uv_domain.v_interval();
+        let ends = [caller.min(), caller.max(), full.min(), full.max()];
+        if ends.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let max_param = ends.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        // A swept point differs from its generator point by v E. Enclose the
+        // dot product and multiplication without subtracting large plane equations.
+        let e = self.extrusion_vec;
+        let dot_err =
+            gamma(5) * ((normal.x * e.x).abs() + (normal.y * e.y).abs() + (normal.z * e.z).abs());
+        let bound = (normal.dot(e).abs() + dot_err) * max_param * (1.0 + gamma(2));
+        bound.is_finite().then_some(bound)
+    }
+
+    // Called only after the special case declined and its general fallback returned
+    // no curves. A proved crossing must remain unresolved, rather than become empty,
+    // when the zero-tolerance drift certificate rules out a parallel approximation.
+    fn check_empty_plane_fallback(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        plane: &Plane,
+        other_uv_domain: &Extent2d,
+        approx_tol_3d: Option<f64>,
+    ) -> Result<()> {
+        let Some(gen) = self.gen_curve() else {
+            return Ok(());
+        };
+        let gen_ivl = if self.swap_uv {
+            uv_domain.v_interval()
+        } else {
+            uv_domain.u_interval()
+        };
+        if approx_tol_3d.is_some_and(|t| approx_tol3d(k, t) == 0.0)
+            && self
+                .extrusion_vec
+                .is_perpendicular_to(plane.position().z_axis(), EFF_ZERO_SQRT)
+            && self
+                .plane_sweep_displacement(k, uv_domain, plane.position().z_axis())
+                .is_some_and(|drift| drift > 0.0)
+            && uv_domain.are_equal(&self.base.natural_uv_domain(), 0.0)
+            && gen_ivl.are_equal(&gen.natural_interval(), 0.0)
+            && self.anal_uv_domain.v_interval().contains_value(0.0, 0.0)
+            && generator_crosses_plane(gen, self.extrusion_vec, plane, other_uv_domain)
+        {
+            return Err(SolidError::surface_failed(
+                OP_GLOBAL,
+                "a certified plane crossing was not resolved at zero tolerance",
+            ));
+        }
+        Ok(())
+    }
+
     // ---- GlobalSurfaceIntersect -------------------------------------------------------
 
     /// The intersection curves of this surface over `uv_domain` with `other` over
@@ -306,7 +401,7 @@ impl SurfOfExtrusion {
     ///
     /// Those of the special cases and of the general intersection
     /// (`SmAdvSurfaceIntersector`, on ownerless [`Surface`] stand-ins of both
-    /// surfaces).
+    /// surfaces), including an unresolved certified plane crossing at zero tolerance.
     #[allow(clippy::too_many_arguments)] // upstream's signature
     pub fn global_surface_intersect(
         &self,
@@ -383,6 +478,11 @@ impl SurfOfExtrusion {
             ang_tol_rad,
             None,
         )?;
+        if r.curves_3d.is_empty() {
+            if let IntersectTarget::Plane(p) = target {
+                self.check_empty_plane_fallback(k, uv_domain, p, other_uv_domain, approx_tol_3d)?;
+            }
+        }
         Ok(ExtrusionIntersection {
             needs_more_intersections: false,
             curves_3d: r.curves_3d,
@@ -442,7 +542,7 @@ impl SurfOfExtrusion {
         // (SmSurfaceIntersector::DoIntersection resets the output arrays: the special
         // case's curves are dropped; the tolerance is the SmApproxTol3d upstream passes
         // on, already converted)
-        base_global_surface_intersect_in(
+        let r = base_global_surface_intersect_in(
             k,
             this,
             uv_domain,
@@ -452,7 +552,13 @@ impl SurfOfExtrusion {
             approx_tol_3d.map(|t| approx_tol3d(k, t)),
             ang_tol_rad,
             context,
-        )
+        )?;
+        if r.curves_3d.is_empty() {
+            if let SurfaceKind::Plane(p) = other.kind_with_nurb(k)? {
+                self.check_empty_plane_fallback(k, uv_domain, p, other_uv_domain, approx_tol_3d)?;
+            }
+        }
+        Ok(r)
     }
 
     // ---- IntersectWithPlane -----------------------------------------------------------
@@ -462,9 +568,10 @@ impl SurfOfExtrusion {
     /// generator's interval for the closed test. The tolerance is the smaller of
     /// `approx_tol_3d` and `SM_EFF_ZERO_SQRT`.
     ///
-    /// * A linear or coplanar generator whose swept plane is not parallel to the
-    ///   plane: the line common to both planes, classified on this surface and
-    ///   trimmed to the pieces inside it (crossing).
+    /// * A linear or coplanar generator whose swept plane is transverse to the
+    ///   plane: the common line classified on this surface and trimmed to the
+    ///   pieces inside it (crossing). A generator certified in the supplied plane
+    ///   instead takes the coincident-patch construction below.
     /// * A perpendicular or independent generator whose plane is parallel to the
     ///   plane: nothing when the plane cuts the extrusion axis outside the extrusion
     ///   interval (ends snapped within the tolerance), else the generator projected
@@ -533,6 +640,8 @@ impl SurfOfExtrusion {
     ) -> Result<ExtrusionIntersection> {
         // init output
         let mut out = ExtrusionIntersection::default();
+        let mut deviation = 0.0_f64;
+        let mut patch_output = None;
 
         // plane and ExtrusionSurface locals
         let plane_normal = plane.position().z_axis();
@@ -558,15 +667,33 @@ impl SurfOfExtrusion {
         let gen_own = self.gen_or_null(OP_PLANE)?;
         let tmp = gen_with_out_of_bounds(gen_own, self.base.is_out_of_bounds_enabled());
         let gen = tmp.as_ref().unwrap_or(gen_own);
+        let sweep_displacement = self
+            .plane_sweep_displacement(k, uv_domain, plane_normal)
+            .unwrap_or(f64::INFINITY);
+        let sweep_parallel_to_plane = self
+            .extrusion_vec
+            .is_perpendicular_to(plane_normal, ang_tol)
+            && sweep_displacement <= tol;
+        if sweep_parallel_to_plane {
+            deviation = sweep_displacement;
+        }
 
         // When GenCurve is linear or Planar and swept in its own plane
         // and SweptPlanarSurface is not parallel to input Surface
         // Then,
         //   XSect = Line
-        if matches!(
-            self.orientation,
-            CurveOrientType::Linear | CurveOrientType::Coplanar
-        ) && !swept_normal.is_parallel_to(plane_normal, ang_tol)
+        // A certified coincident profile uses the patch construction below. Read
+        // the supplied plane directly: an inferred normal can lose accuracy on a
+        // far, thin triangle. Transverse planar profiles keep classification of
+        // the common line, uniting overlapping intervals from distinct roots.
+        let coincident_generator =
+            sweep_parallel_to_plane && generator_in_plane(gen, self.extrusion_vec, plane);
+        if !coincident_generator
+            && matches!(
+                self.orientation,
+                CurveOrientType::Linear | CurveOrientType::Coplanar
+            )
+            && !swept_normal.is_parallel_to(plane_normal, ang_tol)
         {
             // build a plane bigger than the Surface
             let this_plane = Plane::from_normal(self.curve_point, swept_normal);
@@ -576,7 +703,12 @@ impl SurfOfExtrusion {
             //  (status ignored upstream: every failure of SmPlane::IntersectWithPlane
             //  comes before its first output, which it resets with the needs-more
             //  flag, so a failure is "no curves, no more intersections")
-            let plane_tol = approx_tol_3d.map(|t| approx_tol3d(k, t));
+            // Parallel sweeps share this special case's capped distance tolerance.
+            let plane_tol = if sweep_parallel_to_plane {
+                Some(tol)
+            } else {
+                approx_tol_3d.map(|t| approx_tol3d(k, t))
+            };
             let (needs_more, plane_x) = match plane.intersect_with_plane_owned(
                 k,
                 other_uv_domain,
@@ -609,16 +741,128 @@ impl SurfOfExtrusion {
             let line = lines.swap_remove(0);
             let line_ivl = line.natural_interval();
 
+            // Solve near the profile, independently of a distant interval midpoint
+            // and the sweep caps. A long bounded fiber query can lose a valid root
+            // near its end. The positive control hull encloses every generator
+            // point, so this short line still searches every possible root.
+            let source_fibers = if sweep_parallel_to_plane {
+                let line_data = match line.kind() {
+                    CurveKind::Line(l) => {
+                        let data = l.canonical();
+                        Some((data.point, data.vector))
+                    }
+                    _ => line.is_line(k, 0, tol)?,
+                };
+                let Some((line_origin, line_direction)) = line_data else {
+                    return Ok(ExtrusionIntersection::needs_more());
+                };
+                let Some((length, direction)) = line_direction.length_and_unit() else {
+                    return Ok(ExtrusionIntersection::needs_more());
+                };
+                if !length.is_finite() {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                let Some(hull) = gen.piece_hull_points(&gen_curve_nurb_ivl) else {
+                    return Ok(ExtrusionIntersection::needs_more());
+                };
+                let norm1 = |p: Point3| p.x.abs() + p.y.abs() + p.z.abs();
+                let Some(&(reference, _)) = hull.first() else {
+                    return Ok(ExtrusionIntersection::needs_more());
+                };
+                let shift = (reference - line_origin).dot(direction);
+                if !shift.is_finite() {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                // Any computed shift defines a point on the supporting line.
+                // Fused affine coordinates avoid large-product cancellation:
+                // their rounding depends on the nearby result, not marker ends.
+                let origin = Point3::new(
+                    direction.x.mul_add(shift, line_origin.x),
+                    direction.y.mul_add(shift, line_origin.y),
+                    direction.z.mul_add(shift, line_origin.z),
+                );
+                if !norm1(origin).is_finite() {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                let mut radius = 0.0_f64;
+                for (p, error) in hull {
+                    if !norm1(p).is_finite() || !error.is_finite() || error < 0.0 {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    }
+                    radius = radius.max(
+                        norm1(p - origin) + 3.0 * error + gamma(16) * (norm1(p) + norm1(origin)),
+                    );
+                }
+                radius = (radius + 1.0) * (1.0 + gamma(16));
+                if !radius.is_finite() {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                let query_tol = tol + gamma(32) * (norm1(origin) + radius + shift.abs());
+                if !query_tol.is_finite() {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                let fiber = Curve::from(crate::curve::line::Line::bounded(
+                    origin,
+                    direction,
+                    &Extent1d::from_min_max(-radius, radius),
+                    &crate::curve::line::BoundedLineOptions::default(),
+                ));
+                let roots = gen.global_curve_intersect::<NoObject>(
+                    k,
+                    &gen_curve_nurb_ivl,
+                    &fiber,
+                    &fiber.natural_interval(),
+                    query_tol,
+                    &CurveIntersectOptions::default(),
+                )?;
+                let mut witnesses = Vec::new();
+                for root in roots.as_slice() {
+                    // A coincident range is a continuum of source fibers; a
+                    // single endpoint cannot certify its swept coverage.
+                    if root.solution_type == SolutionType::RangeOfValues {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    }
+                    let Some(&t) = root.start.parameters.first() else {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    };
+                    if gen_curve_nurb_ivl.contains_value(t, 0.0) {
+                        let Some(error) = gen.point_error_bound(t) else {
+                            return Ok(ExtrusionIntersection::needs_more());
+                        };
+                        witnesses.push((gen.evaluate_point(k, t)?, error));
+                    }
+                }
+                Some(witnesses)
+            } else {
+                None
+            };
+
             // classify the 3dCurves against the natural boundaries of this surface (for
             // trimming)
             let mut classification =
                 CurveClassification::with_curve_interval(k, ClassifyHandle::Curve, line_ivl, tol);
-            this.curve_on_classify(
+            // Split at requested source bounds as well as natural bounds, so
+            // midpoint membership represents an entire classification interval.
+            let bounded;
+            let classification_surface = if sweep_parallel_to_plane
+                && !uv_domain.are_equal(&this.natural_uv_domain_with_nurb(k)?, 0.0)
+            {
+                if !uv_domain.is_contained_by(&this.natural_uv_domain_with_nurb(k)?, 0.0) {
+                    return Ok(ExtrusionIntersection::needs_more());
+                }
+                let mut extrusion = self.clone_exact();
+                extrusion.trim_with_domain(k, uv_domain)?;
+                bounded = Surface::from(extrusion);
+                &bounded
+            } else {
+                this
+            };
+            classification_surface.curve_on_classify(
                 k,
                 ClassifyHandle::Surface,
                 &ClassifyGeometry {
                     curve: &line,
-                    surface: this,
+                    surface: classification_surface,
                 },
                 &mut classification,
             )?;
@@ -629,16 +873,67 @@ impl SurfOfExtrusion {
             let mut moved_to = 0;
             for interval in classification.intervals() {
                 // skip intervals outside the surface
-                if interval.mid.point_class() == PointClassType::Unknown {
+                let class = interval.mid.point_class();
+                if matches!(class, PointClassType::Unknown | PointClassType::Nothing) {
                     continue;
+                }
+
+                let mut interval_fibers = None;
+                if let Some(witnesses) = &source_fibers {
+                    // Normal projection can label exterior intervals as Surface.
+                    // Accept a midpoint only when a generator witness reaches it
+                    // inside the actual bounded sweep, allowing evaluation roundoff.
+                    let point = line
+                        .as_ref()
+                        .or_else(|| out.curves_3d.get(moved_to))
+                        .ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_PLANE,
+                                "the classification line is missing",
+                            )
+                        })?
+                        .evaluate_point(k, interval.interval().mid())?;
+                    let Some(caller_sweep) = self.plane_sweep_interval(k, uv_domain) else {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    };
+                    let full_sweep = self.anal_uv_domain.v_interval();
+                    let lo = caller_sweep.min().max(full_sweep.min());
+                    let hi = caller_sweep.max().min(full_sweep.max());
+                    if lo > hi {
+                        continue;
+                    }
+                    let e2 = self.extrusion_vec.dot(self.extrusion_vec);
+                    if !e2.is_finite() || e2 <= 0.0 {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    }
+                    let norm1 = |p: Point3| p.x.abs() + p.y.abs() + p.z.abs();
+                    let mut accepted = Vec::new();
+                    for &(c, error) in witnesses {
+                        let v = ((point - c).dot(self.extrusion_vec) / e2).max(lo).min(hi);
+                        let q = c + v * self.extrusion_vec;
+                        let roundoff = 3.0 * error
+                            + gamma(32)
+                                * (norm1(point) + norm1(c) + v.abs() * norm1(self.extrusion_vec));
+                        let distance = (point - q).length();
+                        if !distance.is_finite() || !roundoff.is_finite() {
+                            return Ok(ExtrusionIntersection::needs_more());
+                        }
+                        if distance <= tol + roundoff {
+                            accepted.push((c, error));
+                        }
+                    }
+                    if accepted.is_empty() {
+                        continue;
+                    }
+                    interval_fibers = Some((accepted, Extent1d::from_min_max(lo, hi)));
                 }
 
                 // add interval to output
                 let mut ivl = *interval.interval();
 
-                // quick case - the whole curve
-                if ivl.are_equal(&line_ivl, EFF_ZERO) {
-                    let whole = match line.take() {
+                // Move the whole line once; otherwise trim a copy.
+                let curve = if ivl.are_equal(&line_ivl, EFF_ZERO) {
+                    match line.take() {
                         Some(l) => {
                             moved_to = out.curves_3d.len();
                             l
@@ -653,25 +948,29 @@ impl SurfOfExtrusion {
                                 )
                             })?
                             .clone(),
-                    };
-                    out.curves_3d.push(whole);
-                    out.curve_types.push(TsectCurveType::Crossing);
-                    continue;
-                }
-
-                // else - add a trimmed curve to the output (Trim may snap the
-                // interval to existing knots; statuses ignored upstream)
-                let source = match line.as_ref() {
-                    Some(l) => l,
-                    None => out.curves_3d.get(moved_to).ok_or_else(|| {
-                        SolidError::surface_failed(
-                            OP_PLANE,
-                            "the moved intersection curve is missing",
-                        )
-                    })?,
+                    }
+                } else {
+                    let source = line
+                        .as_ref()
+                        .or_else(|| out.curves_3d.get(moved_to))
+                        .ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_PLANE,
+                                "the moved intersection curve is missing",
+                            )
+                        })?;
+                    let mut curve = source.copy(k)?;
+                    ignore_status(curve.trim(k, &mut ivl, TrimMode::Notify))?;
+                    curve
                 };
-                let mut curve = source.copy(k)?;
-                ignore_status(curve.trim(k, &mut ivl, TrimMode::Notify))?;
+                if let Some((witnesses, sweep)) = interval_fibers {
+                    let Some(bound) =
+                        curve_source_deviation(&curve, &witnesses, self.extrusion_vec, sweep)
+                    else {
+                        return Ok(ExtrusionIntersection::needs_more());
+                    };
+                    deviation = deviation.max(bound);
+                }
                 out.curves_3d.push(curve);
                 out.curve_types.push(TsectCurveType::Crossing);
             }
@@ -760,10 +1059,7 @@ impl SurfOfExtrusion {
         // when extrusion vec is perpendicular to plane normal
         // - xsect is one or more lines each line generated by sweeping
         //   a plane/GenCurve intersection point.
-        else if self
-            .extrusion_vec
-            .is_perpendicular_to(plane_normal, ang_tol)
-        {
+        else if sweep_parallel_to_plane {
             // get sweptCurve/plane intersection point
             let d = -plane_origin.dot(plane_normal);
             let vecs = [plane_normal];
@@ -821,7 +1117,7 @@ impl SurfOfExtrusion {
                 .iter()
                 .map(|s| first_param(&s.start.parameters))
                 .collect();
-            let mut patch = Vec::new();
+            let mut patch = None;
             if !ranges.is_empty() {
                 let inputs = PatchInputs {
                     gen,
@@ -850,7 +1146,7 @@ impl SurfOfExtrusion {
                         .iter()
                         .any(|&(a, b)| a - EFF_ZERO_PARAM <= t && t <= b + EFF_ZERO_PARAM)
                 });
-                patch = p.curves;
+                patch = Some(p);
             }
             // arrive here for the PointSolutions
 
@@ -886,12 +1182,9 @@ impl SurfOfExtrusion {
                 };
                 let start_pt = to_euclid(pw0);
                 let end_pt = to_euclid(pw1);
-                let Some((mut start_pt, mut end_pt)) = plane.trim_plane_line_to_plane_domain(
-                    &plane.natural_uv_domain(),
-                    start_pt,
-                    end_pt,
-                    tol,
-                ) else {
+                let Some((mut start_pt, mut end_pt)) =
+                    plane.trim_plane_line_to_plane_domain(other_uv_domain, start_pt, end_pt, tol)
+                else {
                     // only use curves that intersect plane domain
                     continue;
                 };
@@ -980,15 +1273,32 @@ impl SurfOfExtrusion {
             }
 
             // the coincident patches' boundaries (not upstream)
-            for (c, t) in patch {
-                out.curves_3d.push(c);
-                out.curve_types.push(t);
+            if let Some(p) = patch {
+                // The patch certificate covers profile residual and boundary rounding;
+                // add sweep drift even when clipping makes every side on the plane.
+                let bound = (p.deviation + sweep_displacement) * (1.0 + gamma(1));
+                patch_output = Some((out.curves_3d.len(), bound));
+                for (c, t) in p.curves {
+                    out.curves_3d.push(c);
+                    out.curve_types.push(t);
+                }
             }
         } else {
             // this is not a special case intersection:
             //  plane cuts through SurfOfExtrusion at an angle,
             out.needs_more_intersections = true;
             return Ok(out);
+        }
+
+        // Retain the source profile certificate as well as the residual of the
+        // constructed curves: plane-domain sides can be offset from the extrusion.
+        if sweep_parallel_to_plane {
+            for curve in &out.curves_3d {
+                let Some(bound) = curve_plane_deviation(curve, plane) else {
+                    return Ok(ExtrusionIntersection::needs_more());
+                };
+                deviation = deviation.max(bound);
+            }
         }
 
         // set output
@@ -1008,7 +1318,10 @@ impl SurfOfExtrusion {
                 };
                 out.curve_types.push(t);
             }
-            out.deviations.push(0.0);
+            let deviation = patch_output
+                .filter(|(start, _)| ii >= *start)
+                .map_or(deviation, |(_, bound)| deviation.max(bound));
+            out.deviations.push(deviation);
         }
 
         // all done
@@ -1666,7 +1979,464 @@ mod tests {
         assert!(!r.needs_more_intersections);
         assert_eq!(r.curves_3d.len(), 1);
         assert_eq!(r.curve_types, vec![TsectCurveType::Crossing]);
-        assert_eq!(r.deviations, vec![0.0]);
+        assert_eq!(r.deviations.len(), r.curves_3d.len());
+        for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+            assert!(deviation <= EFF_ZERO_SQRT);
+            let net = gen_base(curve).unwrap().canonical().unwrap();
+            assert_eq!(net.degree, 1);
+            for p in net.control_points {
+                assert!((p.x - 0.5).abs() <= deviation);
+            }
+        }
+    }
+
+    /// A directrix at plane u = 0 misses a caller domain beginning at u = 0.25.
+    /// When it is included, the caller's v bounds clip its endpoints as well.
+    #[test]
+    fn parallel_directrix_respects_the_requested_plane_domain() {
+        let k = k();
+        let surfaces = [
+            line_extrusion(&k),
+            swept(
+                &k,
+                &[(0.0, 1.0, 0.0), (0.5, -1.0, 0.0), (1.0, 1.0, 0.0)],
+                Some(1.0),
+                Vec3::Z,
+            ),
+        ];
+        let natural = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let plane = Plane::new(
+            Point3::new(0.5, 0.0, 0.0),
+            Vec3::Y,
+            Vec3::Z,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &natural,
+        );
+        for s in surfaces {
+            for (umin, expected) in [(0.25, 0), (-0.25, 1)] {
+                let domain = Extent2d::from_bounds(umin, 0.25, 1.0, 0.75);
+                let r = s
+                    .intersect_with_plane(&k, &s.base().natural_uv_domain(), &plane, &domain, None)
+                    .unwrap();
+                assert!(!r.needs_more_intersections);
+                assert_eq!(r.curves_3d.len(), expected);
+                for curve in &r.curves_3d {
+                    let points = gen_base(curve).unwrap().canonical().unwrap();
+                    let mut heights: Vec<f64> = points
+                        .control_points
+                        .iter()
+                        .map(|p| {
+                            assert!((p.x - 0.5).abs() < 1e-12);
+                            assert!(p.y.abs() < 1e-12);
+                            p.z
+                        })
+                        .collect();
+                    heights.sort_by(f64::total_cmp);
+                    assert_eq!(heights.len(), 2);
+                    // The directrix is built at the infinite marker endpoints before
+                    // clipping, so allow their interpolation's rounding error.
+                    let roundoff = gamma(16) * crate::math::INFINITE_PARAMETER;
+                    assert!((heights[0] - 0.25).abs() <= roundoff);
+                    assert!((heights[1] - 0.75).abs() <= roundoff);
+                }
+            }
+        }
+    }
+
+    /// A rotated parabolic cylinder has a plane crossing at s ~= 3.38834,
+    /// for every v in [0,1]. A failed zero-tolerance trace must not claim empty.
+    #[test]
+    fn zero_tolerance_plane_fallback_does_not_claim_empty() {
+        let k = k();
+        let interval = Extent1d::from_min_max(0.8356207714308481, 4.420145634594439);
+        let generator = crate::curve::parabola::Parabola::new(
+            Point3::ZERO,
+            Vec3::new(-0.5222483795623447, -0.5164133560594942, 0.6786559332444352),
+            Vec3::new(0.7920279342718203, -0.588734748734649, 0.16150277695898263),
+            interval,
+            0.23681154935845689,
+            3,
+        );
+        let domain = Extent2d::from_bounds(interval.min(), 0.0, interval.max(), 1.0);
+        let mut s = SurfOfExtrusion::new(
+            &k,
+            Curve::from(generator),
+            Point3::ZERO,
+            Vec3::new(
+                -0.3291151918968259,
+                -0.6473691290951337,
+                -0.7458712366999675,
+            ),
+            domain,
+            false,
+        )
+        .unwrap();
+        s.make_nurb(&k).unwrap();
+        let plane = Plane::from_normal(
+            Point3::new(-0.3132374718803482, -2.289191366692601, 2.0336234358415344),
+            Vec3::new(-0.4900887030536102, -0.539591788730856, 0.6845829129283505),
+        );
+        let od = plane.natural_uv_domain();
+        let d = s.base().natural_uv_domain();
+        // Endpoint signs hold at both sweep ends; affine dependence on v keeps
+        // them opposite throughout [0,1], so continuity proves a root in every slice.
+        let n = plane.position().z_axis();
+        let o = plane.position().origin();
+        for v in [0.0, 1.0] {
+            let low = s
+                .evaluate_step_point(&k, Point2::new(interval.min(), v))
+                .unwrap();
+            let high = s
+                .evaluate_step_point(&k, Point2::new(interval.max(), v))
+                .unwrap();
+            assert!(n.dot(low - o) < -2.0);
+            assert!(n.dot(high - o) > 1.0);
+        }
+        let special = s
+            .intersect_with_plane(&k, &d, &plane, &od, Some(0.0))
+            .unwrap();
+        assert!(special.needs_more_intersections);
+        let wrapped_plane = Surface::from(plane.clone());
+        let check_error = |error: SolidError| {
+            assert_eq!(error.operation(), OP_GLOBAL);
+            assert!(matches!(
+                error.surface_failure(),
+                Some(crate::error::surface::SurfaceFailure::Failed(reason))
+                    if reason.contains("certified plane crossing") && reason.contains("zero tolerance")
+            ));
+        };
+        for target in [
+            IntersectTarget::Plane(&plane),
+            IntersectTarget::Surface(&wrapped_plane),
+        ] {
+            match s.global_surface_intersect(&k, &d, target, &od, [true, true], Some(0.0), None) {
+                Ok(result) => assert!(
+                    !result.curves_3d.is_empty(),
+                    "a crossing is not an empty intersection"
+                ),
+                Err(error) => check_error(error),
+            }
+        }
+        // A disjoint plane still gives a successful empty result at zero tolerance.
+        let missed = Plane::from_normal(o + 100.0 * n, n);
+        let empty = s
+            .global_surface_intersect(
+                &k,
+                &d,
+                IntersectTarget::Plane(&missed),
+                &missed.natural_uv_domain(),
+                [true, true],
+                Some(0.0),
+                None,
+            )
+            .unwrap();
+        assert!(empty.curves_3d.is_empty());
+        let wrapped_s = Surface::from(s);
+        match wrapped_s.global_surface_intersect(
+            &k,
+            &d,
+            &wrapped_plane,
+            &od,
+            [true, true],
+            Some(0.0),
+            None,
+        ) {
+            Ok(result) => assert!(
+                !result.curves_3d.is_empty(),
+                "surface dispatch must retain the unresolved result"
+            ),
+            Err(error) => check_error(error),
+        }
+    }
+
+    /// Opposite endpoint signs may jump across the plane at a full-multiplicity knot.
+    #[test]
+    fn discontinuous_generator_does_not_certify_a_plane_crossing() {
+        // Each linear piece has constant x=-1 or x=1, so neither meets x=0.
+        let net = NurbCurve::new(
+            vec![
+                CPoint::new(-1.0, 0.0, 0.0, NOW),
+                CPoint::new(-1.0, 1.0, 0.0, NOW),
+                CPoint::new(1.0, 2.0, 0.0, NOW),
+                CPoint::new(1.0, 3.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::X);
+        assert!(!generator_crosses_plane(
+            &curve,
+            Vec3::Z,
+            &plane,
+            &plane.natural_uv_domain()
+        ));
+    }
+
+    /// Two generator roots sweep the same line where z = 0 meets x = 0.
+    /// The intersection is their union, a single segment along the Y axis.
+    #[test]
+    fn parallel_coplanar_sweep_intersection_is_not_duplicated() {
+        let k = k();
+        for (finite, drift) in [(false, 0.0), (true, 0.0), (true, 2.0_f64.powi(-44))] {
+            let mut s = swept(
+                &k,
+                &[(-1.0, -1.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0)],
+                None,
+                Vec3::new(drift, if finite { 2.0 } else { 1.0 }, 0.0),
+            );
+            if finite {
+                s.trim_with_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 2.0, 1.0))
+                    .unwrap();
+            }
+            let bound = if finite { 3.0 } else { 2.0 };
+            let domain = Extent2d::from_bounds(-bound, -1.0, bound, 1.0);
+            let plane = Plane::new(
+                Point3::ZERO,
+                Vec3::Y,
+                Vec3::Z,
+                crate::geom::vector2d::Vec2::new(1.0, 1.0),
+                &domain,
+            );
+            let r = s
+                .intersect_with_plane(&k, &s.base().natural_uv_domain(), &plane, &domain, None)
+                .unwrap();
+            assert!(!r.needs_more_intersections);
+            assert!(!r.curves_3d.is_empty());
+            assert!(r.curve_types.iter().all(|&t| t == TsectCurveType::Crossing));
+            // This classification route also retains the full sweep-drift bound.
+            assert!(r.deviations.iter().all(|&d| d >= drift));
+            let mut intervals: Vec<_> = r
+                .curves_3d
+                .iter()
+                .map(|curve| {
+                    let interval = curve.natural_interval();
+                    let a = curve.evaluate_point(&k, interval.min()).unwrap();
+                    let b = curve.evaluate_point(&k, interval.max()).unwrap();
+                    assert!(a.x.abs() < 1e-9 && a.z.abs() < 1e-9);
+                    assert!(b.x.abs() < 1e-9 && b.z.abs() < 1e-9);
+                    (a.y.min(b.y), a.y.max(b.y))
+                })
+                .collect();
+            intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // In the finite case, [-0.5, 1.5] union [0.5, 2.5] is [-0.5, 2.5].
+            let (start, finish) = if finite { (-0.5, 2.5) } else { (-2.0, 2.0) };
+            let mut end = start;
+            for (lo, hi) in intervals {
+                // Adjacent pieces may partition the answer, but never overlap.
+                assert!((lo - end).abs() < 1e-9);
+                assert!(hi > lo);
+                end = hi;
+            }
+            assert!((end - finish).abs() < 1e-9);
+        }
+    }
+
+    /// Caller NURB sweep bounds must be converted before testing STEP fibers.
+    #[test]
+    fn parallel_coplanar_sweep_respects_reparameterized_source_domain() {
+        let k = k();
+        let drift = 2.0_f64.powi(-44);
+        let mut s = swept(
+            &k,
+            &[(-1.0, -1.0, 0.0), (1.0, 0.0, 0.0), (-1.0, 1.0, 0.0)],
+            None,
+            Vec3::new(drift, 2.0, 0.0),
+        );
+        s.trim_with_domain(&k, &Extent2d::from_bounds(0.0, 0.0, 2.0, 1.0))
+            .unwrap();
+        s.reparameterize(&k, &Extent2d::from_bounds(0.0, 10.0, 2.0, 20.0))
+            .unwrap();
+        let source_domain = Extent2d::from_bounds(0.0, 11.0, 2.0, 12.0);
+        let domain = Extent2d::from_bounds(-3.0, -1.0, 3.0, 1.0);
+        let plane = Plane::new(
+            Point3::ZERO,
+            Vec3::Y,
+            Vec3::Z,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &domain,
+        );
+        let bound = s
+            .plane_sweep_displacement(&k, &source_domain, Vec3::X)
+            .unwrap();
+        assert!(bound >= drift && bound <= drift * (1.0 + 1e-10));
+        let r = s
+            .intersect_with_plane(&k, &source_domain, &plane, &domain, None)
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        let mut intervals: Vec<_> = r
+            .curves_3d
+            .iter()
+            .map(|curve| {
+                let interval = curve.natural_interval();
+                let a = curve.evaluate_point(&k, interval.min()).unwrap().y;
+                let b = curve.evaluate_point(&k, interval.max()).unwrap().y;
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(intervals.len(), 2);
+        // v=[.1,.2] sweeps roots y=-.5,+.5 by [.2,.4].
+        for (actual, expected) in intervals.iter().zip([(-0.3, -0.1), (0.7, 0.9)]) {
+            assert!((actual.0 - expected.0).abs() < 1e-9, "{intervals:?}");
+            assert!((actual.1 - expected.1).abs() < 1e-9, "{intervals:?}");
+        }
+    }
+
+    #[test]
+    fn parallel_flat_generator_range_declines_without_partial_coverage() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (-1.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0),
+                (0.0, 10.0, 0.0),
+                (1.0, 10.0, 0.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::X);
+        let result = s
+            .intersect_with_plane(
+                &k,
+                &Extent2d::from_bounds(0.0, 0.0, 3.0, 1.0),
+                &plane,
+                &plane.natural_uv_domain(),
+                None,
+            )
+            .unwrap();
+        // The complete coincident generator span sweeps Y=[0,11]. Keeping
+        // only either endpoint's fiber would lose its middle.
+        assert!(result.needs_more_intersections);
+        assert!(result.curves_3d.is_empty());
+    }
+
+    #[test]
+    fn parallel_rational_sweep_keeps_both_far_tails() {
+        let k = k();
+        let a = 2.6732068221646728;
+        let b = 6.494791779629098;
+        let net = NurbCurve::new(
+            vec![
+                CPoint::new(
+                    0.7787532160592693,
+                    0.41516730641944366,
+                    0.0,
+                    1.058369559093775,
+                ),
+                CPoint::new(
+                    1.6449735124840872,
+                    -1.639375175700008,
+                    0.0,
+                    0.9771324625698774,
+                ),
+                CPoint::new(
+                    3.095321822027647,
+                    -1.6984076619721575,
+                    0.0,
+                    1.255089018424894,
+                ),
+                CPoint::new(
+                    5.598401909924472,
+                    -1.2735666915485684,
+                    0.0,
+                    1.9935203457971689,
+                ),
+            ],
+            3,
+            vec![a, a, a, a, b, b, b, b],
+        )
+        .unwrap();
+        let s = SurfOfExtrusion::create_canonical(
+            &k,
+            Curve::from(BSplineCurve::from_nurb(net, 3, false)),
+            Vec3::new(0.6300223112498824, 0.0, 0.0),
+        )
+        .unwrap();
+        let plane = Plane::from_normal(
+            Point3::new(
+                2.5943748446032284,
+                -0.8692503151488464,
+                5.923072763725463e-09,
+            ),
+            Vec3::new(0.0, -0.08134453898884497, 0.9966860418289665),
+        );
+        let result = s
+            .intersect_with_plane(
+                &k,
+                &s.base().natural_uv_domain(),
+                &plane,
+                &plane.natural_uv_domain(),
+                Some(1e-6),
+            )
+            .unwrap();
+        assert!(!result.needs_more_intersections);
+        let mut intervals = Vec::new();
+        for curve in &result.curves_3d {
+            let ivl = curve.natural_interval();
+            let p = curve.evaluate_point(&k, ivl.min()).unwrap();
+            let q = curve.evaluate_point(&k, ivl.max()).unwrap();
+            intervals.push((p.x.min(q.x), p.x.max(q.x)));
+        }
+        intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Independent cubic roots give C.x=1.601203589467039 and
+        // 2.663509647870795. Their sweeps overlap; retain both outside tails.
+        assert!(!intervals.is_empty());
+        assert!((intervals[0].0 + 777803.1535292441).abs() < 1e-6);
+        assert!((intervals.last().unwrap().1 - 777807.4182424814).abs() < 1e-6);
+        for pair in intervals.windows(2) {
+            assert!((pair[0].1 - pair[1].0).abs() < 1e-8, "{intervals:?}");
+        }
+    }
+
+    #[test]
+    fn parallel_line_deviation_covers_bounded_source_endpoints() {
+        let k = k();
+        let a = Point3::new(1.6424282115340212, 4.191812055542643, -4.002740938533824);
+        let b = Point3::new(a.x, 5.734466112976998, -4.320040760290739);
+        let sweep = Extent1d::from_min_max(2.736341766260848, 8.229820056406474);
+        let mut line = Line::from_points(a, b, 3);
+        line.make_nurb().unwrap();
+        let mut s = SurfOfExtrusion::new(
+            &k,
+            Curve::from(line),
+            Point3::new(2.1834703041803483, 4.7236608744811885, -4.159176543571766),
+            Vec3::new(0.001, 0.0, 0.0),
+            Extent2d::from_bounds(0.0, sweep.min(), 1.0, sweep.max()),
+            true,
+        )
+        .unwrap();
+        s.make_nurb(&k).unwrap();
+        s.set_out_of_bounds_enabled(true);
+        let plane = Plane::from_normal(
+            Point3::new(1.645727841106027, b.y, b.z),
+            Vec3::new(0.0, -0.8238675923367362, -0.5667823129714524),
+        );
+        let r = s
+            .intersect_with_plane(
+                &k,
+                &s.base().natural_uv_domain(),
+                &plane,
+                &plane.natural_uv_domain(),
+                Some(0.0),
+            )
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        assert_eq!(r.curves_3d.len(), 1);
+        let curve = &r.curves_3d[0];
+        let ivl = curve.natural_interval();
+        let p = curve.evaluate_point(&k, ivl.min()).unwrap();
+        let q = curve.evaluate_point(&k, ivl.max()).unwrap();
+        let expected_min = b.x + 0.001 * sweep.min();
+        let expected_max = b.x + 0.001 * sweep.max();
+        // Plane incidence alone cannot bound tangential endpoint error.
+        let deviation = r.deviations[0];
+        assert!((p.x.min(q.x) - expected_min).abs() <= deviation);
+        assert!((p.x.max(q.x) - expected_max).abs() <= deviation);
+        assert!(deviation < EFF_ZERO_SQRT);
     }
 
     #[test]
@@ -2328,9 +3098,15 @@ mod tests {
 
     /// The signed area of a UV polygon (shoelace).
     fn uv_area(poly: &[Point2]) -> f64 {
+        let Some(&origin) = poly.first() else {
+            return 0.0;
+        };
         poly.iter()
             .zip(poly.iter().cycle().skip(1))
-            .map(|(p, q)| p.x * q.y - q.x * p.y)
+            .map(|(p, q)| {
+                let (p, q) = (*p - origin, *q - origin);
+                p.x * q.y - q.x * p.y
+            })
             .sum::<f64>()
             / 2.0
     }
@@ -2476,6 +3252,21 @@ mod tests {
                         assert!(r.curves_3d.is_empty());
                         continue;
                     }
+                    // Each copy reaches |z| = d at a generator control point.
+                    // A reported deviation must enclose that distance, including
+                    // the rounding of computing the control-net bound.
+                    assert_eq!(r.deviations.len(), r.curves_3d.len());
+                    assert!(r.deviations.iter().all(|&v| v.is_finite() && v >= d));
+                    for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                        let ivl = curve.natural_interval();
+                        for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                            let distance = curve.evaluate_point(&k, t).unwrap().z.abs();
+                            assert!(
+                                distance <= deviation,
+                                "d {d:e} shape {shape}: distance {distance:e} exceeds deviation {deviation:e}"
+                            );
+                        }
+                    }
                     // the sweep (length 2 along Y) of a generator 3 long in X
                     assert_region(&r, &plane, 6.0);
                     if shape < 2 {
@@ -2490,6 +3281,49 @@ mod tests {
                             ],
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// Positive rational weights keep the generator at z = d. Clipping the
+    /// sweep to the plane's domain returns plane-made sides at z = 0, whose
+    /// deviation must still cover their distance d from the extrusion.
+    #[test]
+    fn clipped_rational_patch_reports_the_generator_offset() {
+        let k = k();
+        for scale in [1e-3, 1.0, 1e3] {
+            let d = 1e-12 * scale;
+            let s = swept(
+                &k,
+                &[(0.0, 0.0, d), (scale, 0.0, d), (2.0 * scale, 0.0, d)],
+                Some(0.5),
+                Vec3::Y * scale,
+            );
+            let plane = xy_plane(Extent2d::from_bounds(
+                0.5 * scale,
+                -0.5 * scale,
+                1.5 * scale,
+                0.5 * scale,
+            ));
+            let dom = Extent2d::from_bounds(0.0, -1.0, 1.0, 1.0);
+            let r = s
+                .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), None)
+                .unwrap();
+            assert!(!r.needs_more_intersections, "scale {scale:e}");
+            assert_eq!(r.curves_3d.len(), 4);
+            assert_eq!(r.surface1_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.surface2_uv_curves.len(), r.curves_3d.len());
+            assert_eq!(r.curve_types.len(), r.curves_3d.len());
+            assert_eq!(r.deviations.len(), r.curves_3d.len());
+            for ((curve, kind), &deviation) in
+                r.curves_3d.iter().zip(&r.curve_types).zip(&r.deviations)
+            {
+                assert_eq!(*kind, TsectCurveType::RegionBoundary);
+                assert!(deviation.is_finite() && deviation >= d);
+                let ivl = curve.natural_interval();
+                for t in [ivl.min(), ivl.mid(), ivl.max()] {
+                    assert_eq!(curve.evaluate_point(&k, t).unwrap().z, 0.0);
                 }
             }
         }
@@ -2776,6 +3610,245 @@ mod tests {
             let slab = cut(&cut(&corners, &|p| mu(p) - lo), &|p| hi - mu(p));
             let want = uv_area(&slab).abs();
             assert_region(&r, &plane, want);
+        }
+    }
+
+    /// The supplied plane contains the generator and sweep, but the normal inferred
+    /// from this thin generator triangle differs by more than the dispatch's angular
+    /// tolerance at UV coordinates near 1e6. It must still give the slab boundary.
+    #[test]
+    fn far_origin_corner_slab_has_a_closed_boundary() {
+        let k = k();
+        let o = 1e6;
+        let dom = Extent2d::from_bounds(o, o, o + 10.0, o + 10.0);
+        let plane = rotated_plane(dom);
+        let th: f64 = 2.68865247675069297;
+        let euv = (th.cos(), th.sin());
+        // Work relative to the box origin so the expected area does not lose
+        // precision by subtracting products of coordinates near 1e6.
+        let mu = |p: Point2| -euv.1 * (p.x - o) + euv.0 * (p.y - o);
+        let corners = [
+            Point2::new(o, o),
+            Point2::new(o + 10.0, o),
+            Point2::new(o + 10.0, o + 10.0),
+            Point2::new(o, o + 10.0),
+        ];
+        let c = *corners
+            .iter()
+            .min_by(|&&p, &&q| mu(p).total_cmp(&mu(q)))
+            .unwrap();
+        let f = (0.399576720803022, 0.21708714905902105, 0.5446327714186807);
+        let inner = |a, b| Point2::new(o + (1.0 + 8.0 * a), o + (1.0 + 8.0 * b));
+        let (a, b) = (inner(f.0, f.1), inner(f.2, f.0));
+        let uv = [(a.x, a.y), (c.x, c.y), (b.x, b.y)];
+        let r = uv_polyline(&k, &plane, &uv, euv, (-1e4, 1e4));
+        let beta = mu(a).max(mu(b));
+        let want = uv_area(&cut(&corners, &|p| beta - mu(p))).abs();
+        assert_region(&r, &plane, want);
+    }
+
+    /// An angularly parallel sweep can drift 1e-3 off the plane over its extent.
+    /// Both a generator in the plane and one crossing it must give curves on the
+    /// plane within their reported deviation, or decline. A short interval far
+    /// from zero still has the same drift from the generator.
+    #[test]
+    fn nearly_parallel_long_sweep_respects_reported_plane_deviation() {
+        let k = k();
+        for offset in [0.0, 1e6] {
+            let origin = Point3::new(offset, offset, offset);
+            let plane = Plane::from_normal(origin, Vec3::X);
+            for generator_direction in [Vec3::Y, Vec3::X] {
+                for (vmin, vmax) in [(-1e6, 1e6), (1e6, 1e6 + 1.0)] {
+                    let a = origin - generator_direction;
+                    let b = origin + generator_direction;
+                    let mut s = swept(
+                        &k,
+                        &[(a.x, a.y, a.z), (b.x, b.y, b.z)],
+                        None,
+                        Vec3::new(1e-9, 0.0, 1.0),
+                    );
+                    let domain = Extent2d::from_bounds(0.0, vmin, 1.0, vmax);
+                    s.trim_with_domain(&k, &domain).unwrap();
+                    let r = s
+                        .intersect_with_plane(&k, &domain, &plane, &plane.step_uv_domain(), None)
+                        .unwrap();
+                    if r.needs_more_intersections {
+                        assert!(r.curves_3d.is_empty());
+                        continue;
+                    }
+                    assert!(!r.curves_3d.is_empty());
+                    assert_eq!(r.curves_3d.len(), r.deviations.len());
+                    for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                        let net = gen_base(curve).unwrap().canonical().unwrap();
+                        // Degree-one curves lie on their control segments, so this
+                        // checks every point of every output curve, not samples.
+                        assert_eq!(net.degree, 1);
+                        for &p in &net.control_points {
+                            let distance = plane.position().z_axis().dot(p - origin).abs();
+                            assert!(
+                                distance <= deviation,
+                                "offset {offset}, generator {generator_direction:?}, sweep \
+                                 [{vmin}, {vmax}]: distance {distance} exceeds {deviation}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A directrix tilted off x = 0 drifts 1e-7 over [-100, 100], below tol.
+    /// A smaller tilt also passes the patch certificate; both must report the drift.
+    #[test]
+    fn below_threshold_sweep_reports_plane_deviation() {
+        let k = k();
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::X);
+        for (generator_direction, tilt) in [(Vec3::X, 1e-9), (Vec3::Y, 1e-13)] {
+            let a = -generator_direction;
+            let b = generator_direction;
+            let mut s = swept(
+                &k,
+                &[(a.x, a.y, a.z), (b.x, b.y, b.z)],
+                None,
+                Vec3::new(tilt, 0.0, 1.0),
+            );
+            let domain = Extent2d::from_bounds(0.0, -100.0, 1.0, 100.0);
+            s.trim_with_domain(&k, &domain).unwrap();
+            let r = s
+                .intersect_with_plane(&k, &domain, &plane, &plane.step_uv_domain(), None)
+                .unwrap();
+            assert!(!r.needs_more_intersections);
+            assert!(!r.curves_3d.is_empty());
+            assert_eq!(r.curves_3d.len(), r.deviations.len());
+            for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                assert!(deviation > 0.0 && deviation <= EFF_ZERO_SQRT);
+                assert!(
+                    deviation >= tilt * 100.0,
+                    "the full sweep drift must be covered"
+                );
+                let net = gen_base(curve).unwrap().canonical().unwrap();
+                // Degree-one curves lie on their control segments, so this checks
+                // every output point, including the endpoints at maximum drift.
+                assert_eq!(net.degree, 1);
+                for &p in &net.control_points {
+                    let distance = plane.position().z_axis().dot(p).abs();
+                    assert!(
+                        distance <= deviation,
+                        "generator {generator_direction:?}: distance {distance} exceeds {deviation}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The profile residual and sweep drift add. Plane-domain sides also retain
+    /// the profile residual, even when clipping constructs them exactly on x = 0.
+    #[test]
+    fn parallel_patch_deviation_covers_profile_and_sweep() {
+        let k = k();
+        let residual = 2.0_f64.powi(-44);
+        for (e, vmin, domain, expected) in [
+            (
+                Vec3::new(residual, 0.0, 1.0),
+                0.0,
+                Extent2d::from_bounds(-2.0, -2.0, 2.0, 2.0),
+                2.0 * residual,
+            ),
+            (
+                Vec3::Z,
+                -1.0,
+                Extent2d::from_bounds(-0.25, -0.25, 0.25, 0.25),
+                residual,
+            ),
+        ] {
+            let mut s = swept(&k, &[(residual, -1.0, 0.0), (residual, 1.0, 0.0)], None, e);
+            let sweep = Extent2d::from_bounds(0.0, vmin, 1.0, 1.0);
+            s.trim_with_domain(&k, &sweep).unwrap();
+            let plane = Plane::new(
+                Point3::ZERO,
+                Vec3::Y,
+                Vec3::Z,
+                crate::geom::vector2d::Vec2::new(1.0, 1.0),
+                &domain,
+            );
+            let r = s
+                .intersect_with_plane(&k, &sweep, &plane, &domain, None)
+                .unwrap();
+            assert!(!r.needs_more_intersections);
+            assert!(!r.curves_3d.is_empty());
+            assert_eq!(r.curves_3d.len(), r.deviations.len());
+            for (curve, &deviation) in r.curves_3d.iter().zip(&r.deviations) {
+                assert!(deviation >= expected && deviation <= EFF_ZERO_SQRT);
+                let net = gen_base(curve).unwrap().canonical().unwrap();
+                assert_eq!(net.degree, 1);
+                for p in net.control_points {
+                    assert!(p.x.abs() <= deviation);
+                    if e == Vec3::Z {
+                        assert!((p.x - residual).abs() <= deviation);
+                    }
+                }
+            }
+        }
+    }
+
+    /// #18903 (a review comment on #18771): the unit UV box of a plane whose origin
+    /// is at `x0`, swept along `(1, -1)` by the fold `(3, 0)`-`(d, 0)`-`(2, 1)`
+    /// (`d = 2^-10`) over a long interval: the slab `mu = u + w >= d` cuts the corner
+    /// off the box, a pentagon of area `1 - d^2 / 2` with a `d sqrt 2` edge. At
+    /// `x0 = 0` the boundary is that pentagon. At `x0 = 1e12` its two cut vertices,
+    /// `(d, 0)` and `(0, d)`, are one point to their bounds (about `2e-2`) and merge;
+    /// keeping one of them turned the other's side into a chord across the box (a
+    /// quadrilateral of area about `1 - d / 2`, an area error `d / 2`). They merge into
+    /// the corner `(0, 0)` where their sides meet: the boundary is the box itself,
+    /// every edge on a side of it, its area `1` within `d^2 / 2` of the exact one.
+    /// The answer's ends are then the plane points of the box corners, bit for bit,
+    /// and each curve's deviation covers the corner's `d / sqrt 2` from the region
+    /// the extrusion covers.
+    #[test]
+    fn slab_merges_a_far_cut_corner_into_the_corner() {
+        let k = k();
+        let d = 2f64.powi(-10);
+        for x0 in [0.0, 1e12] {
+            let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+            let mut plane = Plane::new(
+                Point3::new(x0, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                crate::geom::vector2d::Vec2::new(1.0, 1.0),
+                &dom,
+            );
+            plane.make_nurb().unwrap();
+            let gen = [(3.0, 0.0), (d, 0.0), (2.0, 1.0)];
+            let r = uv_polyline(&k, &plane, &gen, (1.0, -1.0), (-10.0, 10.0));
+            if x0 == 0.0 {
+                assert_eq!(r.curves_3d.len(), 5);
+                let short = shortest_curve(&r);
+                assert!(short > d && short < 2.0 * d, "{short:e}");
+                assert_region_closing_to(&r, &plane, 1.0 - d * d / 2.0, 2.0 * f64::EPSILON);
+                continue;
+            }
+            assert_eq!(r.curves_3d.len(), 4);
+            let corners: Vec<Point3> = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+                .iter()
+                .map(|&(u, w)| plane.evaluate_point_fast(Point2::new(u, w)))
+                .collect();
+            for c in &r.curves_3d {
+                let canon = gen_base(c).unwrap().canonical().unwrap();
+                assert_eq!(canon.degree, 1);
+                for end in [
+                    canon.control_points[0],
+                    *canon.control_points.last().unwrap(),
+                ] {
+                    assert!(corners.contains(&end), "end {end:?} is no box corner");
+                }
+            }
+            assert_region_closing_to(&r, &plane, 1.0, 2.0 * f64::EPSILON);
+            // The corner `(0, 0)` is off the region the extrusion covers (`u + w >= d`)
+            // by `d / sqrt 2` in the plane: every curve's deviation bounds it.
+            assert_eq!(r.deviations.len(), 4);
+            for &dev in &r.deviations {
+                assert!(dev >= d / 2f64.sqrt(), "deviation {dev:e}");
+            }
         }
     }
 

@@ -93,6 +93,14 @@ pub struct RepairDone {
     pub modelling: bool,
     /// Its volume, mm³, when it is a closed solid.
     pub volume: Option<f64>,
+    /// The tolerance-scale defects SMLib's check fails that were healed first (edges shorter
+    /// than their tolerance, sliver faces between coincident edges, curve pieces of no length),
+    /// in a line; face indices in the rest of the report are the healed part's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub healed: Option<String>,
+    /// That heal failed inside the kernel, and why: the repair went on from the part as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heal_failed: Option<String>,
 }
 
 /// What `body.repair` returns.
@@ -1632,13 +1640,11 @@ pub enum FlipAxis {
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
-/// follows), `sheet_face` (to a face of a sheet part) or `fixed` (where it is: an origin,
-/// construction or explicit plane).
+/// follows) or `fixed` (where it is: an origin, construction or explicit plane).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RedefineAttachment {
     ExactFace,
-    SheetFace,
     Fixed,
 }
 

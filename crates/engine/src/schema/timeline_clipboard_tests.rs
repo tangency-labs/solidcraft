@@ -312,6 +312,15 @@ fn copy_and_paste_replies_match_the_output_schema() {
     matches(output_schema_for::<CopyResult>(), "timeline.copy", &nothing);
 }
 
+/// Set in the child process that [`add_and_export_replies_match_the_output_schema`] runs in a
+/// temporary folder, for its relative path.
+const RELATIVE_CHILD: &str = "SOLIDCRAFT_TIMELINE_RELATIVE_CHILD";
+
+/// A new temporary folder for one test, removed when it goes out of scope, a panic included.
+fn temp_folder() -> tempfile::TempDir {
+    tempfile::Builder::new().prefix("solidcraft-timeline-schema-").tempdir_in(solidcraft_io::vfs::temp_dir()).unwrap_or_else(|e| panic!("{e}"))
+}
+
 /// Add every step of a design's script in Warn, with its parameters: each `timeline.add` reply
 /// matches the output schema without warnings, a feature that does not build says why, and the
 /// script is returned and written as before.
@@ -358,19 +367,49 @@ fn add_and_export_replies_match_the_output_schema() {
     assert!(broken["error"].is_string() || broken["warning"].is_string(), "{broken}");
     matches(output_schema_for::<AddResult>(), "timeline.add", &broken);
 
-    // With a path the script is written, and the reply names the file.
-    let dir = std::env::temp_dir().join(format!("solidcraft-timeline-schema-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
-    let file = dir.join("script.json");
+    // With a path the script is written, and the reply names the file. The folder is this
+    // test's alone and goes away however the test ends (#19249).
+    let dir = temp_folder();
+    let file = dir.path().join("script.json");
     let written = run(&mut s, "timeline.export_script", json!({"path": file}));
     let text = std::fs::read_to_string(&file).unwrap_or_default();
-    let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(serde_json::from_str::<Value>(&text).ok(), Some(written["script"].clone()));
     // The file's text is the pretty-printed script with its keys sorted, as it has always been.
     let sorted = serde_json::to_string_pretty(&written["script"]).unwrap_or_default();
     assert_eq!(text, sorted);
     assert_eq!(written["path"], json!(file), "{written}");
+    assert_eq!(written["absolute_path"], json!(file), "an absolute path is its own absolute path: {written}");
+    assert!(exported.get("absolute_path").is_none(), "no file, no absolute path: {exported}");
+    assert_eq!(written["bytes"], json!(text.len()), "the reply gives the size of the file written: {written}");
+    assert!(exported.get("bytes").is_none(), "no file, no size: {exported}");
     matches(output_schema_for::<ExportScriptResult>(), "timeline.export_script", &written);
+    // A relative path is written in the folder the process runs in. The reply echoes it as given
+    // in `path` and names it in full in `absolute_path`: an agent on the other end of MCP doesn't
+    // know that folder (#18831, #19248).
+    // The engine resolves it against the process's folder, and changing that folder would move
+    // every other test running at the same time, so this test runs again in a child process
+    // whose folder is a new temporary one, and only the child goes on (#19249).
+    if std::env::var_os(RELATIVE_CHILD).is_none() {
+        let here = temp_folder();
+        let out = std::process::Command::new(std::env::current_exe().unwrap_or_else(|e| panic!("{e}")))
+            .args(["--exact", "schema::timeline_clipboard::tests::add_and_export_replies_match_the_output_schema", "--test-threads=1", "--nocapture"])
+            .current_dir(here.path())
+            .env(RELATIVE_CHILD, "1")
+            .output()
+            .unwrap_or_else(|e| panic!("{e}"));
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && text.contains("1 passed"), "{text}");
+        return;
+    }
+    let relative = format!("solidcraft-timeline-relative-{}.json", std::process::id());
+    let here = run(&mut s, "timeline.export_script", json!({"path": relative}));
+    let full = std::env::current_dir().map(|d| d.join(&relative)).unwrap_or_else(|e| panic!("{e}"));
+    let written_here = std::fs::read_to_string(&full).unwrap_or_default();
+    let _ = std::fs::remove_file(&full);
+    assert_eq!(here["path"], json!(relative), "`path` is the path given: {here}");
+    assert_eq!(here["absolute_path"], json!(full), "{here}");
+    matches(output_schema_for::<ExportScriptResult>(), "timeline.export_script", &here);
+    assert_eq!(here["bytes"], json!(written_here.len()), "{here}");
 }
 
 /// A misspelt key still runs in Warn, and says so, with a reply that matches its schema.

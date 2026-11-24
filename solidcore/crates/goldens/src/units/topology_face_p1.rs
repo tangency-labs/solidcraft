@@ -584,7 +584,7 @@ fn reaches_brep(b: &Brep, f: FaceId) -> Result<bool, SolidError> {
 
 #[allow(clippy::too_many_lines)] // one record per op
 fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     // upstream edge curves are owned by their edges
     let edges: Vec<EdgeId> = b.edges().ids().collect();
     for e in edges {
@@ -795,6 +795,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let serial =
                 solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
             put_owners(&mut o, &b, serial).map_err(e)?;
+            crate::trim_hook::observe(&mut b);
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
@@ -1014,7 +1015,7 @@ pub(super) fn own_built(
     init_gaps: bool,
 ) -> Result<crate::own_builder::Built, HarnessError> {
     use crate::own_builder::{build_as, read_as, renumber_with, Built, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::TOPOLOGY_FIXTURE;
     let BrepIn::File { rebuild, .. } = src else {
         return build_as(&mut k, src, validate_only, init_gaps, conv)?
@@ -1025,7 +1026,7 @@ pub(super) fn own_built(
         // the gap walk may leave size estimates a copy does not carry: read afresh
         return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
     }
-    if crate::tolsub::active() {
+    if crate::tolsub::active() || crate::refit::active() {
         // (a tolerance-substitution replay sees every read: no cached copy)
         return read_as(&mut k, &path, *rebuild, validate_only, false, conv);
     }

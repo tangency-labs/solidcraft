@@ -12,6 +12,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
@@ -188,16 +191,7 @@ fn differences(at: &str, a: &Value, b: &Value, out: &mut Vec<String>) {
 fn a_sample_of_the_corpus_bodies_goes_round_unchanged() {
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
-    let fixes_json: Value =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    let mut fixes = UpstreamFixes::default();
-    for flag in fixes_json.as_array().expect("fixes.json: flag names") {
-        let name = flag.as_str().unwrap();
-        *fixes
-            .flag_mut(name)
-            .unwrap_or_else(|| panic!("fixes.json: no fix {name}")) = true;
-    }
+    let fixes = solidcraft_fixes::solidcraft_fixes();
     let mut t = Tally::default();
     let with_bodies = files.iter().filter_map(|f| {
         let e: Value = serde_json::from_str(&std::fs::read_to_string(f).unwrap()).unwrap();

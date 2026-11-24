@@ -734,6 +734,8 @@ pub(crate) fn put_tags(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
 /// uses' edges (index in the edge list) and orientations. Positions in the lists, not arena
 /// ids, so record numbering never enters the comparison.
 pub(crate) fn topology_digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+    #[cfg(test)]
+    crate::certify::written(b);
     let shells = bp1::shells(k, b, None)?;
     let fs = bp1::faces(b, None)?;
     let es = bp1::edges(b, None)?;

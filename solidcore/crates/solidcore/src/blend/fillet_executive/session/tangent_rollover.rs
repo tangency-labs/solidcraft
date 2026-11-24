@@ -4,7 +4,10 @@
 //! round's edge. A lone round is decided in closed form, along a straight edge between faces
 //! each a plane or a circular cylinder parallel to it only
 //! ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]), and so is a round of
-//! several along such an edge that no other round meets (#18411); any other round of
+//! several along such an edge that no other round meets (#18411), another round's edge on
+//! the face it rolls onto counting only at the rolled edge's ends or where that round rolls
+//! over the same edge (#18830: the two sides of a slot beside a hole's seam; the bands' check
+//! then compares the two rounds on that face, #19242); any other round of
 //! several, such as one of a chain, from its ball's sections along its edge
 //! (`rails_wholly_past`, upstream's unimplemented tangent case of
 //! `SmFilletSolver::ProcessFullRollOver`).
@@ -39,7 +42,8 @@ use crate::blend::fillet_solver::p1::{
 };
 use crate::blend::fillet_tangent_rollover::{tangent_rollover_supports, Rollover};
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
@@ -51,13 +55,20 @@ use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::session::tangent_rollover";
 
-/// A stage of the rollover that failed with no reason the kernel names (a defect,
-/// [`crate::error::blend::BlendFailure::StageFailed`]): a solver the session does not hold.
-/// Its origin is the caller's line.
+/// A reviewed defect of the roll-over ([`BlendFailure::Defect`]), `why` saying why, with
+/// `status` (`SM_ERR`, or `SM_ERR_NULL_POINTER` for upstream's `NER`). Its origin is the
+/// caller's line.
 #[track_caller]
-fn stage_failed() -> SolidError {
-    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
+fn defect(why: &'static str, status: i32) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(status)
+        .into_error()
 }
+
+/// Why a constant round's solver has both offset surfaces: the solver is set up with one on
+/// each side, and a roll-over replaces one, never removes it.
+const SOLVER_OFFSETS: &str = "a round's solver has no offset surface on a side: the solver is set \
+     up with one on each side, and a roll-over replaces one, never removes it";
 
 /// The vertices of the edges of `face`.
 ///
@@ -69,6 +80,22 @@ fn face_vertices(target: &Brep, face: FaceId) -> Result<Vec<VertexId>> {
         out.extend(edge::vertices(target, e, None)?.into_iter().flatten());
     }
     Ok(out)
+}
+
+/// A round's closed-form decision ([`tangent_rollover_supports`]): the face it rolls onto on
+/// each side, or `None` for a round outside the sections it decides.
+type Decision = Option<[Option<Rollover>; 2]>;
+
+/// Whether a round of several is apart from the others ([`FilletSession::round_apart`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Apart {
+    /// Another round meets it where its rollover would not be checked: decided by its ball's
+    /// sections.
+    No,
+    /// No other round's edge has a vertex on a face it may roll off, nor on a face it may
+    /// roll onto other than away from the edge it rolls over (where the bands' check compares
+    /// that round's band with this round's rolled rail).
+    Clear,
 }
 
 /// The intervals a round's edge is cut into to tell where its ball's contacts lie: the ball's
@@ -93,7 +120,8 @@ impl FilletSession<'_> {
     /// lies on. A lone round is decided in closed form, along a straight edge between faces each
     /// a plane or a circular cylinder parallel to it only ([`tangent_rollover_supports`]). So is
     /// a round of several along such an edge that no other round meets ([`Self::round_apart`];
-    /// #18411: both rims of a pocket), its rollover not proved again after the trace
+    /// #18411: both rims of a pocket; #18830: the two sides of a slot beside a hole's seam,
+    /// one rolling onto the wall the other stands on), its rollover not proved again after the trace
     /// ([`RolloverProof::ClosedForm`]) where each face it rolls onto is a plane or a cylinder
     /// parallel to the edge ([`Rollover::prismatic_beyond`]); any other round of several, such as one of a chain, from
     /// its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge only partway
@@ -114,21 +142,76 @@ impl FilletSession<'_> {
             })
             .collect();
         let ends = self.rounds_ends(&ids)?;
+        // each round's closed-form decision, made once on the faces as they are before any
+        // round rolls (rolling changes a solver's offset surfaces, not the body): the round's
+        // own where it is lone or apart, and for the others' apart test, where a decision
+        // that is `None` (outside the sections it decides, or no inputs) or fails is taken
+        // as a round that may roll anywhere. A round that is not apart rolls by its ball's
+        // sections instead; on the faces the closed form decides (planes and cylinders
+        // parallel to a straight edge) every section across the edge is the same, so for a
+        // smooth far edge that spans the round's edge the sections find the contact on the
+        // same side of it as the closed form's one section does. The closed form looks only at
+        // far edges that span the round's edge and takes the first it rolls over; the
+        // sections take the first smooth far edge with no span test, so a far edge split into
+        // pieces along the round's edge (a seam cut in two) may be decided differently.
+        let all_inputs: Vec<Option<Inputs>> = ids
+            .iter()
+            .map(|&id| self.rollover_inputs(id))
+            .collect::<Result<_>>()?;
+        let mut own_decisions: Vec<Option<Result<Decision>>> = all_inputs
+            .iter()
+            .map(|own| {
+                own.as_ref().map(|own| {
+                    tangent_rollover_supports(
+                        k,
+                        &mut *self.objects.target,
+                        own.edge,
+                        own.faces,
+                        own.offsets,
+                        own.tangency,
+                    )
+                })
+            })
+            .collect();
+        for decision in &mut own_decisions {
+            // only a cancellation or an unported step stops here, as `probe` lets through;
+            // any other failure is the round's own to report where it is decided
+            if let Some(Err(error)) = decision.as_ref() {
+                if error.is_unported_or_cancelled() {
+                    if let Some(Err(error)) = decision.take() {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        let decided: Vec<Decision> = own_decisions
+            .iter()
+            .map(|d| match d {
+                Some(Ok(sides)) => *sides,
+                _ => None,
+            })
+            .collect();
         for (i, &id) in ids.iter().enumerate() {
             self.objects.solver_mut(id)?.base_mut().rollover_proof = RolloverProof::AfterTrace;
-            let Some(inputs) = self.rollover_inputs(id)? else {
+            let Some(inputs) = all_inputs.get(i).and_then(Option::as_ref) else {
                 continue;
             };
-            let apart = !lone && self.round_apart(k, i, ends.as_deref(), &inputs)?;
-            let closed = if lone || apart {
-                tangent_rollover_supports(
-                    k,
-                    &mut *self.objects.target,
-                    inputs.edge,
-                    inputs.faces,
-                    inputs.offsets,
-                    inputs.tangency,
-                )?
+            let apart = if lone {
+                Apart::No
+            } else {
+                self.round_apart(k, i, ends.as_deref(), inputs, &decided)?
+            };
+            let closed = if lone || apart != Apart::No {
+                match own_decisions.get_mut(i).and_then(Option::take) {
+                    Some(decision) => decision?,
+                    None => {
+                        return Err(defect(
+                            "a round's own roll-over decision is not there: one is made for \
+                             each round with inputs, and each is taken once",
+                            SM_ERR,
+                        ))
+                    }
+                }
             } else {
                 None
             };
@@ -142,6 +225,8 @@ impl FilletSession<'_> {
                         self.objects.solver_mut(id)?.base_mut().rollover_proof =
                             RolloverProof::ClosedForm;
                     }
+                    // the other round's band on the face this one rolls onto is compared
+                    // with its rolled rail by the bands' check (#19242)
                     rollovers
                 }
                 None if lone => [None, None],
@@ -152,9 +237,13 @@ impl FilletSession<'_> {
                         .get_mut(id.0 as usize)
                         .and_then(Option::as_mut)
                     else {
-                        return Err(stage_failed());
+                        return Err(defect(
+                            "a rolling round's solver is not held by the session: it was \
+                             read at the same id at the start of the step",
+                            SM_ERR,
+                        ));
                     };
-                    rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?
+                    rails_wholly_past(k, &mut *self.objects.target, solver, inputs)?
                 }
             };
             for (rail, rollover) in rollovers.into_iter().enumerate() {
@@ -168,10 +257,16 @@ impl FilletSession<'_> {
 
     /// Whether the round `i` of a blend of several, of `ends` (each round's edge's vertices,
     /// [`Self::rounds_ends`]), is apart from the others: no other round's edge has a vertex on
-    /// its edge, nor on a face beside it that has a smooth far edge (one tangent to the face
-    /// beyond within `inputs.tangency`, a side it may roll off), nor on such a face beyond (one
-    /// it may roll onto). Nothing of another round then lies at its ends or on the faces it may
-    /// roll on. `false` where `ends` is `None`.
+    /// its edge, nor on a face beside it that has a smooth far edge T (one tangent to the face
+    /// beyond within `inputs.tangency`, a side it may roll off). On the face beyond T (one it
+    /// may roll onto) another round's edge may have a vertex only where that round touches the
+    /// face beyond as a face of its own, away from T: it has no vertex at T's ends, where this
+    /// round's rolled rail ends, and `decided` (each round's closed-form decision,
+    /// [`tangent_rollover_supports`]) shows it does not roll over T itself. Nothing of another
+    /// round then lies at its ends or on the face it may roll off, and another round's band
+    /// on the face beyond is a band on a face both rounds' rails lie on, which the bands'
+    /// check (`geometry_bands_clear_other_rails`) compares with this round's rolled rail.
+    /// [`Apart::No`] where `ends` is `None`.
     ///
     /// # Errors
     /// Those of the topology queries and of the tangency test.
@@ -181,9 +276,10 @@ impl FilletSession<'_> {
         i: usize,
         ends: Option<&[Vec<VertexId>]>,
         inputs: &Inputs,
-    ) -> Result<bool> {
+        decided: &[Decision],
+    ) -> Result<Apart> {
         let Some(ends) = ends else {
-            return Ok(false);
+            return Ok(Apart::No);
         };
         let others: Vec<VertexId> = ends
             .iter()
@@ -193,7 +289,7 @@ impl FilletSession<'_> {
             .collect();
         let met = |vertices: &[VertexId]| vertices.iter().any(|v| others.contains(v));
         if ends.get(i).is_none_or(|own| met(own)) {
-            return Ok(false);
+            return Ok(Apart::No);
         }
         let target = &mut *self.objects.target;
         for &face in &inputs.faces {
@@ -212,14 +308,34 @@ impl FilletSession<'_> {
                 if !tangent.is_some_and(|(tangent, _)| tangent) {
                     continue;
                 }
+                let t_ends: Vec<VertexId> = edge::vertices(target, e, None)?
+                    .into_iter()
+                    .flatten()
+                    .collect();
                 for f in edge::faces(target, e, None)? {
-                    if met(&face_vertices(target, f)?) {
-                        return Ok(false);
+                    let on_face = face_vertices(target, f)?;
+                    if f == face {
+                        if met(&on_face) {
+                            return Ok(Apart::No);
+                        }
+                        continue;
+                    }
+                    for (j, own) in ends.iter().enumerate() {
+                        if j == i || !own.iter().any(|v| on_face.contains(v)) {
+                            continue;
+                        }
+                        let rolls_over_t = match decided.get(j).copied().flatten() {
+                            Some(sides) => sides.iter().flatten().any(|r| r.edge == e),
+                            None => true,
+                        };
+                        if rolls_over_t || own.iter().any(|v| t_ends.contains(v)) {
+                            return Ok(Apart::No);
+                        }
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(Apart::Clear)
     }
 
     /// The vertices of each solver's edge of `ids`, in order; `None` where a solver has no
@@ -272,7 +388,7 @@ impl FilletSession<'_> {
         for (offset, rail) in offsets.iter_mut().zip(0..2) {
             *offset = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
+                .ok_or_else(|| defect(SOLVER_OFFSETS, SM_ERR_NULL_POINTER))?
                 .surface
                 .offset_distance();
         }
@@ -283,17 +399,20 @@ impl FilletSession<'_> {
         let Some(edge) = eu1::edge(target, u0)? else {
             return Ok(None);
         };
-        let mut faces = Vec::with_capacity(2);
-        for u in [u0, u1] {
-            let face = eu1::faceuse(target, u)?
+        let face_of = |u| -> Result<FaceId> {
+            eu1::faceuse(target, u)?
                 .map(|fu| eu1::faceuse_face(target, fu))
                 .transpose()?
                 .flatten()
-                .ok_or_else(|| SolidError::blend_missing(OP, "the face use's face"))?;
-            faces.push(face);
-        }
-        let faces = <[_; 2]>::try_from(faces)
-            .map_err(|_| SolidError::blend_missing(OP, "a face on each side of the edge"))?;
+                .ok_or_else(|| {
+                    defect(
+                        "an edge use a round's solver rolls on has no face: the solver is set \
+                         up on the edge uses of the two faces it blends",
+                        SM_ERR_NULL_POINTER,
+                    )
+                })
+        };
+        let faces = [face_of(u0)?, face_of(u1)?];
         Ok(Some(Inputs {
             edge,
             faces,
@@ -314,7 +433,12 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         let geoms = self.objects.solver(id)?.base().fillet_geoms();
         let support = crate::topology::face::p2::surface(self.objects.target, rollover.face)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+            .ok_or_else(|| {
+                Failure::new(OP, BlendFailure::FaceHasNoSurface)
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .at(EntityRef::Face(rollover.face))
+                    .into_error()
+            })?
             .clone_for_evaluation()?;
         let solver = self.objects.solver_mut(id)?.base_mut();
         roll_solver_surface(k, solver, rail, &support, rollover)?;
@@ -358,7 +482,7 @@ fn roll_solver_surface(
     let sign = if rollover.opposite_normals { -1.0 } else { 1.0 };
     let old = solver
         .surface(rail)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        .ok_or_else(|| defect(SOLVER_OFFSETS, SM_ERR_NULL_POINTER))?;
     let (distance, extends) = (
         old.surface.offset_distance() * sign,
         old.surface.surface.allow_extension(),

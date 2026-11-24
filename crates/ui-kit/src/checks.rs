@@ -100,7 +100,9 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
         let at = Rect::from_center_size(pos2(square.right() + t.space_6 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
         super::icons::paint_icon(&ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)), at, icon, 1.0);
     }
-    let text_rect = Rect::from_min_max(pos2((square.right() + icon_width + gap).min(rect.right()), rect.top()), rect.max);
+    // The box is snapped to a device pixel, which can leave the text less room than its width by a
+    // fraction of one: a pixel of slack keeps an exactly-sized label from eliding ("Fl…").
+    let text_rect = Rect::from_min_max(pos2((square.right() + icon_width + gap).min(rect.right()), rect.top()), rect.max + vec2(1.0, 0.0));
     if wrap {
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let at = pos2((text_rect.left() * ppp).round() / ppp, ((text_rect.center().y - galley.size().y / 2.0) * ppp).round() / ppp);
