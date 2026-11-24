@@ -18,7 +18,9 @@
 //! own definition.
 //!
 //! The parametrisation is the kernel's: a plane runs along its axes made unit with unit
-//! scales (its parameters the record's times the axes' lengths), a revolution in degrees.
+//! scales (its parameters the record's times the axes' lengths, its v axis made square to its
+//! u where the record's are off square within a placement's tolerance), a revolution in
+//! degrees.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
@@ -30,6 +32,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::math::gamma;
@@ -49,8 +52,10 @@ const OP: &str = "surface::from_parameters::from_parameters";
 /// the surface is its whole knot domain and the box is returned as given.
 ///
 /// - **Plane:** the kernel's plane with unit axes along the record's, unit scales, over the
-///   box scaled by the axes' lengths. The axes must be square to rounding: the kernel's
-///   plane cannot hold a skew parametrisation.
+///   box scaled by the axes' lengths. The kernel's plane cannot hold a skew
+///   parametrisation: axes off square by no more than its placement keeps (10⁻¹²) are read
+///   with the v axis made square to the u axis, the normal and point set kept; axes further
+///   off are refused.
 /// - **Cylinder:** about the frame's z through the origin moved by `v0` along it, over the
 ///   angles in degrees and the height `v1 - v0`.
 /// - **Cone:** from its apex (where the radius is 0, `-radius_at_origin / tan` along z),
@@ -62,11 +67,11 @@ const OP: &str = "surface::from_parameters::from_parameters";
 ///
 /// # Errors
 ///
-/// `InvalidInput` for numbers not finite, axes not square or of no length, a box not
-/// increasing, a cone of half angle not in `(0, pi/2)` or with its box past the apex, or a
-/// result whose NURBS form is not proved on the record's surface; `Unsupported` for a ball
-/// patch (its label has no parameters: its face's NURBS form is the surface) and a placed
-/// revolution; those of the kind's constructor and of [`lies_on`].
+/// `InvalidInput` for numbers not finite, axes of no length or not square (a plane's: further
+/// off square than a placement keeps; within that they are read square), a box not increasing,
+/// a cone of half angle not in `(0, pi/2)` or with its box past the apex, or a result whose
+/// NURBS form is not proved on the record's surface; `Unsupported` for a ball patch (its label
+/// has no parameters: its face's NURBS form is the surface) and a placed revolution; those of the kind's constructor and of [`lies_on`].
 pub fn from_parameters(
     k: &Kernel,
     record: &Record,
@@ -395,6 +400,12 @@ fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3, Vec3)> {
 
 /// The plane `origin + u du + v dv` over `u x v`: unit axes along `du`, `dv`, unit scales,
 /// the box scaled by their lengths ([`axis_scale`]); and its implicit surface.
+///
+/// The kernel's plane cannot hold a skew parametrisation. Axes off square by no more than
+/// the kernel's placement keeps ([`plane_axes_near_square`]; records written before
+/// solidcore#3377 carry about 10⁻¹⁴) are read with `dv` made square to `du`
+/// ([`square_plane_axis`]): the plane's normal and point set stay, and its parameters shear
+/// by at most that angle times the face's size along `v`. Axes further off are refused.
 fn plane(
     origin: Point3,
     du: Vec3,
@@ -406,13 +417,17 @@ fn plane(
     if !(a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0) {
         return Err(SolidError::invalid_input(OP, "a plane axis has no length"));
     }
-    if !plane_axes_square(du, dv) {
-        return Err(SolidError::invalid_input(
+    let skew = || {
+        SolidError::invalid_input(
             OP,
-            "the plane's axes are not square: the kernel's plane cannot hold a skew parametrisation",
-        ));
+            "the plane's axes are further off square than a placement keeps: the kernel's plane cannot hold a skew parametrisation",
+        )
+    };
+    if !plane_axes_near_square(du, dv) {
+        return Err(skew());
     }
     let (a, b) = (axis_scale(du), axis_scale(dv));
+    let dv = square_plane_axis(du, dv).ok_or_else(skew)?;
     let dom = Extent2d::from_bounds(u[0] * a, v[0] * b, u[1] * a, v[1] * b);
     let p = Plane::new(origin, du, dv, Vec2::new(1.0, 1.0), &dom);
     // the record's own normal, du x dv made unit
@@ -421,11 +436,42 @@ fn plane(
     Ok((Surface::from(p), Implicit::Plane { origin, normal }, [a, b]))
 }
 
-/// Whether a record plane's axes are square to the rounding of their dot product, as
-/// [`plane`] requires: the kernel's plane cannot hold a skew parametrisation.
+/// Whether a record plane's axes are square to the rounding of their dot product, as the
+/// record writes them ([`square_plane_axis`]).
 #[must_use]
 pub(crate) fn plane_axes_square(du: Vec3, dv: Vec3) -> bool {
     du.dot(dv).abs() <= gamma(3) * du.length() * dv.length()
+}
+
+/// Whether a record plane's axes are off square by no more than the kernel's placement keeps
+/// (`SetCanonical` keeps unit axes with `|x·y| ≤ EFF_ZERO`), to the rounding of their dot
+/// product: the axes [`plane`] reads, squaring them.
+#[must_use]
+fn plane_axes_near_square(du: Vec3, dv: Vec3) -> bool {
+    du.dot(dv).abs() <= (EFF_ZERO + gamma(3)) * du.length() * dv.length()
+}
+
+/// A plane's y axis made square to its x: `y` itself when it is square to `x` to the rounding
+/// the reader takes ([`plane_axes_square`]), else `y` with its part along `x` taken out and
+/// made unit again. A placement keeps axes up to 10⁻¹² off square (`SetCanonical`), and a
+/// plane fitted through far corners can be off by 10⁻¹⁴, which the record writes square and
+/// [`plane`] reads square (solidcore#3377); the move is that angle times the face's size.
+/// `None` when two passes do not square it (axes parallel, or NaN); the reader refuses an axis
+/// that is not finite on its own.
+pub(crate) fn square_plane_axis(x: Vec3, y: Vec3) -> Option<Vec3> {
+    let mut y = y;
+    for _ in 0..2 {
+        if plane_axes_square(x, y) {
+            return Some(y);
+        }
+        let off = y - x * (x.dot(y) / x.length_squared());
+        let len = off.length();
+        if !(len.is_finite() && len > 0.0) {
+            return None;
+        }
+        y = off / len;
+    }
+    plane_axes_square(x, y).then_some(y)
 }
 
 /// How far a plane's parameter runs along its unit axis for a unit of the record's along
