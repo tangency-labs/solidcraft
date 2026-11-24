@@ -475,6 +475,27 @@ impl Transform {
         Ok([x, y])
     }
 
+    /// Not upstream: plane axes `x` and `y` with each coordinate smaller than `noise` dropped,
+    /// each made unit again. A flat face's plane read back from a body comes tilted by rounding
+    /// (about 2e-15); a cut by that plane meets the face only nearly, where the same plane with
+    /// the rounding dropped meets it exactly. Axes with nothing to drop come back unit and
+    /// otherwise unchanged. `None` when a coordinate or `noise` is not finite, `noise` is
+    /// negative, an axis has no length once cleaned, or the cleaned axes are parallel: the
+    /// caller then keeps the axes it has.
+    #[must_use]
+    pub fn axis_squared_frame(x: Vec3, y: Vec3, noise: f64) -> Option<[Vec3; 2]> {
+        if !(finite3(x) && finite3(y) && noise.is_finite() && noise >= 0.0) {
+            return None;
+        }
+        let clean = |v: Vec3| {
+            let c = |a: f64| if a.abs() < noise { 0.0 } else { a };
+            Vec3::new(c(v.x), c(v.y), c(v.z)).unitize().ok()
+        };
+        let (x, y) = (clean(x)?, clean(y)?);
+        x.cross(y).unitize().ok()?;
+        Some([x, y])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their
@@ -775,6 +796,42 @@ impl Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rounding below `noise` along a world axis is dropped and the axes come back unit; a plane
+    /// tilted for real, and one with nothing to drop, keep their axes; parallel, empty or
+    /// non-finite axes and a bad `noise` give `None`.
+    #[test]
+    fn an_axis_squared_frame_drops_only_the_rounding() {
+        let tilted = Transform::axis_squared_frame(
+            Vec3::new(1.0, 2e-15, 0.0),
+            Vec3::new(-3e-16, 1.0, 1e-15),
+            1e-12,
+        );
+        assert_eq!(tilted, Some([Vec3::X, Vec3::Y]));
+        let (s, c) = (0.3_f64.sin(), 0.3_f64.cos());
+        let real = [Vec3::new(c, s, 0.0), Vec3::new(-s, c, 0.0)];
+        assert_eq!(
+            Transform::axis_squared_frame(real[0], real[1], 1e-12),
+            Some(real)
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::X, Vec3::new(1.0, 1e-15, 0.0), 1e-12),
+            None,
+            "parallel once cleaned"
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::new(1e-13, 0.0, 0.0), Vec3::Y, 1e-12),
+            None,
+            "no length once cleaned"
+        );
+        assert_eq!(
+            Transform::axis_squared_frame(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::Y, 1e-12),
+            None
+        );
+        for noise in [-1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(Transform::axis_squared_frame(Vec3::X, Vec3::Y, noise), None);
+        }
+    }
 
     #[test]
     fn point_arrays_keep_their_order_under_an_affine_map() {

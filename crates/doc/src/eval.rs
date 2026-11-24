@@ -16804,15 +16804,10 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
 /// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
 /// as it is.
 fn square_to_axes(plane: &Plane) -> Plane {
-    let drop = |v: Vec3| {
-        let c = |x: f64| if x.abs() < 1e-12 { 0.0 } else { x };
-        Vec3::new(c(v.x), c(v.y), c(v.z)).normalized().unwrap_or(v)
-    };
-    let (x, y) = (drop(plane.x), drop(plane.y));
-    if x.cross(y).normalized().is_none() {
-        return *plane;
+    match solidcore_ops::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
+        Some([x, y]) => Plane { origin: plane.origin, x: Vec3::new(x[0], x[1], x[2]), y: Vec3::new(y[0], y[1], y[2]) },
+        None => *plane,
     }
-    Plane { origin: plane.origin, x, y }
 }
 
 /// The pieces of a split, a side in pieces that do not touch made one body each (#6762): a cap's
