@@ -80,6 +80,8 @@ doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents
 doc.recovery_list                 opening and recovering documents
+document.activate                 shows an open design: no geometry, tested in the UI's documents tests
+document.list                     lists the open designs: no geometry, tested in the engine's documents tests and the UI's documents tests
 document.metadata                 document metadata and revisions
 document.metadata.remove          document metadata and revisions
 document.metadata.set             document metadata and revisions
@@ -220,6 +222,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+mesh.reduce                       reduces a mesh without changing the source; tested in crates/engine/src/tests/mesh_convert.rs::reduction_persists_a_separate_mesh_for_conversion_and_undo
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
@@ -357,6 +360,7 @@ render.texture.remove             rendering image resources; crates/engine/src/c
 select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
+select.invert                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
 select.same_look                  the selection
 select.set                        the selection
