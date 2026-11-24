@@ -5,6 +5,7 @@
 //! explicit refusal domains unchanged. No recursion.
 
 use super::arc_conversion::PathRefusal;
+use super::recognition::RecognitionVector;
 use crate::geom::certified::next_up;
 use crate::math::Vec2;
 mod bulges;
