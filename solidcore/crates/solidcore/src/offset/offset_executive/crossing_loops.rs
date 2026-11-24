@@ -493,6 +493,39 @@ fn chain_orientation(
     uv_loop_orientation(kernel, &pieces, &senses, None)
 }
 
+/// (solidcraft#18278) Refuses ([`LoopCrossing::ComesApartAroundHole`]) a face whose hole lies
+/// inside one of its islands, `island_faces`, built from one loop each: the hole would be
+/// the island's, and a face of loops on a face is not built (module notes). Each hole is
+/// tested at the middle of its first stretch, which no island's loop passes through.
+#[allow(clippy::too_many_arguments)]
+fn holes_outside_islands(
+    kernel: &Kernel,
+    b: &mut Brep,
+    stretches: &[LoopStretch],
+    uvs: &[Curve],
+    new_loops: &[Vec<usize>],
+    hole_loops: &[usize],
+    island_faces: &[FaceId],
+    zone_tol: f64,
+) -> Result<()> {
+    if island_faces.is_empty() {
+        return Ok(());
+    }
+    for &ll in hole_loops {
+        let stretch = at(stretches, *present(at(new_loops, ll)?.first(), NO_STRETCH)?)?;
+        let uv3 = at(uvs, stretch.uv)?.evaluate_point(kernel, 0.5 * (stretch.lo + stretch.hi))?;
+        let uv = Point2::new(uv3.x, uv3.y);
+        for &island_face in island_faces {
+            let l = face_outer_loop(b, island_face)?;
+            let found = contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
+            if found != PointContainment::Outside {
+                return Err(unresolved(LoopCrossing::ComesApartAroundHole));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The edge loop of `face` (its `SM_OT_SAME` face use's first), for a face of one loop.
 fn face_outer_loop(b: &Brep, face: FaceId) -> Result<LoopId> {
     let mut fu = present(face::upward_faceuse(b, face)?, FACE_NO_FACEUSE)?;
@@ -1235,9 +1268,10 @@ impl OffsetExecutive {
         // holes overlap their neighbours but leave the ring's middle, the stretches of the
         // holes facing the middle close round it, and that region is a face of its own, not
         // a hole of the face around the ring (whose loop would wind the wrong way, `SmFace`
-        // loop orientation test).
+        // loop orientation test). An island stands whether or not a stretch of the outer
+        // loop is left round it.
         let mut islands: Vec<usize> = Vec::new();
-        if !one_loop && !outer_loops.is_empty() {
+        if !one_loop {
             for (ll, chain) in new_loops.iter().enumerate() {
                 if new_loop_is_outer.get(ll).copied().unwrap_or(false) {
                     continue;
@@ -1280,23 +1314,16 @@ impl OffsetExecutive {
             if !*island && !island_faces.is_empty() {
                 // every hole outside every island, else the face around the ring is not
                 // the hole's (refused as before)
-                for &ll in &hole_loops {
-                    let stretch = at(
-                        &stretches,
-                        *present(at(&new_loops, ll)?.first(), NO_STRETCH)?,
-                    )?;
-                    let uv3 = at(&uvs, stretch.uv)?
-                        .evaluate_point(kernel, 0.5 * (stretch.lo + stretch.hi))?;
-                    let uv = Point2::new(uv3.x, uv3.y);
-                    for &island_face in &island_faces {
-                        let l = face_outer_loop(b, island_face)?;
-                        let found =
-                            contains_uv_point(kernel, b, l, None, uv, zone_tol)?.containment;
-                        if found != PointContainment::Outside {
-                            return Err(unresolved(LoopCrossing::ComesApartAroundHole));
-                        }
-                    }
-                }
+                holes_outside_islands(
+                    kernel,
+                    b,
+                    &stretches,
+                    &uvs,
+                    &new_loops,
+                    &hole_loops,
+                    &island_faces,
+                    zone_tol,
+                )?;
                 island_faces.clear();
             }
             let mut input = FaceCurvesInput {
@@ -1384,6 +1411,17 @@ impl OffsetExecutive {
             }
             new_faces.push(made_face);
         }
+        // islands and no face round them: a hole inside one is still refused
+        holes_outside_islands(
+            kernel,
+            b,
+            &stretches,
+            &uvs,
+            &new_loops,
+            &hole_loops,
+            &island_faces,
+            zone_tol,
+        )?;
 
         // Fork 1b016ca: the regions the loops wind round the other way that are cavity,
         // each a face on the surface turned over (the loop runs round the region the
