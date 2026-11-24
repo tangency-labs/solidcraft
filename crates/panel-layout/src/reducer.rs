@@ -1422,13 +1422,14 @@ fn apply(
             if layout.section(&section)?.location.zone() != Zone::Bottom {
                 return Err(error(Rule::Placement, "row height requires a Bottom section"));
             }
-            let (min, max) = bottom_height_bounds(layout, registry)?;
+            // A card with no tab available here keeps its own height and doesn't bound the row.
+            let shown = |s: &Section| s.location.zone() == Zone::Bottom && presented_tab(s, availability).is_some();
+            let (min, max) = bottom_height_bounds_of(layout, registry, shown)?;
             if !height.is_finite() || height <= 0.0 || height > MAX_LOGICAL || height < min || height > max {
                 return Err(error(Rule::Bounds, "Bottom height outside common row bounds"));
             }
-            let members: BTreeSet<_> =
-                layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom).flat_map(|s| s.tabs.iter().cloned()).collect();
-            for target in layout.sections.iter_mut().filter(|s| s.location.zone() == Zone::Bottom) {
+            let members: BTreeSet<_> = layout.sections.iter().filter(|s| shown(s)).flat_map(|s| s.tabs.iter().cloned()).collect();
+            for target in layout.sections.iter_mut().filter(|s| shown(s)) {
                 target.size.height = height;
             }
             for panel in &mut layout.instances {
