@@ -3,6 +3,7 @@
 //! After a selected point is lost, an old positional reference expires so it cannot select a
 //! different hole. The last release warns if it opens a design with the new format and preserves
 //! data it cannot read.
+//! The model cache also keeps the drill that made each named hole through a sheet or into its rim.
 
 use serde_json::Value;
 

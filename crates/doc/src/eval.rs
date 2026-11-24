@@ -7873,14 +7873,16 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64,
     walls
 }
 
+/// One of a hole feature's tools and the information the sheet metal builder needs to rebuild it.
+struct HoleTool {
+    traced: Traced,
+    prism: Option<more::PrimitivePrism>,
+    point_role: Option<String>,
+}
+
 /// The cutting tools of a hole feature at every spot, each with its exact geometry when it is a
 /// straight cylinder (see [`hole_tools_and_prisms`]).
-fn hole_feature_tools(
-    doc: &Document,
-    vals: &BTreeMap<String, Value>,
-    st: &ModelState,
-    f: &Feature,
-) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<HoleTool>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     // A hole at sketch points is drilled in its sketch's frame: the bodies it cuts are met where
     // they are shown, so a body of another, moved component is drilled only where the hole
@@ -7897,9 +7899,11 @@ fn hole_feature_tools(
         let depth = hole_depth_to(st, &spot.at, dir, &to.map(Vec3::from), depth)?;
         let prefix = spot.point.map(hole_point_role);
         tools.extend(
-            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside)?
-                .into_iter()
-                .map(|(tool, prism)| (tool.with_part_prefix(prefix.as_deref()), prism)),
+            hole_tools_and_prisms(vals, st, &spot.at, dir, diameter, &depth, hole, kept_inside)?.into_iter().map(|(tool, prism)| HoleTool {
+                traced: tool.with_part_prefix(prefix.as_deref()),
+                prism,
+                point_role: prefix.clone(),
+            }),
         );
     }
     Ok(tools)
@@ -8222,10 +8226,10 @@ fn hole_tools_reaching(
         seam.set(seam.get() + 0.613);
         Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
     };
-    let cyl = |rad: f64, lo: f64, hi: f64, part: &str| -> Result<(Traced, Option<more::PrimitivePrism>)> {
+    let cyl = |rad: f64, lo: f64, hi: f64, part: &'static str| -> Result<(Traced, Option<more::PrimitivePrism>)> {
         let tool = kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
         let axis = plane.normal();
-        let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo, reach: hi - lo };
+        let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo, reach: hi - lo, part };
         Ok((crate::lineage::part_tool(tool, part), Some(prism)))
     };
     // Reuse the existing drill-point tool for the narrow bore, independently of its entry.
@@ -9613,7 +9617,7 @@ fn feature_tools_with_constructor(
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
         )?]),
-        FeatureKind::Hole { .. } => Ok(hole_feature_tools(doc, vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
+        FeatureKind::Hole { .. } => Ok(hole_feature_tools(doc, vals, st, f)?.into_iter().map(|tool| tool.traced).collect()),
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
 }
@@ -13758,7 +13762,7 @@ fn eval_feature_kind(
             // A drill square through a flat panel of a sheet made from surfaces the hole cuts goes
             // into its outline, and one along the panel into its rim is a bore of it.
             let handled = if st.surface_sheets.is_empty() { Vec::new() } else { more::surface_hole_cut(f, st, &tools)? };
-            let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
+            let tools: Vec<Traced> = tools.into_iter().map(|tool| tool.traced).collect();
             if handled.is_empty() {
                 // A hole moved off the material (a changed position, parameter or sketch point)
                 // cuts nothing: it says so, as a pattern does of its copies (#10701).
