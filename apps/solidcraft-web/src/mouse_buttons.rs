@@ -43,6 +43,9 @@ pub struct Observed {
     /// The buttons went down on the canvas, so a press egui missed may be added. A drag that
     /// started elsewhere on the page and came over the canvas must not become a press in the app.
     pub on_canvas: bool,
+    /// The pointer was cancelled or the window lost the focus since the last frame: every button
+    /// egui holds is let go, the further ones (6 and up) too, which the bitmask has no bit for.
+    pub lost: bool,
 }
 
 /// What happened to the pointer, as the page's listeners see it.
@@ -165,7 +168,8 @@ impl Tracker {
             Happened::Lost | Happened::Blur { of_window: true } => 0,
             Happened::Blur { of_window: false } => return false,
         };
-        let observed = Observed { buttons, on_canvas: self.on_canvas };
+        let lost = matches!(happened, Happened::Lost | Happened::Blur { of_window: true }) || self.pending.is_some_and(|o| o.lost);
+        let observed = Observed { buttons, on_canvas: self.on_canvas, lost };
         if buttons == 0 {
             self.on_canvas = false;
         }
@@ -208,6 +212,14 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
         }
     }
     let mut out = Vec::new();
+    if observed.lost {
+        // A further button egui holds is let go too: no release of it will come.
+        for button in PointerButton::ALL.into_iter().skip(BUTTONS.len()) {
+            if down[button as usize] {
+                out.push(Event::PointerButton { pos, button, pressed: false, modifiers });
+            }
+        }
+    }
     for (bit, button) in BUTTONS.into_iter().enumerate() {
         let held = observed.buttons & (1 << bit) != 0;
         let pressed = match (down[bit], held) {
@@ -602,6 +614,22 @@ mod tests {
         assert_eq!(down, NONE);
     }
 
+    /// A further button (6 and up) has no bit in the browser's bitmask: moves that report none
+    /// held leave it held, and a cancelled pointer lets go of it with the rest.
+    #[test]
+    fn a_further_button_is_held_until_released_or_lost() {
+        let mut t = Tracker::default();
+        let (down, fixes) = frame(&mut t, NONE, &[press(PointerButton::Extra3, true)], pointer(0, true));
+        assert!(fixes.is_empty(), "{fixes:?}");
+        assert_eq!(down, held(&[PointerButton::Extra3]));
+        let (down, fixes) = frame(&mut t, down, &[Event::PointerMoved(Pos2::new(30.0, 40.0))], pointer(0, false));
+        assert!(fixes.is_empty(), "a move with no bit for it keeps it held: {fixes:?}");
+        let (down, _) = frame(&mut t, down, &[press(PointerButton::Primary, true)], pointer(0b01, true));
+        let (down, fixes) = frame(&mut t, down, &[], Happened::Lost);
+        assert_eq!(fixes, vec![press(PointerButton::Extra3, false), press(PointerButton::Primary, false)]);
+        assert_eq!(down, NONE);
+    }
+
     /// A drag that started elsewhere on the page and came over the canvas isn't a press in the app.
     #[test]
     fn a_drag_from_outside_the_canvas_presses_nothing() {
@@ -626,7 +654,7 @@ mod tests {
         assert!(fixes.is_empty() && down == NONE, "{fixes:?}");
         assert_eq!(t.take(), None, "an observation is used once");
         let touch_held = held(&[PointerButton::Primary]);
-        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false }, P, Modifiers::NONE).is_empty());
+        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false, lost: false }, P, Modifiers::NONE).is_empty());
     }
 
     /// The tracker asks for a frame only when the held buttons change.

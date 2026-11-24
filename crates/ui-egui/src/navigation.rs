@@ -876,7 +876,8 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // Only a start: a button pressed while another is already held keeps the running drag's motion.
     let delta = ui
         .input(|i| {
-            let starts = i.pointer.any_pressed() && egui::PointerButton::ALL.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
+            let starts =
+                i.pointer.any_pressed() && egui::PointerButton::ALL.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
             starts.then(|| i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from)).flatten()
         })
         .filter(|d| d.is_finite())
@@ -3134,7 +3135,7 @@ mod tests {
         drag_with(&mut h, PointerButton::Extra6, Modifiers::NONE);
         assert_eq!(h.app.cam, orbited, "button 9 needs Shift");
         drag_with(&mut h, PointerButton::Extra6, Modifiers::SHIFT);
-        assert!(h.app.cam.target.dist(orbited.target) > 1e-6, "with Shift button 9 pans");
+        assert_ne!(h.app.cam.target, orbited.target, "with Shift button 9 pans");
         assert_eq!(h.app.cam.back(), orbited.back());
         let panned = h.app.cam;
         drag_with(&mut h, PointerButton::Extra4, Modifiers::NONE);

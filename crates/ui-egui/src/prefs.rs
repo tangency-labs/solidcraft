@@ -66,7 +66,8 @@ pub enum NavButton {
 }
 
 /// The setting's names of the further buttons, from button 6.
-const NUMBERED_IDS: [&str; 11] = ["button6", "button7", "button8", "button9", "button10", "button11", "button12", "button13", "button14", "button15", "button16"];
+const NUMBERED_IDS: [&str; 11] =
+    ["button6", "button7", "button8", "button9", "button10", "button11", "button12", "button13", "button14", "button15", "button16"];
 
 impl NavButton {
     /// The five buttons every mouse mapping names; the further ones are listed only once mapped.
@@ -124,7 +125,8 @@ impl NavButton {
 
     /// The further buttons the user mapped, in order of their numbers.
     pub fn mapped_numbered(prefs: &Prefs) -> impl Iterator<Item = NavButton> {
-        let mut numbered: Vec<NavButton> = prefs.nav_button_map.keys().filter_map(|id| NavButton::from_id(id)).filter(|b| matches!(b, NavButton::Numbered(_))).collect();
+        let mut numbered: Vec<NavButton> =
+            prefs.nav_button_map.keys().filter_map(|id| NavButton::from_id(id)).filter(|b| matches!(b, NavButton::Numbered(_))).collect();
         numbered.sort_by_key(|b| b.pointer().map(egui::PointerButton::number));
         numbered.into_iter()
     }
