@@ -356,11 +356,9 @@ fn moved_form(c: &Curve, d: Vec3) -> Option<Curve> {
 fn swept_form(c: &Curve, up: Vec3) -> Option<Surface> {
     let v_knots = vec![0.0, 0.0, up.len(), up.len()];
     match c {
-        Curve::Spline { knots, points } => Some(Surface::Spline {
-            u_knots: knots.clone(),
-            v_knots,
-            points: points.iter().map(|&p| vec![p, arr(Vec3::from(p) + up)]).collect(),
-        }),
+        Curve::Spline { knots, points } => {
+            Some(Surface::Spline { u_knots: knots.clone(), v_knots, points: points.iter().map(|&p| vec![p, arr(Vec3::from(p) + up)]).collect() })
+        }
         Curve::RationalSpline { knots, homogeneous } => Some(Surface::RationalSpline {
             u_knots: knots.clone(),
             v_knots,
