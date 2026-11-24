@@ -93,12 +93,12 @@ pub fn run_api(site: &str, smoke: bool) -> Result<(), String> {
     server.set(Mode::Serve(site));
     let browser = Chrome::launch(&chrome, &work.0.join("profile"))?;
     let mut cdp = browser.connect()?;
-    if smoke {
-        return smoke_test(&mut cdp, server.port);
-    }
     let downloads = work.0.join("downloads");
     std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
-    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
+    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": &downloads}))?;
+    if smoke {
+        return smoke_test(&mut cdp, server.port, &downloads);
+    }
     cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
     // The page has the keyboard, as a tab the user is looking at does (for KEYS_TEST).
     cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
@@ -129,8 +129,8 @@ pub fn run_api(site: &str, smoke: bool) -> Result<(), String> {
 }
 
 /// One launch, a synthetic saved design opened through the real UI thread, and three
-/// composited frames after camera changes. The full API and offline tests remain separate.
-fn smoke_test(cdp: &mut Cdp, port: u16) -> Result<(), String> {
+/// token-correlated frames after camera changes. The full API and offline tests remain separate.
+fn smoke_test(cdp: &mut Cdp, port: u16, downloads: &Path) -> Result<(), String> {
     let started = Instant::now();
     cdp.call("Page.enable", json!({}))?;
     cdp.call("Page.addScriptToEvaluateOnNewDocument", json!({"source": SMOKE_ERRORS}))?;
@@ -155,33 +155,45 @@ fn smoke_test(cdp: &mut Cdp, port: u16) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(100));
     }
     println!("web-api-test smoke: {}", cdp.eval(&format!("window.smokeRun(() => {SMOKE_TEST})"))?);
-    cdp.call("Page.startScreencast", json!({"format": "jpeg", "quality": 10, "everyNthFrame": 1}))?;
-    for yaw in [0.3, 0.8, 1.3] {
-        let previous_image = cdp.presented_image.clone();
-        cdp.eval(&format!("window.smokeRun(() => window.solidcraft.request('ui.camera', {{yaw: {yaw}, fit: true}}))"))?;
-        let before = cdp.presented_frames;
+    let mut previous_image = Vec::new();
+    for (index, yaw) in [0.3, 0.8, 1.3].into_iter().enumerate() {
+        let name = format!("smoke-{index}.png");
+        // ui.screenshot's token is queued after this camera command. The app answers only
+        // with that request's frame, after at least three paints and its GPU readback.
+        let shot = cdp.eval(&format!(
+            "window.smokeRun(async () => {{
+                await window.solidcraft.request('ui.camera', {{yaw: {yaw}, fit: true}});
+                const shot = await window.solidcraft.request('ui.screenshot', {{path: '/downloads/{name}'}});
+                const ui = await window.solidcraft.request('ui.inspect');
+                if (!Number.isFinite(ui.camera.yaw) || Math.abs(ui.camera.yaw - {yaw}) > 1e-6) throw new Error('camera did not reach yaw {yaw}');
+                return shot;
+            }})"
+        ))?;
+        if shot["width"] != 1280 || shot["height"] != 720 {
+            return Err(format!("web-api-test smoke: unexpected captured frame: {shot}"));
+        }
         let frame_started = Instant::now();
-        loop {
-            // This crosses the app's frame loop; rAF alone would only prove the browser is alive.
-            let ui = cdp.eval("window.smokeRun(() => window.solidcraft.request('ui.inspect'))")?;
+        let image = loop {
             if let Some(error) = cdp.eval("window.smokeError")?.as_str() {
                 return Err(format!("web-api-test smoke: frame: {error}"));
             }
-            // Use the composited image: draw counters can be zero when a viewport texture is reused.
-            if cdp.presented_frames > before
-                && !cdp.presented_image.is_empty()
-                && cdp.presented_image != previous_image
-                && ui["camera"]["yaw"].as_f64().is_some_and(|got| (got - yaw).abs() < 1e-6)
+            if let Ok(bytes) = std::fs::read(downloads.join(&name))
+                && bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                && bytes.ends_with(b"\0\0\0\0IEND\xaeB`\x82")
             {
-                break;
+                break bytes;
             }
             if frame_started.elapsed() > Duration::from_secs(30) {
-                return Err(format!("web-api-test smoke: no composited model frame at yaw {yaw}; UI: {ui}"));
+                return Err(format!("web-api-test smoke: captured frame {name} was not downloaded"));
             }
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        if image == previous_image {
+            return Err(format!("web-api-test smoke: the captured image did not change at yaw {yaw}"));
         }
+        previous_image = image;
     }
-    cdp.call("Page.stopScreencast", json!({}))?;
-    println!("web-api-test smoke: three composited model frames; passed in {:.1}s", started.elapsed().as_secs_f64());
+    println!("web-api-test smoke: three token-correlated model frames; passed in {:.1}s", started.elapsed().as_secs_f64());
     Ok(())
 }
 
@@ -1349,8 +1361,6 @@ fn http(port: u16, method: &str, path: &str) -> Result<Vec<u8>, String> {
 struct Cdp {
     stream: TcpStream,
     next: u64,
-    presented_frames: u64,
-    presented_image: String,
 }
 
 impl Cdp {
@@ -1382,7 +1392,7 @@ impl Cdp {
         if !head.starts_with(b"HTTP/1.1 101") {
             return Err(format!("DevTools handshake refused: {}", String::from_utf8_lossy(&head)));
         }
-        Ok(Cdp { stream, next: 0, presented_frames: 0, presented_image: String::new() })
+        Ok(Cdp { stream, next: 0 })
     }
 
     fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> Result<(), String> {
@@ -1455,17 +1465,6 @@ impl Cdp {
         self.send_frame(0x1, json!({ "id": id, "method": method, "params": params }).to_string().as_bytes())?;
         loop {
             let reply: Value = serde_json::from_str(&self.recv()?).map_err(|e| format!("DevTools: {e}"))?;
-            if reply["method"] == "Page.screencastFrame" {
-                self.presented_frames += 1;
-                self.presented_image = reply["params"]["data"].as_str().unwrap_or_default().to_owned();
-                self.next += 1;
-                self.send_frame(
-                    0x1,
-                    json!({"id": self.next, "method": "Page.screencastFrameAck", "params": {"sessionId": reply["params"]["sessionId"]}})
-                        .to_string()
-                        .as_bytes(),
-                )?;
-            }
             if reply["id"] == id {
                 if let Some(e) = reply.get("error") {
                     return Err(format!("{method}: {e}"));
