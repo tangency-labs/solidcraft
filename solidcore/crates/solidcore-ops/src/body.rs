@@ -25,7 +25,10 @@ use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, EntityRef, Vec3};
 
-use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+/// The faces a record's open shells use backward, which a body built from its data turns over
+/// ([`Body::turn_over_listed`]).
+pub use solidcore_convert::brep::backward_sheet_faces;
+use solidcore_convert::brep::{to_kernel, to_record, turn_to_record_side, Order, Unsupported};
 use solidcore_record::brep::Brep as Record;
 
 use crate::error::status;
@@ -416,6 +419,38 @@ impl Body {
         })
     }
 
+    /// Gives the faces at `positions` of this body's face list the side a record gives them by
+    /// `forward: false` in an open shell: for a body just built from a record's data (an
+    /// application's own import of a record), which lists its faces in the record's order, the
+    /// faces [`backward_sheet_faces`] names. The kernel uses every face of an open shell forward
+    /// and keeps a sheet face's side in its surface: each face is turned over (`SmFace::SwapUV`)
+    /// with its loops started where the record walks them, so the body's record numbers its
+    /// faces, edges and vertices as the record does (`solidcore_convert::brep::to_kernel` does
+    /// the same for its own import). A position listed twice turns once.
+    ///
+    /// # Errors
+    /// [`Error::Argument`], before the body is touched, for a position past the face list;
+    /// [`Error::Unsupported`], before the body is touched, for a face of a closed shell (whose
+    /// side its material gives); the kernel's status, the body put back as it was (the call's
+    /// rollback).
+    pub fn turn_over_listed(&self, positions: &[u32]) -> Result<()> {
+        if positions.is_empty() {
+            return Ok(());
+        }
+        with_body("turn_over", self, |k, b| {
+            let mut picked = Vec::new();
+            for &i in positions {
+                let Some(&f) = b.face_list().get(i as usize) else {
+                    return Ok(Err(Error::Argument));
+                };
+                if !picked.contains(&f) {
+                    picked.push(f);
+                }
+            }
+            Ok(turn_faces(k, b, &picked))
+        })?
+    }
+
     /// Face, edge and vertex counts.
     ///
     /// # Errors
@@ -447,6 +482,37 @@ impl Body {
             brep_volume(k, b, relative_accuracy, &attrs)
         })
     }
+}
+
+/// Each face of `faces` turned to the side its record gives it
+/// ([`turn_to_record_side`]), after checking that every one is a sheet's (both its uses in one
+/// shell), so a refusal leaves the body as it was.
+fn turn_faces(k: &Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
+    for &f in faces {
+        if !sheet_face(b, f).map_err(status)? {
+            return Err(Error::Unsupported(
+                "turning over a face of a closed shell: its material gives its side",
+            ));
+        }
+    }
+    for &f in faces {
+        turn_to_record_side(k, b, f).map_err(status)?;
+    }
+    b.refresh_cached_topology();
+    Ok(())
+}
+
+/// Whether both uses of face `f` lie in one shell (a sheet's face).
+fn sheet_face(b: &Brep, f: FaceId) -> solidcore::Result<bool> {
+    let face = b.face(f)?;
+    let Some(top) = face.faceuse else {
+        return Ok(false);
+    };
+    let fu = b.faceuse(top)?;
+    let Some(mate) = fu.mate else {
+        return Ok(false);
+    };
+    Ok(fu.shell == b.faceuse(mate)?.shell)
 }
 
 /// A sheet turned over ([`Body::turn_over`]): its record and order, and where each record edge

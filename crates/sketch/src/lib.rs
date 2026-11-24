@@ -43,6 +43,7 @@ mod profiles3d;
 pub mod profiling;
 mod shape;
 mod solver;
+mod sparse;
 mod spline_points;
 mod text;
 mod thin;

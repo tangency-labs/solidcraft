@@ -581,9 +581,6 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
         Some(v) => Some(sketch_id(s, Some(v), cmd, "sketch")?),
     };
     let (pairs, next_pair) = member_pairs(s, p, cmd)?;
-    if p.get("groups").is_some_and(|g| !g.is_null()) && p.get("continuous").and_then(Value::as_bool) == Some(true) {
-        return Err(bad(cmd, "not supported yet: continuous members cannot be combined with groups; use separate Frame Members"));
-    }
     let grouped = p.get("groups").filter(|g| !g.is_null()).map(|_| member_groups(s, cmd, p)).transpose()?;
     if path_sketch.is_none() && pairs.is_empty() {
         return Err(bad(cmd, "give `sketch` (the frame sketch, its lines), `pairs` (pairs of points), or both"));

@@ -6845,18 +6845,15 @@ fn groups_refuse_flat_continuous_even_without_parameter_checks() {
             p["continuous"] = continuous;
             let err = s.execute("frame.member", &p).unwrap_err().to_string();
             let placement_error = "give `continuous` in each of `groups`, not beside them";
-            let expected = if level == crate::schema::ParamCheck::Strict { "unknown key `continuous`" } else { placement_error };
-            assert!(err.contains(expected), "{p}: {err}");
+            assert!(err.contains(placement_error), "{p}: {err}");
             assert!(crate::schema::issues("frame.member", &p).iter().any(|i| i.message == placement_error));
             assert_eq!(s.doc.to_json(), before, "a refused call changes nothing");
         }
-        // The handler still treats null as absent. Until continuous is supported, the normal
-        // unknown-key policy in Strict mode remains unchanged.
-        if level == crate::schema::ParamCheck::Off {
-            let mut p = grouped(&rails, &posts);
-            p["continuous"] = Value::Null;
-            run(&mut s, "frame.member", p);
-        }
+        // Continuous is a recognized flat key. With groups, only null counts as absent,
+        // consistently in the handler and the contract at every parameter-check level.
+        let mut p = grouped(&rails, &posts);
+        p["continuous"] = Value::Null;
+        run(&mut s, "frame.member", p);
     }
 }
 
@@ -7210,6 +7207,10 @@ fn continuous_member_keeps_one_identity_through_reversal_edit_reopen_and_undo() 
     );
     let bs = bodies(&mut s);
     assert_eq!(bs[0].0, "Main hoop");
+    let kind = &s.doc.feature(fid.as_u64().unwrap()).unwrap().kind;
+    assert_eq!(solidcraft_doc::frame::member_line_ids(&s.model.state(), kind).unwrap(), ["$path"]);
+    let solidcraft_doc::FeatureKind::FrameMember { names, .. } = kind else { panic!("not a member") };
+    assert_eq!(names.get("$path").map(String::as_str), Some("Main hoop"));
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(bodies(&mut reopened).into_iter().map(|b| b.0).collect::<Vec<_>>(), ["Main hoop"]);
     run(&mut s, "edit.undo", json!({}));
@@ -7218,9 +7219,20 @@ fn continuous_member_keeps_one_identity_through_reversal_edit_reopen_and_undo() 
         &mut s,
         "timeline.redefine",
         json!({"feature": fid, "command": "frame.member", "params": {
-            "sketch": "Chassis", "lines": ids.into_iter().rev().collect::<Vec<_>>(), "continuous": true, "profile": profile, "body_name": "Hoop"
+            "sketch": "Chassis", "lines": ids.iter().rev().collect::<Vec<_>>(), "continuous": true, "profile": profile, "body_name": "Hoop"
         }}),
     );
+    assert_eq!(bodies(&mut s)[0].0, "Main hoop");
+    // An explicit change of the base name still renames the physical path member.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": fid, "command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": ids, "continuous": true, "profile": profile, "body_name": "Rear hoop"
+        }}),
+    );
+    assert_eq!(bodies(&mut s)[0].0, "Rear hoop");
+    run(&mut s, "edit.undo", json!({}));
     assert_eq!(bodies(&mut s)[0].0, "Main hoop");
 }
 

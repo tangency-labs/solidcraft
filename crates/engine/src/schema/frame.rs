@@ -1119,7 +1119,7 @@ fn member_required(schema: &mut Schema) {
                 {"properties": {"groups": {"type": "null"}}},
                 {"required": ["sketch"], "properties": {
                     "lines": {"type": "null"}, "anchor": {"type": "null"}, "locate": {"type": "null"}, "angle": {"type": "null"},
-                    "mirror": {"type": "null"}, "body_name": {"type": "null"}
+                    "mirror": {"type": "null"}, "body_name": {"type": "null"}, "continuous": {"type": "null"}
                 }}
             ]},
             // One group is canonical flat form. Several currently stay independent and square-ended.
