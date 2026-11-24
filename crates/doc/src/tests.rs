@@ -407,6 +407,42 @@ fn a_saved_model_with_a_long_warning_is_adopted() {
     assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
 }
 
+/// A sketch a design file puts on a face by its point alone (no face name, no attachment)
+/// follows the nearest flat face that faces its way. When no face is at its point any more, it
+/// still opens on that face's plane, but with a warning (#20518): the `sketch.create` command
+/// refuses the same point, and the file said nothing. A face that only moved along its normal
+/// (the point still on it, seen square to it) gives no warning.
+#[test]
+fn a_sketch_whose_face_point_is_on_no_face_warns() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: None, anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let z = m.state().sketches.iter().find(|s| s.feature == id).unwrap().plane.origin.z;
+        (result.warning.clone(), z)
+    };
+    let (warning, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a point on the top face: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(15.0, Vec3::new(10.0, 10.0, 15.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a top face that moved up 5 mm still holds the point: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0));
+    let warning = warning.unwrap_or_default();
+    assert!(warning.contains("no face is at the point the sketch was placed on, [60, 60, 20]"), "{warning}");
+    assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
+}
+
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
 /// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
 #[test]
@@ -1444,9 +1480,8 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: format 63, the one before the midplane change
-    // (`format/v64/midplane-old-frame.rs`), and no list of the changes it has, so the change is
-    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
+    // The design as an older build saved it: before v64 (`midplane-old-frame.rs`), so the
+    // v64 migration step is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
     saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
@@ -1913,6 +1948,43 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     let other = bodies.iter().find(|(n, _, _)| n != "Body1").cloned().unwrap_or_else(|| panic!("{bodies:?}"));
     assert!(rel(other.1, arm) < 1e-6 && other.2 == 1, "the arm: {bodies:?}");
     assert_eq!(kept, Some(KeptSeparate::AlongEdge));
+}
+
+/// A chamfer or fillet a design file picks by a point alone (no `body`, no edge name), where
+/// the point lies on edges of two bodies, blends the first body as before but warns, naming both
+/// (#20517): the `solid.chamfer` and `solid.fillet` commands refuse the same pick. A pick on one
+/// body's edge alone gives no warning.
+#[test]
+fn a_blend_picked_on_edges_of_two_bodies_warns_and_names_both() {
+    let blended = |kind: serde_json::Value| {
+        let mut doc = Document::new("two cubes");
+        for corner in [["0", "0", "0"], ["10", "0", "0"]] {
+            let cube = serde_json::json!({"type": "box", "corner": corner, "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+            doc.add_feature(serde_json::from_value(cube).unwrap(), None).unwrap();
+        }
+        let blend = doc.add_feature(serde_json::from_value(kind).unwrap(), None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(blend).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let st = m.state();
+        let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+        let volumes: Vec<f64> = st.bodies.iter().map(|b| measure(&b.body).unwrap().volume).collect();
+        (result.warning.clone(), names, volumes)
+    };
+    for kind in ["chamfer", "fillet"] {
+        let size = if kind == "chamfer" { "distance" } else { "radius" };
+        let (warning, names, volumes) = blended(serde_json::json!({"type": kind, "edges": [[10.0, 0.0, 5.0]], size: "1"}));
+        assert_eq!(names.len(), 2, "{names:?}");
+        let warning = warning.unwrap_or_default();
+        let both = format!("[10, 0, 5] lies on edges of 2 bodies, {} and {}: `{}` is blended", names[0], names[1], names[0]);
+        assert!(warning.contains(&both) && warning.contains("with `body`"), "{kind}: {warning}");
+        // The result is the same as before: the first body is blended, the second left alone.
+        assert!(volumes[0] < 999.9 && rel(volumes[1], 1000.0) < 1e-9, "{kind}: {volumes:?}");
+
+        let (warning, _, _) = blended(serde_json::json!({"type": kind, "edges": [[0.0, 0.0, 5.0]], size: "1"}));
+        assert!(warning.is_none(), "{kind} on an edge of one body: {warning:?}");
+    }
 }
 
 /// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a

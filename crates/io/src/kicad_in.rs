@@ -314,6 +314,17 @@ pub fn is_kicad_path(path: &str) -> bool {
     Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("kicad_pro") || e.eq_ignore_ascii_case("kicad_pcb"))
 }
 
+/// The smallest board thickness, in millimetres, the import believes.
+///
+/// The import options window's "Board thickness" row offers the same range (see
+/// [`crate::formats`]), so the thickness the window shows for a file and the thickness the import
+/// uses for that file are the same number.
+pub(crate) const BOARD_THICKNESS_MIN_MM: f64 = 0.01;
+
+/// The largest board thickness, in millimetres, the import believes (see
+/// [`BOARD_THICKNESS_MIN_MM`]).
+pub(crate) const BOARD_THICKNESS_MAX_MM: f64 = 1000.0;
+
 /// The board's own thickness (mm), from its `(general (thickness …))`: the import options window
 /// shows it before the board is built. `None` when the file cannot be read or names no valid
 /// thickness.
@@ -338,13 +349,21 @@ pub fn kicad_board_thickness(bytes: &[u8]) -> Option<f64> {
                         Token::Atom(value) => value.parse::<f64>().ok(),
                         _ => None,
                     })?;
-                    return (value.is_finite() && value > 0.0 && value <= 1000.0).then_some(value);
+                    return (value.is_finite() && (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(&value)).then_some(value);
                 }
                 _ => {}
             }
         }
     }
     None
+}
+
+/// The thickness of the board a KiCad project or PCB path names, read from its file without
+/// building it (the import options start at it; `doc.open` uses it when given no `thickness`).
+pub fn kicad_file_thickness(path: &str) -> Option<f64> {
+    let board = kicad_board_path(Path::new(path)).ok()?;
+    let bytes = crate::vfs::read(&board.to_string_lossy(), MAX_KICAD_BYTES).ok()?;
+    kicad_board_thickness(&bytes)
 }
 
 /// Resolve a selected KiCad project to its same-stem board, or keep a directly selected board.
@@ -383,7 +402,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         .and_then(|g| field(g, "thickness"))
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
-        .filter(|v| *v > 0.0 && *v <= 1000.0)
+        .filter(|v| (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(v))
         .unwrap_or(1.6);
 
     let color = options.color.map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]).unwrap_or(DEFAULT_BOARD_COLOR);
@@ -960,8 +979,11 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
 fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
     let loops = outline_loops(board)?;
     let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let bodies =
-        extrude_regions_bodies(&regions, 0.0, thickness).or_else(|_| extrude_regions_bodies(&regions_from_loops(loops, None), 0.0, thickness))?;
+    // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
+    let checked = |regions: &[Region2]| {
+        solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
+    };
+    let bodies = checked(&regions).or_else(|_| checked(&regions_from_loops(loops, None)))?;
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
