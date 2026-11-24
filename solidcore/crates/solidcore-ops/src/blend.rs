@@ -801,7 +801,12 @@ fn chamfer_sized(
 
 /// `e` ([`Error::TooLarge`]) with the point at the middle of `edge`, the edge its size was
 /// found for. An edge or point that cannot be read leaves the size without a point.
-fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::Result<Error> {
+pub(crate) fn sized_on(
+    k: &Kernel,
+    b: &Brep,
+    edge: Option<EdgeId>,
+    e: Error,
+) -> solidcore::Result<Error> {
     let Error::TooLarge {
         size,
         kind,

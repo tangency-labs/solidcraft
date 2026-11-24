@@ -879,6 +879,10 @@ pub enum FitKind {
     Scale,
     /// A chord round's width.
     Chord,
+    /// A bead's leg: from its joint to its toe ([`crate::bead`]).
+    Leg,
+    /// A bead's sagitta: how far the middle of its arc stands off the chord ([`crate::bead`]).
+    Sagitta,
 }
 
 impl RoomReason {
@@ -942,6 +946,8 @@ impl FitKind {
             FitKind::Distance => "distance",
             FitKind::Scale => "scale",
             FitKind::Chord => "chord width",
+            FitKind::Leg => "leg",
+            FitKind::Sagitta => "sagitta",
         }
     }
 }
