@@ -1462,6 +1462,8 @@ mod tests {
     //! file is blessed by the `goldens` binary, built without `cfg(test)` and so without
     //! these checks.
     use super::*;
+    use crate::units::topology_vertexuse::{BssIn, SrfIn};
+    use solidcore::geom::geom_utility::p2::ContinuityType;
     use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
     use solidcore::topology::{edge, vertex};
 
@@ -1667,5 +1669,113 @@ mod tests {
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// A square tube `|x| + |y| = 1`, `z` in `[0, 1]`: bilinear, U along `z`, V round the
+    /// square from `(1, 0)` back to it. The first and last control points of every V row
+    /// are equal (`net[i][0] == net[i][4]`), so the surface closes in V exactly, but
+    /// the tube turns 90 degrees there (`d/dv` is `(-1, 1, 0)` at `v = 0` and `(1, 1, 0)`
+    /// at `v = 4`), so `IsPeriodic` is false in V: a seam reaches the move only through the
+    /// face properties' closure. (The properties are set by hand: the healer would not
+    /// report C1 across this kink; the case covers the gate, not the healer.)
+    fn kinked_tube() -> BrepIn {
+        let row = |z: f64| {
+            vec![
+                [1.0, 0.0, z, 1.0],
+                [0.0, 1.0, z, 1.0],
+                [-1.0, 0.0, z, 1.0],
+                [0.0, -1.0, z, 1.0],
+                [1.0, 0.0, z, 1.0],
+            ]
+        };
+        BrepIn::Face {
+            surface: SrfIn::Bspline(BssIn {
+                oob: false,
+                form: 0,
+                net: vec![row(0.0), row(1.0)],
+                p: 1,
+                q: 1,
+                u: vec![0.0, 0.0, 1.0, 1.0],
+                v: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+            }),
+            // the face covers V in [0.5, 2.5]: the seam at V = 0 lies outside it
+            dom: [0.0, 0.5, 1.0, 2.5],
+        }
+    }
+
+    /// `move_seam` on [`kinked_tube`] with face properties that report a seam crossed in V
+    /// and closed in V as `closed_v` at `closed_val_v`: the result, the invariant check of
+    /// the replays above, and `IsPeriodic` in V on the input surface.
+    fn move_seam_on_kinked_tube(
+        closed_v: Tri,
+        closed_val_v: ContinuityType,
+    ) -> (fp1::MoveSeamResult, Vec<String>, bool) {
+        let mut k = crate::runner_kernel();
+        let Ok(Ok((mut b, _))) = own_brep(&kinked_tube(), false, false) else {
+            panic!("the tube face did not build");
+        };
+        let faces: Vec<FaceId> = b.faces().ids().collect();
+        let [f] = faces[..] else {
+            panic!("the tube is one face, got {}", faces.len());
+        };
+        let s = b.face(f).unwrap().surface.clone().unwrap();
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let periodic_v = s.is_periodic(&k, &d, SurfParamType::V).unwrap();
+        let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut Vec::new())
+            .unwrap_or_else(|_| panic!("HasSeamProblem failed on the tube"));
+        let before = before(&mut b);
+        let mut fp = FaceProps::<H>::new();
+        fp.bad_crossed_seam_dir = SurfParamType::V;
+        fp.bad_missing_seam_dir = SurfParamType::Neither;
+        fp.bad_near_miss_seam_dir = SurfParamType::Neither;
+        fp.closed_u = Tri::False;
+        fp.closed_v = closed_v;
+        fp.closed_val_v = closed_val_v;
+        let r = fp1::move_seam(
+            &mut k,
+            &mut b,
+            f,
+            key_of(EntityRef::Face(f)),
+            &mut cu,
+            &mut cv,
+            problem,
+            fp1::MoveSeamOptions::default(),
+            Some(&fp),
+            &|_| None,
+        );
+        let refused = r.as_ref().err().map(ToString::to_string);
+        let found = problems(&mut b, &before, refused);
+        (r.unwrap_or_default(), found, periodic_v)
+    }
+
+    /// The face properties' closure gate (review of #21381): a seam the properties
+    /// report in a direction they close at C1 is still moved when `IsPeriodic` is false
+    /// there, and the move keeps the B-rep valid (invariants 0-3 above); the same seam
+    /// reported closed only at C0, or at C1 but `closed_v` False, is no seam problem, so
+    /// nothing moves. The face covers V in `[0.5, 2.5]`, not the whole period, so the move is
+    /// out of the face (to the middle of the unused `[2.5, 4.5]`, snapped to knot 3). The
+    /// surface closes exactly, so the split and the rejoin at the old seam glue coincident
+    /// rows: no edge leaves the surface and no tolerance needs to grow.
+    #[test]
+    fn move_seam_props_c1_closure_on_a_non_periodic_surface() {
+        let (r, found, periodic_v) = move_seam_on_kinked_tube(Tri::True, ContinuityType::C1);
+        assert!(!periodic_v, "the tube must not be periodic in V");
+        assert_eq!(r.u, fp1::FixSeamPlanType::NoChanges);
+        assert_eq!(
+            r.v,
+            fp1::FixSeamPlanType::MoveOutOfFace,
+            "a seam closed at C1 by the face properties was not moved out of the face"
+        );
+        assert!(found.is_empty(), "{}", found.join("\n"));
+
+        for (closed_v, val) in [
+            (Tri::True, ContinuityType::C0),
+            (Tri::False, ContinuityType::C1),
+        ] {
+            let (r, found, _) = move_seam_on_kinked_tube(closed_v, val);
+            assert_eq!(r.u, fp1::FixSeamPlanType::NoChanges);
+            assert_eq!(r.v, fp1::FixSeamPlanType::NoChanges, "{closed_v:?} {val:?}");
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
     }
 }
