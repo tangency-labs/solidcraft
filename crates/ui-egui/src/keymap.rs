@@ -1249,7 +1249,9 @@ mod tests {
         h.call("ui.palette", json!({"open": false}));
         h.frames(2);
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
-        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
+        // Select All names the whole-body scope rather than listing the body.
+        assert!(h.app.session.selection_all_bodies);
+        assert_eq!(h.app.session.selected_count().unwrap(), 1);
     }
 
     fn app() -> SolveApp {
