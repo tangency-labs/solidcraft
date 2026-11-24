@@ -87,6 +87,8 @@ mod issue_16669_pole_trace_span_certified;
 mod issue_1672_torus_minus_z;
 #[path = "../issue_16735_trims_past_domain.rs"]
 mod issue_16735_trims_past_domain;
+#[path = "../issue_17062_ellipse_rounding_only_interval.rs"]
+mod issue_17062_ellipse_rounding_only_interval;
 #[path = "../issue_1767_bspline_surface_part.rs"]
 mod issue_1767_bspline_surface_part;
 #[path = "../issue_1799_tight_box_divides_at_knots.rs"]
