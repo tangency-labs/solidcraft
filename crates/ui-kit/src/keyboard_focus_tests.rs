@@ -93,6 +93,31 @@ fn tab_into_a_text_or_number_box_selects_its_text_and_a_click_does_not() {
     assert_eq!(f.value, "12 mm0", "a click keeps the caret where it lands");
 }
 
+/// A text editor owns the Escape that blurs it, not the next idle Escape.
+#[test]
+fn escape_that_blurs_a_text_editor_keeps_keyboard_ownership() {
+    let ctx = context();
+    install_keyboard_focus(&ctx);
+    let mut text = String::from("12 mm");
+    let id = egui::Id::new("escape owner");
+    raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id)).request_focus();
+    });
+    raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+    assert!(ctx.text_edit_focused());
+    raw_frame(&ctx, egui::RawInput { events: key(egui::Key::Escape, false), ..Default::default() }, |ui| {
+        assert!(!ctx.egui_wants_keyboard_input());
+        assert!(text_edit_owned_escape(&ctx));
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+    raw_frame(&ctx, egui::RawInput { events: key(egui::Key::Escape, false), ..Default::default() }, |ui| {
+        assert!(!text_edit_owned_escape(&ctx));
+        ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    });
+}
+
 /// Enter or Shift+Enter in a table cell reports the move; a held key, a Ctrl+Enter or another
 /// cell's key does not.
 #[test]

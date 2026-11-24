@@ -3009,6 +3009,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if popup_owner
         || inline_editor
         || chat_owner
+        || crate::ui_kit::text_edit_owned_escape(ctx)
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
         || (ctx.egui_wants_keyboard_input() && !(crate::viewport_status::enabled(app) && app.viewport_status.owns_focus(ctx)))
     {

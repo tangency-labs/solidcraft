@@ -26,6 +26,18 @@ pub fn install_keyboard_focus(ctx: &egui::Context) {
     }
 }
 
+fn text_escape_id(viewport: egui::ViewportId) -> egui::Id {
+    egui::Id::unique("sc_text_edit_owned_escape").with(viewport)
+}
+
+/// Escape belonged to a text editor before egui cleared its focus. Keep the
+/// ownership for every layout pass of the same frame, but not the next press.
+pub fn text_edit_owned_escape(ctx: &egui::Context) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    let id = text_escape_id(ctx.viewport_id());
+    ctx.data(|d| d.get_temp::<u64>(id)) == Some(frame)
+}
+
 fn focused_text_id() -> egui::Id {
     egui::Id::unique("sc_keyboard_focus_text")
 }
@@ -53,7 +65,19 @@ impl egui::Plugin for TabSelects {
     }
 
     // Raw input, before any widget consumes the key.
-    fn input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {
+    fn input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        // The preceding pass still knows which editor had focus. Focus::begin_pass
+        // will clear it before the app can ask egui_wants_keyboard_input().
+        let escape = input.events.iter().any(|event| {
+            matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, modifiers, .. } if !modifiers.any())
+        });
+        if escape
+            && let Some(id) = self.last.get(&input.viewport_id).copied().flatten()
+            && egui::text_edit::TextEditState::load(ctx, id).is_some()
+        {
+            let frame = ctx.cumulative_frame_nr_for(input.viewport_id);
+            ctx.data_mut(|d| d.insert_temp(text_escape_id(input.viewport_id), frame));
+        }
         self.tab_pressed |= input.events.iter().any(|event| {
             matches!(event, egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
                 if !modifiers.any() || modifiers.shift_only())
