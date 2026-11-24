@@ -5279,6 +5279,37 @@ fn split_face_dialog_keeps_a_sketch_split_and_its_loops() {
     assert!(p.get("sketch").is_none() && p.get("loops").is_none(), "{p}");
 }
 
+/// #17555: Split Face takes a sketch as its splitting tool, so a sketch's curves divide a face,
+/// the way the command does from the command line.
+#[test]
+fn split_face_dialog_takes_a_sketch_as_its_splitting_tool() {
+    let mut app = app_with(json!([
+        {"command":"solid.box", "params":{"length":40,"width":30,"height":20,"body_name":"B"}},
+        {"command":"sketch.create", "params":{"plane":"XY","name":"Loop"}},
+        {"command":"sketch.line", "params":{"points":[[10,5],[30,5],[20,25]],"closed":true}},
+        {"command":"sketch.finish", "params":{}}
+    ]));
+    let sketch = app.session.doc.find_feature("Loop").unwrap().id;
+    let mut d = crate::dialogs::Dialog::for_command(&app, "solid.split_face").unwrap();
+    // The splitting tool takes a sketch: a curve of it, picked in the viewport.
+    assert!(
+        crate::dialogs::fits(d.inputs[1].accept, &Sel::ExternalSketchCurve { sketch, id: "l1".into() }),
+        "the splitting tool does not take a sketch"
+    );
+    // The face to split, and the sketch that divides it.
+    let face = crate::dialogs::face_sel(&app.session, Vec3::new(20.0, 12.0, 20.0)).expect("the top face");
+    d.pick(&app.session, face);
+    d.active = 1;
+    d.pick(&app.session, Sel::ExternalSketchCurve { sketch, id: "l1".into() });
+    let (command, params) = crate::dialogs::apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(command, "solid.split_face");
+    assert_eq!(params["sketch"], json!(sketch), "{params}");
+    // The face is divided: the triangle is cut out of the top of the box.
+    app.session.execute(&command, &params).unwrap();
+    let measured = app.run("inspect.measure", json!({"bodies": ["B"]})).unwrap();
+    assert_eq!(measured["bodies"][0]["kernel"]["faces"], json!(7), "{measured}");
+}
+
 /// #16400: Plane Through Three Points takes a point on a mesh body's surface, the exact point of
 /// the triangle under the pointer.
 #[test]

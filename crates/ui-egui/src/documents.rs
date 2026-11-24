@@ -2959,11 +2959,21 @@ fn view_tab<'a>(
     }
 }
 
-/// A tab's menu: rename its design (`rename`: the translated label), close it, the others, or
-/// all of them.
-fn tab_menu(rename: &str) -> [crate::app_bar::TabMenuRow<'_>; 4] {
+/// The translated labels of a tab's Rename and Save rows, and the Save As shortcut shown beside it.
+struct TabMenuText {
+    rename: String,
+    save: String,
+    save_as: String,
+    save_as_key: String,
+}
+
+/// A tab's menu: rename its design, save it, save it under another name, close it, the others, or
+/// all of them. Save and Save As show their shortcuts on the shown design's tab, where they apply.
+fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 6] {
     [
-        crate::app_bar::TabMenuRow::new("ui.renameTab", rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.renameTab", &text.rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.saveTab", &text.save, "Ctrl+S"),
+        crate::app_bar::TabMenuRow::new("ui.saveTabAs", &text.save_as, &text.save_as_key),
         crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
         crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
         crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
@@ -3006,8 +3016,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
     let new_tip = app.tr("ui.start_page").to_string();
-    let rename_label = app.tr("ui.rename_design_tab").to_string();
-    let menu = tab_menu(&rename_label);
+    let menu_text = TabMenuText {
+        rename: app.tr("ui.rename_design_tab").to_string(),
+        save: app.tr("ui.save").to_string(),
+        save_as: format!("{}…", app.tr("ui.save_as")),
+        save_as_key: crate::keymap::effective(app, "file.save_as").unwrap_or_default(),
+    };
+    let menu = tab_menu(&menu_text);
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
     let current_window = app.view_windows.current_window();
     let design_views: Vec<Vec<_>> = (0..n)
@@ -3264,7 +3279,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped, mut renamed) = (None, None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut saved) = (None, None, None, None, None, None);
     let mut window_drop = false;
     for action in actions {
         match action {
@@ -3272,6 +3287,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
                 "ui.renameTab" => renamed = Some(tab),
+                "ui.saveTab" => saved = Some((tab, false)),
+                "ui.saveTabAs" => saved = Some((tab, true)),
                 "ui.closeTab" => shut = Some(tab),
                 "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
                 "ui.closeAllTabs" => many = Some((0..n).collect()),
@@ -3325,6 +3342,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    if let Some((tab, as_new)) = saved.filter(|_| idle) {
+        save_tab(app, tab, as_new);
+    }
     // Rename from the menu: the design's tab is shown first (over the start page too), so its
     // name is edited in place.
     if let Some(tab) = renamed.filter(|_| idle) {
@@ -3335,6 +3355,25 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if let Some((name, _)) = info.get(tab).filter(|_| shown == tab && !app.home.open) {
             start_tab_rename(app, name, Rect::ZERO);
         }
+    }
+}
+
+/// Save design `i` from its tab's menu, as File › Save does (`as_new`: as File › Save As does).
+/// Another tab's design is shown first, as the "save changes?" prompt does before it saves one,
+/// so a question Save asks (where to save a new design, a read-only or changed file) is about the
+/// design in view.
+fn save_tab(app: &mut SolveApp, i: usize, as_new: bool) {
+    if app.file_picker_busy() || i >= app.docs.count() || app.docs.group.is_some() {
+        return;
+    }
+    let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    if i != shown || app.home.open {
+        switch(app, i);
+    }
+    if as_new {
+        crate::toolbar::save_as(app);
+    } else {
+        crate::toolbar::save(app);
     }
 }
 
@@ -5250,6 +5289,61 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// Save in a tab's menu saves that design to its file, from another tab too (it is shown
+    /// first); a design never saved asks where, as File › Save does. Save As always asks, and
+    /// the design then lives in the new file.
+    #[test]
+    fn save_and_save_as_in_a_tabs_menu_save_that_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let first = h.dir.join("first.sc");
+        h.app.run("file.save_as", json!({"path": first})).unwrap();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        assert!(h.app.session.is_dirty());
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 3, "width": 3, "height": 3})).unwrap();
+        h.frames(3);
+        let menu = |h: &mut crate::scenario::Harness, tab: usize, row: &str| {
+            h.step(&json!({"click": {"handle": format!("tab:design:{tab}")}, "button": "right"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": format!("tab_menu:{row}")}})).unwrap();
+            h.frames(2);
+            h.settle();
+        };
+        // Save on the other tab's menu: that design is shown and written to its own file.
+        menu(&mut h, 0, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 0);
+        assert!(!h.app.session.is_dirty(), "saved");
+        assert_eq!(h.app.session.path.as_deref(), first.to_str());
+        let on_disk = std::fs::read(&first).unwrap();
+        // Save on a design never saved asks where (the scenario's picker answers in its folder).
+        menu(&mut h, 1, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 1);
+        assert!(h.app.session.path.is_some() && !h.app.session.is_dirty(), "saved where the picker said");
+        // Save As writes a new file and leaves the old one as it was.
+        let before = h.app.session.path.clone();
+        switch(&mut h.app, 0);
+        h.app.run("component.rename", json!({"component": 0, "name": "Plate Mk2"})).unwrap();
+        switch(&mut h.app, 1);
+        h.frames(2);
+        menu(&mut h, 0, "ui.saveTabAs");
+        assert_eq!(h.app.docs.active, 0);
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Plate Mk2.sc").to_str(), "Save As offers the design's name");
+        assert_eq!(std::fs::read(&first).unwrap(), on_disk, "the first file is kept as it was");
+        switch(&mut h.app, 1);
+        assert_eq!(h.app.session.path, before, "the other design keeps its own file");
+        // Over the start page, Save shows the design before it saves it.
+        h.app.run("solid.box", json!({"length": 4, "width": 4, "height": 4})).unwrap();
+        h.app.home.open = true;
+        h.frames(2);
+        menu(&mut h, 1, "ui.saveTab");
+        assert!(!h.app.home.open, "the start page gives way to the design");
+        assert!(!h.app.session.is_dirty(), "and it is saved");
     }
 
     /// The menu's Rename edits the design's name in its tab, as a double-click does; on a tab

@@ -584,10 +584,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
+    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
+    /// Browse button and the text field still accepts a pasted path, the document library cannot
+    /// choose a folder, and Settings › Design hides the folder settings.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,

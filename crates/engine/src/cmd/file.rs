@@ -106,6 +106,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
+            "link?: bool (default true: keep a STEP source link for Update Links; false keeps an independent copy; without a disk path the web app keeps a copy); ",
         )),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh)).begins_edit()
         .at("SOLID", "INSERT")
@@ -575,11 +576,34 @@ impl DesignSnapshot {
 /// While the profiler records, the reply's `profile` is the import's share of it (reading,
 /// building the solids in SMLib, placing, meshing and evaluating them), as
 /// `diagnostics.profile` reports it.
-fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, keep_link: bool) -> Result<Value> {
     let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
+    let keep_link = keep_link && !cfg!(target_arch = "wasm32") && super::component_link::is_step_source(path);
     let warning = memory_warning(path);
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    add_step_bytes(s, path, name, options, &bytes, profiled).map(|reply| with_memory_warning(reply, warning))
+    let reply = add_step_bytes(s, path, name, options, &bytes, profiled)?;
+    if keep_link {
+        let (Some(component), Some(feature)) = (reply["component"].as_u64(), reply["feature"].as_u64()) else {
+            return Err(EngineError::Other(format!("{path}: the import has no component to link")));
+        };
+        let names = match options.names {
+            solidcraft_io::StepNames::Auto => "auto",
+            solidcraft_io::StepNames::Solid => "solid",
+            solidcraft_io::StepNames::Product => "product",
+            solidcraft_io::StepNames::Instance => "instance",
+        };
+        s.doc_mut().links.insert(
+            component,
+            solidcraft_doc::DesignLink {
+                path: super::design_link::absolute(std::path::Path::new(path)).to_string_lossy().into_owned(),
+                feature,
+                step_names: Some(names.into()),
+                file_sha256: Some(solidcraft_doc::DesignLink::file_digest(&bytes)),
+                ..Default::default()
+            },
+        );
+    }
+    Ok(with_memory_warning(reply, warning))
 }
 
 /// Add a STEP, IGES or native CAD file's `bytes`. A FreeCAD file's sketches and features come in
@@ -1146,7 +1170,12 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(kind)) if kind == "box" => true,
         Some(_) => return Err(bad(cmd, crate::schema::insert_step::ENVELOPE_MESSAGE)),
     };
-    let mut out = add_step(s, path, str_(p, "name"), &options)?;
+    let keep_link = match p.get("link") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(link)) => *link,
+        Some(_) => return Err(bad(cmd, "`link` must be a boolean")),
+    };
+    let mut out = add_step(s, path, str_(p, "name"), &options, keep_link)?;
     if envelope {
         out["envelope"] = json!(import_envelope(s, &out)?);
     }
