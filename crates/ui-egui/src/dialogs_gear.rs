@@ -24,8 +24,6 @@ pub struct Gear {
     pub backlash: f64,
     pub backlash_thicker: bool,
     pub clearance: f64,
-    pub root_fillet: f64,
-    pub tip_round: f64,
     pub flank_points: f64,
     pub rim_thickness: f64,
     pub bore_diameter: f64,
@@ -49,8 +47,6 @@ impl Gear {
             backlash: 0.0,
             backlash_thicker: false,
             clearance: 0.25,
-            root_fillet: 0.0,
-            tip_round: 0.0,
             flank_points: 8.0,
             rim_thickness: 4.0,
             bore_diameter: 0.0,
@@ -79,8 +75,6 @@ impl Gear {
             backlash: g.backlash,
             backlash_thicker: g.backlash_thicker,
             clearance: g.clearance,
-            root_fillet: g.root_fillet,
-            tip_round: g.tip_round,
             flank_points: f64::from(g.flank_points),
             rim_thickness: if g.rim_thickness > 0.0 { g.rim_thickness } else { g.module * 2.0 },
             bore_diameter: g.bore_diameter,
@@ -111,7 +105,7 @@ impl Gear {
         };
     }
 
-    /// Make this a spur, helical, herringbone or ring gear; the axle hole, clearance and roundings stay.
+    /// Make this a spur, helical, herringbone or ring gear; the axle hole and clearance stay.
     pub fn preset(&mut self, p: Preset) {
         (self.internal, self.helix_angle, self.double_helical) = (false, 0.0, false);
         match p {
@@ -215,8 +209,6 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
         });
     }
     number(ui, "gear.clearance", "dialog:gear:clearance", &mut g.clearance, 0.0..=0.6, 0.01, "");
-    number(ui, "gear.root_fillet", "dialog:gear:root_fillet", &mut g.root_fillet, 0.0..=1000.0, 0.05, " mm");
-    number(ui, "gear.tip_round", "dialog:gear:tip_round", &mut g.tip_round, 0.0..=1000.0, 0.05, " mm");
     number(ui, "gear.flank_points", "dialog:gear:flank_points", &mut g.flank_points, 2.0..=64.0, 1.0, "");
     number(ui, "gear.helix_angle", "dialog:gear:helix_angle", &mut g.helix_angle, -45.0..=45.0, 0.5, "\u{b0}");
     if g.internal {
@@ -269,8 +261,6 @@ pub fn commands(g: &Gear) -> Result<Vec<(String, Value)>, String> {
         g.profile_shift,
         g.backlash,
         g.clearance,
-        g.root_fillet,
-        g.tip_round,
         g.flank_points,
         g.rim_thickness,
         g.bore_diameter,
@@ -290,8 +280,6 @@ pub fn commands(g: &Gear) -> Result<Vec<(String, Value)>, String> {
         "backlash": g.backlash,
         "backlash_direction": if g.backlash_thicker { "thicker" } else { "thinner" },
         "clearance": g.clearance,
-        "root_fillet": g.root_fillet,
-        "tip_round": g.tip_round,
         "flank_points": g.flank_points.round().clamp(0.0, 1e6) as u32,
         "helix_angle": g.helix_angle,
         "internal": g.internal,
@@ -348,31 +336,31 @@ mod tests {
         assert!(h.app.session.doc.gears.is_empty(), "one undo removes the gear");
     }
 
-    /// The form carries clearance, the two roundings, the backlash direction and the profile accuracy
+    /// The form carries clearance, the backlash direction and the profile accuracy
     /// to the gear, and Edit Gear brings them back.
     #[test]
-    fn the_form_sets_clearance_roundings_backlash_direction_and_accuracy() {
+    fn the_form_sets_clearance_backlash_direction_and_accuracy() {
         let mut h = Harness::new();
         h.app.start("gear.insert");
         h.frames(3);
         if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
             (g.module, g.teeth, g.backlash, g.backlash_thicker) = (2.0, 24.0, 0.1, true);
-            (g.clearance, g.root_fillet, g.tip_round, g.flank_points) = (0.3, 0.5, 0.2, 12.0);
+            (g.clearance, g.flank_points) = (0.3, 12.0);
         }
         h.frames(2);
-        for k in ["clearance", "root_fillet", "tip_round", "flank_points", "backlash_thicker"] {
+        for k in ["clearance", "flank_points", "backlash_thicker"] {
             assert!(handle_at(&format!("dialog:gear:{k}")).is_some(), "{k}");
         }
         h.step(&json!({"key": "Enter"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
         let (component, saved) = gear(&h).expect("a gear is saved");
-        assert_eq!((saved.clearance, saved.root_fillet, saved.tip_round, saved.flank_points, saved.backlash_thicker), (0.3, 0.5, 0.2, 12, true));
+        assert_eq!((saved.clearance, saved.flank_points, saved.backlash_thicker), (0.3, 12, true));
         h.app.tree.picked_components = vec![component];
         h.app.start("gear.edit");
         h.frames(3);
         let Some(Kind::Gear(g)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no gear form") };
-        assert_eq!((g.clearance, g.root_fillet, g.tip_round, g.flank_points, g.backlash_thicker), (0.3, 0.5, 0.2, 12.0, true));
+        assert_eq!((g.clearance, g.flank_points, g.backlash_thicker), (0.3, 12.0, true));
     }
 
     /// Wait, within a bound, for the preview of the form's values to be computed.
@@ -407,10 +395,15 @@ mod tests {
         assert!(h.app.preview.active && h.app.preview.bounds != first, "the preview follows the values");
         // A value that makes no gear says so in the form, not in a preview.
         if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
-            g.root_fillet = 1.9;
+            g.bore_diameter = 1000.0;
         }
-        wait_preview(&mut h);
-        assert!(h.app.preview.error.is_some() || !h.app.preview.active, "a refused value shows no gear");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        h.frames(2);
+        while !(h.app.preview.error.is_some() || !h.app.preview.active) {
+            assert!(std::time::Instant::now() < deadline, "a refused value shows no gear");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.frame();
+        }
         crate::dialogs::cancel(&mut h.app);
         h.settle();
         assert!(!h.app.preview.active, "cancel takes the preview away");
@@ -443,8 +436,6 @@ mod tests {
             backlash: 0.05,
             flank_points: 12,
             clearance: 0.3,
-            root_fillet: 0.0,
-            tip_round: 0.0,
             backlash_thicker: false,
             internal: false,
             rim_thickness: 0.0,

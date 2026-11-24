@@ -31,12 +31,6 @@ pub struct GearInsertParams {
     /// Clearance coefficient from 0 to 0.6 of the module (default 0.25): the roots lie `module × (1 + clearance - profile_shift)` inside the pitch circle.
     #[serde(default)]
     pub clearance: Option<f64>,
-    /// Radius in millimetres rounding each corner where a flank meets the root, from 0 to the module (default 0: sharp).
-    #[serde(default)]
-    pub root_fillet: Option<f64>,
-    /// Radius in millimetres rounding each corner where a flank meets the tip, from 0 to the module (default 0: sharp).
-    #[serde(default)]
-    pub tip_round: Option<f64>,
     /// `thinner` (default): the backlash is taken off the teeth. `thicker`: it is added to them, for a mate that carries the whole clearance.
     #[serde(default)]
     pub backlash_direction: Option<String>,
@@ -93,12 +87,6 @@ pub struct GearEditParams {
     /// New clearance coefficient from 0 to 0.6 of the module : the roots lie `module × (1 + clearance - profile_shift)` inside the pitch circle.
     #[serde(default)]
     pub clearance: Option<f64>,
-    /// New radius in millimetres rounding each corner where a flank meets the root, from 0 to the module.
-    #[serde(default)]
-    pub root_fillet: Option<f64>,
-    /// New radius in millimetres rounding each corner where a flank meets the tip, from 0 to the module.
-    #[serde(default)]
-    pub tip_round: Option<f64>,
     /// `thinner`: the backlash is taken off the teeth. `thicker`: it is added to them, for a mate that carries the whole clearance.
     #[serde(default)]
     pub backlash_direction: Option<String>,

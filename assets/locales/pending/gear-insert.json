@@ -25,10 +25,8 @@
     "gear.reset": "إعادة ضبط",
     "gear.rim_thickness": "سماكة الحلقة",
     "gear.root_diameter": "قطر دائرة الجذر",
-    "gear.root_fillet": "نصف قطر تدوير الجذر",
     "gear.teeth": "عدد الأسنان",
     "gear.tip_diameter": "القطر الخارجي",
-    "gear.tip_round": "نصف قطر تدوير الرأس",
     "help.gear.edit": "يعدّل ترسًا أدرجته: غيّر المقياس أو عدد الأسنان أو زاوية الضغط أو العرض أو الحلزون أو الخلوص أو التدوير أو الثقب فيُعاد بناء الترس في مكانه. استخدمه بدل الحذف وإعادة الإدراج ليحتفظ باقي التصميم بمراجعه.",
     "help.gear.insert": "يدرج ترسًا أسطوانيًا مستقيم أو حلزوني الأسنان بمنحنى ملتف، خارجيًا أو داخليًا، كمكوّن جديد. تحدد المقياس وعدد الأسنان وزاوية الضغط وعرض السن، ويمكنك إضافة زاوية حلزون أو أسنان حلزونية مزدوجة أو ثقب محور أو حلقة داخلية؛ تُرسم الأسنان وتُمسح كأي ميزة أخرى."
   },
@@ -58,10 +56,8 @@
     "gear.reset": "Zurücksetzen",
     "gear.rim_thickness": "Kranzdicke",
     "gear.root_diameter": "Fußkreisdurchmesser",
-    "gear.root_fillet": "Fußrundungsradius",
     "gear.teeth": "Zähnezahl",
     "gear.tip_diameter": "Kopfkreisdurchmesser",
-    "gear.tip_round": "Kopfrundungsradius",
     "help.gear.edit": "Bearbeitet ein eingefügtes Zahnrad: Modul, Zähnezahl, Eingriffswinkel, Breite, Schrägung, Kopfspiel, Verrundung oder Bohrung ändern, und das Zahnrad wird an Ort und Stelle neu aufgebaut. Nutzen Sie es statt Löschen und erneut Einfügen, damit der Rest des Entwurfs seine Bezüge behält.",
     "help.gear.insert": "Fügt ein Evolventen-Stirnrad (gerad- oder schrägverzahnt), außen- oder innenverzahnt, als neues Bauteil ein. Sie geben Modul, Zähnezahl, Eingriffswinkel und Zahnbreite an und können einen Schrägungswinkel, Doppelschrägverzahnung, eine Wellenbohrung oder einen Innenkranz hinzufügen; die Zähne werden wie jedes andere Feature skizziert und gesweept."
   },
@@ -91,10 +87,8 @@
     "gear.reset": "Reset",
     "gear.rim_thickness": "Ring thickness",
     "gear.root_diameter": "Root diameter",
-    "gear.root_fillet": "Root fillet radius",
     "gear.teeth": "Teeth",
     "gear.tip_diameter": "Outside diameter",
-    "gear.tip_round": "Tip rounding radius",
     "help.gear.edit": "Edits a gear you inserted: change the module, tooth count, pressure angle, width, helix, clearance, rounding or bore, and the gear is rebuilt in place. Use it instead of deleting and inserting again, so the rest of the design keeps its references.",
     "help.gear.insert": "Inserts an involute spur or helical gear, external or internal, as a new component. You give the module, tooth count, pressure angle and face width, and can add a helix angle, double helical teeth, an axle hole or an internal ring; the teeth are sketched and swept like any other feature."
   },
@@ -124,10 +118,8 @@
     "gear.reset": "איפוס",
     "gear.rim_thickness": "עובי טבעת",
     "gear.root_diameter": "קוטר מעגל השורש",
-    "gear.root_fillet": "רדיוס עיגול השורש",
     "gear.teeth": "מספר שיניים",
     "gear.tip_diameter": "הקוטר החיצוני",
-    "gear.tip_round": "רדיוס עיגול הראש",
     "help.gear.edit": "עורך גלגל שיניים שהוספת: משנים מודול, מספר שיניים, זווית לחץ, רוחב, סליל, מרווח, עיגול או חור, והגלגל נבנה מחדש במקומו. השתמשו בו במקום למחוק ולהוסיף שוב, כדי ששאר התכנון ישמור על ההפניות שלו.",
     "help.gear.insert": "מוסיף גלגל שיניים בעל פרופיל אבולוטי, ישר או סלילי, חיצוני או פנימי, כרכיב חדש. מזינים מודול, מספר שיניים, זווית לחץ ורוחב שן, ואפשר להוסיף זווית סליל, שיניים סליליות כפולות, חור ציר או טבעת פנימית; השיניים משורטטות ונסחפות כמו כל תכונה אחרת."
   },
@@ -157,10 +149,8 @@
     "gear.reset": "リセット",
     "gear.rim_thickness": "リムの厚さ",
     "gear.root_diameter": "歯底円直径",
-    "gear.root_fillet": "歯元フィレット半径",
     "gear.teeth": "歯数",
     "gear.tip_diameter": "歯先円直径",
-    "gear.tip_round": "歯先丸め半径",
     "help.gear.edit": "挿入した歯車を編集します。モジュール、歯数、圧力角、幅、ねじれ、クリアランス、丸め、穴を変更すると、その場で歯車が作り直されます。削除して入れ直す代わりに使うと、設計の他の部分の参照が保たれます。",
     "help.gear.insert": "インボリュート平歯車またははすば歯車（外歯または内歯）を新しいコンポーネントとして挿入します。モジュール、歯数、圧力角、歯幅を指定し、ねじれ角、やまば歯、軸穴、内歯のリムを追加できます。歯形はスケッチされ、ほかのフィーチャーと同じようにスイープされます。"
   },
@@ -190,10 +180,8 @@
     "gear.reset": "초기화",
     "gear.rim_thickness": "림 두께",
     "gear.root_diameter": "이뿌리원 지름",
-    "gear.root_fillet": "이뿌리 필릿 반지름",
     "gear.teeth": "잇수",
     "gear.tip_diameter": "이끝원 지름",
-    "gear.tip_round": "이끝 둥글림 반지름",
     "help.gear.edit": "삽입한 기어를 편집합니다. 모듈, 잇수, 압력각, 너비, 비틀림, 간극, 라운딩, 구멍을 바꾸면 기어가 그 자리에서 다시 만들어집니다. 삭제 후 다시 삽입하는 대신 사용하면 나머지 설계가 참조를 유지합니다.",
     "help.gear.insert": "인벌루트 평기어 또는 헬리컬 기어(외접 또는 내접)를 새 컴포넌트로 삽입합니다. 모듈, 잇수, 압력각, 이 너비를 지정하고 비틀림각, 이중 헬리컬 이, 축 구멍, 내접 기어의 림을 추가할 수 있습니다. 잇날은 스케치되어 다른 피처처럼 스윕됩니다."
   },
@@ -223,10 +211,8 @@
     "gear.reset": "Đặt lại",
     "gear.rim_thickness": "Độ dày vành",
     "gear.root_diameter": "Đường kính chân răng",
-    "gear.root_fillet": "Bán kính lượn chân răng",
     "gear.teeth": "Số răng",
     "gear.tip_diameter": "Đường kính đỉnh răng",
-    "gear.tip_round": "Bán kính bo đỉnh răng",
     "help.gear.edit": "Chỉnh sửa bánh răng đã chèn: đổi mô-đun, số răng, góc áp lực, bề rộng, góc nghiêng, khe hở, bo tròn hoặc lỗ trục, và bánh răng được dựng lại tại chỗ. Dùng thay cho xóa rồi chèn lại để phần còn lại của thiết kế giữ nguyên các tham chiếu.",
     "help.gear.insert": "Chèn bánh răng trụ thân khai, răng thẳng hoặc răng nghiêng, ăn khớp ngoài hoặc ăn khớp trong, thành một thành phần mới. Bạn nhập mô-đun, số răng, góc áp lực và bề rộng răng, rồi có thể thêm góc nghiêng răng, răng chữ V, lỗ trục hoặc vành bánh răng trong; răng được phác thảo rồi quét như mọi tính năng khác."
   },
@@ -256,10 +242,8 @@
     "gear.reset": "重置",
     "gear.rim_thickness": "齿圈厚度",
     "gear.root_diameter": "齿根圆直径",
-    "gear.root_fillet": "齿根圆角半径",
     "gear.teeth": "齿数",
     "gear.tip_diameter": "齿顶圆直径",
-    "gear.tip_round": "齿顶倒圆半径",
     "help.gear.edit": "编辑已插入的齿轮：修改模数、齿数、压力角、宽度、螺旋角、顶隙、圆角或轴孔，齿轮会就地重建。用它代替删除后重新插入，这样设计的其余部分会保持其引用。",
     "help.gear.insert": "将渐开线直齿轮或斜齿轮（外齿或内齿）作为新零部件插入。指定模数、齿数、压力角和齿宽后，还可加入螺旋角、人字齿、轴孔或内齿圈；齿形会被草绘并像其他特征一样扫掠。"
   }

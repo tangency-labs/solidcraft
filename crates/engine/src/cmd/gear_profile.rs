@@ -26,10 +26,6 @@ pub struct GearSpec {
     pub internal: bool,
     /// Clearance coefficient `c`: the root lies `m (1 + c - x)` inside the pitch circle (0.25 standard).
     pub clearance: f64,
-    /// Radius (mm) rounding each corner where a flank meets the root; 0 leaves it sharp.
-    pub root_fillet: f64,
-    /// Radius (mm) rounding each corner where a flank meets the tip; 0 leaves it sharp.
-    pub tip_round: f64,
     /// The backlash makes the teeth thicker instead of thinner (for a mate that carries the clearance).
     pub thicker: bool,
 }
@@ -45,8 +41,6 @@ impl GearSpec {
             flank_points: 8,
             internal: false,
             clearance: 0.25,
-            root_fillet: 0.0,
-            tip_round: 0.0,
             thicker: false,
         }
     }
@@ -99,18 +93,13 @@ pub fn outline(g: &GearSpec) -> Result<Vec<[f64; 2]>, String> {
     if !g.clearance.is_finite() || !(0.0..=0.6).contains(&g.clearance) {
         return Err("the clearance must be from 0 to 0.6 of the module".into());
     }
-    for (what, r) in [("root fillet", g.root_fillet), ("tip rounding", g.tip_round)] {
-        if !r.is_finite() || r < 0.0 || r > g.module {
-            return Err(format!("the {what} radius must be from 0 up to the module"));
-        }
-    }
     if !g.internal {
         return build(g, g.tip_radius(), g.root_radius());
     }
     if g.shift != 0.0 {
         return Err("profile shift is for external gears".into());
     }
-    let space = GearSpec { internal: false, backlash: -g.backlash, root_fillet: g.tip_round, tip_round: g.root_fillet, ..*g };
+    let space = GearSpec { internal: false, backlash: -g.backlash, ..*g };
     build(&space, g.root_radius(), g.tip_radius())
 }
 
@@ -163,164 +152,8 @@ fn build(g: &GearSpec, ra: f64, rf: f64) -> Result<Vec<[f64; 2]>, String> {
         out.extend(flank.iter().map(|&(r, h)| at(r, -h)));
         out.extend(flank.iter().rev().map(|&(r, h)| at(r, h)));
     }
-    if g.root_fillet > 0.0 || g.tip_round > 0.0 {
-        out = round_corners(&out, flank.len(), g.root_fillet, g.tip_round)?;
-    }
     if out.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) {
         return Err("the gear outline is not finite".into());
-    }
-    Ok(out)
-}
-
-/// Which corner of a tooth a point of the outline is, if any: `n` points make one flank, and a tooth runs
-/// up one flank and down the other (`2 n` points), so its tips are points `n - 1` and `n` and its roots
-/// are the last point and the next tooth's first.
-#[derive(Clone, Copy, PartialEq)]
-enum Corner {
-    Tip,
-    Root,
-}
-
-fn corner_of(i: usize, n: usize) -> Option<Corner> {
-    let k = i % (2 * n);
-    if k == n - 1 || k == n {
-        Some(Corner::Tip)
-    } else if k == 0 || k == 2 * n - 1 {
-        Some(Corner::Root)
-    } else {
-        None
-    }
-}
-
-/// The point `t` along the outline from vertex `i` going `dir` (1 or -1 steps), with the vertices passed on
-/// the way. The next corner is a barrier: `None` once `t` would reach it.
-fn walk(pts: &[[f64; 2]], n: usize, i: usize, dir: isize, t: f64) -> Option<([f64; 2], usize)> {
-    let len = pts.len();
-    let (mut cur, mut left, mut passed) = (i, t, 0);
-    loop {
-        let next = (cur as isize + dir).rem_euclid(len as isize) as usize;
-        let seg = (pts[next][0] - pts[cur][0]).hypot(pts[next][1] - pts[cur][1]);
-        if left <= seg {
-            let f = if seg > 0.0 { left / seg } else { 0.0 };
-            return Some(([pts[cur][0] + (pts[next][0] - pts[cur][0]) * f, pts[cur][1] + (pts[next][1] - pts[cur][1]) * f], passed));
-        }
-        left -= seg;
-        if corner_of(next, n).is_some() || next == i {
-            return None;
-        }
-        cur = next;
-        passed += 1;
-    }
-}
-
-/// How far along the outline from vertex `i` going `dir` before the next corner, in mm.
-fn room(pts: &[[f64; 2]], n: usize, i: usize, dir: isize) -> f64 {
-    let len = pts.len();
-    let (mut cur, mut total) = (i, 0.0);
-    for _ in 0..len {
-        let next = (cur as isize + dir).rem_euclid(len as isize) as usize;
-        total += (pts[next][0] - pts[cur][0]).hypot(pts[next][1] - pts[cur][1]);
-        if corner_of(next, n).is_some() {
-            break;
-        }
-        cur = next;
-    }
-    total
-}
-
-/// Round the flank-to-root and flank-to-tip corners of every tooth with circular arcs: the arc of radius
-/// `rho` that touches the outline `t` back and `t` ahead of the corner, the outline between dropped. The
-/// flank is a curve, so `t` is found from the chords to those two points, and each side may give up just
-/// under half of the way to the next corner (which may be rounded too).
-fn round_corners(pts: &[[f64; 2]], n: usize, root: f64, tip: f64) -> Result<Vec<[f64; 2]>, String> {
-    let len = pts.len();
-    let mut skip = vec![false; len];
-    let mut arcs: Vec<Option<Vec<[f64; 2]>>> = vec![None; len];
-    for i in 0..len {
-        let (rho, what) = match corner_of(i, n) {
-            Some(Corner::Tip) => (tip, "tip rounding"),
-            Some(Corner::Root) => (root, "root fillet"),
-            None => (0.0, ""),
-        };
-        if rho <= 0.0 {
-            continue;
-        }
-        let v = pts[i];
-        let angle = |a: [f64; 2], b: [f64; 2]| {
-            let (ua, ub) = ([a[0] - v[0], a[1] - v[1]], [b[0] - v[0], b[1] - v[1]]);
-            let (la, lb) = (ua[0].hypot(ua[1]), ub[0].hypot(ub[1]));
-            if !(la > 1e-9 && lb > 1e-9) {
-                return None;
-            }
-            let u = ([ua[0] / la, ua[1] / la], [ub[0] / lb, ub[1] / lb]);
-            Some((u.0, u.1, (u.0[0] * u.1[0] + u.0[1] * u.1[1]).clamp(-1.0, 1.0).acos()))
-        };
-        let fold = || format!("the {what} cannot be rounded where the outline folds back");
-        let (_, _, mut phi) = angle(pts[(i + len - 1) % len], pts[(i + 1) % len]).ok_or_else(fold)?;
-        let reach = |dir: isize| room(pts, n, i, dir) * 0.49;
-        let t_max = reach(-1).min(reach(1));
-        if !(0.05..=PI - 0.05).contains(&phi) {
-            return Err(fold());
-        }
-        let too_big = |phi: f64| format!("the {what} radius is too large for the tooth: at most {:.3} mm", t_max * (phi / 2.0).tan());
-        let mut t = rho / (phi / 2.0).tan();
-        let mut ends = None;
-        for _ in 0..6 {
-            if t > t_max {
-                return Err(too_big(phi));
-            }
-            let (Some((a, back)), Some((b, fwd))) = (walk(pts, n, i, -1, t), walk(pts, n, i, 1, t)) else {
-                return Err(too_big(phi));
-            };
-            let (_, _, p) = angle(a, b).ok_or_else(fold)?;
-            if !(0.05..=PI - 0.05).contains(&p) {
-                return Err(fold());
-            }
-            (phi, ends) = (p, Some((a, b, back, fwd)));
-            t = rho / (phi / 2.0).tan();
-        }
-        if t > t_max {
-            return Err(too_big(phi));
-        }
-        let Some((a, b, back, fwd)) = ends else { return Err(fold()) };
-        let (ua, ub, _) = angle(a, b).ok_or_else(fold)?;
-        let (t1, t2) = ([v[0] + ua[0] * t, v[1] + ua[1] * t], [v[0] + ub[0] * t, v[1] + ub[1] * t]);
-        let bis = [ua[0] + ub[0], ua[1] + ub[1]];
-        let bl = bis[0].hypot(bis[1]);
-        let reach_c = rho / (phi / 2.0).sin();
-        let c = [v[0] + bis[0] / bl * reach_c, v[1] + bis[1] / bl * reach_c];
-        let (s1, s2) = ((t1[1] - c[1]).atan2(t1[0] - c[0]), (t2[1] - c[1]).atan2(t2[0] - c[0]));
-        let mut d = s2 - s1;
-        while d > PI {
-            d -= TAU;
-        }
-        while d < -PI {
-            d += TAU;
-        }
-        let steps = ((d.abs() / (PI / 12.0)).ceil() as usize).clamp(2, 8);
-        arcs[i] = Some(
-            (0..=steps)
-                .map(|k| {
-                    let ang = s1 + d * k as f64 / steps as f64;
-                    [c[0] + rho * ang.cos(), c[1] + rho * ang.sin()]
-                })
-                .collect(),
-        );
-        skip[i] = true;
-        for k in 1..=back {
-            skip[(i + len - k) % len] = true;
-        }
-        for k in 1..=fwd {
-            skip[(i + k) % len] = true;
-        }
-    }
-    let mut out = Vec::with_capacity(len * 2);
-    for i in 0..len {
-        if let Some(arc) = &arcs[i] {
-            out.extend(arc.iter().copied());
-        } else if !skip[i] {
-            out.push(pts[i]);
-        }
     }
     Ok(out)
 }
@@ -416,37 +249,6 @@ mod tests {
         };
         assert!((space(0.0) - PI * 2.0 / 2.0).abs() < 1e-9);
         assert!((space(0.1) - (PI + 0.1)).abs() < 1e-9);
-    }
-
-    #[test]
-    fn rounded_corners_stay_between_the_circles_and_a_standard_fillet_fits() {
-        // The usual root fillet is about 0.38 of the module; the tip is eased by a fifth of it.
-        for points in [8, 16, 32] {
-            let mut g = GearSpec::new(2.0, 24, 20.0);
-            g.flank_points = points;
-            let sharp = outline(&g).unwrap();
-            g.root_fillet = 0.76;
-            g.tip_round = 0.4;
-            let pts = outline(&g).unwrap();
-            // The root between two teeth is a chord, a little inside the root circle; a fillet tangent to it
-            // may follow it in by that much.
-            let (lo, hi) = (g.root_radius().min(g.base_radius()) - 0.1, g.tip_radius() + 1e-9);
-            assert!(pts.iter().all(|p| (lo..=hi).contains(&radius(p))), "{points}");
-            assert!(pts.len() > sharp.len() && pts.iter().all(|p| p[0].is_finite() && p[1].is_finite()), "{points}");
-            // The tip circle is no longer touched: the rounding takes the corner off.
-            assert!(pts.iter().map(radius).fold(0.0, f64::max) < g.tip_radius() - 1e-6, "{points}");
-        }
-    }
-
-    #[test]
-    fn a_rounding_too_large_for_the_tooth_is_refused_with_the_most_it_allows() {
-        let mut g = GearSpec::new(2.0, 24, 20.0);
-        g.tip_round = 1.9;
-        let e = outline(&g).unwrap_err();
-        assert!(e.contains("tip rounding radius is too large") && e.contains("at most"), "{e}");
-        g.tip_round = 0.0;
-        g.root_fillet = 2.0;
-        assert!(outline(&g).unwrap_err().contains("root fillet radius is too large"));
     }
 
     #[test]
