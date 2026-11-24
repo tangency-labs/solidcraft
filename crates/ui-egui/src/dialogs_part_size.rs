@@ -174,7 +174,7 @@ pub fn open(app: &mut SolveApp, component: u64) {
         needs_a_part(app);
         return;
     }
-    app.session.selection.clear();
+    app.session.clear_selection();
     app.tree.picked_components = vec![component];
     app.start("parts.resize");
 }

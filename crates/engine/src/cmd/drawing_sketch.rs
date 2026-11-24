@@ -62,7 +62,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet, sketch, original: None }));
-    s.selection.clear();
+    s.clear_selection();
     reading(s, sketch, cmd)
 }
 
@@ -80,7 +80,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let solved = s.doc.solve_sheet_sketch(owner.id, sketch)?;
     let original = owner.sheet_sketch(sketch).cloned().ok_or_else(|| bad(cmd, "the open drawing has no such sketch"))?;
     s.active_sheet_sketch = Some(Arc::new(SheetSketchEdit { drawing: owner.id, sheet: solved.sheet, sketch, original: Some(original) }));
-    s.selection.clear();
+    s.clear_selection();
     s.revision += 1;
     reading(s, sketch, cmd)
 }
@@ -127,7 +127,7 @@ pub(super) fn finish(s: &mut Session, p: &Value) -> Result<Value> {
     let entry = sketch_store::sheet_target(s, &Value::Null, "sketch.finish")?;
     let mut result = reading(s, entry.sketch, "sketch.finish")?;
     s.active_sheet_sketch = None;
-    s.selection.clear();
+    s.clear_selection();
     s.revision += 1;
     if let Some(object) = result.as_object_mut() {
         object.insert("editing".into(), Value::Bool(false));
@@ -158,7 +158,7 @@ pub(super) fn cancel(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     s.active_sheet_sketch = None;
-    s.selection.clear();
+    s.clear_selection();
     s.revision += 1;
     serde_json::to_value(contract::Cancelled {
         drawing: ids::encode(entry.drawing),

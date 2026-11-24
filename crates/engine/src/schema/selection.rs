@@ -113,7 +113,8 @@ pub struct SelectionGetResult {
     /// shown body although [`items`] is empty.
     pub count: usize,
     /// Every shown body is selected, by scope rather than by name: [`items`] names no bodies.
-    #[serde(default)]
+    /// Left out when false, so an ordinary selection reads as it always did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub all_bodies: bool,
     /// The selected items, in order.
     pub items: Vec<SelectionItem>,

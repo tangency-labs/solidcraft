@@ -447,7 +447,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
-    s.selection.clear();
+    s.clear_selection();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
     if display_only {
         s.refresh_display();
@@ -558,7 +558,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if s.active_component != 0 && !s.doc.components.iter().any(|c| c.id == s.active_component) {
         s.active_component = 0;
     }
-    s.selection.clear();
+    s.clear_selection();
     s.refresh();
     let failing: Vec<FailingFeature> = s
         .model
@@ -1042,7 +1042,7 @@ fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         Some(k) if k < n => Some(k),
         _ => None,
     };
-    s.selection.clear();
+    s.clear_selection();
     reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
@@ -1814,8 +1814,6 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     if items.len() > 10_000 {
         return Err(bad("select.set", "too many items"));
     }
-    // Naming items replaces a whole-body selection: the user picked something particular.
-    s.selection_all_bodies = false;
     let mut sel: Vec<Sel> = Vec::new();
     for it in items {
         let one = selection_item(s, it)?;
@@ -1841,9 +1839,23 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sel.push(one);
     }
-    if !bool_(p, "add").unwrap_or(false) {
+    if bool_(p, "add").unwrap_or(false) {
+        if s.all_bodies_selected() {
+            // Adding shown bodies to a whole-body selection changes nothing: the scope stays,
+            // without listing its bodies. Anything else is added to the bodies it covers.
+            let hidden = &s.visibility.hidden_bodies;
+            if sel.iter().all(|x| matches!(x, Sel::Body { name } if !hidden.contains(name))) {
+                s.refresh_display();
+                return reply("select.set", SelectSetResult { selected: s.selected_count()?, param_warnings: Vec::new() });
+            }
+            s.selection = s.selected_items()?;
+        }
+    } else {
         s.selection.clear();
     }
+    // Named items replace the whole-body scope (only once every item checked out, so a refused
+    // select leaves the selection as it was).
+    s.selection_all_bodies = false;
     for x in sel {
         if !s.selection.contains(&x) {
             s.selection.push(x);
@@ -2029,8 +2041,7 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.selection.clear();
-    s.selection_all_bodies = false;
+    s.clear_selection();
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }

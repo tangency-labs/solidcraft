@@ -609,7 +609,7 @@ fn clear_history(s: &mut Session, sc: &Scope) {
         s.active_component = 0;
         s.active_occurrence_path = None;
     }
-    s.selection.clear();
+    s.clear_selection();
 }
 
 /// The design as it was before a swap, to check the swap against.

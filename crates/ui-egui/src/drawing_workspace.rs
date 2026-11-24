@@ -53,6 +53,9 @@ pub struct State {
     /// What was selected in the other workspace when Drawing was entered (Design's selection while
     /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
     selection_away: Vec<solidcraft_engine::Sel>,
+    /// The other workspace's whole-body scope (`Session::selection_all_bodies`), kept with
+    /// `selection_away`: Design's Select All waits while in Drawing, where it would mean nothing.
+    selection_all_away: bool,
     /// The session's selection is Drawing's (else Design's).
     selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
@@ -135,6 +138,8 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
         _ => true,
     });
     app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+    let all_back = std::mem::take(&mut app.drawing_workspace.selection_all_away);
+    app.drawing_workspace.selection_all_away = std::mem::replace(&mut app.session.selection_all_bodies, all_back);
 }
 
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the

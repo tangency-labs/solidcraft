@@ -677,6 +677,7 @@ impl ComputedCommands {
         session.same_document_context(source)
             && session.checked_sketch_owner(self.computed.active_sketch, self.computed.sketching_view).is_ok()
             && session.selection == source.selection
+            && session.selection_all_bodies == source.selection_all_bodies
             && (!self.steps.iter().any(|step| {
                 step.id.eq_ignore_ascii_case("plugin.run")
                     || step.id.split_once('.').is_some_and(|(package, _)| source.plugin_state.packages.contains_key(package))
@@ -1931,33 +1932,51 @@ impl Session {
     }
 
     /// Re-evaluate the model after a document change.
-    /// The model placed in the world through component occurrences (and uncaptured moves): what
-    /// to display, measure, pick and export. The same as `model.state()` without components.
-    /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
+    /// Whether the whole-body scope is in force: Select All set it, no item has been named since
+    /// and no sketch is open. Anything that names items or clears the selection ends it, so a
+    /// stale flag never outlives the list it stood for.
+    pub fn all_bodies_selected(&self) -> bool {
+        self.selection_all_bodies && self.selection.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// Clear the selection: the named items and the whole-body scope.
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.selection_all_bodies = false;
+    }
+
     /// Whether anything is selected: a list of items or the whole-body scope.
     pub fn has_selection(&self) -> bool {
-        !self.selection.is_empty() || self.selection_all_bodies
+        !self.selection.is_empty() || self.all_bodies_selected()
     }
 
     /// The selection as the items an operation works on: the whole-body scope resolves to the
     /// name of every shown body, in the world's order.
     pub fn selected_items(&self) -> Result<Vec<Sel>> {
-        if !self.selection_all_bodies {
+        if !self.all_bodies_selected() {
             return Ok(self.selection.clone());
         }
-        let hidden = &self.visibility.hidden_bodies;
-        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect())
+        Ok(self.shown_body_names()?.into_iter().map(|name| Sel::Body { name }).collect())
     }
 
     /// How many things are selected, resolving the whole-body scope against the world.
     pub fn selected_count(&self) -> Result<usize> {
-        if !self.selection_all_bodies {
+        if !self.all_bodies_selected() {
             return Ok(self.selection.len());
         }
-        let hidden = &self.visibility.hidden_bodies;
-        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).count())
+        let hidden: std::collections::HashSet<&str> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(b.name.as_str())).count())
     }
 
+    /// The bodies the whole-body scope covers: every body not hidden, in the world's order.
+    fn shown_body_names(&self) -> Result<Vec<String>> {
+        let hidden: std::collections::HashSet<&str> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        Ok(self.world_state()?.bodies.iter().filter(|b| !hidden.contains(b.name.as_str())).map(|b| b.name.clone()).collect())
+    }
+
+    /// The model placed in the world through component occurrences (and uncaptured moves): what
+    /// to display, measure, pick and export. The same as `model.state()` without components.
+    /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
     pub fn world_state(&self) -> Result<Arc<solidcraft_doc::ModelState>> {
         let st = self.model.state();
         if self.doc.occurrences.is_empty() {
@@ -3132,7 +3151,7 @@ impl Session {
         if self.section_state() != c.section {
             self.set_section_state(c.section);
         }
-        self.selection.clear();
+        self.clear_selection();
         self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
@@ -3673,6 +3692,7 @@ impl Session {
         self.prune_sheet_sketch_edit();
         drawing_scene::forget_closed(self);
         self.selection = computed.selection;
+        self.selection_all_bodies = computed.selection_all_bodies;
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
         self.active_component = computed.active_component;

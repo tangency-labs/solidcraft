@@ -40,7 +40,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let s: &Session = s;
     let mut ctx = Context::new(s)?;
-    let scoped = s.selection_all_bodies;
+    let scoped = s.all_bodies_selected();
     let items: Vec<SelectionItem> = s
         .selection
         .iter()

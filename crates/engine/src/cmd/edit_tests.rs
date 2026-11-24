@@ -2629,6 +2629,57 @@ fn the_whole_body_selection_reports_its_count_without_listing_bodies() {
 }
 
 #[test]
+fn a_whole_body_selection_ends_with_undo_and_waits_in_a_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "select.all", json!({}));
+    // Undo clears the selection, the scope with it, as it clears a list.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.has_selection(), "undo ends the scope");
+    assert!(!s.selection_all_bodies);
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    // In a sketch the bodies are not what Delete or the menus act on.
+    assert!(!s.has_selection(), "an open sketch sets the body scope aside");
+    assert_eq!(s.selected_items().unwrap(), Vec::<Sel>::new());
+}
+
+#[test]
+fn adding_to_a_whole_body_selection_keeps_it_and_a_refused_pick_changes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "select.all", json!({}));
+    // A Shift+click on a shown body adds nothing new: the scope stays, still unlisted.
+    let added = run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Spare"}], "add": true}));
+    assert_eq!(added["selected"], 2, "{added}");
+    assert!(s.all_bodies_selected() && s.selection.is_empty());
+    // Adding something else adds it to the bodies the scope covers.
+    run(&mut s, "select.set", json!({"items": [{"type": "plane", "name": "XY"}], "add": true}));
+    assert!(!s.selection_all_bodies);
+    assert_eq!(s.selection, [Sel::Body { name: "Block".into() }, Sel::Body { name: "Spare".into() }, Sel::Plane { name: "XY".into() }]);
+    // A select that is refused leaves the selection as it was.
+    run(&mut s, "select.all", json!({}));
+    assert!(s.execute("select.set", &json!({"items": [{"type": "body", "name": "Missing"}]})).is_err());
+    assert!(s.all_bodies_selected(), "a refused select keeps the scope");
+}
+
+#[test]
+fn delete_of_a_whole_body_selection_keeps_locked_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    s.visibility.locked_bodies.push("Spare".into());
+    run(&mut s, "select.all", json!({}));
+    let done = run(&mut s, "selection.delete", json!({"all_bodies": true}));
+    assert_eq!(done["bodies"], json!(["Block"]), "{done}");
+    let left: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(left, ["Spare"], "a locked body stays, as it does when the selection names it");
+    assert!(!s.has_selection());
+}
+
+#[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
     run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 7]}, "name": "Pin"}));
