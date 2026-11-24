@@ -44,7 +44,8 @@ pub enum FilletSetUp {
     PrimaryEdgeUse,
     /// The mate of a fillet edge's primary edge use.
     PrimaryEdgeUseMate,
-    /// The radial edge use of a side edge's edge use.
+    /// The radial edge use of an edge use at a corner (a side edge's or the filleted
+    /// edge's).
     RadialEdgeUse,
     /// A rail edge's 3D curve, or the UV trim curve the 2D path reads.
     RailCurve,
@@ -54,10 +55,16 @@ pub enum FilletSetUp {
     RailEndVertexUse,
     /// The offset surface of a fillet geometry's rail, its own or its solver's.
     RailOffsetSurface,
+    /// The reference curve a variable-radius solver's recalculation of its fillet geometry
+    /// is given.
+    ReferenceCurve,
     /// A fillet solver's fillet executive.
     SolverExecutive,
     /// One of a fillet solver's two offset surfaces.
     SolverOffsetSurface,
+    /// A curve-based fillet solver's original curve (the edge or centre curve it is set
+    /// up on).
+    SolverOriginalCurve,
     /// A fillet solver's surface generator.
     SurfaceGenerator,
     /// The B-spline UV trim curve of a rail's edge use.
@@ -123,8 +130,12 @@ impl FilletSetUp {
             Self::RailOffsetSurface => {
                 "a rail of a fillet geometry has no offset surface, of its own or its solver's"
             }
+            Self::ReferenceCurve => {
+                "the variable-radius solver's recalculation is given no reference curve"
+            }
             Self::SolverExecutive => "a fillet solver has no fillet executive",
             Self::SolverOffsetSurface => "a fillet solver lacks one of its two offset surfaces",
+            Self::SolverOriginalCurve => "a curve-based fillet solver has no original curve",
             Self::SurfaceGenerator => "a fillet solver has no surface generator",
             Self::UvTrimCurve => "the rail's edge use has no B-spline UV trim curve",
             Self::VertexCrossSection => "a fillet vertex has no cross-section edge",
