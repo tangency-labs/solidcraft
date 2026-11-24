@@ -1,4 +1,4 @@
-//! Linked designs: a component whose bodies come from another design file (Insert Design).
+//! Linked components whose bodies come from a design (Insert Design) or a STEP source.
 //!
 //! The linked design is opened and evaluated on its own, and its solid bodies, as placed in it,
 //! join a new component through an Import feature (exact B-rep, kept in this design so it opens
@@ -68,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
          cannot read (that one keeps its bodies, is named in failed and gets a warning); linked_bodies?: all|folder (a linked design that \
          was itself saved without the bodies of its linked designs: which of those files are read for them; default all; folder: only \
-         files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked designs again and replaces \
+         files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("break")
         .contract(&BREAK_LINK_CONTRACT)
         .output(output_schema_for::<BreakLinkResult>)
-        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
+        .params("component: id or name of a linked component — keeps its bodies as they are and forgets the source file"),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
         .contract(&EXTRACT_CONTRACT)
@@ -155,22 +155,30 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 }
 
 /// Whether `link`, of the component `comp`, has no bodies in `doc`: its Import feature holds
-/// neither STEP text nor records, as a file saved without linked bodies keeps it.
+/// neither STEP text nor records, as a file saved without linked bodies keeps it. A link to a
+/// STEP file always keeps its bodies ([`leave_out_linked_bodies`]).
 fn left_out(doc: &Document, comp: u64, link: &DesignLink) -> bool {
-    doc.feature(link.feature)
-        .filter(|f| f.component == comp)
-        .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
+    link.step_names.is_none()
+        && doc
+            .feature(link.feature)
+            .filter(|f| f.component == comp)
+            .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
 }
 
 /// `design`, the copy of `doc` a save writes, without the bodies of its linked designs: each
 /// link's Import feature loses its STEP text and its records, and the copy says so
 /// ([`Document::linked_bodies_left_out`]), so opening it reads them from the linked files again
 /// ([`read_left_out_bodies`]). A link whose file cannot be reached now, or changed since the
-/// link read it, keeps its bodies: they may be the only copy ([`link_file_problem`]). `doc` is
+/// link read it, keeps its bodies: they may be the only copy ([`link_file_problem`]). A link to
+/// a STEP file (Insert STEP) keeps its bodies too: only linked designs are left out. `doc` is
 /// the design in the session, saved at `from`, whose link paths are whole.
 pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document>, doc: &Document, from: Option<&str>) {
-    let features: Vec<u64> =
-        doc.links.iter().filter(|(comp, link)| link_file_problem(doc, **comp, link, from).is_none()).map(|(_, l)| l.feature).collect();
+    let features: Vec<u64> = doc
+        .links
+        .iter()
+        .filter(|(comp, link)| link.step_names.is_none() && link_file_problem(doc, **comp, link, from).is_none())
+        .map(|(_, l)| l.feature)
+        .collect();
     let design = design.to_mut();
     design.linked_bodies_left_out = true;
     for id in features {
@@ -208,7 +216,7 @@ pub(super) fn kept_linked_bodies(s: &Session) -> Vec<String> {
     s.doc
         .links
         .iter()
-        .filter(|(comp, link)| !left_out(&s.doc, **comp, link))
+        .filter(|(comp, link)| link.step_names.is_none() && !left_out(&s.doc, **comp, link))
         .filter_map(|(comp, link)| {
             let why = link_file_problem(&s.doc, *comp, link, from)?;
             let name = s.doc.components.iter().find(|c| c.id == *comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
@@ -580,7 +588,7 @@ fn remember_read(
     });
 }
 
-/// The bytes of the design at `file`, which must not be the design saved at `own`.
+/// The bytes of the source at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     // A network location only when its server is allowed, a device never: judged from the text
@@ -638,6 +646,26 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
         digests.push((file, stamp, digest.clone()));
     }
     Some(digest)
+}
+
+/// Only STEP has a source link; other formats accepted by Insert STEP keep their old behaviour.
+pub(super) fn is_step_source(path: &str) -> bool {
+    Path::new(path).extension().and_then(|x| x.to_str()).is_some_and(|x| x.eq_ignore_ascii_case("step") || x.eq_ignore_ascii_case("stp"))
+}
+
+/// Read either kind of linked source into the same replacement and reference-matching path.
+fn source_bodies(file: &Path, bytes: &[u8], link: &DesignLink, validation: solidcraft_kernel::Validation) -> Result<(Linked, LinkedImages)> {
+    let Some(names) = &link.step_names else { return design_bodies(file, bytes, selected_configuration(link), validation) };
+    let names = solidcraft_io::StepNames::parse(names).ok_or_else(|| EngineError::Other("invalid linked STEP naming policy".into()))?;
+    let shown = file.to_string_lossy();
+    let mut feature = solidcraft_io::step_import_feature_named(bytes, &shown, names).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    // Assembly body slots and offsets are retained by the Import feature, like body names.
+    // Repeated placements must remain skipped rather than being imported a second time.
+    if let FeatureKind::Import { skip, .. } = &mut feature.kind {
+        *skip = super::file::import::step_skip(&feature.import);
+    }
+    remember_read(file, None, digest(bytes), &feature, &[], &[], &Default::default(), &[]);
+    Ok(((feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()), (Vec::new(), Vec::new())))
 }
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature, and its canvases and
@@ -875,19 +903,36 @@ fn material_fingerprint(doc: &Document, material: &str) -> Result<Option<String>
     doc.user_material(material).map(LinkedBodyProperties::fingerprint).transpose().map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// `name` without the ` (linked N)` suffixes inheriting a linked material may have added.
+fn linked_stem(name: &str) -> &str {
+    let mut stem = name;
+    while let Some(rest) = stem.strip_suffix(')')
+        && let Some((head, n)) = rest.rsplit_once(" (linked ")
+        && !n.is_empty()
+        && n.bytes().all(|b| b.is_ascii_digit())
+    {
+        stem = head;
+    }
+    stem
+}
+
 /// Copy a design-owned definition without changing a same-named assembly material.
 fn inherit_material(doc: &mut Document, source: &SourceProperties, previous: Option<&str>) -> Result<String> {
     let Some(definition) = &source.definition else { return Ok(source.material.clone()) };
-    for existing in &doc.user_materials {
-        // Equal density/optics do not make differently named materials interchangeable.
-        // A previous disambiguated copy can be reused on subsequent source updates.
-        if !existing.name.eq_ignore_ascii_case(&definition.name) && previous != Some(existing.name.as_str()) {
-            continue;
-        }
-        let mut candidate = definition.clone();
-        candidate.name.clone_from(&existing.name);
-        if &candidate == existing {
-            return Ok(existing.name.clone());
+    let stem = linked_stem(&definition.name);
+    let short: String = stem.chars().take(64).collect();
+    // Equal density/optics do not make differently named materials interchangeable. The same
+    // name, or the previous disambiguated copy on a source update, is reused first; then an equal
+    // `(linked N)` copy of the same name another body made.
+    let exact = |m: &UserMaterial| m.name.eq_ignore_ascii_case(&definition.name) || previous == Some(m.name.as_str());
+    let copy = |m: &UserMaterial| [stem, short.as_str()].iter().any(|n| linked_stem(&m.name).eq_ignore_ascii_case(n));
+    for same_name in [&exact as &dyn Fn(&UserMaterial) -> bool, &copy] {
+        for existing in doc.user_materials.iter().filter(|m| same_name(m)) {
+            let mut candidate = definition.clone();
+            candidate.name.clone_from(&existing.name);
+            if &candidate == existing {
+                return Ok(existing.name.clone());
+            }
         }
     }
     if doc.user_materials.len() >= solidcraft_doc::MAX_USER_MATERIALS {
@@ -1269,6 +1314,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             inherited: Vec::new(),
             inherited_metadata: metadata,
             file_sha256: Some(read),
+            step_names: None,
         },
     );
     s.refresh();
@@ -1329,9 +1375,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|x| x.id == *c).map_or_else(|| c.to_string(), |x| x.name.clone());
         return Err(bad(cmd, format!("{name}: that component is not linked to a design")));
     }
-    // A list goes on past a design it cannot read: that link keeps its bodies and is named in
+    // A batch goes on past a source it cannot read: that link keeps its bodies and is named in
     // `failed`, so the others still come in as one step (#9743).
-    let go_on = p.get("components").is_some();
+    let go_on = p.get("component").is_none();
     // Linked designs saved without bodies of their own follow the caller's rule as they open.
     let _reading = Opening::enter(s.path.as_deref(), LinkedRead::read(p, cmd)?);
     let links: Vec<(u64, DesignLink)> =
@@ -1370,7 +1416,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let kept_faces = s
             .doc
             .feature(link.feature)
-            .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
+            .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
             let meshes = link_meshes(s, comp, link.feature);
@@ -1389,7 +1435,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
+        let (_, sf, faces, metadata, properties, meshes) = match source_bodies(&file, &bytes, &link, s.validation()) {
             Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -1427,6 +1473,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                 ));
             }
         }
+        let before = s.model.result(link.feature).map(|r| r.state.clone());
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
                 // Bodies keep their names where the design still has as many.
@@ -1439,6 +1486,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             f.link_faces = faces;
         }
         s.refresh();
+        if !same && let (Some(before), Some(after)) = (before, s.model.result(link.feature).map(|r| r.state.clone())) {
+            warnings.extend(s.doc_mut().rebind_linked_faces(link.feature, &before, &after));
+            s.refresh();
+        }
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed {
             updated.push(cname)
@@ -1539,7 +1590,7 @@ fn set_link_meshes(s: &mut Session, comp: u64, link: u64, name: &str, file: &str
 fn numbered_references(s: &Session, comp: u64, feature: u64) -> Vec<String> {
     let numbered = format!("F{feature}:face:");
     let on = |o: &solidcraft_doc::joints::JointOrigin| {
-        s.doc.occurrences.iter().any(|x| x.id == o.part() && x.component == comp)
+        s.doc.occurrences.iter().any(|x| x.id == o.part() && s.doc.component_within(x.component, comp))
             && o.snap.face_names().iter().any(|n| n.trim_start_matches(solidcraft_doc::naming::LEGACY_MARK).starts_with(&numbered))
     };
     let joints = s.doc.assembly.joints.iter().filter(|j| on(&j.a) || on(&j.b)).map(|j| format!("joint {}", j.name));
@@ -1553,6 +1604,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.relink";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    if link.step_names.is_some() {
+        return Err(bad(cmd, "STEP sources cannot be relinked to a design; break the link and insert the new STEP file"));
+    }
     if !matches!(s.doc.feature(link.feature), Some(f) if f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
         return Err(bad(cmd, "the linked bodies are gone; break the link or insert the design again"));
     }
@@ -2303,6 +2357,42 @@ mod tests {
         assert_eq!(list["errors"][0]["name"], "PinInHole", "{list}");
         assert!(list["joints"][0]["frame_a"].is_null(), "{list}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn step_links_keep_resolving_joint_faces_and_report_a_removed_hole() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-step-link-joints-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut part = plate(&dir.join("plate.sc"));
+        let path = dir.join("plate.step");
+        run(&mut part, "file.export", json!({"path": path}));
+        let mut s = Session::default();
+        run(&mut s, "file.insert_step", json!({"path": path, "name": "Plate"}));
+        run(&mut s, "occurrence.ground", json!({"occurrence": "Plate:1", "grounded": true}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 50, 0], "operation": "new", "body_name": "PinBody"}));
+        run(&mut s, "component.create", json!({"name": "Pin", "parent": "root", "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": ["PinBody"], "component": "Pin"}));
+        run(
+            &mut s,
+            "joint.create",
+            json!({"type": "rigid", "name": "PinInHole", "flip": true,
+            "a": {"occurrence": "Plate:1", "circle": [13, 0, 5]}, "b": {"occurrence": "Pin:1", "circle": [3, 50, 0]}}),
+        );
+        let joint = s.doc.assembly.joints.iter().find(|j| j.name == "PinInHole").unwrap().id;
+        assert_joint_at(&mut s, 10.0, "inserted STEP");
+        run(&mut part, "parameters.change", json!({"name": "hx", "expression": "20 mm"}));
+        run(&mut part, "file.export", json!({"path": path}));
+        let reply = run(&mut s, "component.update_links", json!({}));
+        assert!(reply["warnings"].to_string().contains("PinInHole"), "positional STEP faces need a reminder: {reply}");
+        assert_joint_at(&mut s, 20.0, "updated STEP");
+        assert!(s.doc.assembly.joints.iter().any(|j| j.id == joint));
+        run(&mut part, "timeline.delete", json!({"feature": "Hole"}));
+        run(&mut part, "file.export", json!({"path": path}));
+        let reply = run(&mut s, "component.update_links", json!({}));
+        let list = run(&mut s, "joint.list", json!({}));
+        assert!(reply["warnings"].to_string().contains("PinInHole"), "{reply}");
+        assert_eq!(list["errors"][0]["name"], "PinInHole", "{list}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Two arms jointed top face to bottom face, both occurrences of one linked arm design: when

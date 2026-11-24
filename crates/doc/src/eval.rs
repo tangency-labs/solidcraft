@@ -1353,10 +1353,14 @@ impl ModelState {
                     b.bytes = if x.bytes > 0 { x.bytes } else { b.body.retained_bytes() };
                 }
                 None => {
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    (key, &b.name).hash(&mut h);
-                    b.key = h.finish();
-                    if !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
+                    let stamped = made_body_key(key, &b.name);
+                    // A body a saved model kept, given back by what its feature read
+                    // ([`Model::adopt`]), was stamped with this key when it was made: it keeps the
+                    // names it was saved with, as the whole state taken back does, since its record
+                    // holds no lineage to trace them from again.
+                    let saved = b.key == stamped && b.lineage().is_none() && b.names.is_saved();
+                    b.key = stamped;
+                    if !saved && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
                         b.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
                     }
                     // Faces split on purpose stay split through later features (for export).
@@ -1390,6 +1394,14 @@ impl ModelState {
             self.sketch_keys.insert(feature, h.finish());
         }
     }
+}
+
+/// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
+/// made or changed.
+fn made_body_key(key: u64, name: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (key, name).hash(&mut h);
+    h.finish()
 }
 
 /// Evaluation results by cache key, shared by a model and its copies (previews, scratch
@@ -3575,6 +3587,15 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // fold in here, each relative to the reading component, as `reads.paths` does.
             return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
+        FeatureKind::MeshReduce { body, .. } => {
+            reads.placed_body(st, body);
+            if let Some(st) = st {
+                let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+                serde_json::to_string(&doc.body_offsets.get(&name)).unwrap_or_default().hash(&mut h);
+            } else {
+                reads.all = true;
+            }
+        }
         // A component's envelope bounds what is placed inside it, where it stands in its frame:
         // moving a part inside it builds it again, moving the component does not.
         FeatureKind::BoundingSolid { contents: true, .. } => return contents_digest(doc, f, st),
@@ -3877,6 +3898,40 @@ impl Model {
     /// and evaluation owed, which reads it again as read.
     pub fn settle_import_checks(&mut self) -> bool {
         self.settle_import_checks_under(kernel::heals_tolerance_defects())
+    }
+
+    /// Call `wake` once the SMLib check of each import's parts still running ends
+    /// ([`kernel::ImportChecks::on_end`]): a window asks for the frame the result needs when it
+    /// lands, instead of asking [`Self::checking_imports`] every frame while the checks run.
+    /// Every check that ends in the meantime calls it at once; a model with none running wakes
+    /// nothing.
+    pub fn on_import_checks_end(&self, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        for r in &self.results {
+            if let Some(report) = &r.import_report
+                && report.checks.is_running()
+            {
+                report.checks.on_end(wake.clone());
+            }
+        }
+    }
+
+    /// The import `id` has a check still running, which the returned closure ends (tests): what
+    /// [`kernel::ImportChecks::running_for_tests`] is for, on a model a window holds.
+    #[doc(hidden)]
+    pub fn running_import_check_for_tests(&mut self, id: u64) -> impl FnOnce(Vec<kernel::ImportIssue>) + Send + 'static {
+        let (checks, end) = kernel::ImportChecks::running_for_tests();
+        if let Some(r) = self.results.iter_mut().find(|r| r.id == id) {
+            let report = r.import_report.as_deref().cloned().unwrap_or(kernel::ImportReport {
+                parts: 0,
+                solids: 0,
+                issues: Vec::new(),
+                single_root: true,
+                split_edges: 0,
+                checks: checks.clone(),
+            });
+            r.import_report = Some(std::sync::Arc::new(kernel::ImportReport { checks, ..report }));
+        }
+        end
     }
 
     /// [`Self::settle_import_checks`] with the heal preference given.
@@ -10467,10 +10522,127 @@ fn occurrences_from(doc: &Document, from: u64, ids: &[u64]) -> Option<Mat> {
     Some(m)
 }
 
-/// The placements (column-major matrices) of a pattern's copies, the original excluded.
+/// The placements (column-major matrices) of a pattern's copies, the original excluded, read
+/// with the values the features are built with, so a bare number in an expression is in the
+/// design's unit (#8523).
 pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<[[f64; 4]; 4]>> {
-    let (vals, _) = doc.param_values();
+    let vals = doc.evaluation_values();
     pattern_transforms(doc, &vals, st, 0, p)
+}
+
+/// A pattern count: a whole number of 1 to [`MAX_INSTANCES`].
+fn pattern_count(vals: &BTreeMap<String, Value>, e: &str) -> Result<usize> {
+    let n = expr::eval_count(e, vals)?;
+    if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
+        return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+    }
+    Ok(n as usize)
+}
+
+/// One direction of a rectangular pattern, worked out from its distance type (#8523).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternRow {
+    /// How many, the original included.
+    pub count: usize,
+    /// The step between neighbours.
+    pub step: f64,
+    /// Copy at the end: the length the row spans, its last copy at the extent's end and the gap
+    /// before it shorter than `step` (centred: half of it each way, a copy at either end).
+    pub end: Option<f64>,
+}
+
+impl PatternRow {
+    /// Each one's offset along the direction in slot order, the original's (zero) first, placed
+    /// by the alignment and Flip as the copies always were. With Copy at the end, the last slot
+    /// moves to where the whole row spans exactly the extent; centred, the outermost slot on
+    /// each side moves to half the extent that way.
+    pub fn offsets(&self, alignment: solidcraft_sketch::PatternAlignment, reversed: bool) -> Vec<f64> {
+        let mut out: Vec<f64> = (0..self.count).map(|i| self.step * alignment.multiplier(i, reversed)).collect();
+        let last = self.count.saturating_sub(1);
+        if let Some(end) = self.end
+            && alignment == solidcraft_sketch::PatternAlignment::Center
+        {
+            let outer = (0..self.count).map(|i| alignment.multiplier(i, reversed).abs()).fold(0.0_f64, f64::max);
+            for (i, slot) in out.iter_mut().enumerate() {
+                let m = alignment.multiplier(i, reversed);
+                if outer > 0.0 && m.abs() == outer {
+                    *slot = end / 2.0 * m.signum();
+                }
+            }
+        } else if let Some(end) = self.end
+            && last > 0
+        {
+            let others = out.iter().take(last);
+            let lo = others.clone().copied().fold(0.0_f64, f64::min);
+            let hi = others.copied().fold(0.0_f64, f64::max);
+            let ahead = alignment.multiplier(last, reversed) >= 0.0;
+            if let Some(slot) = out.get_mut(last) {
+                *slot = if ahead { lo + end } else { hi - end };
+            }
+        }
+        out
+    }
+}
+
+/// One rectangular pattern direction from its distance type and the expressions it uses: the
+/// count, the spacing and the extent (one it doesn't use may be anything, or left out). A
+/// centred direction set by spacing and extent reaches half the extent each way from the
+/// original, with as many copies on each side.
+pub fn pattern_row(
+    vals: &BTreeMap<String, Value>,
+    distance: crate::PatternDistance,
+    count: Option<&str>,
+    spacing: Option<&str>,
+    extent: Option<&str>,
+    copy_at_end: bool,
+    alignment: solidcraft_sketch::PatternAlignment,
+) -> Result<PatternRow> {
+    use crate::PatternDistance as D;
+    let missing = |what: &str| DocError::Invalid(format!("the pattern's {what} is missing"));
+    let positive = |e: Option<&str>, what: &str| -> Result<f64> {
+        let v = val(vals, e.ok_or_else(|| missing(what))?, Kind::Length)?;
+        if !v.is_finite() || v <= 0.0 || v >= 1e9 {
+            return Err(DocError::Invalid(format!("the pattern's {what} must be greater than zero")));
+        }
+        Ok(v)
+    };
+    match distance {
+        D::CountSpacing => {
+            let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
+            let step = val(vals, spacing.ok_or_else(|| missing("spacing"))?, Kind::Length)?;
+            Ok(PatternRow { count: n, step, end: None })
+        }
+        D::CountExtent => {
+            let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
+            let extent = positive(extent, "extent")?;
+            let step = if n > 1 { extent / (n - 1) as f64 } else { 0.0 };
+            Ok(PatternRow { count: n, step, end: None })
+        }
+        D::SpacingExtent => {
+            let step = positive(spacing, "spacing")?;
+            let extent = positive(extent, "extent")?;
+            let centred = alignment == solidcraft_sketch::PatternAlignment::Center;
+            // How far the copies reach on each side they go to.
+            let reach = if centred { extent / 2.0 } else { extent };
+            // Float noise such as 0.1 + 0.2 must not lose the copy at the extent's end.
+            let tol = 1e-9 * extent.max(1.0);
+            if step > reach + tol {
+                let what = if centred { "half its extent" } else { "its extent" };
+                return Err(DocError::Invalid(format!("the pattern's spacing ({step} mm) is longer than {what} ({extent} mm)")));
+            }
+            let sides = if centred { 2 } else { 1 };
+            let fit = ((reach + tol) / step).floor();
+            if !fit.is_finite() || fit * sides as f64 >= MAX_INSTANCES as f64 {
+                return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+            }
+            let gaps = fit as usize * sides;
+            let short = reach - fit * step > tol;
+            if copy_at_end && short {
+                return Ok(PatternRow { count: gaps + 1 + sides, step, end: Some(extent) });
+            }
+            Ok(PatternRow { count: gaps + 1, step, end: None })
+        }
+    }
 }
 
 /// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
@@ -10479,7 +10651,9 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
 /// occurrence ids.
 pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
     let marker = doc.marker.unwrap_or(doc.features.len());
-    let (vals, _) = doc.param_values();
+    // The values the features are built with, as `pattern_matrices` reads them when the copies
+    // are first placed: a bare number is in the design's unit (#8523).
+    let vals = doc.evaluation_values();
     // Snapshot what each Pattern of components wants, then mutate. Features after the marker
     // are rolled back: their copies go, like bodies of a rolled-back Pattern.
     let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
@@ -10566,33 +10740,51 @@ fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> 
 }
 
 fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
-    let count = |e: &str| -> Result<usize> {
-        let n = expr::eval_count(e, vals)?;
-        if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
-            return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
-        }
-        Ok(n as usize)
-    };
+    let count = |e: &str| pattern_count(vals, e);
     let mut out = Vec::new();
     match p {
-        crate::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let (n1, s1) = (count(count1)?, val(vals, spacing1, Kind::Length)?);
+        crate::PatternKind::Rectangular {
+            dir1,
+            count1,
+            spacing1,
+            dir2,
+            count2,
+            spacing2,
+            alignment,
+            alignment2,
+            reversed,
+            reversed2,
+            distance1,
+            distance2,
+            extent1,
+            extent2,
+            copy_at_end1,
+            copy_at_end2,
+        } => {
+            let row1 = pattern_row(vals, *distance1, Some(count1), Some(spacing1), extent1.as_deref(), *copy_at_end1, *alignment)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
-            let (n2, s2, d2) = match (dir2, count2, spacing2) {
-                (Some(d), Some(c), Some(sp)) => {
-                    (count(c)?, val(vals, sp, Kind::Length)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
-                }
-                _ => (1, 0.0, Vec3::Y),
+            // A second direction without the values its distance type uses is left out, as one
+            // without a count or a spacing always was.
+            let complete = (!distance2.uses_count() || count2.is_some())
+                && (!distance2.uses_spacing() || spacing2.is_some())
+                && (!distance2.uses_extent() || extent2.is_some());
+            let (row2, d2) = match dir2 {
+                Some(d) if complete => (
+                    pattern_row(vals, *distance2, count2.as_deref(), spacing2.as_deref(), extent2.as_deref(), *copy_at_end2, *alignment2)?,
+                    d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?,
+                ),
+                _ => (PatternRow { count: 1, step: 0.0, end: None }, Vec3::Y),
             };
-            if n1.saturating_mul(n2) > MAX_INSTANCES {
+            if row1.count.saturating_mul(row2.count) > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
-            for i in 0..n1 {
-                for j in 0..n2 {
+            let (along1, along2) = (row1.offsets(*alignment, *reversed), row2.offsets(*alignment2, *reversed2));
+            for (i, a) in along1.iter().enumerate() {
+                for (j, b) in along2.iter().enumerate() {
                     if i == 0 && j == 0 {
                         continue;
                     }
-                    out.push(translation(d1 * (s1 * alignment.multiplier(i, *reversed)) + d2 * (s2 * alignment2.multiplier(j, *reversed2))));
+                    out.push(translation(d1 * *a + d2 * *b));
                 }
             }
         }
@@ -10850,6 +11042,12 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
 /// faces all lie on surfaces the body had already (a thin wall cut away between two pockets)
 /// leaves none either, so the caller compares volumes when it finds none.
 fn has_a_new_surface(old: &Body, new: &Body) -> bool {
+    new_surface_faces(old, new).into_iter().any(|f| f)
+}
+
+/// For each face of `new`, whether it lies on a surface no face of `old` lies on, compared as
+/// [`has_a_new_surface`] compares them.
+fn new_surface_faces(old: &Body, new: &Body) -> Vec<bool> {
     use kernel::FaceSurface as S;
     let tol = (old.size().max(new.size()) * 1e-7).max(1e-7);
     let parallel = |a: Vec3, b: Vec3| a.cross(b).len() <= 1e-9;
@@ -10874,10 +11072,12 @@ fn has_a_new_surface(old: &Body, new: &Body) -> bool {
     let (old_rec, new_rec) = (old.record(), new.record());
     let olds: Vec<(Option<S>, Option<&solidcore_record::brep::Surface>)> =
         (0..old.face_count()).map(|fi| (kernel::face_surface(old, fi), old_rec.faces.get(fi).map(|f| &f.surface))).collect();
-    (0..new.face_count()).rev().any(|fi| match kernel::face_surface(new, fi) {
-        Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
-        None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
-    })
+    (0..new.face_count())
+        .map(|fi| match kernel::face_surface(new, fi) {
+            Some(surface) => !olds.iter().any(|(o, _)| o.as_ref().is_some_and(|o| same(o, &surface))),
+            None => new_rec.faces.get(fi).is_some_and(|f| !olds.iter().any(|(_, o)| *o == Some(&f.surface))),
+        })
+        .collect()
 }
 
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
@@ -10999,6 +11199,143 @@ fn copies_as_bodies<'a>(copies: &[&'a [Traced]]) -> (Vec<(Body, Vec<&'a [Traced]
     (groups, one_by_one)
 }
 
+/// What a pattern's cut shows of one of its copies ([`copies_cut_by_history`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyCut {
+    /// It took material: a face of its tool is left in a body it cut.
+    Took,
+    /// It took none: no face of its tool is left anywhere, and no other copy reaches its box.
+    Missed,
+    /// The cut does not show which.
+    Unknown,
+}
+
+/// What each of a pattern's cut copies did (by its place among its instances, `instances.len()`
+/// of them: instance `first + k + 1` of source feature `src`, its tools `copies[instances[k]]`)
+/// to the bodies it cut (`before`, as they were before the cut; `count` bodies in the model
+/// then), as the cut's own history shows it (#18396: asking the kernel about every copy was half
+/// of a design's rebuild).
+///
+/// A copy took material when a face of its tool is left in a body after the cut on a surface no
+/// face of that body had before: a wall of the pocket the copy made, with material on its other
+/// side. A copy took none when no face of its tool is left in any body and no other copy's tool
+/// reaches its exact box (grown by the bodies' tolerance): a tool that shares material with a
+/// body leaves some of its boundary inside the body (the body is not inside it: it is still
+/// there), and that boundary is a face of the result unless another copy cut it away. That holds
+/// only for a body of one piece, still one piece after the cut (a tool can take a whole piece of
+/// a body of several and leave none of its faces), and for a copy whose tools' faces all trace
+/// to that copy. Anything else (a body the history does not cover, a body the cut split, a body
+/// of several pieces, a copy beside another or not traced) is not known from it.
+fn copies_cut_by_history(
+    st: &ModelState,
+    before: &[ModelBody],
+    count: usize,
+    src: u64,
+    first: usize,
+    copies: &[Traced],
+    instances: &[std::ops::Range<usize>],
+) -> Vec<CopyCut> {
+    use solidcraft_kernel::history::FaceOrigin;
+    let n = instances.len();
+    let mut took = vec![false; n];
+    let mut left = vec![false; n];
+    // Every body the copies cut is still there, alone, with what it came from.
+    let mut covered = st.bodies.len() == count;
+    for old in before {
+        let Some(now) = st.body(&old.name) else {
+            covered = false;
+            continue;
+        };
+        let crate::lineage::Made::Traced(lineage) = &now.made else {
+            covered = false;
+            continue;
+        };
+        if lineage.history.faces.len() != now.body.face_count() || old.body.is_mesh() || now.body.is_mesh() {
+            covered = false;
+            continue;
+        }
+        // A body of several pieces (or one the cut made so) can lose a whole piece to a copy
+        // that leaves no face of its own.
+        if old.body.shell_count() != 1 || now.body.shell_count() != 1 {
+            covered = false;
+        }
+        let copy_of: Vec<Option<usize>> = lineage
+            .operands
+            .iter()
+            .map(|op| match op.as_ref() {
+                crate::lineage::Operand::CopiedTool { feature, instance, .. } if *feature == src => {
+                    instance.checked_sub(first + 1).filter(|k| *k < n)
+                }
+                _ => None,
+            })
+            .collect();
+        if copy_of.iter().all(Option::is_none) {
+            continue;
+        }
+        let fresh = new_surface_faces(&old.body, &now.body);
+        for (face, fresh) in lineage.history.faces.iter().zip(fresh) {
+            for origin in &face.origins {
+                if let FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } = *origin
+                    && let Some(Some(k)) = copy_of.get(operand)
+                {
+                    if let Some(l) = left.get_mut(*k) {
+                        *l = true;
+                    }
+                    if fresh
+                        && matches!(origin, FaceOrigin::Face { .. })
+                        && let Some(t) = took.get_mut(*k)
+                    {
+                        *t = true;
+                    }
+                }
+            }
+        }
+    }
+    // Each copy's exact box over its tools, grown by twice the tolerance of the bodies it cuts
+    // (the tools' own is in [`more::exact_box`]): two copies closer than that may have the sliver
+    // between them taken by the kernel as one. None where a box can't be worked out.
+    let grow = 2.0 * before.iter().map(|b| b.body.record().tolerance).fold(0.0, f64::max);
+    let boxes: Vec<Option<solidcraft_geom::Aabb3>> = instances
+        .iter()
+        .map(|range| {
+            let tools = copies.get(range.clone())?;
+            let mut b = solidcraft_geom::Aabb3::EMPTY;
+            for t in tools {
+                if t.body.is_mesh() {
+                    return None;
+                }
+                b = b.union(&more::exact_box(&t.body)?);
+            }
+            Some(b.inflated(grow))
+        })
+        .collect();
+    // Whether every face of copy `k`'s tools traces to copy `k` alone: its tools have a lineage,
+    // and each of its operands is copy `k` of `src`'s tool.
+    let traced = |k: usize| {
+        instances.get(k).and_then(|range| copies.get(range.clone())).is_some_and(|tools| {
+            !tools.is_empty()
+                && tools.iter().all(|t| {
+                    t.lineage.as_ref().is_some_and(|l| {
+                        l.operands.iter().all(|op| {
+                            matches!(op.as_ref(), crate::lineage::Operand::CopiedTool { feature, instance, .. }
+                                if *feature == src && *instance == first + k + 1)
+                        })
+                    })
+                })
+        })
+    };
+    (0..n)
+        .map(|k| {
+            if took[k] {
+                return CopyCut::Took;
+            }
+            let alone =
+                boxes[k].is_some() && boxes.iter().enumerate().all(|(j, other)| j == k || (other.is_some() && more::boxes_apart(&boxes[k], other)));
+            if covered && !left[k] && alone && traced(k) { CopyCut::Missed } else { CopyCut::Unknown }
+        })
+        .collect()
+}
+
 /// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
 /// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
@@ -11022,6 +11359,7 @@ fn count_copy_misses(
     instances: &[std::ops::Range<usize>],
     axes: &[Vec<(Vec3, Vec3)>],
 ) -> (usize, usize) {
+    let _span = solidcraft_profile::span("doc", "copy_misses");
     let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
         miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
@@ -11805,14 +12143,16 @@ fn replay(
                 instances.push(start..copies.len());
             }
         }
-        if op == Operation::Cut {
-            // Checked against the bodies the copies cut, in the frames they cut them in.
-            let into: Vec<String> = miss_scope(st, f, &targets).map(|b| b.name.clone()).collect();
-            let shown = targets_as_shown(st, f, &into)?;
-            let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &instances, &axes);
-            missed += m;
-            total += t;
-        }
+        // Checked against the bodies the copies cut, in the frames they cut them in, as they were
+        // before the cut.
+        let miss_check = match op {
+            Operation::Cut => {
+                let into: Vec<String> = miss_scope(st, f, &targets).map(|b| b.name.clone()).collect();
+                let before: Vec<ModelBody> = st.bodies.iter().filter(|b| into.contains(&b.name)).cloned().collect();
+                Some((targets_as_shown(st, f, &into)?.into_owned(), before, st.bodies.len(), copies.clone()))
+            }
+            _ => None,
+        };
         // New bodies from a pattern join their source when they touch it (as one feature would).
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;
@@ -11821,6 +12161,19 @@ fn replay(
             let mut named = f.clone();
             named.body_names = f.body_names.iter().skip(start).cloned().collect();
             apply_traced(doc, st, &named, copies, op, &targets)?;
+        }
+        if let Some((shown, before, count, copies)) = miss_check {
+            // A copy whose tool left a wall in a target took material: the cut says so itself
+            // (#18396: asking the kernel about every copy was half of a design's rebuild). The
+            // copies it does not show are asked about as before.
+            let cut = copies_cut_by_history(st, &before, count, src.id, *first, &copies, &instances);
+            let unsure: Vec<usize> = (0..instances.len()).filter(|k| cut.get(*k).is_none_or(|c| *c == CopyCut::Unknown)).collect();
+            let some_instances: Vec<std::ops::Range<usize>> = unsure.iter().filter_map(|k| instances.get(*k).cloned()).collect();
+            let some_axes: Vec<Vec<(Vec3, Vec3)>> =
+                if axes.is_empty() { Vec::new() } else { unsure.iter().map(|k| axes.get(*k).cloned().unwrap_or_default()).collect() };
+            let (m, t) = count_copy_misses(&shown, f, &targets, &copies, &some_instances, &some_axes);
+            missed += m + cut.iter().filter(|c| **c == CopyCut::Missed).count();
+            total += t + (instances.len() - unsure.len());
         }
         let mut unthreaded = 0;
         for (on, reach) in axes.iter().zip(&reaches) {
@@ -14292,6 +14645,41 @@ fn eval_feature_kind(
             let result = ModelBody::new(source.name.clone(), converted, f.id);
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
+            Ok(())
+        }
+        FeatureKind::MeshReduce { body, triangle_count, percentage } => {
+            let source = st.body(body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            if doc.model_body_component(source) != f.component {
+                return Err(DocError::Invalid("activate the mesh body's component before reducing it".into()));
+            }
+            let (_, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+            let original = triangles.len();
+            let target = match (triangle_count, percentage) {
+                (Some(n), None) if *n > 0 => *n,
+                (None, Some(p)) if p.is_finite() && *p > 0.0 && *p < 100.0 => ((original as f64 * p / 100.0).floor() as usize).max(1),
+                _ => return Err(DocError::Invalid("specify exactly one positive triangle_count or percentage between 0 and 100".into())),
+            };
+            if target >= original {
+                return Err(DocError::Invalid(format!("target {target} must be less than the original {original} triangles")));
+            }
+            let (result, achieved) = kernel::reduce_mesh(&source.body, target)?;
+            if achieved >= original {
+                return Err(DocError::Invalid("mesh reduction could not remove any triangles under its geometric and topology constraints".into()));
+            }
+            if achieved > target {
+                *warning = Some(format!(
+                    "reduction stopped at {achieved} triangles; requested {target}; geometric or topology constraints prevented further reduction"
+                ));
+            }
+            let source_offset = doc.model_body_offset(source).copied();
+            let name = copy_body_name(st, f, 0, &format!("{body} Reduced"));
+            // A stored placement for the new body takes precedence. Otherwise materialize the
+            // source offset in its geometry: no new document placement is needed.
+            let result = match source_offset.filter(|_| !doc.body_offsets.contains_key(&name)) {
+                Some(offset) => kernel::transform_matrix(&result, offset)?,
+                None => result,
+            };
+            st.bodies.push(ModelBody::new(name, result, f.id));
             Ok(())
         }
         FeatureKind::Repair { body, gap, patch_holes } => {

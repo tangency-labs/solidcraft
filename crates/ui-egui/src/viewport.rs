@@ -302,6 +302,15 @@ pub struct ViewportState {
     simplified_edges: SimplifiedEdges,
     /// The model scene key of the last scene built (`scene_key`).
     pub(crate) key: u64,
+    /// That key without the display refinement's generation ([`scene_key_base`]): a refinement
+    /// alone patches the scene it published ([`patch_edge_steps`]) instead of building it again.
+    key_base: u64,
+    /// The blocks of the last scene built, in its order, with the bodies each draws: only the
+    /// blocks whose bodies' edge steps changed are rebuilt for a camera move.
+    published: std::sync::Mutex<Option<PublishedBlocks>>,
+    /// The bodies whose edge step the display refinement changed since the last scene
+    /// ([`Lod::update_edges_changed`]): the scene patches their blocks when nothing else changed.
+    lod_patch: Option<Vec<usize>>,
     /// The last model scene published to the renderer, kept so levels of detail made since can
     /// be filled into it ([`publish_levels`]) without building it again.
     last_scene: std::sync::Mutex<Option<GpuScene>>,
@@ -1001,6 +1010,16 @@ fn in_view(proj: &Proj, b: &solidcraft_engine::geom::Aabb3) -> bool {
 
 fn scene_key(app: &SolveApp) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    scene_key_base(app).hash(&mut h);
+    lod_generation(app).hash(&mut h);
+    h.finish()
+}
+
+/// [`scene_key`] without the display refinement's generation: everything a camera move leaves as
+/// it was. A scene published for no other change than the refinement's generation patches the
+/// blocks whose bodies' edges changed ([`patch_edge_steps`]) instead of building itself again.
+fn scene_key_base(app: &SolveApp) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
     // Not the session revision: selection and view-only commands bump it without changing the
     // model. The document identity catches edits, including appearance-only ones (whose world
     // state may be the same Arc).
@@ -1008,7 +1027,6 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.session.colored_components.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     base_scene_key(app).hash(&mut h);
-    lod_generation(app).hash(&mut h);
     // Not the levels of detail: those made since are filled into the scene built
     // ([`publish_levels`]), each rebuild of a large scene costing a frame.
     h.finish()
@@ -1491,15 +1509,19 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
             edge_steps.push((id, ppm, q.chord(b.body.size())));
         }
     }
-    let busy = match app.viewport.lod.lock() {
+    let (busy, patch) = match app.viewport.lod.lock() {
         Ok(mut lod) => {
-            lod.update_edges(edge_steps);
-            lod.update(q, candidates, &known.live);
+            let changed = lod.update_edges_changed(edge_steps);
+            let steps = lod.update(q, candidates, &known.live);
             lod.stats.choose_ms = crate::now_ms() - t0;
-            lod.busy()
+            // Edges alone: the scene patches the blocks those bodies are in. A body drawn at
+            // another step draws other triangles, so its block is a new one: the scene is built.
+            let patch = if steps || changed.is_empty() { None } else { Some(changed) };
+            (lod.busy(), patch)
         }
-        Err(_) => false,
+        Err(_) => (false, None),
     };
+    app.viewport.lod_patch = patch;
     if busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(30));
     }
@@ -1712,6 +1734,7 @@ fn model_plan_class(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, activ
 
 /// A model scene block kept by the viewport: its bytes and the meshes they were built from
 /// (held, so no other mesh can take their addresses while the block is kept).
+#[derive(Clone)]
 pub(crate) struct CachedBlock {
     bytes: std::sync::Arc<crate::gpu::BlockBytes>,
     meshes: Vec<std::sync::Arc<solidcraft_engine::geom::Mesh>>,
@@ -1720,7 +1743,19 @@ pub(crate) struct CachedBlock {
     ranges: Vec<BodyRange>,
 }
 
+/// The blocks of the published model scene, in its order, with the bodies each draws: a camera
+/// move that only changes how those bodies' edges are simplified rebuilds their blocks and no
+/// other ([`patch_edge_steps`]).
+#[derive(Default)]
+struct PublishedBlocks {
+    /// One entry per scene block, in `GpuScene::blocks` order.
+    blocks: Vec<Vec<BodyDraw>>,
+    /// Each drawn body's block, in `blocks`, by its [`crate::display_lod::body_id`].
+    block_of: std::collections::HashMap<usize, usize>,
+}
+
 /// One body's share of a block.
+#[derive(Clone)]
 struct BodyRange {
     name: String,
     /// Its vertices: three per triangle, in mesh order (none when its faces are drawn elsewhere).
@@ -1941,6 +1976,9 @@ struct CopyLook {
 struct BodyDraw {
     /// The body's name in the world state, for the highlight's lookup of its triangles.
     name: String,
+    /// Its [`crate::display_lod::body_id`]: the id the display refinement names it by, so a
+    /// changed edge step finds its block ([`PublishedBlocks::block_of`]).
+    id: usize,
     /// Its mesh where it stands, or (with `place`) the shared mesh `place` moves there.
     mesh: std::sync::Arc<solidcraft_engine::geom::Mesh>,
     /// The move from `mesh` to where the body stands, for a body drawn as an instance.
@@ -2101,24 +2139,24 @@ fn push_block(
     kept: &mut std::collections::HashMap<u64, CachedBlock>,
     made: &mut std::collections::HashMap<u64, CachedBlock>,
     key: u64,
-    draws: Vec<BodyDraw>,
+    draws: &[BodyDraw],
     shaded: bool,
     build: impl Fn(&BodyDraw, &mut crate::gpu::BlockBuilder),
 ) {
-    let same = |c: &CachedBlock| c.meshes.len() == draws.len() && c.meshes.iter().zip(&draws).all(|(m, d)| std::sync::Arc::ptr_eq(m, &d.mesh));
+    let same = |c: &CachedBlock| c.meshes.len() == draws.len() && c.meshes.iter().zip(draws).all(|(m, d)| std::sync::Arc::ptr_eq(m, &d.mesh));
     let classes_same = |c: &CachedBlock| {
         c.ranges.len() == draws.len()
-            && c.ranges.iter().zip(&draws).all(|(r, d)| std::sync::Arc::ptr_eq(&r.face_classes, &d.face_classes) || r.face_classes == d.face_classes)
+            && c.ranges.iter().zip(draws).all(|(r, d)| std::sync::Arc::ptr_eq(&r.face_classes, &d.face_classes) || r.face_classes == d.face_classes)
     };
     let mut block = match kept.remove(&key).or_else(|| made.remove(&key)).filter(same) {
         Some(c) if classes_same(&c) => c,
-        Some(c) => reindex_block(c, &draws),
-        None => build_block(&draws, shaded, &build),
+        Some(c) => reindex_block(c, draws),
+        None => build_block(draws, shaded, &build),
     };
     // The body names are not part of a block's key (its bytes are the same whatever a body is
     // called): keep the ranges' names those of the bodies drawn from them this time.
     if block.ranges.len() == draws.len() {
-        for (range, d) in block.ranges.iter_mut().zip(&draws) {
+        for (range, d) in block.ranges.iter_mut().zip(draws) {
             if range.name != d.name {
                 range.name.clone_from(&d.name);
             }
@@ -2559,7 +2597,77 @@ fn shared_mesh(
 fn publish_model_scene(app: &mut SolveApp, key: u64) {
     // Levels made while it is built are filled in afterwards.
     let lods = app.viewport.mesh_lods.generation();
-    let sc = build_scene(app);
+    let (sc, published) = build_scene_published(app);
+    if let Ok(mut last) = app.viewport.last_scene.lock() {
+        *last = Some(sc.clone());
+    }
+    if let Ok(mut slot) = app.viewport.slot.lock() {
+        *slot = Some(sc);
+    }
+    if let Ok(mut p) = app.viewport.published.lock() {
+        *p = Some(published);
+    }
+    app.viewport.key = key;
+    app.viewport.key_base = scene_key_base(app);
+    app.viewport.patches = 0;
+    app.viewport.lods_seen = lods;
+    app.viewport.scenes_built += 1;
+    app.viewport.lod_patch = None;
+}
+
+/// Publish a scene whose blocks only the display refinement changed: the bodies whose edge step
+/// changed ([`Lod::update_edges_changed`]) have the blocks they are in rebuilt, from the draws
+/// the published scene kept, and no other block is touched. Nothing else may have changed: the
+/// key without the refinement's generation is the published one's. Whether the scene was
+/// published this way, else it must be built.
+fn patch_edge_steps(app: &mut SolveApp, key: u64) -> bool {
+    let Some(changed) = app.viewport.lod_patch.take() else { return false };
+    if changed.is_empty() || scene_key_base(app) != app.viewport.key_base {
+        return false;
+    }
+    let Some(mut published) = app.viewport.published.lock().ok().and_then(|mut p| p.take()) else { return false };
+    let patched = patch_blocks(app, &mut published, &changed, key);
+    if let Ok(mut p) = app.viewport.published.lock() {
+        *p = Some(published);
+    }
+    patched
+}
+
+/// [`patch_edge_steps`] over the published blocks, taken out of their cell.
+fn patch_blocks(app: &mut SolveApp, published: &mut PublishedBlocks, changed: &[usize], key: u64) -> bool {
+    let Some(mut sc) = app.viewport.last_scene.lock().ok().and_then(|last| last.clone()) else { return false };
+    let (shaded, edges, hidden_edges, markers) = block_flags(app);
+    let dirty: std::collections::BTreeSet<usize> = changed.iter().filter_map(|id| published.block_of.get(id).copied()).collect();
+    if dirty.is_empty() {
+        // Bodies the scene does not draw (hidden, or of another view) changed: nothing to rebuild.
+        app.viewport.key = key;
+        return true;
+    }
+    let tolerances: std::collections::HashMap<usize, f64> = {
+        let Ok(lod) = app.viewport.lod.lock() else { return false };
+        dirty.iter().filter_map(|i| published.blocks.get(*i)).flatten().map(|d| (d.id, lod.edge_tolerance_of(d.id))).collect()
+    };
+    for index in dirty {
+        let Some(draws) = published.blocks.get_mut(index) else { continue };
+        for d in draws.iter_mut() {
+            d.edge_tol = tolerances.get(&d.id).copied().unwrap_or(d.edge_tol);
+        }
+        let rebuilt_key = block_key(draws, shaded, edges, hidden_edges, markers);
+        let rebuilt = build_block(draws, shaded, &|d, out| d.build(out, shaded, edges, hidden_edges, markers));
+        let old = sc.blocks.get(index).map(|b| b.key);
+        if let Some(block) = sc.blocks.get_mut(index) {
+            *block = crate::gpu::SceneBlock { key: rebuilt_key, bytes: rebuilt.bytes.clone() };
+        }
+        // The next build of the whole scene finds this block ready under its new key.
+        if let (Some(old), Ok(mut blocks)) = (old, app.viewport.blocks.lock()) {
+            if old != rebuilt_key {
+                blocks.remove(&old);
+            }
+            blocks.insert(rebuilt_key, rebuilt.clone());
+        }
+        // Whole-body highlights name the block by its key: point them at the rebuilt one.
+        repoint_body_block(app, old, rebuilt_key, &rebuilt);
+    }
     if let Ok(mut last) = app.viewport.last_scene.lock() {
         *last = Some(sc.clone());
     }
@@ -2567,9 +2675,51 @@ fn publish_model_scene(app: &mut SolveApp, key: u64) {
         *slot = Some(sc);
     }
     app.viewport.key = key;
-    app.viewport.patches = 0;
-    app.viewport.lods_seen = lods;
-    app.viewport.scenes_built += 1;
+    app.viewport.patches += 1;
+    true
+}
+
+/// Which parts of a block's bytes the view draws: shaded faces, edges, the edges behind the
+/// model, and vertex markers (the flags [`BodyDraw::key`] and [`BodyDraw::build`] take).
+fn block_flags(app: &SolveApp) -> (bool, bool, bool, bool) {
+    let (shaded, edges) = match app.ui.visual_style {
+        1 => (true, false),
+        2 => (false, true),
+        _ => (true, true),
+    };
+    (shaded, edges, app.ui.visual_style == 3, app.preferences.vertex_markers)
+}
+
+/// The key of a block drawing `draws`, in order: how [`body_scene`] keys each run.
+fn block_key(draws: &[BodyDraw], shaded: bool, edges: bool, hidden_edges: bool, markers: bool) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for d in draws {
+        d.key(shaded, edges, hidden_edges, markers).hash(&mut h);
+        d.edge_tol.to_bits().hash(&mut h);
+    }
+    h.finish()
+}
+
+/// Point the whole-body highlights of a rebuilt block at its new key ([`keep_body_tris`]' maps
+/// name the block a body's triangles are in).
+fn repoint_body_block(app: &SolveApp, old: Option<u64>, new: u64, block: &CachedBlock) {
+    let (Ok(mut tris), Ok(mut lines)) = (app.viewport.body_tris.lock(), app.viewport.body_lines.lock()) else { return };
+    for range in &block.ranges {
+        if !range.vertices.is_empty()
+            && let Some(t) = tris.get_mut(&range.name)
+            && Some(t.block) == old
+        {
+            t.block = new;
+            t.tris = range.opaque.clone();
+            t.vertices = range.vertices.clone();
+        }
+        if !range.lines.is_empty()
+            && let Some(l) = lines.get_mut(&range.name)
+            && Some(l.0) == old
+        {
+            *l = (new, range.lines.clone());
+        }
+    }
 }
 
 /// Fill the levels of detail made since into the published model scene and hand it to the
@@ -2624,12 +2774,20 @@ fn published_key(app: &SolveApp) -> u64 {
     h.finish()
 }
 
+#[cfg(test)]
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
+    build_scene_published(app).0
+}
+
+/// [`build_scene`], with the bodies each block draws: a camera move that only changes how the
+/// bodies' edges are simplified rebuilds just the blocks those bodies are in
+/// ([`patch_edge_steps`]).
+fn build_scene_published(app: &SolveApp) -> (GpuScene, PublishedBlocks) {
     // Bodies where their occurrences place them.
     let st = crate::open_meshing::shown_world(app);
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-    let (mut sc, made) = body_scene(app, &st, |_| true, true, &mut kept);
+    let (mut sc, made, draws) = body_scene(app, &st, |_| true, true, &mut kept);
     app.viewport.simplified_edges.prune();
     keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {
@@ -2640,7 +2798,13 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     continuity_seams(&mut sc, app);
     isocurves(&mut sc, app);
     crate::edit_in_place::draw_context(app, &mut sc);
-    sc
+    let mut block_of = std::collections::HashMap::with_capacity(sc.blocks.len() * 8);
+    for (i, block) in draws.iter().enumerate() {
+        for d in block {
+            block_of.insert(d.id, i);
+        }
+    }
+    (sc, PublishedBlocks { blocks: draws, block_of })
 }
 
 /// Section: the outline of each body where each plane cuts what the section keeps, and where two
@@ -2767,7 +2931,7 @@ fn body_scene(
     takes: impl Fn(usize) -> bool,
     whole: bool,
     kept: &mut std::collections::HashMap<u64, CachedBlock>,
-) -> (GpuScene, std::collections::HashMap<u64, CachedBlock>) {
+) -> (GpuScene, std::collections::HashMap<u64, CachedBlock>, Vec<Vec<BodyDraw>>) {
     let tk = Tokens::get();
     let s = &app.session;
     let active_bodies = active_body_names(app);
@@ -2844,6 +3008,9 @@ fn body_scene(
     let mut copy_looks: std::collections::HashMap<(usize, u64, bool, crate::gpu::PaletteIndex, u32), CopyLook> = std::collections::HashMap::new();
     let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(arena.entries()).with_motions(arena.motions()));
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
+    // The whole scene's blocks' draws, in `sc.blocks` order, kept so a camera move patches the
+    // blocks whose bodies' edges changed ([`patch_edge_steps`]).
+    let mut published: Vec<Vec<BodyDraw>> = Vec::new();
     let mut run: Vec<BodyDraw> = Vec::new();
     let mut run_key = std::collections::hash_map::DefaultHasher::new();
     // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
@@ -2998,6 +3165,7 @@ fn body_scene(
         // body with face looks keeps its own: its parts are a look's faces each).
         let edges_shared = instanced.is_some() && face_looks.is_empty() && instances.edges.is_some();
         let name = b.name.clone();
+        let id = crate::display_lod::body_id(b).0;
         // Drawn from its own triangles or plan, its faces painted or not: in its face slots, which
         // a copy shares with the others and which name no motion (with none, the arena full, its
         // faces are drawn in its own colour slot, which does).
@@ -3009,6 +3177,7 @@ fn body_scene(
         let body = match instanced {
             Some((mesh, place)) => BodyDraw {
                 name,
+                id,
                 mesh,
                 place: Some(place),
                 face_colors,
@@ -3027,6 +3196,7 @@ fn body_scene(
             },
             None => BodyDraw {
                 name,
+                id,
                 mesh: drawn_mesh(app, b),
                 place: None,
                 face_colors,
@@ -3054,11 +3224,17 @@ fn body_scene(
         if key.is_multiple_of(16) || run.len() >= 64 {
             let draws = std::mem::take(&mut run);
             let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, kept, &mut made, block_key, draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+            push_block(&mut sc, kept, &mut made, block_key, &draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+            if whole {
+                published.push(draws);
+            }
         }
     }
     if !run.is_empty() {
-        push_block(&mut sc, kept, &mut made, run_key.finish(), run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+        push_block(&mut sc, kept, &mut made, run_key.finish(), &run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+        if whole {
+            published.push(run);
+        }
     }
     // Every shown body has its entries, so only a larger map holds bodies no longer shown.
     if appearance.bodies.len() > shown_names.len() || appearance.keys.len() > shown_names.len() {
@@ -3076,7 +3252,7 @@ fn body_scene(
         let palette = std::sync::Arc::make_mut(&mut sc.palette);
         *palette = std::mem::take(palette).with_materials(materials);
     }
-    (sc, made)
+    (sc, made, published)
 }
 
 /// A palette slot's PBR finish in colour `color` (sRGB): the look's metallic, roughness and IOR,
@@ -4922,7 +5098,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Wireframe draws no faces, so nothing hides an edge or a vertex. `slack` is the body's own:
     // what counts as lying on the face in front depends on how coarsely that body is meshed.
     let wireframe = app.ui.visual_style == 2;
-    let hidden_edges = app.ui.visual_style == 3 && app.preferences.select_hidden_edges;
+    let hidden_edges = app.preferences.select_hidden_edges;
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
@@ -7899,8 +8075,13 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.preview.moving_layer()
         };
         if !layered && key != app.viewport.key {
-            publish_model_scene(app, key);
-            drag_layer::whole_scene_built(app);
+            // A camera move changes only how the bodies' edges are simplified: their blocks are
+            // rebuilt, and the scene is not built again (a large assembly's whole scene costs a
+            // frame). Anything else the key covers builds it.
+            if !patch_edge_steps(app, key) {
+                publish_model_scene(app, key);
+                drag_layer::whole_scene_built(app);
+            }
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
         } else if !layered {
@@ -9081,7 +9262,8 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
     {
         let shown_ms = crate::now_ms() - at;
-        if shown_ms < STATUS_TOAST_MS {
+        let sticky = app.status_sticky_at == Some(at);
+        if sticky || shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
             // A JSON save refused for its binary data offers to save the design as a container.
             let save_sc = app.status_save_sc && !undo;
@@ -9098,7 +9280,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
-                countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
+                countdown: (!sticky).then(|| (countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
@@ -9135,12 +9317,15 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                     app.status = None;
                     app.status_undo = false;
                     app.status_save_sc = false;
+                    app.status_sticky_at = None;
                 }
             }
             // One frame when it is due to go, not a frame every half second while it shows.
-            let left_ms = STATUS_TOAST_MS - shown_ms;
-            let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            if !sticky {
+                let left_ms = STATUS_TOAST_MS - shown_ms;
+                let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            }
         } else {
             app.status = None;
         }
@@ -10342,8 +10527,9 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         };
         if i == 0 {
             painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, t.body_edge));
-        } else if virtual_corners.binary_search(&i).is_ok() {
-            // A virtual sharp corner: an open square, it is not on any drawn curve.
+        } else if virtual_corners.binary_search(&i).is_ok() || p.construction {
+            // A virtual sharp corner: an open square, it is not on any drawn curve. A construction
+            // point (#18448) is one too: it is reference geometry, not a point to use.
             painter.rect_stroke(Rect::from_center_size(sp, vec2(6.0, 6.0)), 0.0, Stroke::new(1.2, c), egui::StrokeKind::Middle);
         } else {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
@@ -10377,8 +10563,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
-    // Sketch status, unless the status bar shows it (#7243).
-    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
+    // Sketch status, unless the status bar shows it (#7243). In the free corner of the view, not under the floating ribbon.
+    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive() && !crate::status_bar::shown(app)) {
         let status = if !ss.report.shown_ok() {
             solidcraft_ui_text::tr("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {
@@ -13257,6 +13443,7 @@ mod tests {
         let tol = 0.05;
         let draw = |place: solidcraft_engine::doc::Mat| BodyDraw {
             name: "Copy".into(),
+            id: 0,
             mesh: mesh.clone(),
             place: Some(place),
             face_colors: std::sync::Arc::from([]),
@@ -13452,7 +13639,7 @@ mod tests {
             app.run("occurrence.copy", json!({"component":"Part","translate":[40.0 * (k as f64 + 1.0),0,0]})).unwrap();
         }
         let st = crate::open_meshing::shown_world(&app);
-        let (scene, made) = body_scene(&app, &st, |_| true, true, &mut std::collections::HashMap::new());
+        let (scene, made, _) = body_scene(&app, &st, |_| true, true, &mut std::collections::HashMap::new());
         let ranges: Vec<&BodyRange> = made.values().flat_map(|b| &b.ranges).collect();
         assert_eq!(ranges.len(), 5, "the part and its four copies");
         let shared =
@@ -15819,14 +16006,145 @@ mod tests {
         let meshed = build_scene(&app).merged().lines;
         let key = scene_key(&app);
         // Half a pixel per millimetre: the Ø20 rims are 10 px across, simplified to a quarter pixel.
-        assert!(app.viewport.lod.lock().unwrap().update_edges([(id, Some(0.5), chord)]));
+        assert!(!app.viewport.lod.lock().unwrap().update_edges_changed([(id, Some(0.5), chord)]).is_empty());
         assert_ne!(scene_key(&app), key, "an edge step rebuilds the scene");
         let simplified = build_scene(&app).merged().lines;
         assert!(simplified.len() < meshed.len() / 2, "{} of {} line bytes", simplified.len(), meshed.len());
         assert!(points(&simplified).is_subset(&points(&meshed)), "every point drawn is a point of the meshed edges");
         // Up close (or a body that can come to the eye): drawn as meshed again.
-        assert!(app.viewport.lod.lock().unwrap().update_edges([(id, None, chord)]));
+        assert!(!app.viewport.lod.lock().unwrap().update_edges_changed([(id, None, chord)]).is_empty());
         assert_eq!(build_scene(&app).merged().lines, meshed, "without a step the edges are as meshed");
+    }
+
+    /// A camera move that only changes how the bodies' edges are simplified patches the blocks
+    /// those bodies are in: the scene is not built again, every other block keeps its bytes, and
+    /// the rebuilt one is the block a build makes.
+    #[test]
+    fn a_refinement_alone_patches_the_blocks_whose_edges_changed() {
+        use solidcraft_engine::doc::display_quality::current;
+        let mut app = row_of_cylinders(80);
+        let key = scene_key(&app);
+        publish_model_scene(&mut app, key);
+        assert_eq!(app.viewport.scenes_built, 1);
+        let scene = |app: &SolveApp| app.viewport.last_scene.lock().unwrap().clone().unwrap();
+        assert!(scene(&app).blocks.len() >= 2, "the test needs more than one block");
+        let bodies = app.session.world_state().unwrap().bodies.clone();
+        let ids: Vec<usize> = bodies.iter().map(|b| crate::display_lod::body_id(b).0).collect();
+        let chords: Vec<f64> = bodies.iter().map(|b| current().chord(b.body.size())).collect();
+        // Every body's edges simplified as a small-on-screen body draws them: every block changes.
+        let coarse: Vec<(usize, Option<f64>, f64)> = ids.iter().zip(&chords).map(|(id, c)| (*id, Some(0.5), *c)).collect();
+        let changed = app.viewport.lod.lock().unwrap().update_edges_changed(coarse.clone());
+        assert_eq!(changed.len(), ids.len(), "every body's edge step changed");
+        app.viewport.lod_patch = Some(changed);
+        let after = scene_key(&app);
+        assert_ne!(after, key, "the refinement changes the scene's key");
+        assert!(patch_edge_steps(&mut app, after), "patched, not built again");
+        assert_eq!(app.viewport.scenes_built, 1, "the scene was not built again");
+        // Then one body's edges coarser still, two steps: past the hysteresis, its block only.
+        let before: Vec<_> = scene(&app).blocks.iter().map(|b| (b.key, b.bytes.clone())).collect();
+        let mut finer = coarse;
+        if let Some(first) = finer.first_mut() {
+            first.1 = Some(0.125);
+        }
+        let changed = app.viewport.lod.lock().unwrap().update_edges_changed(finer);
+        assert_eq!(changed, vec![ids[0]], "one body's edge step changed");
+        app.viewport.lod_patch = Some(changed);
+        let after = scene_key(&app);
+        assert!(patch_edge_steps(&mut app, after), "patched");
+        assert_eq!(app.viewport.scenes_built, 1, "still not built");
+        let patched = scene(&app);
+        let rebuilt: Vec<usize> = (0..patched.blocks.len()).filter(|&i| !std::sync::Arc::ptr_eq(&before[i].1, &patched.blocks[i].bytes)).collect();
+        assert_eq!(rebuilt.len(), 1, "one block holds the body whose edges changed, of {}", patched.blocks.len());
+        // The block it rebuilt is the one a build makes; every other keeps the bytes it had.
+        let built = build_scene(&app);
+        assert_eq!(patched.blocks[rebuilt[0]].key, built.blocks[rebuilt[0]].key, "the rebuilt block's key");
+        assert_eq!(patched.blocks[rebuilt[0]].bytes.lines, built.blocks[rebuilt[0]].bytes.lines, "the rebuilt block's edges");
+        assert_eq!(patched.blocks[rebuilt[0]].bytes.vertices, built.blocks[rebuilt[0]].bytes.vertices, "the rebuilt block's triangles");
+        for (i, block) in patched.blocks.iter().enumerate() {
+            if i != rebuilt[0] {
+                assert!(std::sync::Arc::ptr_eq(&before[i].1, &block.bytes), "block {i} was not rebuilt");
+            }
+        }
+        // A body drawn at another step draws other triangles: the scene is built, never patched.
+        assert!(app.viewport.lod.lock().unwrap().force(&bodies[1], current(), 2), "the body is drawn refined");
+        app.viewport.lod_patch = None;
+        let after = scene_key(&app);
+        assert!(!patch_edge_steps(&mut app, after), "a step change builds the scene");
+    }
+
+    /// Measurement (manual): a whole model scene's build against patching it, on the design in
+    /// `SOLIDCRAFT_SCALE_DESIGN`: what a camera move costs the window thread either way. On
+    /// grid100 (56,100 bodies, ~3,600 blocks) it printed a cold build of 2,784 ms, a warm one of
+    /// 136 ms (the one a camera move did before the patch), 1.1 ms for a patch of one body in one
+    /// block and 658 ms when all 56,099 bodies' steps changed at once. Run with
+    /// `SOLIDCRAFT_SCALE_DESIGN=... cargo nextest run -p solidcraft-ui-egui --cargo-profile ci
+    /// --profile ci scene_rebuild_cost --run-ignored ignored-only --no-capture`.
+    #[test]
+    #[ignore = "manual timing on a design file"]
+    fn scene_rebuild_cost() {
+        use solidcraft_engine::doc::display_quality::current;
+        let Some(path) = std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") else { return };
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("doc.open", json!({"path": path.to_string_lossy()})).unwrap();
+        let st = h.app.session.world_state().unwrap();
+        st.warm_meshes(|| true);
+        for b in &st.bodies {
+            let _ = b.display_plan();
+        }
+        drop(st);
+        let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1e3;
+        let key = scene_key(&h.app);
+        let t = std::time::Instant::now();
+        publish_model_scene(&mut h.app, key);
+        let build = ms(t);
+        let bodies = h.app.session.world_state().unwrap().bodies.clone();
+        let ids: Vec<usize> = bodies.iter().map(|b| crate::display_lod::body_id(b).0).collect();
+        let chords: Vec<f64> = bodies.iter().map(|b| current().chord(b.body.size())).collect();
+        // Every body's edges simplified: every block rebuilt.
+        let coarse: Vec<(usize, Option<f64>, f64)> = ids.iter().zip(&chords).map(|(id, c)| (*id, Some(0.5), *c)).collect();
+        let changed = h.app.viewport.lod.lock().unwrap().update_edges_changed(coarse.clone());
+        let all = changed.len();
+        h.app.viewport.lod_patch = Some(changed);
+        let key = scene_key(&h.app);
+        let t = std::time::Instant::now();
+        let ok_all = patch_edge_steps(&mut h.app, key);
+        let patch_all = ms(t);
+        // One body's edges coarser still: one block rebuilt.
+        let mut finer = coarse;
+        if let Some(first) = finer.first_mut() {
+            first.1 = Some(0.125);
+        }
+        let changed = h.app.viewport.lod.lock().unwrap().update_edges_changed(finer);
+        let one = changed.len();
+        h.app.viewport.lod_patch = Some(changed);
+        let key = scene_key(&h.app);
+        let t = std::time::Instant::now();
+        let ok_one = patch_edge_steps(&mut h.app, key);
+        let patch_one = ms(t);
+        let blocks = h.app.viewport.last_scene.lock().unwrap().as_ref().map_or(0, |s| s.blocks.len());
+        // A warm whole build, as a camera move does one: its blocks are all kept.
+        let key = scene_key(&h.app);
+        let t = std::time::Instant::now();
+        publish_model_scene(&mut h.app, key);
+        let rebuild = ms(t);
+        println!(
+            "SCENE bodies={} build_ms={build:.1} rebuild_ms={rebuild:.1} patch_all_ms={patch_all:.1} ({all} bodies, ok={ok_all}) patch_one_ms={patch_one:.1} ({one} body, ok={ok_one}) blocks={blocks} scene_builds={}",
+            bodies.len(),
+            h.app.viewport.scenes_built
+        );
+    }
+
+    /// `n` separate cylinders in a row: each its own mesh, and blocks cut every 64 bodies.
+    fn row_of_cylinders(n: usize) -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        for i in 0..n {
+            s.execute("solid.cylinder", &json!({"radius": 5, "height": 10, "base": [30.0 * i as f64, 0.0, 0.0], "operation": "new"})).unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app.viewport.gpu =
+            Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
+        app
     }
 
     fn cylinder_app() -> SolveApp {

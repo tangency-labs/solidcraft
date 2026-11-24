@@ -351,6 +351,33 @@ fn linked_design_properties_do_not_replace_conflicting_custom_materials() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// #21182: every body that brings the same conflicting custom material shares one `(linked N)`
+/// copy, rather than each adding its own until the design runs out of custom materials.
+#[test]
+fn linked_bodies_with_one_conflicting_material_share_its_copy() {
+    let dir = folder("properties-custom-shared");
+    let file = dir.join("source.solidcraft");
+    properties_part(&file, "Custom alloy", Some(4.2), [12, 34, 56]);
+    let mut s = Session::default();
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
+        name: "Custom alloy".into(),
+        density: 9.0,
+        appearance: None,
+        physical_card: None,
+    });
+    let mut assigned = Vec::new();
+    for _ in 0..3 {
+        let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+        let p = run(&mut s, "component.properties", json!({"component": c}));
+        assert!((p["total"]["mass_g"].as_f64().unwrap() - 4.2).abs() < 1e-6, "{p}");
+        assigned.push(p["bodies"][0]["material"].as_str().unwrap().to_string());
+    }
+    assert_eq!(s.doc.user_materials.len(), 2, "{assigned:?}");
+    assert!(assigned.iter().all(|m| *m == assigned[0] && m != "Custom alloy"), "{assigned:?}");
+    assert_eq!(s.doc.material_density("Custom alloy"), Some(9.0));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn linked_design_properties_keep_distinct_names_for_equal_material_properties() {
     let dir = folder("properties-equal-density");
@@ -1944,5 +1971,44 @@ fn recovering_a_design_saved_without_linked_bodies_reads_only_the_folders_allowe
     assert_eq!(reply["errors"], 0, "{reply}");
     assert!((volume(&mut all) - 7125.0).abs() < 1e-5);
     assert!(all.execute("doc.recover", &json!({"dir": recovery, "id": entry.id, "linked_bodies": "some"})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A save without linked bodies leaves out the bodies of linked designs only: a linked STEP file
+/// (Insert STEP) keeps its bodies in the design's file, and the save has nothing to say of it.
+#[test]
+fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
+    let dir = folder("left-out-step");
+    let source = dir.join("part.json");
+    part(&source, 30);
+    let step = dir.join("block.step");
+    let mut block = Session::default();
+    run(&mut block, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100,0,0]}));
+    run(&mut block, "file.export", json!({"path": step}));
+
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": source}));
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    assert_eq!(s.doc.links.len(), 2, "the design and the STEP file are both linked");
+    let file = dir.join("assembly.json");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved.get("warnings").is_none(), "{saved}");
+    let doc = solidcraft_io::read_design(&std::fs::read(&file).unwrap()).unwrap();
+    let kept: Vec<(bool, bool)> = doc
+        .links
+        .values()
+        .map(|link| match &doc.feature(link.feature).unwrap().kind {
+            solidcraft_doc::FeatureKind::Import { step, records, .. } => (link.step_names.is_some(), !step.is_empty() || records.is_some()),
+            _ => panic!("a link's feature is an Import"),
+        })
+        .collect();
+    assert_eq!(kept, [(false, false), (true, true)], "only the linked design's bodies are left out");
+
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    // The 10 x 20 x 30 part and the 10 x 10 x 10 block.
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+    let listed = run(&mut opened, "component.links", json!({}));
+    assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
     let _ = std::fs::remove_dir_all(dir);
 }

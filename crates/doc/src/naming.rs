@@ -128,6 +128,10 @@ enum NamingAncestor {
     Copy(Arc<ModelBody>),
 }
 impl NameCell {
+    /// Whether these are names a saved model kept ([`NameCell::saved`]), not worked out here.
+    pub(crate) fn is_saved(&self) -> bool {
+        self.saved
+    }
     fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
         if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
             pending.push(NamingAncestor::State(origin.before));
