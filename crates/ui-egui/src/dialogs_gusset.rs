@@ -6,7 +6,6 @@ use crate::{
     ui_kit::{IconSegment, choice_row, expr_row, row, segmented_icons},
 };
 use serde_json::{Map, Value, json};
-use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{
     Sel,
     doc::{FeatureKind, expr::Kind as ValueKind, gusset::Placement},
@@ -138,8 +137,7 @@ pub fn for_feature(
             && let Ok(plane) = app.session.doc.resolve_face_anchor(anchor, component, &state)
             && let Some(index) = app.session.doc.configuration_face_indices(body, &anchor.target).ok().and_then(|is| is.first().copied())
         {
-            let n = plane.normal();
-            let on_face = *at - n * (*at - plane.origin).dot(n);
+            let on_face = solidcore_ops::frame_gusset::support_pick(&plane, *at);
             let name = app.session.doc.world_body_name(&state, &body.name, anchor.component, &anchor.path);
             input.items = vec![Sel::Face { body: name, index, point: solidcraft_engine::doc::apply_point(frame, on_face) }];
         }
