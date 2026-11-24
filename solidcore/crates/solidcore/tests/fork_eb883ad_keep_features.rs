@@ -401,22 +401,58 @@ fn cylinders_keep_their_pinned_volumes() {
         9,
     );
     assert_near_closed_form(v, featured_rounded(false, 8.0) + column);
-    let v = assert_pinned(
+    // #16735's leak check of the r 1.9 boss is anchored on its closed form, not on the figure
+    // from before the gap closure, 24031.843347866372: that figure lay 1.55e-11 off the
+    // closed form, past the 6.07e-12 old leak bound, so it was no figure the leak moved off the
+    // integral, and the check held for main's pin (24031.843347866376, moved 3.6e-12 from it)
+    // only inside the bound's width
+    let v = assert_pinned_on_closed_form(
         cylinder_boss,
         1.9,
-        24031.843347866372,
+        R1_9_BOSS_CLOSED_FORM,
         24031.843347866386,
         9,
     );
     assert_near_closed_form(v, featured_rounded(true, 1.9));
-    let v = assert_pinned(
+    // the r 1.9 hole's likewise: main's pin 23906.179641722782 lay 1.41e-11 off its closed form
+    let v = assert_pinned_on_closed_form(
         cylinder_hole,
         1.9,
-        23906.179641722782,
-        23906.179641722782,
+        R1_9_HOLE_CLOSED_FORM,
+        23906.179641722792,
         9,
     );
     assert_near_closed_form(v, featured_rounded(false, 1.9));
+}
+
+/// The r 1.9 cylinder boss's volume, `featured_rounded(true, 1.9)` = 23855.6 + 56.1 pi with r
+/// the double nearest 1.9, to 70 digits (Machin's pi in 90-digit decimals):
+/// 24031.84334786638740357494603929764260122153030357444555096792510994; held as its nearest
+/// double (0.26 ulp, 9.3e-13, from it; the exact 1.9's value differs by 2.9e-18).
+const R1_9_BOSS_CLOSED_FORM: f64 = 24031.843347866386;
+
+/// The r 1.9 cylinder hole's volume, `featured_rounded(false, 1.9)` = 23855.6 + 16.1 pi with r
+/// the double nearest 1.9, to 70 digits (as [`R1_9_BOSS_CLOSED_FORM`]):
+/// 23906.17964172279567403644030396646248585364352759944131812892732625; held as its nearest
+/// double (0.3 ulp, 1.10e-12, from it).
+const R1_9_HOLE_CLOSED_FORM: f64 = 23906.179641722796;
+
+/// [`assert_pinned`], with #16735's leak check anchored on the volume's closed form `closed`
+/// (a nearest double, within half an ulp of the exact value) instead of a figure from before
+/// the gap closure, and run whether or not the two differ: the body's volume reproduces the
+/// pin, does not depend on the origin, and lies within the old leak bound plus the
+/// quadrature's share of `closed` (`support/volume_leak.rs`), so within that and half an ulp
+/// of the integral.
+fn assert_pinned_on_closed_form(
+    feature: Feature,
+    r: f64,
+    closed: f64,
+    volume: f64,
+    faces: usize,
+) -> f64 {
+    let (k, mut b) = rounded_body(feature, r).unwrap();
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, closed, volume, 1e-7);
+    assert_pinned(feature, r, volume, volume, faces)
 }
 
 /// Planar walls: each crease is an exact section.
@@ -628,22 +664,29 @@ fn pins_moved_by_18913_lie_within_their_sums_rounding_of_the_references() {
     }
 }
 
-/// #18913: the r 1.9 cylinder boss's pin moves by three last bits onto the nearest double of
-/// its closed form, `featured_rounded(true, 1.9)` = 23855.6 + 56.1 pi (r the double nearest
-/// 1.9, 3.2e-15 off in the volume) = 24031.843347866387403574946039297642601221530 to 45
-/// digits (Machin's pi in 80-digit decimals). Main's pin, 24031.843347866376, lay 1.19e-11
-/// (three ulps) off it. It moves with the class frame of `cylinder_fillet_geom_parts_of`.
+/// #18913: the r 1.9 cylinder boss's and hole's pins move onto their closed forms
+/// ([`R1_9_BOSS_CLOSED_FORM`], [`R1_9_HOLE_CLOSED_FORM`], each with its 70-digit value). Main's
+/// pins, 24031.843347866376 and 23906.179641722782, lay 1.18e-11 and 1.41e-11 (three and four
+/// ulps) off them; the new ones lie 9.3e-13 and 3.2e-12 off. Each lies within the rounding of
+/// the volume's sum over its `n` faces (`gamma(n - 1)` of the volume, `n` 9) of the closed
+/// form's nearest double, which itself lies within half an ulp of the closed form. They move
+/// with the class frame of `cylinder_fillet_geom_parts_of`.
 #[test]
-fn the_r1_9_cylinder_boss_pin_is_its_closed_form_s_nearest_double() {
-    let reference = 24031.843347866386_f64;
-    let (v, n) = rounded_with(cylinder_boss, 1.9).unwrap();
-    assert_eq!(n, 9);
-    let off = (v - reference).abs();
-    let bound = gamma(u32::try_from(n - 1).unwrap()) * v.abs();
-    assert!(
-        2.0 * (off + 0.5 * (f64::from_bits(reference.to_bits() + 1) - reference)) <= bound,
-        "volume {v:.17} is {off:e} off the closed form's nearest double, bound {bound:e}"
-    );
+fn the_r1_9_cylinder_pins_are_within_their_sums_rounding_of_their_closed_forms() {
+    for (feature, reference) in [
+        (cylinder_boss as Feature, R1_9_BOSS_CLOSED_FORM),
+        (cylinder_hole as Feature, R1_9_HOLE_CLOSED_FORM),
+    ] {
+        let (v, n) = rounded_with(feature, 1.9).unwrap();
+        assert_eq!(n, 9);
+        let off = (v - reference).abs();
+        let bound = gamma(u32::try_from(n - 1).unwrap()) * v.abs();
+        assert!(
+            2.0 * (off + 0.5 * (f64::from_bits(reference.to_bits() + 1) - reference)) <= bound,
+            "volume {v:.17} is {off:e} off the closed form's nearest double {reference:.17}, \
+             bound {bound:e}"
+        );
+    }
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
