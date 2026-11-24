@@ -174,9 +174,6 @@ pub enum CornerInput {
     /// A Roll-over's seam cap whose corner edges do not close one loop through the seam's
     /// split vertex.
     SeamCapLoopOpen,
-    /// Faces given to a setback containment bound of mixed convexity whose planes meet in no
-    /// one point (the corner's vertex its saddle test is taken about).
-    SetbackFacesMeetInNoPoint,
     /// A squeezed corner edge neither of whose vertices is to be deleted.
     SqueezedEdgeKeepsBothVertices,
     /// A ball, chamfer, Mixed or setback corner, a Swept turn or an End whose vertices or
@@ -243,7 +240,6 @@ impl CornerInput {
             Self::RingNotSet => SM_ERR_NULL_POINTER,
             Self::RoundOfDegreeZeroAcross => SM_ERR,
             Self::SeamCapLoopOpen => SM_ERR,
-            Self::SetbackFacesMeetInNoPoint => SM_ERR,
             Self::SqueezedEdgeKeepsBothVertices => SM_ERR,
             Self::TopologyMismatch => SM_ERR,
             Self::TurnRingWithoutSideEdgeUse => SM_ERR_NULL_POINTER,
@@ -353,6 +349,9 @@ pub enum CornerStep {
     /// A point of a setback fill's solved net that lies on a face is farther than the
     /// tolerance from that face's plane. Not within tolerance.
     SetbackFacePointOffFace,
+    /// The faces of a setback corner of mixed convexity have planes that meet in no one
+    /// point, the vertex its containment's saddle test is taken about. Degenerate.
+    SetbackFacesMeetInNoPoint,
     /// A setback fill's normal is not certified regular and to one side of its rounds'
     /// (the fill may fold). Unsupported.
     SetbackFillMayFold,
@@ -462,6 +461,7 @@ impl CornerStep {
             Self::SetbackBasePointsCoincide => ErrorKind::Degenerate,
             Self::SetbackBaseSidesParallel => ErrorKind::Degenerate,
             Self::SetbackFacePointOffFace => ErrorKind::NotWithinTolerance,
+            Self::SetbackFacesMeetInNoPoint => ErrorKind::Degenerate,
             Self::SetbackFillMayFold => ErrorKind::Unsupported,
             Self::SetbackFillNotCertified => ErrorKind::NotFound,
             Self::SetbackG2NetTurnsBack => ErrorKind::Unsupported,
@@ -520,6 +520,7 @@ impl CornerStep {
             Self::SetbackBasePointsCoincide => "a setback fill's base points all coincide",
             Self::SetbackBaseSidesParallel => "a setback fill's base polygon has two sides along parallel directions at a base point",
             Self::SetbackFacePointOffFace => "a point of a setback fill's solved net on a face is farther than the tolerance from it",
+            Self::SetbackFacesMeetInNoPoint => "a setback corner's face planes meet in no one point",
             Self::SetbackFillMayFold => "a setback fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
             Self::SetbackFillNotCertified => "no setback fill up to degree 9 is certified at the corner's setbacks",
             Self::SetbackG2NetTurnsBack => "every G2 setback fill up to degree 9 has a patch whose control net turns back",

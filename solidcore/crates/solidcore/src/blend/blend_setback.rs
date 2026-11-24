@@ -3136,7 +3136,7 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
 /// # Errors
 /// As [`containment`]'s; [`CornerInput::FillNotFromSetbackSplit`] for a fill that is not the
 /// setback split's (`2n` patches of one span, its faces among those given),
-/// [`CornerInput::SetbackFacesMeetInNoPoint`] (`SM_ERR`) for faces that meet in no one point.
+/// [`CornerStep::SetbackFacesMeetInNoPoint`] (`SM_ERR`) for faces that meet in no one point.
 pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
     let n = fill.round.len();
     if n < 3
@@ -3160,15 +3160,8 @@ pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Re
     if faces.iter().any(Face::is_curved) {
         return Ok(f64::INFINITY);
     }
-    let vertex = graph::faces_common_point(faces).ok_or_else(|| {
-        SolidError::blend(
-            OP,
-            BlendFailure::CornerInputInvalid {
-                input: CornerInput::SetbackFacesMeetInNoPoint,
-                entity: None,
-            },
-        )
-    })?;
+    let vertex = graph::faces_common_point(faces)
+        .ok_or_else(|| corner_step(CornerStep::SetbackFacesMeetInNoPoint))?;
     let mut nets = Vec::new();
     for patch in &fill.patches {
         nets.push(net_of(patch)?);
@@ -3487,6 +3480,7 @@ mod tests {
                 CornerStep::SetbackFacePointOffFace,
                 ErrorKind::NotWithinTolerance,
             ),
+            (CornerStep::SetbackFacesMeetInNoPoint, ErrorKind::Degenerate),
             (CornerStep::SetbackFillNotCertified, ErrorKind::NotFound),
             (CornerStep::SetbackMarginInfeasible, ErrorKind::NotFound),
             (CornerStep::SetbackRailEndsCoincide, ErrorKind::Degenerate),
@@ -3599,10 +3593,10 @@ mod tests {
         );
     }
 
-    /// Faces whose planes are parallel meet in no one point: the caller's faces, invalid
-    /// input with the `SM_ERR` status the bare status had.
+    /// Faces whose planes are parallel meet in no one point: a degenerate corner, with the
+    /// `SM_ERR` status the bare status had.
     #[test]
-    fn faces_meeting_in_no_point_are_invalid_input() {
+    fn faces_meeting_in_no_point_are_degenerate() {
         let z = Vec3::new(0.0, 0.0, 1.0);
         let faces = [
             Face::plane(Point3::new(0.0, 0.0, 0.0), z),
@@ -3610,14 +3604,8 @@ mod tests {
             Face::plane(Point3::new(0.0, 0.0, 2.0), z),
         ];
         assert_eq!(graph::faces_common_point(&faces), None);
-        let err = SolidError::blend(
-            OP,
-            BlendFailure::CornerInputInvalid {
-                input: CornerInput::SetbackFacesMeetInNoPoint,
-                entity: None,
-            },
-        );
-        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        let err = corner_step(CornerStep::SetbackFacesMeetInNoPoint);
+        assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
         assert_eq!(
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)
