@@ -58,7 +58,7 @@ mod data;
 use data::DATA;
 
 /// The main commit [`DATA`] was recorded against.
-const MAIN_COMMIT: &str = "1b210ef4b0";
+const MAIN_COMMIT: &str = "e5199bcb17";
 
 /// Main's golden line of each row of [`DATA`], in its order (`{"unit": .., "line": ..}`).
 const MAIN_LINES: &str = include_str!("wr450_rows/main.jsonl");
