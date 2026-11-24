@@ -2973,8 +2973,9 @@ struct ViewJob {
     /// Whether its view draws the design as it places its parts, whose shown set the cache keeps.
     placed: bool,
     /// The design as it places its parts, where its view's overlays' copies are made from (#13048),
-    /// when `copy` isn't it: a view in another position, with overlays.
-    base: Option<Session>,
+    /// when `copy` isn't it: a view in another position, with overlays. Boxed, so a job keeps one
+    /// session's size in [`Work`], beside a picture's.
+    base: Option<Box<Session>>,
     /// The drawing open when the job was asked for: its records of the view's dimensions and notes.
     drawing: Arc<Drawing>,
     ticket: Ticket,
@@ -3031,7 +3032,7 @@ impl ViewJob {
             None => (None, Vec::new(), refused),
         };
         // The session the view draws from, and the design its overlays' copies are made from.
-        let (from, design) = (made.as_ref().unwrap_or(&copy), base.as_ref().unwrap_or(&copy));
+        let (from, design) = (made.as_ref().unwrap_or(&copy), base.as_deref().unwrap_or(&copy));
         // A design whose parts can't be placed draws its views as placeholders (`shown` says why).
         let state = from.world_state().unwrap_or_else(|_| from.model.state());
         let shown = match (refused, shown) {
@@ -3123,7 +3124,7 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
     } else if choice.evaluates() {
         (designed(s), None, Some(choice), None, None)
     } else {
-        let base = (!view.overlays.value.is_empty()).then(|| designed(s));
+        let base = (!view.overlays.value.is_empty()).then(|| Box::new(designed(s)));
         match copy_for(s, &choice) {
             Ok(copy) => (copy.session, None, None, None, base),
             Err(why) => (designed(s), Some(why), None, None, None),

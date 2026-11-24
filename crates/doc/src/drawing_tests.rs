@@ -1395,7 +1395,10 @@ fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
 fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
     let current = file(&read(&view_sketch_file()).unwrap());
     let mut older = current.clone();
-    older["format_pending"] = json!(DRAWING.pending_names().into_iter().filter(|name| name != "view-sketches").collect::<Vec<_>>());
+    // `view-sketches` is format 5's only change, so a format-5 file that lists none of its changes
+    // was saved before it, whatever changes this build has pending.
+    older["format"] = json!(DRAWING.format_string(5));
+    older["format_pending"] = json!([]);
     let mut record = current["sketches"][1].clone();
     let object = record.as_object_mut().unwrap();
     object.remove("owner");
