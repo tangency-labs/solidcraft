@@ -356,6 +356,20 @@ impl ExecutiveAccess<Handle> for Access {
         self.events.push("tolerance");
         Ok(())
     }
+    // the fake has no patch faces: the fillet body's stitch is the scripted stitch
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        _: &[Handle],
+    ) -> Result<StitchAttempt> {
+        self.stitch_faces(k, brep, tolerance, None, false)
+    }
+    // the fake has no solver geometry: no trace to extend
+    fn extend_trace_to_its_rails(&mut self, _: &mut Kernel, _: Handle) -> Result<()> {
+        Ok(())
+    }
     fn stitch_faces(
         &mut self,
         _: &mut Kernel,

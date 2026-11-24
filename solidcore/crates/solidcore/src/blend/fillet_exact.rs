@@ -3564,7 +3564,9 @@ fn trace_ends_on_class(
                 continue;
             }
             let centre = eval_offset(k, ops.solver_mut(), rail, t.uv_pos(srf))?;
-            if o.distance(centre) > tol {
+            // written to accept: a distance that is not a number is not on the class
+            let on_class = o.distance(centre) <= tol;
+            if !on_class {
                 return Ok(false);
             }
         }

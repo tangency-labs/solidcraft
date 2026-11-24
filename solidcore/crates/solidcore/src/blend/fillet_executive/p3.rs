@@ -1436,27 +1436,30 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// patch of `corners` meets it
     /// ([`FaceStitchAccess::stitch_body_keeping_fillet_edges`]).
     ///
-    /// With no corner there is no patch face, and the patch callback keeps
-    /// `SmStitchCallback`'s choice for every glued pair: the default stitch.
+    /// Required: only the implementor knows the patch faces its corners built, so there
+    /// is no default that could stitch without the callback (WR-546). With no corner
+    /// there is no patch face, and the patch callback keeps `SmStitchCallback`'s choice
+    /// for every glued pair: the default stitch.
     ///
     /// # Errors
-    /// [`SolidError::Unported`] for corners without live context (an implementor that
-    /// can resolve a corner's patch faces overrides this); as [`Self::stitch_faces`].
+    /// As [`Self::stitch_faces`]; an implementor that cannot resolve a corner's patch
+    /// faces returns [`SolidError::Unported`].
     fn stitch_faces_keeping_fillet_edges(
         &mut self,
         k: &mut Kernel,
         brep: O,
         tolerance: f64,
         corners: &[O],
-    ) -> Result<StitchAttempt> {
-        if corners.is_empty() {
-            return self.stitch_faces(k, brep, tolerance, None, false);
-        }
-        Err(SolidError::unported(
-            "SmFilletPatchStitchCallback",
-            "blend.fillet_executive_p3",
-        ))
-    }
+    ) -> Result<StitchAttempt>;
+
+    /// `sm_ExtendTraceToItsRails` (fork tangency-labs/smlib@a9277fd, WR-609/WR-610) on
+    /// `solver`: let its trace reach as far as its rails can lie from the filleted edge
+    /// ([`BrepCreationAccess::creation_extend_trace_to_its_rails`]). Required: only the
+    /// implementor holds the solver's geometry.
+    ///
+    /// # Errors
+    /// The extension's own errors.
+    fn extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()>;
 
     /// `SmFilletExecutive::DoPiecewiseMerge` on the implementor's bodies (the live
     /// session's port is `FilletSession`'s piecewise merge).
@@ -2304,12 +2307,11 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
 
     /// `sm_ExtendTraceToItsRails` (fork tangency-labs/smlib@a9277fd, WR-609; called
     /// before the corners since @6e77631, WR-610) on this solver: let its trace reach
-    /// as far as its rails can lie from the filleted edge. Only a live session has
-    /// solvers to extend.
+    /// as far as its rails can lie from the filleted edge; the adapter over
+    /// [`ExecutiveAccess`] delegates to [`ExecutiveAccess::extend_trace_to_its_rails`].
     ///
     /// # Errors
-    /// The extension's own errors; the adapter over [`ExecutiveAccess`] has no solver
-    /// geometry to extend.
+    /// The extension's own errors.
     fn creation_extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()>;
 
     /// `SmFilletSolver::BallIsRegular` (the fork's, tangency-labs/smlib#79 410dfe1 to
@@ -2546,8 +2548,8 @@ where
         ExecutiveAccess::process_smooth_edge_sequences(self, k, executive)
     }
 
-    fn creation_extend_trace_to_its_rails(&mut self, _k: &mut Kernel, _solver: O) -> Result<()> {
-        Err(invalid("the trace reach needs a live fillet session"))
+    fn creation_extend_trace_to_its_rails(&mut self, k: &mut Kernel, solver: O) -> Result<()> {
+        ExecutiveAccess::extend_trace_to_its_rails(self, k, solver)
     }
 
     fn creation_ball_is_regular(
