@@ -92,7 +92,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // stops the wall.
             let shown = targets_as_shown(st, f, &["*".to_string()])?;
             let tools = rib_tools(vals, &shown, f, None)?;
-            apply_op(doc, st, f, tools, Operation::Join, &[])
+            apply_traced(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
             let tp = doc.resolve_plane_in(vals, target, 0, f.component, Some(st))?;
@@ -228,7 +228,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// The walls of rib `f` (one per curve for a web), each run until it meets the bodies. `at`
 /// moves the rib's sketch first: a pattern's or mirror's copy of the rib is built again where
 /// the copy is, against the bodies there (#4593), as a hole is drilled again at each copy.
-pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Body>> {
+pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Traced>> {
     let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, extend } = &f.kind else {
         return Err(DocError::Invalid(format!("{} is not a rib", f.name)));
     };
@@ -412,7 +412,7 @@ fn contour_profile(ss: &SolvedSketch, ids: &[String]) -> Result<(Vec<Seg2>, Vec<
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
 /// `t` thick about the sketch plane.
-fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Body> {
+fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Traced> {
     let mut pts = chain_points(ss, ids)?;
     let meshes: Vec<_> = st.bodies.iter().map(|b| b.mesh()).collect();
     let reach = meshes.iter().map(|m| m.bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
@@ -563,8 +563,11 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
         lp = lp.reversed();
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
-    let tools = kernel::extrude(&ss.plane, &[region], -t / 2.0, t / 2.0)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), -t / 2.0, t / 2.0)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its two walls are the extrude's caps, `start` and `end`; its top, along the curve, the
+    // curve's `side:<curve>` (#20622).
+    Ok(crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)).tool(body, None))
 }
 
 /// Run a rib curve's open ends (`pts`, in sketch coordinates) on in their own direction until they
@@ -618,7 +621,7 @@ fn extend_rib_ends(st: &ModelState, ss: &SolvedSketch, pts: &mut Vec<Vec2>, t: f
 
 /// A rib wall along the sketch normal: the curves widened to `t` in the sketch plane, run from
 /// the sketch toward the body by `depth` (or until the whole wall reaches the body).
-fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Body> {
+fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Traced> {
     let pts = chain_points(ss, ids)?;
     let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
     if !(len > 1e-9) {
@@ -704,8 +707,13 @@ fn rib_tool_normal(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, d
     }
     let region = Region2 { outer: lp, holes: Vec::new() };
     let (a, b) = if sign > 0.0 { (0.0, h) } else { (-h, 0.0) };
-    let tools = kernel::extrude(&ss.plane, &[region], a, b)?;
-    tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+    let tools = kernel::extrude(&ss.plane, std::slice::from_ref(&region), a, b)?;
+    let body = tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))?;
+    // Its walls lie half the thickness beside its curves: named as a thin extrude's are, by the
+    // curve and the side (#20622). Its ends are the extrude's caps.
+    let thin = crate::lineage::ThinWallRoles { curves: ids.to_vec(), distances: [half, half] };
+    let roles = crate::lineage::ProfileRoles { thin: Some(&thin), ..crate::lineage::ProfileRoles::swept(Some(ss), Some(&region)) };
+    Ok(roles.tool(body, None))
 }
 
 /// Where the material begins and ends along a ray, from where the ray crosses the bodies'

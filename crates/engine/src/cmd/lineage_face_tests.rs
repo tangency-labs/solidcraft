@@ -219,6 +219,39 @@ fn the_end_faces_of_a_pipe_take_a_sketch_that_follows_the_pipe() {
     }
 }
 
+/// #20622: a rib's walls take a sketch, as a thin extrude's walls do: a 2 mm rib along a line
+/// across a shelled box (the issue's steps). Each wall is named by the line and its side, so the
+/// sketches follow the rib when its line moves and keep their faces after a save.
+#[test]
+fn the_walls_of_a_rib_take_a_sketch_that_follows_the_rib() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.shell", json!({"faces": [[30, 20, 10]], "thickness": "1mm"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "RibLine"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 1], [30, 39]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibLine", "curves": ["l1"], "thickness": "2 mm", "direction": "normal"}));
+    no_errors(&s);
+    sketch_on(&mut s, [31., 20., 5.], "PlusX");
+    sketch_on(&mut s, [29., 20., 5.], "MinusX");
+    let wall_x = |s: &Session, name: &str| {
+        let (plane, certificate) = healthy(s, name);
+        assert_eq!(certificate, Some(FaceCertificate::Lineage), "{name}");
+        plane.origin.x
+    };
+    assert!((wall_x(&s, "PlusX") - 31.).abs() < 1e-9 && (wall_x(&s, "MinusX") - 29.).abs() < 1e-9);
+    // The rib's line moves 5 mm along x: the sketches on its walls go with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "RibLine"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.start", "to": [35, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [35, 39]}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_errors(&s);
+    for t in [&s, &reopened(&s)] {
+        assert!((wall_x(t, "PlusX") - 36.).abs() < 1e-9, "{:?}", healthy(t, "PlusX"));
+        assert!((wall_x(t, "MinusX") - 34.).abs() < 1e-9, "{:?}", healthy(t, "MinusX"));
+    }
+}
+
 /// A plate with a boss patterned 3 times along x, `pitch` apart.
 fn patterned_bosses(sketch_on_seed_first: bool) -> Session {
     let mut s = Session::default();
