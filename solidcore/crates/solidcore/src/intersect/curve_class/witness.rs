@@ -152,7 +152,6 @@ fn finite(points: Vec<Point3>) -> Meet {
 /// Within the tolerance of tangent the true crossings are returned, not the touching
 /// point: a line just inside the circle crosses it twice, as far apart as the depth
 /// allows, and the caller decides whether both lie at the vertex.
-#[allow(clippy::too_many_arguments)]
 fn line_circle(
     point: Point3,
     direction: Vec3,
@@ -221,10 +220,21 @@ fn line_circle(
         let half = half_sq.sqrt();
         return project(vec![f - direction * half, f + direction * half]);
     }
-    // the line crosses the circle's plane at one point
+    // the line crosses the circle's plane at one point x. A point of the line within tol
+    // of the circle is within tol of the plane, so within tol / |dn| of x along the line,
+    // and x then lies within tol + tol / |dn| of the circle in the plane: farther than
+    // that the line is apart. x within tol of the circle is the crossing; in between, a
+    // shallow line may pass within tol of the circle away from x, undecided here
     let x = point + direction * ((origin - point).dot(normal) / dn);
-    if ((x - origin).length() - radius).abs() > tol {
+    let off = ((x - origin).length() - radius).abs();
+    if !off.is_finite() {
+        return Meet::Undecided;
+    }
+    if off > tol + tol / dn.abs() {
         return Meet::Points(Vec::new());
+    }
+    if off > tol {
+        return Meet::Undecided;
     }
     project(vec![x])
 }
@@ -358,11 +368,6 @@ fn meet(e: Carrier, k_carrier: Carrier, stretch: [Point3; 2], tol: f64, sin_ang:
             finite(vec![q - v * half, q + v * half])
         }
     }
-}
-
-/// The point halfway between `a` and `b`.
-fn midpoint_of(a: Point3, b: Point3) -> Point3 {
-    a + (b - a) * 0.5
 }
 
 /// `angle` reduced into `[0, 2π)`.
@@ -845,6 +850,41 @@ mod tests {
         // and a line below the plane over the whole circle stays apart
         let k = line([1.0, 0.0, -0.5], [1.0, 0.0, 1e-4]);
         let Meet::Points(ps) = meet(e, k, stretch, TOL, SIN) else {
+            panic!("decided");
+        };
+        assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn a_shallow_line_through_the_plane_near_the_circle_is_undecided() {
+        // the delta review's case: the unit circle in z = 0 and a line through
+        // (1.001, 0, 0) with direction (-1, 0, 2e-4), just past the angle tolerance. It
+        // crosses the plane 1e-3 off the circle but passes within 2e-7 of it near (1, 0, 0)
+        let e = Carrier::Circle {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Point3::new(1.0, 0.0, 0.0),
+            y: Point3::new(0.0, 1.0, 0.0),
+            normal: Point3::new(0.0, 0.0, 1.0),
+            radius: 1.0,
+        };
+        let stretch = [Point3::new(0.0, -1.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let k = line([1.001, 0.0, 0.0], [-1.0, 0.0, 2e-4]);
+        assert!(matches!(meet(e, k, stretch, TOL, SIN), Meet::Undecided));
+        // steep through the circle: the crossing itself
+        let Meet::Points(ps) = meet(e, line([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), stretch, TOL, SIN)
+        else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 1);
+        assert!((ps[0] - Point3::new(1.0, 0.0, 0.0)).length() <= 1e-12);
+        // steep and 1e-3 off the circle: apart
+        let Meet::Points(ps) = meet(
+            e,
+            line([1.001, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            stretch,
+            TOL,
+            SIN,
+        ) else {
             panic!("decided");
         };
         assert!(ps.is_empty());
