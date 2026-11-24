@@ -162,10 +162,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;

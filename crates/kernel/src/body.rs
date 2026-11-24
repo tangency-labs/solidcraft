@@ -1136,6 +1136,22 @@ impl Body {
         Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
+    /// Where the rim of `faces` cuts `outline`, a curve over `interval` lying in the plane through
+    /// `point` square to `normal`: the outline's parameters, in order, each exact on the surface
+    /// across the rim ([`solidcore_ops::Body::outline_cuts`]). `Err` for a mesh body and for each
+    /// refusal, by its cause.
+    pub fn outline_cuts(&self, faces: &[usize], outline: &Curve, interval: [f64; 2], point: Vec3, normal: Vec3) -> Result<Vec<f64>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("outline cuts need an exact body".into()))?;
+        let (body, order) = &*form;
+        body.outline_cuts(order, faces, outline, interval, point.into(), normal.into()).map_err(|e| match e {
+            solidcore_ops::Error::Argument => KernelError::Invalid(
+                "outline cuts: an index past the faces, a face with no side that faces out, a coordinate that is not finite, or an outline the kernel can't hold".into(),
+            ),
+            solidcore_ops::Error::Unsupported(why) => KernelError::Invalid(format!("outline cuts: {why}")),
+            e => KernelError::Failed(format!("outline cuts: {e}")),
+        })
+    }
+
     /// Exact polyline samples for each non-seam edge bordering `face` of `self`.
     pub fn face_edge_polylines(&self, face: usize) -> Vec<Vec<Vec3>> {
         if self.is_mesh() {
