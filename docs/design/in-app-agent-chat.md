@@ -191,19 +191,6 @@ serialized as ACP `env` entries (`{name, value}`). The token itself remains in t
 per-port file and is not included in ACP session configuration, arguments, or logs. The test ACP
 agent applies the received `env` entries when it starts the MCP child.
 
-This diagnosis is consistent with the path-resolution code and the functional result below. A
-new SolidCraft session authenticated successfully and ran the real `solidcraft-app.inspect_design`
-tool against the open **Sample Plate** project. It returned `dirty: false` and geometry
-information, made no design changes, and did not return `unauthorized`. This validates the tested
-environment; it does not establish behavior for every environment override or for multiple
-simultaneous instances.
-
-The release app was built with `cargo build --release -p solidcraft --bin solidcraft -j 1`
-(`CARGO_BUILD_JOBS=1` and `nice -n 10` were also applied). The build succeeded with exit code 0
-in about 26 minutes and 6 seconds. A previous parallel/heavy build had coincided with a system
-freeze, so keep app builds serialized and avoid concurrent Cargo builds. Do not use `cargo clean`
-without explicit authorization; Cargo can reuse compatible artifacts from `target`.
-
 ### One undo step per message
 
 When a message is sent the chat remembers the design (`Arc<Document>`) and the undo depth. When
