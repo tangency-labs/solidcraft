@@ -44,9 +44,11 @@
 //!   inside out or not), so only constants the conversion can reach from `θ` are counted.
 //!   The seam snap (`Ellipse::step_inversion` on a full turn) needs the rounded polar point
 //!   within `τ = zone_tol / 100` of the end point, which bounds its angle off `â` by
-//!   `asin(D / rx) ≤ (π/2) D / rx`, `D = L (τ + δP + δE) + |d|` (`seam_reach`): a full turn's
-//!   net is up to about `(π/2) √2 τ R / rx` (2.2e-7 for a round cylinder at the default
-//!   zone tolerance) off the surface it evaluates, a real tear the bound counts.
+//!   `asin(D / rx) ≤ (π/3) D / rx` (`asin x ≤ (π/3) x` on `[0, 1/2]`), `D = L (τ + δP + δE) +
+//!   |d|` (`seam_reach`, `L` the operator norm of the map to the circle's frame): a full turn's
+//!   net is up to about `(π/3) τ R / rx` (1.05e-7 for a round cylinder at the default zone
+//!   tolerance; 9e-8 measured 1e-7 before the end) off the surface it evaluates, a real tear
+//!   the bound counts.
 //!
 //! Every quantity is enclosed in outward-rounded interval arithmetic from the stored data;
 //! the polynomials are Taylor expansions about each piece's middle
@@ -68,6 +70,7 @@
 use super::polynomial_pieces::{
     add_scaled, curve_taylor, inverse_factorial, magnitude, mul, range, stored_nurbs, zero, Poly,
 };
+use super::OP;
 use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs};
@@ -76,6 +79,7 @@ use crate::geom::tol::{context_zone_tol_3d, SmallTopoType};
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_DEG};
 use crate::surface::cone::Cone;
+use crate::Result;
 
 /// The deepest bisection of the sweep direction.
 const MAX_DEPTH: u32 = 60;
@@ -452,8 +456,9 @@ impl Setup<'_> {
         if !(delta.is_finite() && delta.hi <= 0.5 * a_euclid.lo) {
             return None;
         }
-        // (π/2) Δ/|a| radians, in degrees 90 Δ/|a|; then A3 for atan2, the turn and degrees
-        let a2 = (Ivl::from(90.0) * delta / a_euclid * Ivl::from(1.03)).hi;
+        // asin(Δ/|a|) ≤ (π/3) Δ/|a| radians (Δ ≤ |a|/2), in degrees 60 Δ/|a|; then A3 for
+        // atan2, the turn and degrees
+        let a2 = (Ivl::from(60.0) * delta / a_euclid * Ivl::from(1.03)).hi;
         let inversion = a2 + 3.0e-13;
         Some(([theta.lo, theta.hi], a_lo, a_hi, [ax, ay], inversion))
     }
@@ -846,7 +851,22 @@ impl Setup<'_> {
 /// the net's exact point (see the module docs). `None` where it is not enclosed: the cone's
 /// polar conversion not set up, a weight of the net's not proved positive, or a bound that is
 /// not finite.
-pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Option<f64> {
+///
+/// # Errors
+///
+/// The kernel's cancelled status (polled once per piece of the sweep).
+pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Result<Option<f64>> {
+    let mut cancelled = false;
+    let bound = enclose(k, cone, net, &mut cancelled);
+    if cancelled {
+        k.check_cancelled(OP)?;
+    }
+    Ok(bound)
+}
+
+/// [`cone_net_residual`]'s enclosure; `cancelled` set (and `None`) where the kernel was
+/// cancelled during the sweep.
+fn enclose(k: &Kernel, cone: &Cone, net: &Nurbs, cancelled: &mut bool) -> Option<f64> {
     let rev = &cone.rev;
     let circle = rev.polar_curve()?;
     let table = &rev.polar;
@@ -954,6 +974,31 @@ pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Option<
         * Ivl::from(big)
         * (Ivl::from(4.0) + Ivl::from(big) / Ivl::from(360.0)))
     .hi + 1.0e-12;
+    // (#20643 review: a parameter that is NaN or infinite where it is taken as a number gives
+    // no bound; an unbounded height or angle range is not taken as one, only checked for NaN)
+    let finite = [
+        a0,
+        a1,
+        g0,
+        g1,
+        k0,
+        k1,
+        nat.min(),
+        nat.max(),
+        circle.radius_x / circle.radius_y,
+    ]
+    .iter()
+    .chain([cone.base_radius, cone.tan_semi_angle()].iter())
+    .all(|v| v.is_finite());
+    let affine = match map {
+        HeightMap::Affine { s0, n0, l, ls } => [s0, n0, l, ls].iter().all(|v| v.is_finite()),
+        HeightMap::Sign(_) => true,
+    };
+    let clamp_ok =
+        clamp.is_none_or(|([u0, u1], [v0, v1])| ![u0, u1, v0, v1].iter().any(|v| v.is_nan()));
+    if !(finite && affine && clamp_ok && !step_ivl.min().is_nan() && !step_ivl.max().is_nan()) {
+        return None;
+    }
     let position_c = circle.position;
     let mut setup = Setup {
         o,
@@ -1014,6 +1059,10 @@ pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Option<
     let mut worst = 0.0_f64;
     let mut pieces = stack.len();
     while let Some(([s0, s1], depth)) = stack.pop() {
+        if k.check_cancelled(OP).is_err() {
+            *cancelled = true;
+            return None;
+        }
         let m = 0.5 * (s0 + s1);
         let can_split = depth < MAX_DEPTH && pieces + 1 < MAX_PIECES && s0 < m && m < s1;
         match setup.piece([s0, s1], can_split) {
@@ -1034,9 +1083,11 @@ pub(super) fn cone_net_residual(k: &Kernel, cone: &Cone, net: &Nurbs) -> Option<
 /// the point to the seam: the snap needs `|Ẽ − P̃| ≤ τ` (`τ` the approximation tolerance
 /// `zone_tol / 100` of the kernel's zone tolerance, as `ConvertToPolarParameter` passes none),
 /// `Ẽ` the rounded end point and `P̃` the rounded polar point. With `δE`, `δP` their rounding,
-/// `M` the map `P ↦ a` (`‖M‖ ≤ L = √(|Xc|² + f²|Yc|²)`) and `a(E) = rx (cos a1, sin a1) + d`
+/// `M` the map `P ↦ a` (rows `Xc` and `f Yc`; `‖M‖ ≤ L`, `L²` the larger eigenvalue of
+/// `M Mᵀ = [[Xc·Xc, f Xc·Yc], [f Xc·Yc, f² Yc·Yc]]`) and `a(E) = rx (cos a1, sin a1) + d`
 /// (`d` the circle frame's skew), `|a(P) − rx (cos a1, sin a1)| ≤ D = L (τ + δP + δE) + |d|`,
-/// so the angle is at most `asin(D / rx) ≤ (π/2) D / rx`. `None` (no reach proved: the
+/// so the angle is at most `asin(D / rx) ≤ (π/3) D / rx` (`asin x / x` grows on `(0, 1]` and is
+/// `π/3` at `1/2`), in degrees `60 D / rx`. `None` (no reach proved: the
 /// farthest of `a0` from `θ` is taken instead) for a radius not positive or `D > rx / 2`.
 fn seam_reach(k: &Kernel, circle: &Ellipse, polar: &NurbsCurve) -> Option<f64> {
     let (rx, ry) = (circle.radius_x, circle.radius_y);
@@ -1079,7 +1130,10 @@ fn seam_reach(k: &Kernel, circle: &Ellipse, polar: &NurbsCurve) -> Option<f64> {
     // the map's norm and the frame's skew `d`
     let f = Ivl::from(rx / ry);
     let (xx, xy, yy) = (dot3(&xc, &xc), dot3(&xc, &yc), dot3(&yc, &yc));
-    let l = (xx + f * f * yy).sqrt();
+    // ‖M‖² = (tr + √((xx − f² yy)² + 4 f² xy²)) / 2, the larger eigenvalue of M Mᵀ
+    let (tr, diff) = (xx + f * f * yy, xx - f * f * yy);
+    let disc = diff * diff + Ivl::from(4.0) * f * f * xy * xy;
+    let l = ((tr + disc.sqrt()) * Ivl::from(0.5)).sqrt();
     let skew = rxi * Ivl::from((xx - one).mag())
         + ryi * Ivl::from(xy.mag())
         + Ivl::from((f * rxi).mag()) * Ivl::from(xy.mag())
@@ -1088,7 +1142,7 @@ fn seam_reach(k: &Kernel, circle: &Ellipse, polar: &NurbsCurve) -> Option<f64> {
     if !(d.is_finite() && d.hi <= 0.5 * rx) {
         return None;
     }
-    let reach = (Ivl::from(90.0) * d / rxi * Ivl::from(1.0 + 1.0e-9)).hi;
+    let reach = (Ivl::from(60.0) * d / rxi * Ivl::from(1.0 + 1.0e-9)).hi;
     reach.is_finite().then_some(reach)
 }
 
@@ -1196,8 +1250,9 @@ mod tests {
         for eps in [1.0e-9, 1.0e-6, 1.0e-3] {
             for (name, s, r, _) in cones(&k) {
                 let (net, lifted) = nets(&k, &s, eps);
-                let b0 = net_to_surface_bound(&k, &s, &net).unwrap();
+                let b0 = net_to_surface_bound(&k, &s, &net).unwrap().unwrap();
                 let b = net_to_surface_bound(&k, &s, &lifted)
+                    .unwrap()
                     .unwrap_or_else(|| panic!("{name} eps {eps:e}: no bound"));
                 let lift = eps * (r - b0) - b0;
                 assert!(
@@ -1221,7 +1276,7 @@ mod tests {
         let eps = 1.0e-7;
         for (name, s, _, _) in cones(&k) {
             let (net, lifted) = nets(&k, &s, eps);
-            let b = net_to_surface_bound(&k, &s, &lifted).unwrap();
+            let b = net_to_surface_bound(&k, &s, &lifted).unwrap().unwrap();
             let crate::surface::surface::SurfaceKind::Cone(c) = s.kind() else {
                 unreachable!()
             };
@@ -1265,8 +1320,9 @@ mod tests {
         let k = Kernel::default();
         for (name, s, _, r_max) in cones(&k) {
             let (net, _) = nets(&k, &s, 0.0);
-            let b =
-                net_to_surface_bound(&k, &s, &net).unwrap_or_else(|| panic!("{name}: no bound"));
+            let b = net_to_surface_bound(&k, &s, &net)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name}: no bound"));
             let crate::surface::surface::SurfaceKind::Cone(c) = s.kind() else {
                 unreachable!()
             };
@@ -1319,7 +1375,7 @@ mod tests {
         c.make_nurb(&k).unwrap();
         let s = Surface::from(c.clone());
         let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap().net;
-        let b = net_to_surface_bound(&k, &s, &net).unwrap();
+        let b = net_to_surface_bound(&k, &s, &net).unwrap().unwrap();
         let d = c.rev.base.natural_uv_domain();
         let v = 0.5 * (d.v_interval().min() + d.v_interval().max());
         let uv = Point2::new(d.u_interval().max() - 5.0e-8, v);
