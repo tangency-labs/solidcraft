@@ -9,7 +9,8 @@
 //! each other. Planes whose outward normals point toward each other bound air, not a wall, and
 //! two planes at the same place bound nothing between them: neither pairs.
 //!
-//! The thickness is measured along the first plane's normal from its point, and the plane halfway
+//! The thickness is measured along the first plane's normal from its point to where that line
+//! meets the second plane (so any point of the second plane gives it), and the plane halfway
 //! is parallel to it. That is exact when the planes are parallel and stands within the angular
 //! tolerance's error otherwise; a pair tilted past the tolerance (a drafted wall) is not paired
 //! here, it needs the bisector construction, which is not built.
@@ -74,8 +75,11 @@ pub fn facing_planes(
     if ua.dot(ub) >= 0.0 || ua.cross(ub).length() > tol.ang_tol_rad().sin() {
         return Ok(None);
     }
-    // Positive when `b` lies behind `a`: the material is between them.
-    let thickness = a.point.distance_along(b.point, ua);
+    // How far behind `a.point`, along `ua`, the normal line through it meets `b`'s plane:
+    // `(a.point - t ua - b.point) . ub = 0` gives `t = (a.point - b.point) . ub / (ua . ub)`,
+    // whichever point represents `b`. Positive when `b` lies behind `a`: the material is between
+    // them. `ua . ub` is below `-cos(ang_tol)` here, so the division is safe.
+    let thickness = a.point.distance_along(b.point, ub) / ua.dot(ub);
     if thickness <= tol.zone_tol_3d {
         return Ok(None);
     }
@@ -172,6 +176,27 @@ mod tests {
             facing_planes(&k, &top, &plane([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn a_tilted_second_plane_gives_one_thickness_whichever_point_represents_it() {
+        // `a` is z = 2 facing up; `b` passes through the origin with normal (sin t, 0, -cos t),
+        // t = 0.4 degrees (within the tolerance). The normal line through (0, 0, 2) is the z axis,
+        // which meets `b` at the origin: thickness 2, mid point (0, 0, 1). The point
+        // (1000, 0, 1000 tan t) is on `b` too, (1000 sin t - 1000 tan t cos t = 0), and must give
+        // the same answer.
+        let k = kernel();
+        let t = 0.4_f64.to_radians();
+        let top = plane([0.0, 0.0, 2.0], [0.0, 0.0, 1.0]);
+        let n = [t.sin(), 0.0, -t.cos()];
+        for p in [[0.0, 0.0, 0.0], [1000.0, 0.0, 1000.0 * t.tan()]] {
+            let pair = facing_planes(&k, &top, &plane(p, n)).unwrap().unwrap();
+            assert!((pair.thickness - 2.0).abs() < 1e-9, "{p:?}: {pair:?}");
+            assert!(
+                (pair.mid_point - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-9,
+                "{pair:?}"
+            );
+        }
     }
 
     #[test]
