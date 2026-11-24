@@ -135,6 +135,8 @@ struct CaseGrants {
     input_folder: bool,
     #[serde(default)]
     memory_mib: Option<usize>,
+    #[serde(default)]
+    fuel: Option<u64>,
 }
 
 /// A folder the plugin may read or write: a fresh, empty one, or a copy of `from` in the tests
@@ -394,6 +396,7 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         command_groups: runtime.permissions.command_groups.clone(),
         folders: runtime.permissions.files.iter().map(|f| CaseFolder { name: f.name.clone(), read: f.read, write: f.write, from: None }).collect(),
         input_folder: runtime.permissions.input_folder,
+        fuel: Some(runtime.limits.fuel),
         memory_mib: Some(runtime.limits.memory_mib),
     };
     let wanted = case.grants.as_ref().unwrap_or(&asked);
@@ -415,6 +418,7 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         package_hash: Some(approval.to_string()),
         command_groups: wanted.command_groups.clone(),
         folders,
+        fuel: wanted.fuel,
         memory_mib: wanted.memory_mib,
         input_folder: wanted.input_folder,
     };

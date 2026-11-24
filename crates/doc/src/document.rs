@@ -1020,8 +1020,11 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        /// From the bottom to the top: unitless expressions (#18822), so the cylinder turns as
+        /// the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Height")]
@@ -2529,6 +2532,14 @@ pub enum FeatureKind {
         #[walk(length = "Tolerance")]
         tolerance: Expr,
     },
+    /// Derive a reduced mesh without changing its upstream source.
+    MeshReduce {
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        triangle_count: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        percentage: Option<f64>,
+    },
     /// Mesh bodies imported from a 3MF or STL file, embedded in the design.
     MeshImport {
         /// Source file name (display only).
@@ -3148,6 +3159,29 @@ pub enum PatternKind {
         reversed: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed2: bool,
+        /// What sets the first direction's copies (#8523): count and spacing (as before), count
+        /// and `extent1`, or spacing and `extent1`. The value it doesn't use is kept, so
+        /// switching back finds it.
+        #[serde(default, skip_serializing_if = "PatternDistance::is_default")]
+        distance1: PatternDistance,
+        /// What sets the second direction's copies.
+        #[serde(default, skip_serializing_if = "PatternDistance::is_default")]
+        distance2: PatternDistance,
+        /// The distance from the first copy to the last along the first direction, for the
+        /// distance types with an extent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Extent")]
+        extent1: Option<Expr>,
+        /// The extent along the second direction.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Extent 2")]
+        extent2: Option<Expr>,
+        /// Spacing and extent: one more copy exactly at the extent's end when the spacing doesn't
+        /// divide it, so only the last gap is shorter.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        copy_at_end1: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        copy_at_end2: bool,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -3213,6 +3247,55 @@ pub enum PatternKind {
     },
 }
 
+/// What a rectangular pattern direction is given, the rest worked out (#8523).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternDistance {
+    /// The count and the spacing between neighbours.
+    #[default]
+    CountSpacing,
+    /// The count and the extent from the first copy to the last: the spacing is the extent
+    /// divided by one less than the count.
+    CountExtent,
+    /// The spacing and the extent: as many evenly spaced copies as fit in the extent.
+    SpacingExtent,
+}
+
+impl PatternDistance {
+    pub fn is_default(&self) -> bool {
+        *self == Self::CountSpacing
+    }
+
+    /// The word the command and the design file use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CountSpacing => "count_spacing",
+            Self::CountExtent => "count_extent",
+            Self::SpacingExtent => "spacing_extent",
+        }
+    }
+
+    /// Read [`PatternDistance::as_str`]'s word.
+    pub fn from_word(word: &str) -> Option<Self> {
+        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent].into_iter().find(|d| d.as_str() == word)
+    }
+
+    /// Whether the count is given (else worked out from the spacing and the extent).
+    pub fn uses_count(self) -> bool {
+        self != Self::SpacingExtent
+    }
+
+    /// Whether the spacing is given (else worked out from the count and the extent).
+    pub fn uses_spacing(self) -> bool {
+        self != Self::CountExtent
+    }
+
+    /// Whether an extent is given.
+    pub fn uses_extent(self) -> bool {
+        self != Self::CountSpacing
+    }
+}
+
 fn default_pattern_alignment(alignment: &solidcraft_sketch::PatternAlignment) -> bool {
     *alignment == solidcraft_sketch::PatternAlignment::Right
 }
@@ -3228,6 +3311,37 @@ pub type PointExpr = [Expr; 3];
 /// A point as expressions (plain numbers, mm).
 pub fn point_expr(p: Vec3) -> PointExpr {
     [Expr::new(format!("{}", p.x)), Expr::new(format!("{}", p.y)), Expr::new(format!("{}", p.z))]
+}
+
+/// A direction whose components are unitless expressions (`["0", "-sin(t)", "-cos(t)"]`), so it
+/// turns as the parameters change. Saved as a [`PointExpr`] is; normalized when evaluated.
+pub type DirExpr = [Expr; 3];
+
+/// A direction as expressions (plain numbers).
+pub fn dir_expr(d: Vec3) -> DirExpr {
+    point_expr(d)
+}
+
+/// The direction `d` holds when each component is a plain number, normalized; `None` when one
+/// is an expression or it is zero.
+pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
+    let num = |e: &Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    let [x, y, z] = d;
+    unit_direction(Vec3::new(num(x)?, num(y)?, num(z)?))
+}
+
+/// `v` as a unit direction, however short it is: scaled by its largest component first, so
+/// only a vector that is exactly zero (or not finite) has none (#18822).
+pub fn unit_direction(v: Vec3) -> Option<Vec3> {
+    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if !(m.is_finite() && m > 0.0) {
+        return None;
+    }
+    Vec3::new(v.x / m, v.y / m, v.z / m).normalized()
+}
+
+fn z_axis_expr() -> DirExpr {
+    dir_expr(Vec3::Z)
 }
 
 /// Stored as `[x, y, z]`: plain numbers as numbers (as points were before they took
@@ -3408,6 +3522,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "BaseFeature",
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
+            FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
         }
     }
@@ -3496,6 +3611,7 @@ impl FeatureKind {
             FeatureKind::Move { .. } => "move",
             FeatureKind::Import { .. } => "import",
             FeatureKind::MeshConvert { .. } => "mesh_convert",
+            FeatureKind::MeshReduce { .. } => "mesh_reduce",
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
         }
@@ -3585,6 +3701,7 @@ impl FeatureKind {
             "BaseFeature" => "import",
             "MeshFeature" => "mesh_import",
             "MeshConvertFeature" => "mesh_convert",
+            "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
             _ => return None,
         })
@@ -3677,6 +3794,7 @@ impl FeatureKind {
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
+            FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
         }
     }
@@ -4095,7 +4213,7 @@ pub struct Document {
     /// its own `Arc`, so an undo step shares every drawing it didn't change. Each is read by its own
     /// family's rules ([`crate::format::read`]), never as a field of the design; a container keeps
     /// each in its own entry.
-    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty", serialize_with = "crate::drawing::serialize_inline")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
@@ -4900,7 +5018,7 @@ impl Document {
         if self.canvases.iter().any(|c| !c.data.is_empty()) {
             kinds.push("images");
         }
-        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+        if self.drawings.iter().any(|d| d.has_binary_data()) {
             kinds.push("drawing images");
         }
         if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
@@ -4918,14 +5036,26 @@ impl Document {
     /// The design as the text of a `.json` file. The same design always gives the same text, and a
     /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
+        self.to_json_checked().unwrap_or_default()
+    }
+
+    /// The same text as `to_json`, reporting serialization failures to a file writer.
+    pub fn to_json_checked(&self) -> Result<String> {
+        let error = |why: serde_json::Error| DocError::Invalid(format!("design not saved: {why}"));
+        let opaque_drawings = self.drawings.iter().any(|drawing| drawing.newer_file.is_some());
         let compact = if self.newer_file.is_some() {
-            let mut value = serde_json::to_value(self).unwrap_or_default();
+            let mut value = serde_json::to_value(self).map_err(error)?;
             crate::newer_file::restore(self, &mut value);
-            serde_json::to_string(&value).unwrap_or_default()
+            if opaque_drawings && let Some(fields) = value.as_object() {
+                return crate::json_layout::pretty_serialized(&crate::drawing::InlineDocument { fields, drawings: &self.drawings }).map_err(error);
+            }
+            serde_json::to_string(&value).map_err(error)?
+        } else if opaque_drawings {
+            return crate::json_layout::pretty_serialized(self).map_err(error);
         } else {
-            serde_json::to_string(self).unwrap_or_default()
+            serde_json::to_string(self).map_err(error)?
         };
-        crate::json_layout::pretty(&compact)
+        Ok(crate::json_layout::pretty(&compact))
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {

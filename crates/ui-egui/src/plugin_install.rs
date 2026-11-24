@@ -7,6 +7,11 @@ use solidcraft_ui_text::{format, tr};
 
 use crate::{SolveApp, ui_kit};
 
+/// The plugin package jobs running now, for `control.pending` and `control.running` (#20814).
+pub fn running_jobs() -> Vec<Value> {
+    crate::plugins::running_jobs()
+}
+
 /// The plugin waiting for the user's answer.
 #[derive(Default)]
 pub(crate) struct State {
@@ -80,6 +85,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
                 grant
             })
             .collect(),
+        fuel: fuel_request(&plugin, app.preferences.plugin_max_fuel),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
@@ -107,6 +113,12 @@ fn browse_folder(app: &mut SolveApp, name: String) {
 pub(crate) fn memory_request(plugin: &Value, ceiling: usize) -> Option<usize> {
     let asked = plugin.pointer("/limits/memory_mib").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())?;
     (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_MEMORY_MIB).then_some(asked)
+}
+
+/// The manifest's fuel request when it needs approval above Max plugin fuel.
+pub(crate) fn fuel_request(plugin: &Value, ceiling: u64) -> Option<u64> {
+    let asked = plugin.pointer("/limits/fuel").and_then(Value::as_u64)?;
+    (asked > ceiling && asked <= solidcraft_engine::plugin::MAX_APPROVED_FUEL).then_some(asked)
 }
 
 fn text(plugin: &Value, key: &str) -> String {
@@ -195,11 +207,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, &summary, ui_kit::Text::Report("plugin_install_summary", false));
                 }
                 ui_kit::text(ui, tr("plugin_install.asks"), ui_kit::Text::Report("plugin_install_asks", false));
-                if lines.is_empty() && ask.grants.memory_mib.is_none() {
+                if lines.is_empty() && ask.grants.memory_mib.is_none() && ask.grants.fuel.is_none() {
                     ui_kit::text(ui, tr("plugin_install.asks_nothing"), ui_kit::Text::Hint("plugin_install_nothing"));
                 }
                 for (i, line) in lines.iter().enumerate() {
                     ui.push_id(i, |ui| ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_permission")));
+                }
+                if let Some(fuel) = ask.grants.fuel {
+                    let line = format("plugin_install.fuel", &[("fuel", &fuel.to_string()), ("limit", &app.preferences.plugin_max_fuel.to_string())]);
+                    ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_fuel"));
                 }
                 if let Some(memory) = ask.grants.memory_mib {
                     let line = format(
@@ -302,7 +318,7 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -332,6 +348,7 @@ mod tests {
                 if frame == 5 {
                     let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
                     assert!(text.contains("Install") && text.contains("exports (write)"), "{text}");
+                    assert!(text.contains("10000000000000 fuel") && text.contains("100000000000"), "{text}");
                     assert!(text.contains("Browse…"), "{text}");
                     if size.x > 1000.0 {
                         assert!(text.contains("Menu: Plugins") && text.contains("Ribbon: Plugins"), "{text}");
@@ -633,12 +650,21 @@ mod tests {
     }
 
     #[test]
+    fn plugin_install_asks_for_fuel_only_above_the_default_and_within_the_hard_ceiling() {
+        let default = 100_000_000_000_u64;
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_000_u64}}), default), Some(10_000_000_000_000));
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":default}}), default), None);
+        assert_eq!(fuel_request(&json!({"limits":{"fuel":10_000_000_000_001_u64}}), default), None);
+        assert_eq!(fuel_request(&json!({}), default), None);
+    }
+
+    #[test]
     fn install_plugin_reviews_then_installs_and_says_so() {
         let mut h = crate::scenario::Harness::new();
         let plugins = h.dir.join("plugins");
         h.app.session.plugin_state.plugins_dir = Some(plugins.clone());
         let manifest = json!({"id":"gears","name":"Gears","version":"0.1.0","description":"Spur gears","capabilities":["commands@0.1"],
-            "runtime":{"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
+            "runtime":{"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":64,"deadline_ms":5000},"module":"gears.wasm","entries":[{"name":"make","slots":[{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Manufacturing"}]}],"commands":["solid.box","file.export_stl"],
             "permissions":{"command_groups":["file"],"files":[{"name":"exports","write":true}]}}});
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         for (name, bytes) in [("gears/plugin.json", serde_json::to_vec(&manifest).unwrap()), ("gears/gears.wasm", b"\0asm".to_vec())] {
@@ -687,6 +713,7 @@ mod tests {
         let grants = &h.app.preferences.plugin_grants["gears"];
         assert!(grants.command_groups.contains("file"));
         assert_eq!(grants.folders[0].folder, h.dir);
+        assert_eq!(serde_json::to_value(grants).unwrap()["fuel"], 10_000_000_000_000_u64);
         // A broken .zip is refused in plain words, with no question.
         let bad = h.dir.join("bad.ZIP");
         std::fs::write(&bad, b"not a zip").unwrap();
