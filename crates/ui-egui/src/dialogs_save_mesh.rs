@@ -435,16 +435,20 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         };
     }
 
-    form_row(ui, "Slicer", |ui| {
-        if let Some(path) = app.slicer_menu.picked.take() {
-            match add_custom(app, &path) {
-                Ok(()) => k.slicer = path,
-                Err(e) => app.set_status(e, true),
+    // The note goes beside the whole row, as Format's and Quality's do: inside it the full-width
+    // combo pushes the note out of sight.
+    let locked = app.policy.locks("send_slicer");
+    crate::policy::row(ui, locked, |ui| {
+        form_row(ui, "Slicer", |ui| {
+            if let Some(path) = app.slicer_menu.picked.take() {
+                match add_custom(app, &path) {
+                    Ok(()) => k.slicer = path,
+                    Err(e) => app.set_status(e, true),
+                }
             }
-        }
-        let choosing = app.file_picker_busy();
-        let locked = app.policy.locks("send_slicer");
-        crate::policy::row(ui, locked, |ui| ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k)));
+            let choosing = app.file_picker_busy();
+            ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
+        })
     });
     false
 }

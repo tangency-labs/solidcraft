@@ -529,16 +529,27 @@ pub fn unchanged(app: &SolveApp, pref: &str, value: &serde_json::Value) -> bool 
 
 /// `add`, disabled and followed by "Set by your organization" while a mandatory value sets the
 /// preference (`locked`).
+/// The note keeps its room on the control's line: a full-width control or a fixed-height row
+/// would otherwise push it onto a second line that nobody sees.
 pub fn row<R>(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     if !locked {
         return add(ui);
     }
-    ui.horizontal_wrapped(|ui| {
-        let inner = ui.add_enabled_ui(false, add).inner;
+    let room = note_width(ui);
+    ui.horizontal(|ui| {
+        let control = egui::vec2((ui.available_width() - room).max(0.0), ui.available_height());
+        let inner = ui.allocate_ui(control, |ui| ui.add_enabled_ui(false, add).inner).inner;
         crate::ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
         inner
     })
     .inner
+}
+
+/// The width "Set by your organization" takes beside a locked control, with the gap before it.
+pub fn note_width(ui: &egui::Ui) -> f32 {
+    let t = solidcraft_theme::Tokens::get();
+    let note = solidcraft_ui_text::tr("policy.set_by_organization").to_owned();
+    ui.painter().layout_no_wrap(note, egui::FontId::proportional(t.font_body), t.form_dim).size().x.ceil() + ui.spacing().item_spacing.x
 }
 
 // ---- user interface ---------------------------------------------------------------------------

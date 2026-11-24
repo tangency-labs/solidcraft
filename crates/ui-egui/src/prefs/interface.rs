@@ -832,12 +832,14 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
 /// A layout checkbox that an organization's policy can lock: greyed out, with "Set by your organization".
 fn locked_layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str, locked: bool) {
     let t = Tokens::get();
-    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
+    // A locked row is wider by its "Set by your organization" note.
+    let note = if locked { crate::policy::note_width(ui) } else { 0.0 };
+    let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16 + note).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
         ui_kit::settings_form(ui, 0.0, |ui| {
             ui_kit::row(ui, "", |ui| {
                 ui.spacing_mut().item_spacing.x = t.space_6;
-                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+                let check_width = (ui.available_width() - t.space_16 - t.space_6 - note).max(0.0);
                 let response = crate::policy::row(ui, locked, |ui| {
                     ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help))
                 });
