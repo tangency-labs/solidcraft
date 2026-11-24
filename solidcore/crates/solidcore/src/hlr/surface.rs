@@ -143,9 +143,15 @@ fn perp(a: Vec3) -> Vec3 {
 impl S3 {
     /// The chart of a face: its surface, in its own parameters where it is a plane or a spline
     /// and in angle and height (angle and angle) where it is a cylinder, cone, sphere or torus,
-    /// over the part its NURBS form spans ([`Face::domain`]).
+    /// over the part its NURBS form spans ([`Face::domain`]). A ball corner has no (u, v) of its
+    /// own: its chart is its NURBS form, the patch, recognised like any spline patch (as the
+    /// sphere it lies on).
     pub fn of_face(face: &Face) -> Result<S3, HlrError> {
-        Ok(match &face.surface {
+        let surface = match (&face.surface, &face.nurbs) {
+            (Surface::BallPatch { .. }, Some(patch)) => patch,
+            (label, _) => label,
+        };
+        Ok(match surface {
             Surface::Plane {
                 origin,
                 u_axis,

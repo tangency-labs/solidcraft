@@ -5,8 +5,8 @@
 //!
 //! Supported: planes, and cylinders, cones, spheres and tori whether stored as analytic records,
 //! rigidly placed revolutions of lines and circles or spline patches (recognised to 1e-9 relative
-//! and then trimmed and intersected in their own chart). Other spline and rigidly placed revolution
-//! faces are freeform:
+//! and then trimmed and intersected in their own chart; a ball corner is its patch). Other spline
+//! and rigidly placed revolution faces are freeform:
 //! unless [`Options::freeform`] is set they are listed in [`Drawing::unsupported`], their
 //! silhouettes are not drawn and anything they could hide is reported uncertain.
 //!
