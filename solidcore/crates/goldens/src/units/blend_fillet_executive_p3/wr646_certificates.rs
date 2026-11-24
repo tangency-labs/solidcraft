@@ -15,26 +15,34 @@
 //!   `T = 4 * tol` (the edge's tolerance) of that chord surface ([`linear_skin_bound`]:
 //!   Bernstein bounds on the net's polynomial patches). In the section at `y`, with `d1`,
 //!   `d2` the depths below the two box faces, the skin's curve then lies in the band
-//!   `|d1 + d2 - r| <= sqrt(2) T`. Every point below the band joins the corner, and every
-//!   point above it the body's interior, by a ray from the corner, on which `d1 + d2` only
-//!   grows, so it never meets the curve. So the removed area lies between
+//!   `|d1 + d2 - r| <= sqrt(2) T`. The parts of the section below and above the band are
+//!   convex and the skin does not meet them, so each is wholly removed or wholly kept: the
+//!   one below holds the edge's corner (removed), the one above the far corner (kept).
+//!   (Over the whole edge these parts form two connected solids, as `r >= 3 > sqrt(2) T`,
+//!   so each has one status for every `y`; the certified enclosure, near `7888`, rules out
+//!   the other combinations.) So the removed area lies between
 //!   `(r - sqrt(2) T)^2 / 2` and `(r + sqrt(2) T)^2 / 2`, within `sqrt(2) r T + T^2` of
 //!   `r^2 / 2`, and the volume lies within `B = sqrt(2) T int_0^20 r + 20 T^2 =
 //!   sqrt(2) T 200 / 3 + 20 T^2` of `8000 - 112`. The body's certified enclosure lies in
 //!   that band. Main's body removed `112.0517` (off by `5.2e-2`, past `B`), so main's
-//!   value is refuted. (The edges lie on the box planes to within their tolerance, which
-//!   moves the volume by `O(tol^2)`, far below `B`.)
-//! - each of the six ball-section rows is compared with the volume `V*` the balls'
-//!   envelope takes off the box. `V*` is enclosed in rounded interval arithmetic
-//!   ([`envelope::envelope`]; the derivation is in that module). The body's certified
-//!   enclosure and the golden's new volume are both certifiably closer to `box - V*` than
-//!   main's volume was, which needs no premise about the skin. Both also lie within
-//!   `T * A_lo` of it (`A_lo <= ` the envelope's area). That band is a consistency check
-//!   with a premise, the skin and the envelope within `T` of each other. Skin to envelope
-//!   (G2) is certified for four of the rows by an ignored proof run in
-//!   `solidcore/crates/solidcore/tests/wr646_variable_round_follows_law.rs`; envelope to
-//!   body (G3) is argued there, not certified. So the band is reported, not a proof, and
-//!   main's values lie inside it too: what refutes main is the closeness above.
+//!   value is refuted. (Argued, not certified: the edges lie on the box planes to within
+//!   their tolerance, and the chord meets the planes at 45 degrees, so the gap moves the
+//!   volume by about `len * tol^2`, far below `B`.)
+//! - each of the six ball-section rows is compared with the true round's volume
+//!   `box - V*`, with `V*` the volume the envelope of the balls of `F` (the round's
+//!   convention, the law continued a quarter of the edge past each end) takes off the box,
+//!   enclosed in
+//!   rounded interval arithmetic ([`envelope::envelope`]; the derivation is in that
+//!   module). Both distances below are certified: the farthest the body's certified
+//!   enclosure, and the golden's new volume, can be from `box - V*`, and the nearest main's
+//!   volume can be. Each row asserts that the new ones are certifiably closer than main's.
+//!   It also asserts that they are within `T * A_lo` (`A_lo <= ` the envelope's area), a
+//!   lower bound on the volume a skin within `T` of the envelope can move. Main's values lie within that band
+//!   too, so they are not refuted outright, only certifiably farther. (Whether the body's
+//!   skin is within `T` of the envelope is not needed for either assertion. Skin to
+//!   envelope is certified for four of the rows by an ignored proof run in
+//!   `solidcore/crates/solidcore/tests/wr646_variable_round_follows_law.rs`; the other
+//!   direction is argued there, not certified.)
 //!
 //! [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
 //! [`mass_bands`]: super::round_definition_proof::mass_bands
@@ -133,7 +141,9 @@ fn check(row: &str) {
             assert_eq!(law.edge_map, [0.0, 1.0], "{name}: the law spans the edge");
             let dims = input.dimensions.unwrap();
             let skin = linear_skin_bound(&k, &body, ends, dims, &law.radii, 4.0 * tol);
-            linear_holds_its_closed_form(&k, &mut body, (4.0 * tol, skin, len), old_volume);
+            let boxed = dims.iter().product::<f64>();
+            let args = (4.0 * tol, skin, len, boxed);
+            linear_holds_its_closed_form(&k, &mut body, args, &law.radii, old_volume);
         } else {
             let law = input.radius_law.as_ref().unwrap();
             let degree = law.degree as usize;
@@ -151,19 +161,35 @@ fn check(row: &str) {
 
 /// The linear-section row: its skin is certified within `T` of the chord surface
 /// ([`linear_skin_bound`]), so its volume lies within `B = T sqrt 2 int r + len T^2` of
-/// `8000 - 112` (the module header derives both). Its certified volume enclosure lies in
+/// `box - len int_0^1 r^2 du / 2`, both from the row's inputs (the module header derives
+/// them: `8000 - 112`). Its certified volume enclosure lies in
 /// that band; main's volume did not.
 fn linear_holds_its_closed_form(
     k: &Kernel,
     body: &mut Brep,
-    (t, skin, len): (f64, f64, f64),
+    (t, skin, len, boxed): (f64, f64, f64, f64),
+    radii: &[f64],
     old_volume: f64,
 ) {
     assert!(skin <= t, "{LINEAR}: the skin is {skin:e} off the chord, past T = {t:e}");
-    let exact = Ivl::from(8000.0) - Ivl::from(112.0);
-    // int_0^len r = len * 10 / 3 for r(u) = 4 - 4u + 4u^2
+    // from the row's quadratic Bezier law r = sum R_i B_i: int_0^1 B_i B_j du =
+    // C(2, i) C(2, j) / (5 C(4, i + j)), and int_0^1 B_i du = 1 / 3
+    assert_eq!(radii.len(), 3, "{LINEAR}: a quadratic law");
+    let c2 = [1.0, 2.0, 1.0];
+    let c4 = [1.0, 4.0, 6.0, 4.0, 1.0];
+    let (mut int_r2, mut int_r) = (Ivl::from(0.0), Ivl::from(0.0));
+    for (i, &ri) in radii.iter().enumerate() {
+        int_r = int_r + Ivl::from(ri) / Ivl::from(3.0);
+        for (j, &rj) in radii.iter().enumerate() {
+            let w = Ivl::from(c2[i] * c2[j]) / Ivl::from(5.0 * c4[i + j]);
+            int_r2 = int_r2 + w * Ivl::from(ri) * Ivl::from(rj);
+        }
+    }
     let (tt, l) = (Ivl::from(t), Ivl::from(len));
-    let bound = (tt * Ivl::from(2.0).sqrt() * l * Ivl::from(10.0) / Ivl::from(3.0) + l * tt * tt).hi;
+    let exact = Ivl::from(boxed) - l * int_r2 / Ivl::from(2.0);
+    // the header's numbers: 8000 - 20 * 11.2 / 2
+    assert!(exact.lo <= 7888.0 && 7888.0 <= exact.hi, "{LINEAR}: closed form {exact:?}");
+    let bound = (tt * Ivl::from(2.0).sqrt() * l * int_r + l * tt * tt).hi;
     let e = enclose_volume(k, body, 1e-9 * exact.hi).unwrap();
     eprintln!(
         "{LINEAR}: skin within {skin:e} of the chord (T = {t:e}); volume in [{}, {}], closed \

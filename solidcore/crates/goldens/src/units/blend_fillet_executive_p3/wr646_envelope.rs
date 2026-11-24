@@ -5,7 +5,8 @@
 //! ball at edge position `t` has the law's radius `r(t)` and touches both planes. The law
 //! is the row's Bezier polynomial in `w = m0 + k t`, with `k = (m1 - m0) / len`, continued
 //! past the edge's ends. The family is the balls at `t` in `F = [-len / 4, 5 len / 4]`, the
-//! same range the skin-to-envelope certificate takes. The section at `s` is cut by the line
+//! same range the skin-to-envelope certificate takes (the round's convention: balls past `F`
+//! are not covered, though by hand they lie far above the envelope). The section at `s` is cut by the line
 //! at distance `a` from one plane. Ball `t = s + d` reaches that line where
 //! `q = a (2 r(t) - a) - d^2 >= 0`, and its lowest point on the line lies at distance
 //! `g(d) = r(t) - sqrt(q)` from the other plane. The union's lowest point is
@@ -269,8 +270,9 @@ impl Law {
         let step = (fam.hi - fam.lo) / f64::from(n);
         law.r_max = (0..n)
             .map(|i| {
+                // neighbours share their end exactly: both are `fam.lo + step * (i + 1)`
                 let lo = fam.lo + step * f64::from(i);
-                let hi = if i + 1 == n { fam.hi } else { lo + step };
+                let hi = if i + 1 == n { fam.hi } else { fam.lo + step * f64::from(i + 1) };
                 law.r(Ivl::new(lo, hi)).hi
             })
             .fold(0.0, f64::max);
@@ -542,6 +544,8 @@ const MAX_DEPTH: u32 = 22;
 
 fn enclose(law: &Law) -> Envelope {
     let len = law.len;
+    // `len` a whole number well inside f64's mantissa: every `len * i / 2^n` below is exact
+    assert!(len.fract() == 0.0 && len > 0.0 && len < 2.0_f64.powi(20), "len {len}");
     let u0 = 2.0_f64.powi(-8);
     let mut total = Z;
     // the strip u <= u0
