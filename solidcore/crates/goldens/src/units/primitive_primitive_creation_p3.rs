@@ -456,6 +456,8 @@ fn construction_geometry(k: &Kernel, b: &Brep, success: bool, out: &mut Vec<f64>
     if !success {
         return Ok(());
     }
+    #[cfg(test)]
+    crate::certify::written(b);
     for &id in b.vertex_list() {
         out.push(1.0); // Native owning lists contain non-null vertices.
         out.extend(b.vertex(id)?.point.to_array());
@@ -814,15 +816,15 @@ mod tests {
 /// Every moved row's profile lies in a plane containing the turn axis. The faces of the
 /// solid of revolution then lie on the turned carriers of the profile curves (a segment's
 /// line, an arc's circle) and on the two end planes, the profile's plane turned through 0
-/// and `theta`. A point `P` is on a turned carrier exactly when, with `h = a . (P - c)`,
-/// `r = |P - c - h a|` and `u = n x a` (`n` the profile plane's normal), one fold
-/// `c + h a +- r u` is on the carrier. The check takes the record's every vertex, edge
-/// sample and face sample (a face sample is taken across the face's parameter box, so it
-/// is on the face's surface though not always inside its trim).
+/// and `theta`. Turning a point `P` about the axis keeps its distance to a turned carrier,
+/// so with `h = a . (P - c)`, `r = |P - c - h a|` and `u` a unit vector normal to `a`, the
+/// distance from either fold `c + h a +- r u` to the profile curve's carrier bounds `P`'s
+/// distance to that carrier turned.
 #[cfg(test)]
 mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
     use super::*;
+    use crate::interval::{sin_cos_deg, Iv};
 
     /// The rows #14425 moved whose samples moved (all profiles in a plane through the axis).
     const SAMPLE_ROWS: [&str; 11] = [
@@ -853,11 +855,42 @@ mod moved_rows {
             .unwrap()
     }
 
+    /// An enclosed vector.
+    type V = [Iv; 3];
+
+    fn v(p: Vec3) -> V {
+        [Iv::exact(p.x), Iv::exact(p.y), Iv::exact(p.z)]
+    }
+    fn sub(a: V, b: V) -> V {
+        std::array::from_fn(|n| a[n].sub(b[n]))
+    }
+    fn add(a: V, b: V) -> V {
+        std::array::from_fn(|n| a[n].add(b[n]))
+    }
+    fn scale(a: V, s: Iv) -> V {
+        a.map(|x| x.mul(s))
+    }
+    fn dot(a: V, b: V) -> Iv {
+        a[0].mul(b[0]).add(a[1].mul(b[1])).add(a[2].mul(b[2]))
+    }
+    fn cross(a: V, b: V) -> V {
+        [
+            a[1].mul(b[2]).sub(a[2].mul(b[1])),
+            a[2].mul(b[0]).sub(a[0].mul(b[2])),
+            a[0].mul(b[1]).sub(a[1].mul(b[0])),
+        ]
+    }
+    fn unit(a: V) -> V {
+        let len = dot(a, a).sqrt();
+        a.map(|x| x.div(len))
+    }
+
     /// A profile curve as the fixture gives it: a segment, or an arc about `centre` in the
-    /// `xy` plane of radius `radius`.
+    /// `xy` plane of radius `radius` from angle `from` to `to` (degrees, from x).
+    #[derive(Clone, Copy)]
     enum Piece {
         Segment(Vec3, Vec3),
-        Arc { centre: Vec3, radius: f64 },
+        Arc { centre: Vec3, radius: f64, from: f64, to: f64 },
     }
 
     impl Piece {
@@ -865,119 +898,245 @@ mod moved_rows {
             if v[0] == 0. {
                 Self::Segment(Vec3::new(v[1], v[2], v[3]), Vec3::new(v[4], v[5], v[6]))
             } else {
-                Self::Arc { centre: Vec3::new(v[1], v[2], v[3]), radius: v[4] }
+                Self::Arc { centre: Vec3::new(v[1], v[2], v[3]), radius: v[4], from: v[5], to: v[6] }
             }
         }
 
-        /// The distance from `q` to the piece's carrier (closed form: to a segment's line,
-        /// or to an arc's whole circle).
-        fn distance(&self, q: Vec3) -> f64 {
+        /// An enclosure of the distance from `q` to the piece's carrier (a segment's line,
+        /// or an arc's whole circle).
+        fn distance(&self, q: V) -> Iv {
             match *self {
                 Self::Segment(p0, p1) => {
-                    let d = p1 - p0;
-                    let t = (q - p0).dot(d) / d.dot(d);
-                    (q - (p0 + d * t)).length()
+                    let d = sub(v(p1), v(p0));
+                    let w = sub(q, v(p0));
+                    let c = cross(w, d);
+                    dot(c, c).sqrt().div(dot(d, d).sqrt())
                 }
                 Self::Arc { centre, radius, .. } => {
-                    let w = q - centre;
-                    let radial = (w.x * w.x + w.y * w.y).sqrt() - radius;
-                    (radial * radial + w.z * w.z).sqrt()
+                    let w = sub(q, v(centre));
+                    let radial = w[0].mul(w[0]).add(w[1].mul(w[1])).sqrt().sub(Iv::exact(radius));
+                    radial.mul(radial).add(w[2].mul(w[2])).sqrt()
                 }
+            }
+        }
+
+        /// The piece's defining points (segment ends; an arc's centre and the circle's
+        /// point along x).
+        fn points(&self) -> [Vec3; 2] {
+            match *self {
+                Self::Segment(p0, p1) => [p0, p1],
+                Self::Arc { centre, radius, .. } => [centre, centre + Vec3::new(radius, 0.0, 0.0)],
+            }
+        }
+
+        /// Points of the piece itself (in floating point): a segment's ends, an arc's ends
+        /// and midpoint.
+        fn on(&self) -> Vec<Vec3> {
+            match *self {
+                Self::Segment(p0, p1) => vec![p0, p1],
+                Self::Arc { centre, radius, from, to } => [from, 0.5 * (from + to), to]
+                    .iter()
+                    .map(|deg| {
+                        let t = deg.to_radians();
+                        centre + Vec3::new(radius * t.cos(), radius * t.sin(), 0.0)
+                    })
+                    .collect(),
             }
         }
     }
 
-    /// `v` turned through `deg` degrees about the line through `c` along the unit `a`.
-    fn turned(v: Vec3, c: Vec3, a: Vec3, deg: f64) -> Vec3 {
-        let (s, co) = deg.to_radians().sin_cos();
-        let d = v - c;
-        c + d * co + a.cross(d) * s + a * ((1.0 - co) * a.dot(d))
+    /// A face carrier: a profile piece turned (by index), or the profile plane turned
+    /// through 0 (`Cap(0)`) or `theta` (`Cap(1)`).
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Carrier {
+        Side(usize),
+        Cap(usize),
     }
 
-    /// The record's points: vertices, then each edge's five samples and each face's nine.
-    fn points(record: &[f64]) -> Vec<Vec3> {
-        let (faces, edges, vertices) = (record[6] as usize, record[7] as usize, record[8] as usize);
-        let mut at = 9;
-        let mut out = Vec::new();
-        let take = |at: &mut usize, n: usize, flagged: bool, out: &mut Vec<Vec3>| {
-            for _ in 0..n {
-                if flagged {
-                    assert_eq!(record[*at], 0.0, "an evaluated point");
-                    *at += 1;
-                }
-                out.push(Vec3::new(record[*at], record[*at + 1], record[*at + 2]));
-                *at += 3;
-            }
-        };
-        for _ in 0..vertices {
-            assert_eq!(record[at], 1.0);
-            at += 1;
-            take(&mut at, 1, false, &mut out);
-        }
-        for _ in 0..edges {
-            assert_eq!(record[at], 1.0, "an edge with a curve");
-            at += 3;
-            take(&mut at, 5, true, &mut out);
-        }
-        for _ in 0..faces {
-            assert_eq!(record[at], 1.0, "a face with a surface");
-            at += 5;
-            take(&mut at, 9, true, &mut out);
-        }
-        assert_eq!(at, record.len(), "the whole record read");
-        out
-    }
-
-    /// Every vertex, edge sample and face sample of each moved row is on a face carrier of
-    /// the exact solid of revolution, within `64 eps s` (`s` the largest coordinate of the
-    /// profile and axis point, at least 1). The allowance: evaluating an analytic surface
-    /// or curve point (its frame products and `sin`/`cos`) rounds each coordinate by at most
-    /// about `10 eps s`, the fold here (dot products, a square root) and the closed-form
-    /// distance to a segment or arc another `10 eps s` each, under `32 eps s`; twice that is
-    /// allowed.
+    /// Each moved row's record is its body's (the record rebuilt from the body is bitwise
+    /// the same), the body is sound (no defect in the soundness check; a manifold solid for
+    /// a capped profile, a sheet for `partial_rotation_line`), every face's boundary (its
+    /// edges' samples and vertices) is in the swept sector (for a profile across the axis,
+    /// the sector or its half-turn), and each face
+    /// of the body is assigned the one carrier (a profile piece
+    /// turned, or an end plane) that its samples, its edges' samples and its vertices are
+    /// all on, each within its own entity's tolerance (the face's, the edge's, the
+    /// vertex's); no two faces share a carrier, except that profile segments mirrored
+    /// across the axis turn to one cone (each segment's ends are on the other's turned
+    /// carrier), which then carries as many faces at most as it has segments; an end plane
+    /// of a profile on one side of the axis carries only its half-plane
+    /// (`capped_rot_square_axis_diag_vertex_touch_*`: two faces on the cone of sides 0
+    /// and 3). The distances are enclosed in interval
+    /// arithmetic from the exact inputs (the unit axis, the fold direction `u` and the
+    /// end planes' normals, with `sin`/`cos` enclosed, all derived from them), so the
+    /// bounds are certain; the tolerances are the body's own, so no allowance is chosen
+    /// here. A face sample is taken across the face's parameter box, so it is on the
+    /// face's surface though not always inside its trim.
     #[test]
-    fn every_moved_sample_is_on_a_face_carrier_of_the_exact_solid() {
+    fn every_moved_record_is_the_exact_solid_of_revolution_sampled() {
         for name in SAMPLE_ROWS {
             let i = case(name);
             let d = &i.data;
-            let (c, a, theta) = (
-                Vec3::new(d[0], d[1], d[2]),
-                Vec3::new(d[3], d[4], d[5]).unitize().unwrap(),
-                d[6],
-            );
+            let c = Vec3::new(d[0], d[1], d[2]);
+            let a = unit(v(Vec3::new(d[3], d[4], d[5])));
+            let theta = d[6];
             let pieces: Vec<Piece> = d[10..].chunks(7).map(Piece::new).collect();
-            // the profile plane's normal: z for the `xy`-plane profiles, else the plane of
-            // the axis and the first segment
-            let n = match pieces[0] {
-                Piece::Segment(p0, p1) if (p0.z, p1.z) != (0.0, 0.0) || a.z != 0.0 => {
-                    a.cross(p1 - p0).unitize().unwrap_or_else(|_| a.cross(p0 - c).unitize().unwrap())
-                }
-                _ => Vec3::Z,
+            // `u`: the unit direction from the axis to the profile point farthest from it
+            // (chosen in floating point, computed enclosed)
+            let off = |p: Vec3| {
+                let w = sub(v(p), v(c));
+                sub(w, scale(a, dot(a, w)))
             };
-            assert!(n.dot(a).abs() < 1e-15, "{name}: the axis in the profile's plane");
-            let u = n.cross(a);
-            let s = d[..3]
+            let far = pieces
                 .iter()
-                .chain(&d[10..])
-                .fold(1.0_f64, |m, x| m.max(x.abs()));
-            let allowance = 64.0 * f64::EPSILON * s;
+                .flat_map(Piece::on)
+                .max_by(|p, q| dot(off(*p), off(*p)).lo.total_cmp(&dot(off(*q), off(*q)).lo))
+                .unwrap();
+            let u = unit(off(far));
+            let n0 = cross(a, u);
+            let normals = [0.0, theta].map(|deg| {
+                let (s, co) = sin_cos_deg(deg);
+                add(scale(n0, co), scale(cross(a, n0), s))
+            });
+            // the end half-planes' directions: `u` turned through 0 and `theta`
+            let dirs = [0.0, theta].map(|deg| {
+                let (s, co) = sin_cos_deg(deg);
+                add(scale(u, co), scale(n0, s))
+            });
+            // whether the profile reaches across the axis (a segment end certainly on the
+            // far side of it from `u`); the arcs here close on a segment, so they do not
+            let straddles = pieces.iter().any(|piece| match piece {
+                Piece::Segment(p0, p1) => [p0, p1].iter().any(|&&q| dot(off(q), u).hi < 0.0),
+                Piece::Arc { .. } => false,
+            });
+            // `p` is in the swept sector within `tol`: a point at angle `phi` from `u` and
+            // distance `r` from the axis has `normals[0] . w = r sin(phi)` and
+            // `normals[1] . w = r sin(phi - theta)`, so the sector `0 <= phi <= theta` is
+            // where the first is not negative and the second not positive (both, up to a
+            // half turn; either, past it). A profile across the axis also sweeps the
+            // opposite sector, where `w` turned a half turn (`-w`) is in this one.
+            let in_sector = |p: Vec3, tol: f64| {
+                let w = sub(v(p), v(c));
+                let within = |w: V| {
+                    let (from_start, to_end) = (dot(normals[0], w), dot(normals[1], w));
+                    let (s, e) = (from_start.lo >= -tol, to_end.hi <= tol);
+                    if theta <= 180.0 { s && e } else { s || e }
+                };
+                within(w) || (straddles && within(w.map(|x| Iv::ZERO.sub(x))))
+            };
+            crate::certify::watch_written();
             let record = entry(&i).unwrap();
+            let mut bodies = crate::certify::take_written();
             assert_eq!(record[0], 0.0, "{name}: a success");
-            let pts = points(&record);
-            assert!(!pts.is_empty());
-            for p in pts {
-                let w = p - c;
-                let h = a.dot(w);
-                let r = (w - a * h).length();
-                let side = [1.0, -1.0].iter().any(|&sg| {
-                    let q = c + a * h + u * (sg * r);
-                    pieces.iter().any(|pc| pc.distance(q) <= allowance)
-                });
-                let cap = [0.0, theta]
-                    .iter()
-                    .any(|&ang| (turned(p, c, a, -ang) - c).dot(n).abs() <= allowance);
-                assert!(side || cap, "{name}: {p:?} on no face carrier");
+            assert_eq!(bodies.len(), 1, "{name}");
+            let mut b = bodies.remove(0);
+            {
+                let mut k = Kernel::default();
+                let found = solidcore::topology::brep::validation::soundness(&mut k, &mut b).unwrap();
+                assert!(found.check.lines().is_empty(), "{name}: {:?}", found.check.lines());
+                // a capped profile turns to a solid; `partial_rotation_line` to a sheet
+                assert_eq!(found.manifold, name.starts_with("capped_"), "{name}: a manifold solid");
             }
+            let k = Kernel::default();
+            let mut again = Vec::new();
+            construction_geometry(&k, &b, true, &mut again).unwrap();
+            let _ = crate::certify::take_written();
+            let tail = &record[record.len() - again.len()..];
+            for (n, (r, x)) in tail.iter().zip(&again).enumerate() {
+                assert_eq!(r.to_bits(), x.to_bits(), "{name}: record value {n}");
+            }
+            let distance = |carrier: Carrier, p: Vec3| -> Iv {
+                let w = sub(v(p), v(c));
+                match carrier {
+                    Carrier::Side(n) => {
+                        let h = dot(a, w);
+                        let r = {
+                            let o = sub(w, scale(a, h));
+                            dot(o, o).sqrt()
+                        };
+                        let fold = |sg: f64| {
+                            add(add(v(c), scale(a, h)), scale(u, r.mul(Iv::exact(sg))))
+                        };
+                        let (dp, dm) = (pieces[n].distance(fold(1.0)), pieces[n].distance(fold(-1.0)));
+                        if dp.hi <= dm.hi { dp } else { dm }
+                    }
+                    Carrier::Cap(n) => dot(normals[n], w),
+                }
+            };
+            let mut carriers: Vec<Carrier> = (0..pieces.len()).map(Carrier::Side).collect();
+            carriers.extend([Carrier::Cap(0), Carrier::Cap(1)]);
+            let mut used = Vec::new();
+            for &f in b.face_list() {
+                let face = b.face(f).unwrap();
+                let surface = face.surface.as_ref().unwrap();
+                let domain = face.uv_domain;
+                let mut pts = Vec::new();
+                for s in 0..=2 {
+                    for t in 0..=2 {
+                        let uv = domain.evaluate(f64::from(s) / 2.0, f64::from(t) / 2.0);
+                        pts.push((surface.evaluate_point(&k, uv).unwrap(), face.tolerance));
+                    }
+                }
+                for e in solidcore::topology::face::p4::edges(&b, f, None, false, None).unwrap() {
+                    let er = b.edge(e).unwrap();
+                    let curve = er.curve.as_ref().unwrap();
+                    for s in 0..=4 {
+                        let p = curve.evaluate_point(&k, er.interval.evaluate(f64::from(s) / 4.0));
+                        pts.push((p.unwrap(), er.tolerance));
+                    }
+                }
+                for vx in solidcore::topology::face::p4::vertices(&b, f, None, false, None).unwrap() {
+                    let vr = b.vertex(vx).unwrap();
+                    pts.push((vr.point, vr.tolerance));
+                }
+                // the face's boundary (its edges' samples and vertices, after the face's
+                // own samples) bounds it, so it is what must be in the sector
+                for &(p, tol) in &pts[9..] {
+                    assert!(in_sector(p, tol), "{name}: face {f:?} point {p:?} outside the sector");
+                }
+                // an end plane of a profile on one side of the axis carries only its
+                // half-plane: the points on the side of `dirs`
+                let on_half = |cr: Carrier, p: Vec3, tol: f64| match cr {
+                    Carrier::Cap(n) if !straddles => dot(dirs[n], sub(v(p), v(c))).lo >= -tol,
+                    _ => true,
+                };
+                let found: Vec<Carrier> = carriers
+                    .iter()
+                    .copied()
+                    .filter(|&cr| {
+                        pts.iter().all(|&(p, tol)| distance(cr, p).mag() <= tol)
+                            && pts[9..].iter().all(|&(p, tol)| on_half(cr, p, tol))
+                    })
+                    .collect();
+                assert!(!found.is_empty(), "{name}: face {f:?} on no carrier");
+                // Several carriers only when they are one surface: profile segments mirrored
+                // across the axis turn to the same cone, so each one's ends are on every
+                // other's turned carrier (within the face's tolerance).
+                for &x in &found {
+                    for &y in &found {
+                        let (Carrier::Side(n), Carrier::Side(m)) = (x, y) else {
+                            assert_eq!(x, y, "{name}: face {f:?} on carriers {found:?}");
+                            continue;
+                        };
+                        if n == m {
+                            continue;
+                        }
+                        assert!(
+                            matches!(pieces[m], Piece::Segment(..))
+                                && pieces[m]
+                                    .points()
+                                    .iter()
+                                    .all(|&q| distance(Carrier::Side(n), q).mag() <= face.tolerance),
+                            "{name}: face {f:?} on carriers {found:?}"
+                        );
+                    }
+                }
+                // No more faces on one surface than the carriers that make it up.
+                let shared = used.iter().filter(|&&c| c == found[0]).count();
+                assert!(shared < found.len(), "{name}: faces beyond {found:?}");
+                used.push(found[0]);
+            }
+            assert!(!used.is_empty(), "{name}");
         }
     }
 

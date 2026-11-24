@@ -2,8 +2,8 @@
 //! of radius 14 centred 14 from the z axis, revolved 270 degrees about -z, has an
 //! `SmTorus` face that `orient_body`
 //! swaps (`SwapUV`). Upstream's swap rebuilt the torus from its NURB; the swap now keeps
-//! the torus as it was made (WR-701), so the body is valid without the torus fixes below,
-//! which hold for the rebuilds that remain (`Reverse`).
+//! the torus as it was made (WR-701), so the body is valid. The rebuild fixes below hold
+//! for the rebuilds that remain (`Reverse`).
 //!
 //! - Upstream's rebuild mirrors the tube interval -90..90 to 90..450 (WR-408), so the
 //!   torus fails `SmSurfOfRevolution` test 2 and `SmTorus` test 2. The rebuild now
@@ -32,12 +32,6 @@ use solidcore::{Brep, Kernel, Vec3};
 /// Pappus: the half disc away from the axis (area pi 14^2 / 2, centroid
 /// 14 + 4 * 14 / (3 pi) from the axis) over three quarters of a turn.
 const EXPECTED_VOLUME: f64 = 28_932.176_098_892_29;
-
-/// The kernel SolidCraft runs: the torus fixes (the analytic profile faces are the only
-/// path since tangency-labs/solidcraft#14425).
-fn fixed_kernel() -> Kernel {
-    Kernel::default()
-}
 
 /// The half disc revolved 270 degrees about `axis` through the origin, capped.
 fn revolve(k: &mut Kernel, axis: Vec3) -> Brep {
@@ -119,27 +113,12 @@ fn closed_form_is_pappus() {
     assert!((v - EXPECTED_VOLUME).abs() <= 1e-12 * EXPECTED_VOLUME);
 }
 
+/// About -z the torus is swapped and keeps its definition (WR-701), so it is not rebuilt
+/// into the inner half of the tube (WR-408) and passes its parameterisation tests; about +z
+/// nothing is swapped. Both are valid with the Pappus volume.
 #[test]
-fn issue_1672_revolve_about_minus_z_is_valid_with_the_fixes() {
-    assert_valid_with_volume(&mut fixed_kernel(), Vec3::new(0.0, 0.0, -1.0));
-}
-
-#[test]
-fn issue_1672_revolve_about_plus_z_is_valid_with_the_fixes() {
-    assert_valid_with_volume(&mut fixed_kernel(), Vec3::new(0.0, 0.0, 1.0));
-}
-
-#[test]
-fn issue_1672_revolve_without_fixes_is_valid() {
+fn issue_1672_revolve_about_either_z_is_valid() {
     for axis in [Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 0.0, 1.0)] {
         assert_valid_with_volume(&mut Kernel::default(), axis);
     }
-}
-
-/// The torus fixes off: the swapped torus keeps its definition (WR-701), so it is not
-/// rebuilt into the inner half of the tube (WR-408) and passes its parameterisation tests.
-#[test]
-fn issue_1672_swapped_torus_keeps_its_definition() {
-    let mut k = Kernel::default();
-    assert_valid_with_volume(&mut k, Vec3::new(0.0, 0.0, -1.0));
 }

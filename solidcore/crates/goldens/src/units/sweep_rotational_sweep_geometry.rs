@@ -1239,11 +1239,16 @@ impl UnitDiff for Runner {
     }
 }
 
+
 /// Proof of the rows `revolve_analytic_profile_faces` moved (tangency-labs/solidcraft#14425):
 /// a line or circle coplanar with the axis now sweeps a cylinder, cone, sphere or torus
 /// parameterised by angle and meridian instead of a B-spline surface of revolution, so the
 /// samples at fixed fractions of the domain sit elsewhere on the same surface. Each row is
-/// checked against the closed form of the solid of revolution of its profile.
+/// checked against the closed form of the solid of revolution of its profile, in interval
+/// arithmetic from the exact inputs, within the kernel's declared accuracy of an analytic
+/// revolution face: `FIT_REL (1 + size)`, the largest distance by which it may miss the
+/// B-spline surface it replaces (`size` the largest coordinate of the profile's ends and
+/// the base point, as the kernel takes it).
 #[cfg(test)]
 mod revolve_analytic_rows {
     #![allow(
@@ -1253,6 +1258,11 @@ mod revolve_analytic_rows {
         clippy::indexing_slicing
     )]
     use super::*;
+    use crate::interval::{sin_cos_deg, Iv};
+    use solidcore::geom::geom_utility::p1::line_point_distance;
+    use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+    use solidcore::surface::surface::p2::{CONE_TYPE, CYLINDER_TYPE, SPHERE_TYPE, TORUS_TYPE};
+    use solidcore::sweep::analytic_revolution::FIT_REL;
 
     /// The moved `EdgeHigher` rows.
     const ROWS: [&str; 9] = [
@@ -1268,192 +1278,266 @@ mod revolve_analytic_rows {
     const IDX: usize = NORMAL + 3;
     const TRIMS: usize = IDX + 4;
 
-    fn unit(v: Vec3) -> Vec3 {
-        v * (1.0 / v.length())
+    /// A vector of enclosures.
+    type V = [Iv; 3];
+
+    fn iv(p: Vec3) -> V {
+        [Iv::exact(p.x), Iv::exact(p.y), Iv::exact(p.z)]
     }
 
-    /// The profile's carrier in the half-plane frame: `h` along the axis from the base
-    /// point, `w` along `e0` (the plane through the axis that holds the profile).
+    fn sub(a: V, b: V) -> V {
+        [a[0].sub(b[0]), a[1].sub(b[1]), a[2].sub(b[2])]
+    }
+
+    fn scale(a: V, s: Iv) -> V {
+        [a[0].mul(s), a[1].mul(s), a[2].mul(s)]
+    }
+
+    fn dot(a: V, b: V) -> Iv {
+        a[0].mul(b[0]).add(a[1].mul(b[1])).add(a[2].mul(b[2]))
+    }
+
+    fn cross(a: V, b: V) -> V {
+        [
+            a[1].mul(b[2]).sub(a[2].mul(b[1])),
+            a[2].mul(b[0]).sub(a[0].mul(b[2])),
+            a[0].mul(b[1]).sub(a[1].mul(b[0])),
+        ]
+    }
+
+    fn norm(a: V) -> Iv {
+        dot(a, a).sqrt()
+    }
+
+    fn sq(x: Iv) -> Iv {
+        x.mul(x)
+    }
+
+    /// The enclosed distance between two recorded points.
+    fn dist(p: Vec3, q: Vec3) -> Iv {
+        norm(sub(iv(p), iv(q)))
+    }
+
+    /// The profile's carrier folded into the half-plane frame: `h` along the axis from
+    /// the base point, `x` along `e0` (the plane through the axis that holds the profile).
     #[derive(Debug, Clone, Copy)]
     enum Carrier {
-        /// The line through `p` along `d`.
-        Line { p: [f64; 2], d: [f64; 2] },
+        /// The line through `(h, x)` points `p` and `q`.
+        Line { p: [Iv; 2], q: [Iv; 2] },
         /// The circle about `c` of radius `r`.
-        Circle { c: [f64; 2], r: f64 },
+        Circle { c: [Iv; 2], r: Iv },
     }
 
+    /// A point's coordinates in the frame: along the axis, along `e0`, along `e1`, and
+    /// its distance from the axis.
+    #[derive(Debug, Clone, Copy)]
+    struct Hxy {
+        h: Iv,
+        x: Iv,
+        y: Iv,
+        rho: Iv,
+    }
+
+    /// The exact frame of the revolution, enclosed: the base point, the axis `a`, the
+    /// radial `e0` of the profile's plane (perpendicular to `a`) and `e1 = a x e0`, each
+    /// with its length, so that the enclosures hold the coordinates in the orthonormal
+    /// frame of the exact inputs.
     struct Revolution {
-        base: Vec3,
-        axis: Vec3,
-        e0: Vec3,
-        e1: Vec3,
-        theta: f64,
+        base: V,
+        a: V,
+        la: Iv,
+        e0: V,
+        l0: Iv,
+        e1: V,
+        l1: Iv,
+        sin_cos: (Iv, Iv),
+        reflex: bool,
         carrier: Carrier,
+        /// The largest distance of the profile from the plane of `a` and `e0`.
+        off_plane: f64,
     }
 
     impl Revolution {
-        fn new(s: &SweepIn, c: &CurveIn, tol: f64) -> Self {
-            // the profile's carrier in 3D
+        fn new(s: &SweepIn, c: &CurveIn) -> Self {
+            /// The profile's carrier in 3D: a line through two points, or a circle
+            /// (centre, normal, radius).
             enum C3 {
-                Line(Vec3, Vec3),
-                Circle(Vec3, Vec3, f64),
+                Line(V, V),
+                Circle(V, V, f64),
             }
-            let base = v3(s.base);
-            let axis = unit(v3(s.axis));
+            let base = iv(v3(s.base));
+            let a = iv(v3(s.axis));
+            let la = norm(a);
+            let rej = |p: V| {
+                let w = sub(p, base);
+                sub(w, scale(a, dot(w, a).div(dot(a, a))))
+            };
             let point = |q: [f64; 4]| {
                 if q[3] == NOW {
-                    Vec3::new(q[0], q[1], q[2])
+                    iv(Vec3::new(q[0], q[1], q[2]))
                 } else {
-                    Vec3::new(q[0] / q[3], q[1] / q[3], q[2] / q[3])
+                    let w = Iv::exact(q[3]);
+                    [0, 1, 2].map(|i| Iv::exact(q[i]).div(w))
                 }
             };
-            let rej = |p: Vec3| {
-                let w = p - base;
-                w - axis * w.dot(axis)
-            };
             let c3 = match c {
-                CurveIn::Line { a, b, .. } | CurveIn::Bline { a, b } => C3::Line(v3(*a), v3(*b)),
+                CurveIn::Line { a, b, .. } | CurveIn::Bline { a, b } => {
+                    C3::Line(iv(v3(*a)), iv(v3(*b)))
+                }
                 CurveIn::Nurb { p: 1, cpts, .. } if cpts.len() == 2 => {
                     C3::Line(point(cpts[0]), point(cpts[1]))
                 }
                 CurveIn::Circle { c, x, y, r, .. } => {
-                    C3::Circle(v3(*c), unit(v3(*x).cross(v3(*y))), *r)
+                    C3::Circle(iv(v3(*c)), cross(iv(v3(*x)), iv(v3(*y))), *r)
                 }
                 CurveIn::Ellipse { c, x, y, rx, ry, .. } if rx == ry => {
-                    C3::Circle(v3(*c), unit(v3(*x).cross(v3(*y))), *rx)
+                    C3::Circle(iv(v3(*c)), cross(iv(v3(*x)), iv(v3(*y))), *rx)
                 }
                 other => panic!("no closed-form carrier for {other:?}"),
             };
-            // e0: radial towards the profile, in the plane through the axis that holds it
+            // e0: radial in the plane through the axis that holds the profile
             let e0 = match &c3 {
-                C3::Line(a, b) => {
-                    let (ra, rb) = (rej(*a), rej(*b));
-                    let far = if ra.length() >= rb.length() { ra } else { rb };
-                    let e0 = unit(far);
-                    let n = axis.cross(e0);
-                    assert!(n.dot(*a - base).abs() <= tol && n.dot(*b - base).abs() <= tol);
-                    e0
+                C3::Line(p, q) => {
+                    let (rp, rq) = (rej(*p), rej(*q));
+                    if norm(rp).hi >= norm(rq).hi { rp } else { rq }
                 }
-                C3::Circle(c, n, _) => {
-                    assert!(n.dot(axis).abs() <= tol / (c.length() + base.length()).max(1.0));
-                    assert!(n.dot(*c - base).abs() <= tol);
-                    unit(n.cross(axis))
-                }
+                C3::Circle(_, n, _) => cross(*n, a),
             };
-            let e1 = axis.cross(e0);
-            let fold = |p: Vec3| {
-                let w = p - base;
-                [w.dot(axis), w.dot(e0)]
-            };
-            let carrier = match c3 {
-                C3::Line(a, b) => {
-                    let (fa, fb) = (fold(a), fold(b));
-                    Carrier::Line {
-                        p: fa,
-                        d: [fb[0] - fa[0], fb[1] - fa[1]],
-                    }
-                }
-                C3::Circle(c, _, r) => Carrier::Circle { c: fold(c), r },
-            };
-            Self {
+            let l0 = norm(e0);
+            let e1 = cross(a, e0);
+            let l1 = norm(e1);
+            let (sin, cos) = sin_cos_deg(s.angle);
+            let mut rev = Self {
                 base,
-                axis,
+                a,
+                la,
                 e0,
+                l0,
                 e1,
-                theta: s.angle.to_radians(),
-                carrier,
+                l1,
+                sin_cos: (sin, cos),
+                reflex: s.angle > 180.0,
+                carrier: Carrier::Circle {
+                    c: [Iv::ZERO; 2],
+                    r: Iv::ZERO,
+                },
+                off_plane: 0.0,
+            };
+            let (carrier, off_plane) = match c3 {
+                C3::Line(p, q) => {
+                    let (fp, fq) = (rev.frame(p), rev.frame(q));
+                    // a segment is as far from the plane as its farther end
+                    let off = fp.y.mag().max(fq.y.mag());
+                    (
+                        Carrier::Line {
+                            p: [fp.h, fp.x],
+                            q: [fq.h, fq.x],
+                        },
+                        off,
+                    )
+                }
+                C3::Circle(c, n, r) => {
+                    let fc = rev.frame(c);
+                    // the circle's points are its centre plus `r` times a unit vector of
+                    // its plane, whose component along `e1` is at most `|n x e1|/(|n||e1|)`
+                    let tilt = norm(cross(n, e1)).div(norm(n).mul(l1));
+                    let off = fc.y.add(Iv::exact(r).mul(tilt)).mag().max(fc.y.sub(Iv::exact(r).mul(tilt)).mag());
+                    (
+                        Carrier::Circle {
+                            c: [fc.h, fc.x],
+                            r: Iv::exact(r),
+                        },
+                        off,
+                    )
+                }
+            };
+            rev.carrier = carrier;
+            rev.off_plane = off_plane;
+            rev
+        }
+
+        /// The coordinates of the exact point enclosed by `p`.
+        fn frame(&self, p: V) -> Hxy {
+            let w = sub(p, self.base);
+            let x = dot(w, self.e0).div(self.l0);
+            let y = dot(w, self.e1).div(self.l1);
+            Hxy {
+                h: dot(w, self.a).div(self.la),
+                x,
+                y,
+                rho: sq(x).add(sq(y)).sqrt(),
             }
         }
 
-        /// `p`'s distance from the axis along the axis and away from it.
-        fn h_rho(&self, p: Vec3) -> (f64, f64, Vec3) {
-            let w = p - self.base;
-            let h = w.dot(self.axis);
-            let r = w - self.axis * h;
-            (h, r.length(), r)
+        fn at(&self, p: Vec3) -> Hxy {
+            self.frame(iv(p))
         }
 
         /// The distance of `(h, w)` from the carrier in the half-plane.
-        fn off_carrier(&self, h: f64, w: f64) -> f64 {
+        fn off_carrier(&self, h: Iv, w: Iv) -> Iv {
             match self.carrier {
-                Carrier::Line { p, d } => {
-                    let l = (d[0] * d[0] + d[1] * d[1]).sqrt();
-                    ((h - p[0]) * d[1] - (w - p[1]) * d[0]).abs() / l
+                Carrier::Line { p, q } => {
+                    let d = [q[0].sub(p[0]), q[1].sub(p[1])];
+                    let cr = h.sub(p[0]).mul(d[1]).sub(w.sub(p[1]).mul(d[0]));
+                    let len = sq(d[0]).add(sq(d[1])).sqrt();
+                    Iv::exact(cr.mag()).div(len)
                 }
                 Carrier::Circle { c, r } => {
-                    (((h - c[0]) * (h - c[0]) + (w - c[1]) * (w - c[1])).sqrt() - r).abs()
+                    let dd = sq(h.sub(c[0])).add(sq(w.sub(c[1]))).sqrt();
+                    Iv::exact(dd.sub(r).mag())
                 }
             }
         }
 
-        /// The side `sigma` (`1` the profile's half-plane, `-1` the opposite one) on whose
-        /// carrier `p` lies within `tol`, if any: `p` folds to `(h, sigma * rho)`.
-        fn side(&self, p: Vec3, tol: f64) -> Option<f64> {
-            let (h, rho, _) = self.h_rho(p);
-            let plus = self.off_carrier(h, rho);
-            let minus = self.off_carrier(h, -rho);
+        /// The side `sigma` (`1` the profile's half-plane, `-1` the opposite one) of the
+        /// carrier `p` lies on within `tol`: `p` folds to `(h, sigma rho)`.
+        fn side(&self, p: Hxy, tol: f64) -> Option<f64> {
+            let plus = self.off_carrier(p.h, p.rho).hi;
+            let minus = self.off_carrier(p.h, Iv::ZERO.sub(p.rho)).hi;
             let (sigma, d) = if plus <= minus { (1.0, plus) } else { (-1.0, minus) };
             (d <= tol).then_some(sigma)
         }
 
-        /// Whether the radial `r` turned to side `sigma` lies within `tol` of the swept
-        /// sector, the turn by `[0, theta]` about the axis from `e0`.
-        fn in_sector(&self, r: Vec3, sigma: f64, tol: f64) -> bool {
-            let r = r * sigma;
-            let (x, y) = (r.dot(self.e0), r.dot(self.e1));
-            let (c, s) = (self.theta.cos(), self.theta.sin());
-            // signed distances from the start and end half-planes, positive inside
-            let from_start = y;
-            let from_end = s * x - c * y;
-            if self.theta <= std::f64::consts::PI {
-                (from_start >= -tol && from_end >= -tol) || (x * x + y * y).sqrt() <= tol
+        /// The signed distances of `p` turned to side `sigma` from the start half-plane
+        /// and the end half-plane, positive inside the swept sector.
+        fn start_end_offsets(&self, p: Hxy, sigma: f64) -> (Iv, Iv) {
+            let s = Iv::exact(sigma);
+            let (x, y) = (p.x.mul(s), p.y.mul(s));
+            let (sin, cos) = self.sin_cos;
+            (y, sin.mul(x).sub(cos.mul(y)))
+        }
+
+        /// Whether `p` on side `sigma` lies within `tol` of the swept sector: a convex
+        /// wedge up to a half turn, the union of the two half-planes past it.
+        fn in_sector(&self, p: Hxy, sigma: f64, tol: f64) -> bool {
+            let (fs, fe) = self.start_end_offsets(p, sigma);
+            if self.reflex {
+                fs.lo >= -tol || fe.lo >= -tol
             } else {
-                !(from_start < -tol && from_end < -tol)
+                (fs.lo >= -tol && fe.lo >= -tol) || p.rho.hi <= tol
             }
         }
 
-        /// The turned meridian's tangent at `p` (on side `sigma`) in 3D, in the
-        /// half-plane of the unit radial `rhat` (which names the half-plane of a point on
-        /// the axis).
-        fn meridian_in(&self, p: Vec3, sigma: f64, rhat: Vec3) -> Vec3 {
-            let (h, rho, _) = self.h_rho(p);
-            let w = sigma * rho;
+        /// The turned meridian's unit tangent at `p` (on side `sigma`), in the half-plane
+        /// of the radial `r` (which names the half-plane of a point on the axis).
+        fn meridian_in(&self, p: Hxy, sigma: f64, r: V) -> V {
             let t = match self.carrier {
-                Carrier::Line { d, .. } => d,
-                Carrier::Circle { c, .. } => [-(w - c[1]), h - c[0]],
+                Carrier::Line { p: a, q } => [q[0].sub(a[0]), q[1].sub(a[1])],
+                Carrier::Circle { c, .. } => {
+                    let w = p.rho.mul(Iv::exact(sigma));
+                    [c[1].sub(w), p.h.sub(c[0])]
+                }
             };
-            self.axis * t[0] + rhat * (sigma * t[1])
+            let ahat = scale(self.a, Iv::exact(1.0).div(self.la));
+            let rhat = scale(r, Iv::exact(1.0).div(norm(r)));
+            let m = [0, 1, 2].map(|i| ahat[i].mul(t[0]).add(rhat[i].mul(t[1].mul(Iv::exact(sigma)))));
+            scale(m, Iv::exact(1.0).div(norm(m)))
         }
 
-        /// How far a cone's point at height `v` may slip along its generator from the
-        /// exact point of that height, from the rounding of the stored semi-angle. The
-        /// cone evaluates `R(v) = base_radius + tan(alpha) v` with `alpha` stored in
-        /// degrees (`atan2` of the profile's radius change over its height, times
-        /// `180/pi`, back times `pi/180`): its `alpha` is off by at most
-        /// `8 eps (alpha + scale/|d|)` (four roundings relative to `alpha`, and the
-        /// profile's coordinates, each within `eps scale`, turning the direction `d` by
-        /// at most `eps scale/|d|` each), and `tan` turns an error `e` in `alpha` into
-        /// `e/cos^2(alpha)` in the slope, so the radius at `v` is off by at most
-        /// `|v| e/cos^2(alpha)` plus `2 eps |v tan(alpha)|` for `tan` and the product.
-        /// Zero for a circle carrier and for a line across the axis (a plane, no cone).
-        fn cone_slip(&self, v: f64, scale: f64) -> f64 {
-            let Carrier::Line { d, .. } = self.carrier else {
-                return 0.0;
-            };
-            if d[0] == 0.0 {
-                return 0.0;
-            }
-            let len2 = d[0] * d[0] + d[1] * d[1];
-            let alpha = (d[1] / d[0]).atan().abs();
-            let e = 8.0 * f64::EPSILON * (alpha + scale / len2.sqrt());
-            let cos2 = d[0] * d[0] / len2;
-            v.abs() * (e / cos2 + 2.0 * f64::EPSILON * (d[1] / d[0]).abs())
-        }
-
-        /// The swept circle of `p`: its `(h, rho)`.
-        fn circle_of(&self, p: Vec3) -> (f64, f64) {
-            let (h, rho, _) = self.h_rho(p);
-            (h, rho)
+        /// The radial of the recorded point `p` (perpendicular to the axis).
+        fn radial(&self, p: Vec3) -> V {
+            let w = sub(iv(p), self.base);
+            sub(w, scale(self.a, dot(w, self.a).div(dot(self.a, self.a))))
         }
     }
 
@@ -1464,6 +1548,8 @@ mod revolve_analytic_rows {
     #[test]
     fn every_moved_row_is_the_revolution_of_its_profile() {
         let k = Kernel::default();
+        // the kernel's angular tolerance: vectors within it are parallel
+        let ang = sin_cos_deg(k.tolerances.ang_tol_deg).0.hi;
         for name in ROWS {
             let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
             let OpIn::EdgeHigher { edge } = &i.op else {
@@ -1483,30 +1569,70 @@ mod revolve_analytic_rows {
                 assert_eq!(rec[at], 0.0, "{name}: sample status");
                 pt(rec, at + 1)
             };
-            // the scale of every coordinate the row computes, and the rounding allowance
-            let mut scale = v3(i.sweep.base).length();
-            for a in 0..N_SURF_SAMPLES {
-                for b in 0..N_SURF_SAMPLES {
-                    scale = scale.max(sample(a, b).length());
+            // the kernel's declared accuracy for this profile, from the same floats
+            // `edge_sweep_higher` hands `analytic_revolution`: the edge's curve trimmed to
+            // its interval, and the larger of the sweep's and the B-rep's tolerance, capped
+            // at `FIT_REL * (1 + size)`
+            let curve = rust_curve(&k, &edge.curve).unwrap();
+            let (mut fb, shell) = new_brep(&k, &i.sweep).unwrap();
+            let (fe, _) = rust_edge(&k, &mut fb, shell, edge).unwrap();
+            let mut trimmed = edge::curve(&fb, fe).unwrap().unwrap().copy(&k).unwrap();
+            let mut ivl = edge::interval(&fb, fe).unwrap();
+            trimmed.trim(&k, &mut ivl, TrimMode::Notify).unwrap();
+            let natural = trimmed.ends(&k).unwrap();
+            let base = v3(i.sweep.base);
+            let size = natural
+                .start
+                .max_dimension()
+                .max(natural.end.max_dimension())
+                .max(base.max_dimension());
+            let eps = if i.sweep.eps > fb.tolerance() { i.sweep.eps } else { fb.tolerance() };
+            let tol = eps.min(FIT_REL * (1.0 + size));
+            let rev = Revolution::new(&i.sweep, &edge.curve);
+            assert!(rev.off_plane <= tol, "{name}: profile {} off its plane", rev.off_plane);
+
+            // the surface's kind is the one `candidate` names for the profile: a line
+            // whose ends are equally far from the axis (within `tol`) sweeps a cylinder,
+            // another line a cone; an arc centred on the axis (within the larger of `tol`
+            // and the caller's tolerance) a sphere, another arc a torus. The distances are
+            // the kernel's own (`line_point_distance` on the same floats); the geometry of
+            // the surface is proved by the samples below, whatever its kind.
+            let axis = v3(i.sweep.axis);
+            let code = rec[FIXTURE + 2] as i64;
+            let want = match &edge.curve {
+                CurveIn::Circle { c, .. } | CurveIn::Ellipse { c, .. } => {
+                    let (centre_dist, _) = line_point_distance(base, axis, v3(*c));
+                    if centre_dist <= tol.max(eps) { SPHERE_TYPE } else { TORUS_TYPE }
                 }
+                _ => {
+                    let (sd, _) = line_point_distance(base, axis, natural.start);
+                    let (ed, _) = line_point_distance(base, axis, natural.end);
+                    if (sd - ed).abs() <= tol { CYLINDER_TYPE } else { CONE_TYPE }
+                }
+            };
+            assert_eq!(code, want, "{name}: surface kind");
+
+            // the five tolerances are the edge's and its vertices' (the fixture's), which
+            // the analytic surface does not touch: the face, start curve and edge take the
+            // edge's; each side takes its vertex's, or stays unset (-1) on a closed edge
+            let (vtol, etol) = ([rec[10], rec[11]], rec[12]);
+            assert_eq!(rec[AFTER_SAMPLES..AFTER_SAMPLES + 3], [etol; 3], "{name}: edge tols");
+            for t in &rec[AFTER_SAMPLES + 3..NORMAL] {
+                assert!(vtol.contains(t) || *t == -1.0, "{name}: vertex tol {t}");
             }
-            let tol = 64.0 * f64::EPSILON * scale;
-            let rev = Revolution::new(&i.sweep, &edge.curve, tol);
 
             // (a) the surface: every sample on the carrier turned into the sector
             for a in 0..N_SURF_SAMPLES {
                 for b in 0..N_SURF_SAMPLES {
-                    let p = sample(a, b);
+                    let p = rev.at(sample(a, b));
                     let sigma = rev
                         .side(p, tol)
                         .unwrap_or_else(|| panic!("{name}: sample {a},{b} {p:?} off carrier"));
-                    let (_, _, r) = rev.h_rho(p);
-                    assert!(rev.in_sector(r, sigma, tol), "{name}: sample {a},{b} outside sector");
+                    assert!(rev.in_sector(p, sigma, tol), "{name}: sample {a},{b} outside sector");
                 }
             }
 
             // the profile's ends, which the side trims sweep
-            let curve = rust_curve(&k, &edge.curve).unwrap();
             let ends = [
                 curve.evaluate_point(&k, edge.t[0]).unwrap(),
                 curve.evaluate_point(&k, edge.t[1]).unwrap(),
@@ -1514,6 +1640,7 @@ mod revolve_analytic_rows {
 
             // (b) the 3D trims: each on the surface and one boundary of it
             let n = rec[TRIMS] as usize;
+            assert!(n > 0, "{name}: a swept face with no trims");
             let mut at = TRIMS + 1;
             let mut trims = Vec::new();
             for t in 0..n {
@@ -1525,28 +1652,20 @@ mod revolve_analytic_rows {
                     })
                     .collect();
                 at += 3 + 4 * N_CURVE_SAMPLES;
-                let sides: Vec<f64> = ps
-                    .iter()
-                    .map(|p| {
-                        rev.side(*p, tol)
-                            .unwrap_or_else(|| panic!("{name}: trim {t} {p:?} off carrier"))
-                    })
-                    .collect();
-                for (p, s) in ps.iter().zip(&sides) {
-                    let (_, _, r) = rev.h_rho(*p);
-                    assert!(rev.in_sector(r, *s, tol), "{name}: trim {t} outside sector");
+                let fs: Vec<Hxy> = ps.iter().map(|p| rev.at(*p)).collect();
+                for f in &fs {
+                    let s = rev
+                        .side(*f, tol)
+                        .unwrap_or_else(|| panic!("{name}: trim {t} {f:?} off carrier"));
+                    assert!(rev.in_sector(*f, s, tol), "{name}: trim {t} outside sector");
                 }
                 // a profile (start or end half-plane) or the circle of one profile end
-                let start = ps.iter().all(|p| rev.e1.dot(*p - rev.base).abs() <= tol);
-                let (c, s) = (rev.theta.cos(), rev.theta.sin());
-                let end_n = rev.e0 * (-s) + rev.e1 * c;
-                let end = ps.iter().all(|p| end_n.dot(*p - rev.base).abs() <= tol);
+                let start = fs.iter().all(|f| f.y.mag() <= tol);
+                let (sin, cos) = rev.sin_cos;
+                let end = fs.iter().all(|f| sin.mul(f.x).sub(cos.mul(f.y)).mag() <= tol);
                 let circle = (0..2).find(|&e| {
-                    let (he, re) = rev.circle_of(ends[e]);
-                    ps.iter().all(|p| {
-                        let (h, rho) = rev.circle_of(*p);
-                        (h - he).abs() <= tol && (rho - re).abs() <= tol
-                    })
+                    let fe = rev.at(ends[e]);
+                    fs.iter().all(|f| f.h.sub(fe.h).mag() <= tol && f.rho.sub(fe.rho).mag() <= tol)
                 });
                 assert!(start || end || circle.is_some(), "{name}: trim {t} on no boundary");
                 trims.push((ps, start, end, circle));
@@ -1565,15 +1684,10 @@ mod revolve_analytic_rows {
                     })
                     .collect();
                 at += 3 + 3 * N_CURVE_SAMPLES;
-                let ut = 64.0 * f64::EPSILON * u0.abs().max(u1.abs()).max(1.0);
-                let vt = 64.0 * f64::EPSILON * v0.abs().max(v1.abs()).max(1.0);
                 let on = |f: &dyn Fn(&[f64; 2]) -> bool| ps.iter().all(f);
                 assert!(
-                    on(&|q| (q[0] - u0).abs() <= ut)
-                        || on(&|q| (q[0] - u1).abs() <= ut)
-                        || on(&|q| (q[1] - v0).abs() <= vt)
-                        || on(&|q| (q[1] - v1).abs() <= vt),
-                    "{name}: uv trim {t} off the domain boundary"
+                    on(&|q| q[0] == u0) || on(&|q| q[0] == u1) || on(&|q| q[1] == v0) || on(&|q| q[1] == v1),
+                    "{name}: uv trim {t} off the domain boundary: {ps:?}"
                 );
                 uvs.push(ps);
             }
@@ -1586,52 +1700,49 @@ mod revolve_analytic_rows {
             // the loop closes in 3D and in uv, and each uv end is the domain corner whose
             // surface sample is the 3D end
             let ends_of = |o: f64, len: usize| if o == 1.0 { (0, len - 1) } else { (len - 1, 0) };
-            let corner = |q: [f64; 2]| {
-                let a = if (q[0] - u0).abs() <= (q[0] - u1).abs() { 0 } else { N_SURF_SAMPLES - 1 };
-                let b = if (q[1] - v0).abs() <= (q[1] - v1).abs() { 0 } else { N_SURF_SAMPLES - 1 };
-                sample(a, b)
+            let index_of = |x: f64, lo: f64, hi: f64| {
+                if x == lo {
+                    0
+                } else {
+                    assert_eq!(x, hi, "{name}: a uv end off the domain's corners");
+                    N_SURF_SAMPLES - 1
+                }
             };
+            let corner = |q: [f64; 2]| sample(index_of(q[0], u0, u1), index_of(q[1], v0, v1));
             for t in 0..n {
                 assert!(orients[t] == 1.0 || orients[t] == 2.0, "{name}: orient {t}");
                 let (_, last) = ends_of(orients[t], N_CURVE_SAMPLES);
                 let next = (t + 1) % n;
                 let (first, _) = ends_of(orients[next], N_CURVE_SAMPLES);
-                // both ends are within `tol` plus the cone's slip of their uv corner (checked
-                // below), so they meet within twice that
-                let gap = (trims[t].0[last] - trims[next].0[first]).length();
-                let slip = rev.cone_slip(uvs[t][last][1], scale);
-                let allowed = 2.0 * (tol + slip);
-                assert!(gap <= allowed, "{name}: 3D loop open after trim {t} by {gap} > {allowed}");
+                // both ends are within `tol` of their uv corner (checked below), so they
+                // meet within twice that
+                let gap = dist(trims[t].0[last], trims[next].0[first]).hi;
+                assert!(gap <= 2.0 * tol, "{name}: 3D loop open after trim {t} by {gap}");
                 // in uv the loop closes too, except across a side dropped as degenerate:
                 // a boundary line between two corners whose surface point is one (a cone's
                 // apex, a sphere's pole)
                 let (qa, qb) = (uvs[t][last], uvs[next][first]);
-                let same_u = (qa[0] - qb[0]).abs() <= 1e-12 * (u1 - u0).abs().max(1.0);
-                let same_v = (qa[1] - qb[1]).abs() <= 1e-12 * (v1 - v0).abs().max(1.0);
+                let (same_u, same_v) = (qa[0] == qb[0], qa[1] == qb[1]);
                 if !(same_u && same_v) {
-                    let collapsed = (corner(qa) - corner(qb)).length();
+                    let apex = corner(qa);
+                    let collapsed = dist(apex, corner(qb)).hi;
                     assert!(
                         (same_u || same_v) && collapsed <= tol,
                         "{name}: uv loop open after trim {t} ({qa:?} to {qb:?}, {collapsed})"
                     );
                     // the whole boundary line is that one point
-                    let near = |x: f64, lo: f64, hi: f64| {
-                        if (x - lo).abs() <= (x - hi).abs() { 0 } else { N_SURF_SAMPLES - 1 }
-                    };
-                    let apex = corner(qa);
                     for j in 0..N_SURF_SAMPLES {
                         let p = if same_u {
-                            sample(near(qa[0], u0, u1), j)
+                            sample(index_of(qa[0], u0, u1), j)
                         } else {
-                            sample(j, near(qa[1], v0, v1))
+                            sample(j, index_of(qa[1], v0, v1))
                         };
-                        assert!((p - apex).length() <= tol, "{name}: side {t} not collapsed");
+                        assert!(dist(p, apex).hi <= tol, "{name}: side {t} not collapsed");
                     }
                 }
                 for j in [0, N_CURVE_SAMPLES - 1] {
-                    let gap = (corner(uvs[t][j]) - trims[t].0[j]).length();
-                    let allowed = tol + rev.cone_slip(uvs[t][j][1], scale);
-                    assert!(gap <= allowed, "{name}: trim {t} end {j} not its uv corner by {gap} > {allowed}");
+                    let gap = dist(corner(uvs[t][j]), trims[t].0[j]).hi;
+                    assert!(gap <= tol, "{name}: trim {t} end {j} not its uv corner by {gap}");
                 }
             }
 
@@ -1644,9 +1755,8 @@ mod revolve_analytic_rows {
                 assert!(trims[fc].2, "{name}: far-end curve in the end half-plane");
             }
             let sv = pt(rec, 4);
-            let near_end = |p: Vec3| {
-                usize::from((ends[0] - p).length() > (ends[1] - p).length())
-            };
+            // (which end a vertex is: the nearer one)
+            let near_end = |p: Vec3| usize::from((ends[0] - p).length() > (ends[1] - p).length());
             if let Some(c) = index(2) {
                 assert_eq!(trims[c].3, Some(near_end(sv)), "{name}: start vertex circle");
             }
@@ -1654,16 +1764,25 @@ mod revolve_analytic_rows {
                 assert_eq!(trims[c].3, Some(1 - near_end(sv)), "{name}: end vertex circle");
             }
 
-            // the normal: the unit normal of the parameterisation at the domain's minimum
-            // corner, across the circle and the meridian, on the side of S_u x S_v
+            // the normal: unit to rounding (each path divides the components by the
+            // computed length: the squared length's three products and two sums, its
+            // square root and the division put each component within a relative
+            // d = 3.5 u / (1 - 3.5 u) of the exact quotient, u = eps/2, so the squared
+            // length is within 2 d + d^2 < 7.1 u < 4 eps of 1; the test's own sum is
+            // enclosed)
             let nrm = pt(rec, NORMAL);
-            assert!((nrm.length() - 1.0).abs() <= 64.0 * f64::EPSILON, "{name}: unit normal");
+            let n2 = dot(iv(nrm), iv(nrm));
+            assert!(n2.sub(Iv::exact(1.0)).mag() <= 4.0 * f64::EPSILON, "{name}: unit normal {n2:?}");
+            // perpendicular to the circle and to the meridian through the domain's minimum
+            // corner within the kernel's angular tolerance, the kernel's own criterion for
+            // two directions being perpendicular (as the entity tolerances are its
+            // criterion for points being one). At a corner on the axis (a cone
+            // apex or a sphere pole) the normal is the limit along the corner's meridian:
+            // take that meridian's half-plane from the neighbouring sample on it (the other
+            // neighbour is the corner again)
             let p00 = sample(0, 0);
-            // at a corner on the axis (a cone apex or a sphere pole) the normal is the limit
-            // along the corner's meridian: take that meridian's half-plane from the
-            // neighbouring sample on it (the other neighbour is the corner again)
-            let off_axis = |q: Vec3| rev.h_rho(q).1 > tol;
-            let at = if off_axis(p00) {
+            let off_axis = |q: Vec3| rev.at(q).rho.lo > tol;
+            let on = if off_axis(p00) {
                 p00
             } else {
                 [sample(0, 1), sample(1, 0)]
@@ -1671,27 +1790,21 @@ mod revolve_analytic_rows {
                     .find(|&q| off_axis(q))
                     .unwrap_or_else(|| panic!("{name}: corner meridian collapsed"))
             };
-            let (_, rho, r) = rev.h_rho(at);
-            let sigma = rev.side(at, tol).unwrap();
-            let ang = 64.0 * f64::EPSILON * scale / rho;
-            let circ = rev.axis.cross(unit(r));
-            assert!(
-                nrm.dot(circ).abs() <= ang,
-                "{name}: normal off the circle's normal plane: {} > {ang}",
-                nrm.dot(circ)
-            );
-            let mer = unit(rev.meridian_in(p00, sigma, unit(r)));
-            assert!(
-                nrm.dot(mer).abs() <= ang,
-                "{name}: normal along the meridian: {} > {ang}",
-                nrm.dot(mer)
-            );
-            // the first grid cell's diagonals: (S11 - S00) x (S01 - S10) is twice the
-            // cell's mean S_u x S_v (exact for a bilinear cell) and stays nonzero when one
-            // of the corner's sides collapses to the axis
-            let d1 = sample(1, 1) - p00;
-            let d2 = sample(0, 1) - sample(1, 0);
-            assert!(nrm.dot(d1.cross(d2)) > 0.0, "{name}: normal against S_u x S_v");
+            let r = rev.radial(on);
+            let sigma = rev.side(rev.at(on), tol).unwrap();
+            let circ = cross(rev.a, r);
+            let along_circ = dot(iv(nrm), circ).div(norm(circ)).mag();
+            assert!(along_circ <= ang, "{name}: normal off the circle's normal plane: {along_circ}");
+            let mer = rev.meridian_in(rev.at(p00), sigma, r);
+            let along_mer = dot(iv(nrm), mer).mag();
+            assert!(along_mer <= ang, "{name}: normal along the meridian: {along_mer}");
+            // on the side of S_u x S_v: the first grid cell's diagonals, (S11 - S00) x
+            // (S01 - S10), are twice the cell's mean S_u x S_v (exact for a bilinear
+            // cell) and stay nonzero when one of the corner's sides collapses to the axis
+            let d1 = sub(iv(sample(1, 1)), iv(p00));
+            let d2 = sub(iv(sample(0, 1)), iv(sample(1, 0)));
+            let side = dot(iv(nrm), cross(d1, d2));
+            assert!(side.lo > 0.0, "{name}: normal against S_u x S_v: {side:?}");
         }
     }
 }

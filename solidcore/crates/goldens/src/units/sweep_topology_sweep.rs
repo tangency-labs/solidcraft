@@ -1559,15 +1559,16 @@ mod tests {
 
 /// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired): the
 /// rotational rows whose vertex points moved. A rotational sweep moves no vertex but to the
-/// image of an input vertex: each output vertex (and so each edge end, which the record
-/// takes from the vertex list) is an input vertex or that vertex turned through the sweep's
-/// angle about its axis (`R(theta) v = c + cos theta (v - c) + sin theta (a x (v - c)) +
-/// (1 - cos theta) (a . (v - c)) a`). The rows are replayed and every point of `points` is
-/// checked against those closed-form images.
+/// image of an input vertex: each output vertex is one of the input vertices or
+/// their images turned through the sweep's angle about its axis (`R(theta) v = c + cos theta
+/// (v - c) + sin theta (a x (v - c)) + (1 - cos theta) (a . (v - c)) a`), and each edge end
+/// is one of the output vertices. The rows are replayed and `points` is checked against
+/// those closed-form images.
 #[cfg(test)]
 mod moved_rows {
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
     use super::*;
+    use crate::interval::{sin_cos_deg, Iv};
     use solidcore::math::Vec3;
     use solidcore::sweep::topology_sweep::store::SweepIdentities;
 
@@ -1585,80 +1586,148 @@ mod moved_rows {
         "whole_rotation_z_45",
     ];
 
-    /// `v` turned through `deg` degrees about the line through `c` along the unit `a`.
-    fn turned(v: Point3, c: Point3, a: Vec3, deg: f64) -> Point3 {
-        let (s, co) = deg.to_radians().sin_cos();
-        let d = v - c;
-        c + d * co + a.cross(d) * s + a * ((1.0 - co) * a.dot(d))
+    /// `v` turned through `deg` degrees about the line through `c` along `axis`, enclosed
+    /// in interval arithmetic from the exact inputs (the unit axis `axis / |axis|` and
+    /// `sin`/`cos` enclosed too).
+    fn turned(v: Point3, c: Point3, axis: Vec3, deg: f64) -> [Iv; 3] {
+        let e = Iv::exact;
+        let (s, co) = sin_cos_deg(deg);
+        let len = e(axis.x).mul(e(axis.x)).add(e(axis.y).mul(e(axis.y))).add(e(axis.z).mul(e(axis.z))).sqrt();
+        let a = [e(axis.x).div(len), e(axis.y).div(len), e(axis.z).div(len)];
+        let d = [e(v.x).sub(e(c.x)), e(v.y).sub(e(c.y)), e(v.z).sub(e(c.z))];
+        let cross = [
+            a[1].mul(d[2]).sub(a[2].mul(d[1])),
+            a[2].mul(d[0]).sub(a[0].mul(d[2])),
+            a[0].mul(d[1]).sub(a[1].mul(d[0])),
+        ];
+        let dot = a[0].mul(d[0]).add(a[1].mul(d[1])).add(a[2].mul(d[2]));
+        let along = e(1.0).sub(co).mul(dot);
+        let cs = [c.x, c.y, c.z];
+        std::array::from_fn(|n| e(cs[n]).add(d[n].mul(co)).add(cross[n].mul(s)).add(a[n].mul(along)))
     }
 
-    /// The input body's vertices, the axis point, the unit axis and the angle.
-    fn input(i: &Input) -> (Vec<Point3>, Point3, Vec3, f64) {
-        if let Some([l, w, h, _, vx, vy, vz, angle, ..]) = i.whole {
-            let mut corners = Vec::new();
-            for x in [0.0, l] {
-                for y in [0.0, w] {
-                    for z in [0.0, h] {
-                        corners.push(Point3::new(x, y, z));
-                    }
-                }
-            }
-            return (corners, Point3::ZERO, Vec3::new(vx, vy, vz).unitize_or_z(), angle);
-        }
-        let [body, _, vx, vy, vz, angle, cx, cy, cz, ..] = i.body.unwrap();
+    /// An input vertex: its point and tolerance.
+    type Vx = (Point3, f64);
+
+    /// The input body's vertex points and tolerances, its edges' end vertices (an edge
+    /// with an end missing is left out), the axis point, the axis and the angle.
+    fn input(i: &Input) -> (Vec<Vx>, Vec<[Vx; 2]>, Point3, Vec3, f64) {
         let mut k = Kernel::default();
-        let mut records = solidcore::topology::topology::NotifyRecords::new();
-        let mut attributes = AttributeStore::new();
-        let handle = BrepId::from_index(0);
-        let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
-        let mut env = solidcore::topology::edge::NotifyEnv {
-            records: &mut records,
-            attributes: &mut attributes,
-            context: None,
-            key_of: &key_of,
+        let (b, c, axis, angle) = if let Some([l, w, h, _, vx, vy, vz, angle, ..]) = i.whole {
+            let b = solidcore::primitive::api_primitives::create_box(&mut k, Point3::ZERO, l, w, h)
+                .unwrap();
+            (b, Point3::ZERO, Vec3::new(vx, vy, vz), angle)
+        } else {
+            let [body, _, vx, vy, vz, angle, cx, cy, cz, ..] = i.body.unwrap();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
+            let mut attributes = AttributeStore::new();
+            let handle = BrepId::from_index(0);
+            let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context: None,
+                key_of: &key_of,
+            };
+            let key = key_of(solidcore::error::EntityRef::Brep(handle)).key;
+            let b = build_body(&mut k, body, key, &mut env).unwrap();
+            (b, Point3::new(cx, cy, cz), Vec3::new(vx, vy, vz), angle)
         };
-        let key = key_of(solidcore::error::EntityRef::Brep(handle)).key;
-        let b = build_body(&mut k, body, key, &mut env).unwrap();
-        let vertices = b
-            .vertex_list()
+        let vx = |v| {
+            (
+                solidcore::topology::vertex::point(&b, v).unwrap(),
+                solidcore::topology::vertex::tolerance(&b, v).unwrap(),
+            )
+        };
+        let vertices = b.vertex_list().iter().map(|&v| vx(v)).collect();
+        let edges = b
+            .edge_list()
             .iter()
-            .map(|&v| solidcore::topology::vertex::point(&b, v).unwrap())
+            .filter_map(|&ed| {
+                let s = solidcore::topology::edge::start_vertex(&b, ed).unwrap()?;
+                let t = solidcore::topology::edge::end_vertex(&b, ed).unwrap()?;
+                Some([vx(s), vx(t)])
+            })
             .collect();
-        (vertices, Point3::new(cx, cy, cz), Vec3::new(vx, vy, vz).unitize_or_z(), angle)
+        (vertices, edges, c, axis, angle)
     }
 
-    /// Each output point is within `64 eps s` of an input vertex or its turned image, `s`
-    /// the largest coordinate magnitude of the input and the axis point (at least 1). The
-    /// allowance: the kernel's rotation (a 3x3 matrix of rounded `cos`/`sin` terms applied
-    /// to `v - c`, then `+ c`) and [`turned`] each round every coordinate by at most
-    /// `(3 + 3) eps` of the summed magnitudes, at most `3 s` each, so `2 * 6 * 3 = 36 eps s`
-    /// per coordinate, under `64 eps s` with the difference of the two.
+    /// Whether `p` is within `tol` of the enclosed point `img` (the distance enclosed, so
+    /// certain).
+    fn near(p: Point3, img: [Iv; 3], tol: f64) -> bool {
+        let e = Iv::exact;
+        let d = [p.x, p.y, p.z]
+            .iter()
+            .zip(img)
+            .map(|(&x, y)| e(x).sub(y))
+            .fold(Iv::ZERO, |sum, d| sum.add(d.mul(d)))
+            .sqrt();
+        d.hi <= tol
+    }
+
+    /// Each output vertex is within its input vertex's tolerance of an input vertex or of
+    /// that vertex's exact turned image (the distance enclosed in interval arithmetic, so
+    /// certain; the tolerance is the input's own, which
+    /// [`RotationalSweepGeometry::vertex_sweep_same`] also uses to tell an image from its
+    /// vertex, so no allowance is chosen here), every edge end is bitwise one of the
+    /// output vertices, and every edge joins the ends of one edge a rotational sweep makes:
+    /// an input edge where it was, its turned image, or an input vertex's arc to its image
+    /// (each end within its input vertex's tolerance). The claim is membership only: the recorded vertex lists hold
+    /// coincident vertices (`nl_pc21_rotate_one_face_higher_axis_through_edge` records
+    /// three at the origin), so the outputs are not matched to distinct images.
+    ///
+    /// [`RotationalSweepGeometry::vertex_sweep_same`]: solidcore::sweep::rotational_sweep_geometry::RotationalSweepGeometry::vertex_sweep_same
     #[test]
-    fn every_moved_point_is_an_input_vertex_or_its_turned_image() {
+    fn every_moved_vertex_is_an_input_vertex_or_its_turned_image() {
         for name in ROWS {
             let i: Input = crate::case::regression_case(&Runner, name).parse().unwrap();
-            let (vertices, c, a, angle) = input(&i);
+            let (vertices, input_edges, c, axis, angle) = input(&i);
             let out = rust(&i).unwrap();
-            assert_eq!(out.ints["whole"][0], 0, "{name}: a success");
-            let s = vertices
-                .iter()
-                .chain([&c])
-                .flat_map(|p| [p.x, p.y, p.z])
-                .fold(1.0_f64, |m, x| m.max(x.abs()));
-            let allowance = 64.0 * f64::EPSILON * s;
-            let images: Vec<Point3> = vertices
-                .iter()
-                .flat_map(|&v| [v, turned(v, c, a, angle)])
-                .collect();
-            let points = &out.values["points"];
-            assert!(!points.is_empty(), "{name}");
-            for p in points.chunks(3) {
-                let p = Point3::new(p[0], p[1], p[2]);
-                let d = images
-                    .iter()
-                    .map(|q| (p - *q).max_dimension())
-                    .fold(f64::INFINITY, f64::min);
-                assert!(d <= allowance, "{name}: {p:?} is {d:e} from every image ({allowance:e})");
+            let whole = &out.ints["whole"];
+            assert_eq!(whole[0], 0, "{name}: a success");
+            let n = whole[6] as usize;
+            let points: Vec<Point3> =
+                out.values["points"].chunks(3).map(|p| Point3::new(p[0], p[1], p[2])).collect();
+            assert!(n > 0 && points.len() >= n, "{name}");
+            let (outputs, ends) = points.split_at(n);
+            let e = Iv::exact;
+            let mut images = Vec::new();
+            for &(v, tol) in &vertices {
+                images.push(([e(v.x), e(v.y), e(v.z)], tol));
+                images.push((turned(v, c, axis, angle), tol));
+            }
+            for &p in outputs {
+                let on = images.iter().any(|&(img, tol)| near(p, img, tol));
+                assert!(on, "{name}: {p:?} is on no input vertex or turned image");
+            }
+            // The edges a rotational sweep can make, as end pairs: each input edge where
+            // it was, its turned image, and each input vertex's arc to its image.
+            let at = |(v, tol): Vx| ([e(v.x), e(v.y), e(v.z)], tol);
+            let image = |(v, tol): Vx| (turned(v, c, axis, angle), tol);
+            let mut allowed = Vec::new();
+            for &[a, b] in &input_edges {
+                allowed.push([at(a), at(b)]);
+                allowed.push([image(a), image(b)]);
+            }
+            for &v in &vertices {
+                allowed.push([at(v), image(v)]);
+            }
+            assert!(ends.len() % 2 == 0, "{name}");
+            assert!(!ends.is_empty(), "{name}: no closed edge recorded");
+            for pair in ends.chunks(2) {
+                let (p, q) = (pair[0], pair[1]);
+                let made = allowed.iter().any(|&[(u, tu), (w, tw)]| {
+                    (near(p, u, tu) && near(q, w, tw)) || (near(p, w, tw) && near(q, u, tu))
+                });
+                assert!(made, "{name}: edge {p:?} - {q:?} is no input edge, image or arc");
+            }
+            for q in ends {
+                assert!(
+                    outputs.iter().any(|p| p.x.to_bits() == q.x.to_bits()
+                        && p.y.to_bits() == q.y.to_bits()
+                        && p.z.to_bits() == q.z.to_bits()),
+                    "{name}: edge end {q:?} is no output vertex"
+                );
             }
         }
     }

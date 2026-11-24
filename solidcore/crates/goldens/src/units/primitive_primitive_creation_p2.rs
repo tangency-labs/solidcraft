@@ -527,6 +527,7 @@ impl UnitDiff for Runner {
 mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+    use solidcore::error::sweep::SweepFailure;
 
     /// Why no requested body exists for the row.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -677,13 +678,18 @@ mod moved_rows {
 
     /// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired)
     /// moved two cone rows from one refusal to another (1007 to 1006): their side face is
-    /// now the analytic cylinder, which `is_degenerate_curve` no longer takes as degenerate,
-    /// so the call refuses one step later (tangency-labs/solidcraft#15350 tracks that test's
+    /// now the analytic cylinder, which the sweep's `is_degenerate_curve` check no longer
+    /// takes as a surface degenerating to a curve (the B-spline surface of revolution
+    /// was refused there, 1007), so the call refuses one step later (tangency-labs/solidcraft#15350 tracks that test's
     /// dependence on the parametrisation). The cone's height is within the B-rep's
     /// tolerance of zero, so its base and top circles, and each vertex of one with the
     /// vertex above it, are one within tolerance: no solid of that height has a valid
     /// B-rep, and the call is refused either way (the API drops the B-rep it was
-    /// building on a refusal, so no body reaches the caller).
+    /// building on a refusal, so no body reaches the caller). The refusing step follows:
+    /// the swept profile edge's own curve is the side line from a base vertex to the
+    /// vertex above it, of length the height, within tolerance of zero, so the face
+    /// builder drops that line as degenerate and the sweep refuses with the typed
+    /// [`SweepFailure::SweptEdgeCurveDropped`] (status 1006), which is asserted here.
     #[test]
     fn the_cones_below_tolerance_height_stay_refused() {
         let data: Value = serde_json::from_str(include_str!(
@@ -705,7 +711,12 @@ mod moved_rows {
             assert_eq!(i.op, 1, "{name}: a partial cone");
             let (result, _, tolerance) = run(&i);
             assert!(i.data[1] > 0.0 && i.data[1] <= tolerance, "{name}: height {}", i.data[1]);
-            assert_eq!(error(&result.expect_err(name)), 1006.0, "{name}");
+            let err = result.expect_err(name);
+            assert!(
+                matches!(err.sweep_failure(), Some(SweepFailure::SweptEdgeCurveDropped)),
+                "{name}: {err:?}"
+            );
+            assert_eq!(error(&err), 1006.0, "{name}");
             seen += 1;
         }
         assert_eq!(seen, 2);

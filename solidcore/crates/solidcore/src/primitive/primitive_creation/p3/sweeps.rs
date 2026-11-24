@@ -754,42 +754,40 @@ mod tests {
         };
         let ((h0, _), (h1, _)) = (polar(p0), polar(p1));
         let profile = segment(p0, p1);
-        {
-            let mut k = Kernel::default();
-            let sheet = create_rotational_sweep(
-                &mut k,
-                &[Some(&profile)],
-                Point3::new(o[0], o[1], o[2]),
-                Vec3::new(a[0], a[1], a[2]),
-                360.0,
-                false,
-            )
-            .unwrap();
-            let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
-            assert!(!faces.is_empty());
-            let mut worst = 0.0_f64;
-            for f in faces {
-                let surface = crate::topology::face::p2::surface(&sheet, f)
-                    .unwrap()
-                    .expect("a surface");
-                let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
-                for i in 0..=24 {
-                    for j in 0..=24 {
-                        let uv = crate::geom::vector2d::Point2::new(
-                            d.u_min() + (d.u_max() - d.u_min()) * f64::from(i) / 24.0,
-                            d.v_min() + (d.v_max() - d.v_min()) * f64::from(j) / 24.0,
-                        );
-                        let x = surface.evaluate_point(&k, uv).unwrap();
-                        let (h, r) = polar([x.x, x.y, x.z]);
-                        let t = (h - h0) / (h1 - h0);
-                        assert!((-1e-9..=1.0 + 1e-9).contains(&t), "past the profile: {x:?}");
-                        let on = [0, 1, 2].map(|c| p0[c] + t * (p1[c] - p0[c]));
-                        worst = worst.max((r - polar(on).1).abs());
-                    }
+        let mut k = Kernel::default();
+        let sheet = create_rotational_sweep(
+            &mut k,
+            &[Some(&profile)],
+            Point3::new(o[0], o[1], o[2]),
+            Vec3::new(a[0], a[1], a[2]),
+            360.0,
+            false,
+        )
+        .unwrap();
+        let faces = crate::topology::brep::p1::faces(&sheet, None).unwrap();
+        assert!(!faces.is_empty());
+        let mut worst = 0.0_f64;
+        for f in faces {
+            let surface = crate::topology::face::p2::surface(&sheet, f)
+                .unwrap()
+                .expect("a surface");
+            let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
+            for i in 0..=24 {
+                for j in 0..=24 {
+                    let uv = crate::geom::vector2d::Point2::new(
+                        d.u_min() + (d.u_max() - d.u_min()) * f64::from(i) / 24.0,
+                        d.v_min() + (d.v_max() - d.v_min()) * f64::from(j) / 24.0,
+                    );
+                    let x = surface.evaluate_point(&k, uv).unwrap();
+                    let (h, r) = polar([x.x, x.y, x.z]);
+                    let t = (h - h0) / (h1 - h0);
+                    assert!((-1e-9..=1.0 + 1e-9).contains(&t), "past the profile: {x:?}");
+                    let on = [0, 1, 2].map(|c| p0[c] + t * (p1[c] - p0[c]));
+                    worst = worst.max((r - polar(on).1).abs());
                 }
             }
-            assert!(worst <= 1e-6, "{worst} mm off the hyperboloid");
         }
+        assert!(worst <= 1e-6, "{worst} mm off the hyperboloid");
     }
 
     /// A full turn of a half annulus about its diameter is a hollow ball; upstream
