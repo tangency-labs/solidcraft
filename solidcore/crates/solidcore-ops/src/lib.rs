@@ -63,6 +63,7 @@ pub mod file;
 pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
+pub mod frame_trim;
 pub mod hatch;
 pub mod heal;
 pub mod history;
