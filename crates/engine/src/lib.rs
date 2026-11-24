@@ -49,6 +49,7 @@ pub mod render_lights;
 pub mod render_preparation;
 pub mod report_issue;
 pub mod sample;
+pub mod selection_context;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;

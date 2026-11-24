@@ -380,6 +380,8 @@ Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` o
 app advertises `plugin_tools: true` in `control.capabilities`; older apps keep their built-in
 tools without a plugin query. Plugin listings and plugin calls read the entries afresh.
 
+**The selection** goes with every tool reply: when the user has something selected, the reply ends with one more text block, `[Selected in SolidCraft right now: N item(s). ...]`, in the format the chat's Attach selection sends (faces and edges with the names and indices the tools take, features and bodies by name, at most 64 items and the rest counted). Nothing is added when nothing is selected. The server reads it with the app's `document.selection`; an app from before it adds nothing.
+
 **`expect`** on `batch` and `execute` turns the verify step into part of the build. An agent
 computes the volume, body count or bounding box a stage should produce before building it;
 instead of a `measure` call and a comparison by hand after every stage, it gives them to the

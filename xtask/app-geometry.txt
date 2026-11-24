@@ -655,6 +655,7 @@ crates/engine/src/render_lights.rs:patch cross
 crates/engine/src/render_lights.rs:position atan2
 crates/engine/src/schema/drawing_view.rs:LinesStatsResult::from triangles
 crates/engine/src/schema/plastic.rs:vector normalized
+crates/engine/src/selection_context.rs:grouped_selection_in triangles
 crates/engine/src/snap.rs:arc_middle cross,dot,normalized
 crates/engine/src/snap.rs:area_centre cross
 crates/engine/src/snap.rs:axis_ends dot
@@ -1501,7 +1502,6 @@ crates/ui-egui/src/viewport.rs:current_face dot
 crates/ui-egui/src/viewport.rs:edge_normals dot
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot
-crates/ui-egui/src/viewport.rs:grouped_selection_in triangles
 crates/ui-egui/src/viewport.rs:keeps_distances dot
 crates/ui-egui/src/viewport.rs:lies_on_section cross,dot,normalized
 crates/ui-egui/src/viewport.rs:look_part triangles

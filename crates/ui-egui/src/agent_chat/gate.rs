@@ -31,7 +31,7 @@ pub enum Verdict {
 /// Methods the bridged MCP server uses; nothing else (clicks, preferences, quitting, the chat
 /// itself) is the agent's.
 const METHODS: &[&str] =
-    &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
+    &["engine.commands", "document.inspect", "document.selection", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
 
 /// Commands the window answers itself, with no engine entry (`control.rs`, `execute`).
 const WINDOW_COMMANDS: &[&str] = &["view.pick"];

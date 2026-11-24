@@ -48,6 +48,7 @@ back (volume, errors, cylinder axes), or change them in one `batch` with `coales
 then set them back the same way before saving.\n\n\
 Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
 (`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
+The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it.\n\n\
 A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -120,6 +121,17 @@ struct Agent {
 }
 
 impl Agent {
+    /// The selection block for a reply, `None` when nothing is selected or the backend cannot say
+    /// (no app listening, an app from before `document.selection`).
+    fn selection(&mut self, result: &Value) -> Option<String> {
+        let failed_to_reach = result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(crate::backend::NOT_RUNNING))));
+        if failed_to_reach {
+            return None;
+        }
+        let reply = self.backend.call("document.selection", json!({})).ok()?;
+        reply["selection"].as_str().map(str::to_owned)
+    }
+
     /// The options tools use now: the server's own, with what the app's Preferences turn on. The
     /// app is asked until it answers once (it may start after the server, or be busy), and its
     /// answer then holds for this session, so the tools an agent listed keep their shape.
@@ -177,6 +189,12 @@ impl Tools for Agent {
             && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
         {
             content.push(json!({"type": "text", "text": note}));
+        }
+        // What the user has selected goes with every reply, so "this" and "these" mean something.
+        if let Some(block) = self.selection(&result)
+            && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
+        {
+            content.push(json!({"type": "text", "text": block}));
         }
         result
     }
