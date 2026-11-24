@@ -42,8 +42,8 @@
 //! `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
 //! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
 //! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
-//! bicubic-by-septic net reaches degree 112 in Q, past the Bernstein forms' cap of 96, and
-//! 80 in the bracket). A face not certified regular is refused (D5), naming the largest
+//! bicubic-by-septic net reaches degree 112 in Q and 80 in the bracket; the tangent bound's
+//! product reaches 100, within the Bernstein forms' cap of 128). A face not certified regular is refused (D5), naming the largest
 //! wall that works: the smallest radius of curvature on the displaced side.
 //!
 //! Deviations: not upstream. Bounds: at most [`MAX_ROUNDS`] refinement rounds and
