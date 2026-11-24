@@ -24,8 +24,13 @@ impl BSplineSurface {
     /// The join of the two ends (`srf_tool::join`) replaces each pair by the average of
     /// its homogeneous points. With equal weights `w` that average is `(w (a + b) / 2, w)`:
     /// the Euclidean midpoint at the same weight, so each control point moves by at most
-    /// `|b - a| / 2` and, by the convex hull of the non-negative rational basis, the
-    /// surface by at most half the gap bound. With unequal weights the average reweights
+    /// `|b - a| / 2` and, by the convex hull of the non-negative rational basis (every
+    /// weight of the net positive, which the bound requires), the surface by at most half
+    /// the gap bound. The join then removes the joint knot as often as its own tolerance
+    /// allows (`remove_knot_conditional`, at most `q` removals for degree `q`, each
+    /// accepted by an uncertified floating comparison against that tolerance): a seam
+    /// join at the face's tolerance `tol` moves the surface by about `tol / 2 + q tol`.
+    /// The certificate covers the averaging only; the removal is upstream's heuristic. With unequal weights the average reweights
     /// the joint line and can move the surface far past the gap (a proportional weight
     /// ratio leaves the boundary curves equal but changes the curves next to them), so
     /// the surface does not close for the join. `false` wherever the bound is `None`.
@@ -82,7 +87,9 @@ impl BSplineSurface {
     /// `|S(end) - S(start)| <= max_j |b_j - a_j| + (rho_max / rho_min - 1) max_j |a_j - a_0|`
     ///
     /// (§4.2's net distance, with one weight ratio per pair). The second term is 0 for a
-    /// non-rational net and for lines whose weights are proportional. The bound counts
+    /// non-rational net and for lines whose weights are proportional. A pair whose
+    /// homogeneous points are equal bit for bit contributes an exact 0 to the first term
+    /// (no conversion to Euclidean points). The bound counts
     /// its rounding (§4.4): a weight's division `gamma_2` of each Euclidean point (none
     /// for a weight of 1), `gamma_8` on each computed length, `gamma_6` on the ratio
     /// (none for weights equal pair by pair: the spread is then exactly 0) and `gamma_4`
@@ -90,7 +97,10 @@ impl BSplineSurface {
     ///
     /// The listed factors leave about `3u` of slack each, which also covers the roundings
     /// not listed: the `- 1` after the ratio, and the subtraction, squares, sum and root
-    /// inside each length.
+    /// inside each length. A length whose squares could underflow (largest component
+    /// below `2^-500`) is bounded by twice its largest component instead (at least
+    /// `sqrt 3` times it), and each converted point adds `f64::MIN_POSITIVE`, which holds
+    /// the absolute error of a coordinate that converts to a subnormal number.
     ///
     /// `None` where the net certifies nothing: no NURB, fewer than two lines in `param`'s
     /// direction, either direction not clamped with exactly `degree + 1` end knots (the
@@ -98,14 +108,16 @@ impl BSplineSurface {
     /// knots the first and last lines are not the boundary curves, with more the end
     /// lines are not either, and an unclamped other direction evaluates its end spans
     /// with basis values that can be negative, outside the convex hull; a knot vector
-    /// that validates is clamped exactly so, so no valid surface lands here), a weight
-    /// not positive (the convex hull no longer holds the curve), a bound that overflows,
+    /// that validates is clamped exactly so, so no valid surface lands here), a weight of
+    /// any control point that is not finite, not a positive normal number or with a reciprocal
+    /// that is not normal (the convex hull no longer holds the surface, or the conversions
+    /// and ratios lose their relative error bounds), a weight ratio that is not a normal number, a bound that overflows,
     /// and for `param` neither U nor V.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for a control point or weight of either boundary line that is not
-    /// finite; those of [`Self::knots`].
+    /// finite, whatever the knot vectors; those of [`Self::knots`].
     pub fn boundary_gap_bound(&self, param: SurfParamType) -> Result<Option<f64>> {
         let Some(sur) = self.gw_nurb() else {
             return Ok(None);
@@ -128,12 +140,6 @@ impl BSplineSurface {
             }
             _ => return Ok(None),
         };
-        if !(self.is_exactly_clamped(SurfParamType::U)?
-            && self.is_exactly_clamped(SurfParamType::V)?)
-        {
-            return Ok(None);
-        }
-
         // (a point's z is 0 for a 2D net; its weight 1 for a non-rational one)
         let finite = |p: &CPoint| {
             p.x.is_finite()
@@ -147,11 +153,23 @@ impl BSplineSurface {
                 "a boundary control point or weight is not finite",
             ));
         }
-        let weight = |p: &CPoint| if p.w == NOW { 1.0 } else { p.w };
-        if !pairs
-            .iter()
-            .all(|(a, b)| weight(a) > 0.0 && weight(b) > 0.0)
+        if !(self.is_exactly_clamped(SurfParamType::U)?
+            && self.is_exactly_clamped(SurfParamType::V)?)
         {
+            return Ok(None);
+        }
+        let weight = |p: &CPoint| if p.w == NOW { 1.0 } else { p.w };
+        // every weight of the net, not only the boundary lines': the convex hull that
+        // carries the join's control point moves to the surface needs all of them
+        // positive, and the relative error bounds of the conversions and ratios below
+        // need them and their reciprocals normal (`is_normal` is false for 0, subnormals,
+        // infinities and NaN; a weight past 2^1022 has a subnormal reciprocal, whose
+        // rounding is no longer relative to the converted coordinate)
+        let normal = |p: &CPoint| {
+            let w = weight(p);
+            w > 0.0 && w.is_normal() && (1.0 / w).is_normal()
+        };
+        if !sur.rows().all(|row| row.iter().all(normal)) {
             return Ok(None);
         }
         // weights equal pair by pair (bit for bit): every ratio is 1, so `beta_j = alpha_j`
@@ -167,11 +185,15 @@ impl BSplineSurface {
         // length itself within gamma_4 of the computed one). Any overflow, here or below,
         // and the net certifies nothing (`f64::max` would drop a NaN).
         let distance = |(x, px): (Vec3, &CPoint), (y, py): (Vec3, &CPoint)| -> Option<f64> {
-            let mut d = (x - y).length() * (1.0 + gamma(8));
+            // the same homogeneous point: the same Euclidean point, exactly
+            if px == py {
+                return Some(0.0);
+            }
+            let mut d = norm_bound(x - y) * (1.0 + gamma(8));
             for (point, cp) in [(x, px), (y, py)] {
                 let e = division(cp);
                 if e != 0.0 {
-                    d += e * point.length() * (1.0 + gamma(4));
+                    d += e * norm_bound(point) * (1.0 + gamma(4)) + f64::MIN_POSITIVE;
                 }
             }
             d.is_finite().then_some(d)
@@ -191,6 +213,10 @@ impl BSplineSurface {
             points = points.max(gap);
             reach = reach.max(far);
             let rho = weight(b) / weight(a);
+            // (a ratio that underflows or overflows loses its relative error bound)
+            if !rho.is_normal() {
+                return Ok(None);
+            }
             rho_min = rho_min.min(rho);
             rho_max = rho_max.max(rho);
         }
@@ -213,8 +239,28 @@ impl BSplineSurface {
     fn is_exactly_clamped(&self, param: SurfParamType) -> Result<bool> {
         let (_, multiplicities) = self.knots(param, None)?;
         let degree = self.degree(param);
-        let ends = |m: Option<&usize>| m.is_some_and(|&m| m == degree + 1);
+        let ends = |m: Option<&usize>| m.is_some_and(|&m| Some(m) == degree.checked_add(1));
         Ok(ends(multiplicities.first()) && ends(multiplicities.last()))
+    }
+}
+
+/// An upper bound on `|v|` from the computed `v`: its computed length (within the
+/// rounding the caller's factor covers) where no square can underflow, and twice its
+/// largest component (at least `sqrt 3` times it, so at least `|v|`, exactly) where one
+/// could: below `2^-500` a square falls under `2^-1000` and towards the subnormal range,
+/// where it loses its relative accuracy or becomes 0 (a nonzero difference of `2^-600`
+/// would otherwise have length 0). Exactly 0 for the zero vector.
+fn norm_bound(v: Vec3) -> f64 {
+    let largest = v.x.abs().max(v.y.abs()).max(v.z.abs());
+    if largest == 0.0 {
+        return 0.0;
+    }
+    // 2^-500
+    let tiny = f64::from_bits(523_u64 << 52);
+    if largest < tiny {
+        2.0 * largest
+    } else {
+        v.length()
     }
 }
 
@@ -377,6 +423,125 @@ mod tests {
         ];
         let s = surface(
             rows,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(s.boundary_gap_bound(SurfParamType::U).unwrap(), None);
+    }
+
+    #[test]
+    fn an_interior_weight_not_positive_certifies_nothing() {
+        // positive, equal boundary weights; the middle line's weight is negative, so the
+        // rational basis is not a convex combination and the join's control point moves
+        // do not bound the surface's
+        let rows = vec![
+            vec![cpw(0.0, 0.0, 0.0, 1.0), cpw(0.0, 0.0, 1.0, 1.0)],
+            vec![cpw(5.0, 5.0, 0.0, -1.0), cpw(5.0, 5.0, 1.0, 1.0)],
+            vec![cpw(0.0, 0.0, 0.0, 1.0), cpw(0.0, 0.0, 1.0, 1.0)],
+        ];
+        let s = surface(
+            rows,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(s.boundary_gap_bound(SurfParamType::U).unwrap(), None);
+        assert!(!s.closes_within(SurfParamType::U, 1.0).unwrap());
+    }
+
+    #[test]
+    fn a_nan_refuses_in_an_unclamped_net_too() {
+        let rows = vec![
+            vec![cp(f64::NAN, 0.0, 0.0), cp(0.0, 0.0, 1.0)],
+            vec![cp(1.0, 0.0, 0.0), cp(1.0, 0.0, 1.0)],
+            vec![cp(0.0, 0.0, 0.0), cp(0.0, 0.0, 1.0)],
+        ];
+        let s = surface(
+            rows,
+            2,
+            1,
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert!(s.boundary_gap_bound(SurfParamType::U).is_err());
+    }
+
+    #[test]
+    fn a_gap_whose_length_underflows_is_not_zero() {
+        // 2^-600 apart: the squares of the difference underflow to 0, so its computed
+        // length is 0; the bound must still hold the gap
+        let t = f64::from_bits(423_u64 << 52);
+        assert_eq!(t, 2.0_f64.powi(-600));
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        let d = Vec3::new(t, 0.0, 0.0);
+        let b = tube([o, o], [d, d])
+            .boundary_gap_bound(SurfParamType::U)
+            .unwrap()
+            .unwrap();
+        assert!(b >= t && b <= 4.0 * t, "{b}");
+    }
+
+    #[test]
+    fn equal_homogeneous_lines_bound_zero_at_any_weight() {
+        // weight 0.5 at 1e12: the Euclidean conversion rounds, but the two lines are the
+        // same homogeneous points, so their curves are the same and the gap is exactly 0
+        let row = |w: f64| vec![cpw(1e12, 0.0, 0.0, w), cpw(1e12, 0.0, 1.0, w)];
+        let s = surface(
+            vec![row(0.5), row(1.0), row(0.5)],
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(s.boundary_gap_bound(SurfParamType::U).unwrap(), Some(0.0));
+        assert!(s.closes_within(SurfParamType::U, 0.0).unwrap());
+    }
+
+    #[test]
+    fn subnormal_weight_ratios_certify_nothing() {
+        // ratios 2^-1074 and 1.25 * 2^-1074 both round to the subnormal 2^-1074: the
+        // computed spread would be 0 while the curves are 1/18 apart at the middle
+        let big = 2.0_f64.powi(1022);
+        let small = 2.0_f64.powi(-52);
+        let rows = vec![
+            vec![cpw(0.0, 0.0, 0.0, big), cpw(1.0, 0.0, 0.0, big)],
+            vec![cpw(0.0, 0.0, 0.0, small), cpw(1.0, 0.0, 0.0, 1.25 * small)],
+        ];
+        let s = surface(
+            rows,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(s.boundary_gap_bound(SurfParamType::U).unwrap(), None);
+    }
+
+    #[test]
+    fn a_subnormal_weight_certifies_nothing() {
+        let tiny = f64::from_bits(1);
+        let row = |w: f64| vec![cpw(0.0, 0.0, 0.0, w), cpw(1.0, 0.0, 0.0, w)];
+        let s = surface(
+            vec![row(1.0), row(tiny), row(1.0)],
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        );
+        assert_eq!(s.boundary_gap_bound(SurfParamType::U).unwrap(), None);
+    }
+
+    #[test]
+    fn a_weight_with_a_subnormal_reciprocal_certifies_nothing() {
+        // 1 / 2^1023 is subnormal: the conversion's rounding is then absolute, not
+        // relative to the coordinate, and the gap's relative allowance no longer covers it
+        let huge = f64::from_bits(2046_u64 << 52);
+        let row = |w: f64| vec![cpw(0.0, 0.0, 0.0, w), cpw(1.0, 0.0, 0.0, w)];
+        let s = surface(
+            vec![row(1.0), row(huge), row(1.0)],
             2,
             1,
             vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],

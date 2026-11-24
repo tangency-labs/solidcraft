@@ -2295,33 +2295,18 @@ pub fn move_seam_notified<O: LoopObject>(
     // everywhere, with equal weights on the two boundary lines
     // (`BSplineSurface::closes_within`, #21491): the join below then averages each pair of
     // boundary points at their common weight, so it moves the surface by at most half the
-    // gap. `zone_tol` is the tolerance the join removes its knot to. A creased (C0)
+    // gap (the joint knot's removal after it is upstream's own `zone_tol` heuristic). The
+    // final split below merges only across a direction this same check on the surface
+    // as it came in closes. A creased (C0)
     // closure is closed: the surface still passes through its edges. No sample decides it
     // (§7.6): `IsPeriodic`'s six samples and the healer's sampled closure grade prove
     // nothing between their points.
-    let closed = |dir: Sp| -> Result<bool> {
-        let net = match surface0.kind_with_nurb(k)? {
-            SurfaceKind::BSpline(b) => Some(b),
-            SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
-            SurfaceKind::BallPatch(bp) => Some(bp.net()),
-            SurfaceKind::Plane(p) => Some(p.base()),
-            SurfaceKind::Cone(c) => Some(c.rev().base()),
-            SurfaceKind::Sphere(s) => Some(s.base().base()),
-            SurfaceKind::Torus(t) => Some(t.base().base()),
-            SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
-            SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
-            SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => None,
-        };
-        match net {
-            Some(net) => net.closes_within(dir, zone_tol),
-            None => Ok(false),
-        }
-    };
-    let closed_u = !(crosses_u || near_miss_u) || closed(Sp::U)?;
-    let closed_v = !(crosses_v || near_miss_v) || closed(Sp::V)?;
+    let closes = (
+        net_closes(k, surface0, Sp::U, zone_tol)?,
+        net_closes(k, surface0, Sp::V, zone_tol)?,
+    );
+    let closed_u = !(crosses_u || near_miss_u) || closes.0;
+    let closed_v = !(crosses_v || near_miss_v) || closes.1;
     let (crosses_u, near_miss_u) = (crosses_u && closed_u, near_miss_u && closed_u);
     let (crosses_v, near_miss_v) = (crosses_v && closed_v, near_miss_v && closed_v);
     let fix_seam_both = (crosses_u || near_miss_u) && (crosses_v || near_miss_v);
@@ -2670,6 +2655,13 @@ pub fn move_seam_notified<O: LoopObject>(
         ))?
         .unwrap_or(false)
     {
+        // not upstream: the split merges only across a seam the face's surface closes on
+        // (`closes`, the gate's check on the surface as it came in: the join and its knot
+        // removal since then moved the net by the gap's half and upstream's tolerance
+        // heuristic, which must not reopen a direction the gate certified). `HasSeamProblem`
+        // and the split read closure off `IsPeriodic`'s samples or the face properties,
+        // which can name a direction the net does not close in; merging there glues the
+        // open ends (#21491)
         // status ignored upstream, passed on by the fork (tangency-labs/smlib 6997962)
         out.split = split_at_seam_depth(
             k,
@@ -2681,10 +2673,38 @@ pub fn move_seam_notified<O: LoopObject>(
             problem,
             props,
             resolve,
+            closes,
             0,
         )?;
     }
     Ok(out)
+}
+
+/// Whether `surface` closes on itself in `dir` within `tol` as a seam join needs
+/// ([`BSplineSurface::closes_within`] on its control net); `false` for a surface without
+/// one.
+///
+/// [`BSplineSurface::closes_within`]: crate::nurbs::b_spline_surface::BSplineSurface::closes_within
+fn net_closes(k: &Kernel, surface: &Surface, dir: SurfParamType, tol: f64) -> Result<bool> {
+    let net = match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(b) => Some(b),
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
+        SurfaceKind::BallPatch(bp) => Some(bp.net()),
+        SurfaceKind::Plane(p) => Some(p.base()),
+        SurfaceKind::Cone(c) => Some(c.rev().base()),
+        SurfaceKind::Sphere(s) => Some(s.base().base()),
+        SurfaceKind::Torus(t) => Some(t.base().base()),
+        SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
+        SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => None,
+    };
+    match net {
+        Some(net) => net.closes_within(dir, tol),
+        None => Ok(false),
+    }
 }
 
 /// `smos_Min(a, b)`: `a < b ? a : b` (unlike `f64::min`, a NaN `a` gives `b` and a
@@ -2786,6 +2806,7 @@ pub fn split_at_seam_notified<O: LoopObject>(
         problem,
         props,
         resolve,
+        (true, true),
         0,
     )
 }
@@ -3222,6 +3243,7 @@ fn split_at_seam_depth<O: LoopObject>(
     mut problem: SeamProblem,
     props: Option<&FaceProps<O>>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
+    closes: (bool, bool),
     depth: usize,
 ) -> Result<SeamSplit> {
     use SurfParamType as Sp;
@@ -3275,8 +3297,12 @@ fn split_at_seam_depth<O: LoopObject>(
 
     let vertex_only_closed_surface = fp3::is_closed_surface_with_vertex_loops(k, b, f, props)?;
 
-    let merge_u = names(problem.crossed, Sp::U) || names(problem.missing, Sp::U);
-    let merge_v = names(problem.crossed, Sp::V) || names(problem.missing, Sp::V);
+    // (`closes`: the directions a caller certified closed; `(true, true)` upstream)
+    let merge_u = closes.0 && (names(problem.crossed, Sp::U) || names(problem.missing, Sp::U));
+    let merge_v = closes.1 && (names(problem.crossed, Sp::V) || names(problem.missing, Sp::V));
+    if !(merge_u || merge_v) {
+        return Ok(out);
+    }
 
     // allow Brep modifications (upstream's SmTemporaryChangeValue of
     // pBrep->m_bEditingEnabled and the context's DoingBoolean flag, restored on
@@ -3297,6 +3323,7 @@ fn split_at_seam_depth<O: LoopObject>(
         depth,
         (merge_u, merge_v),
         vertex_only_closed_surface,
+        closes,
     );
     b.set_editing_enabled(editing);
     k.context.set_doing_boolean(doing_boolean);
@@ -3348,6 +3375,7 @@ fn split_at_seam_merges<O: LoopObject>(
     depth: usize,
     (merge_u, merge_v): (bool, bool),
     vertex_only_closed_surface: bool,
+    closes: (bool, bool),
 ) -> Result<SeamSplit> {
     use SurfParamType as Sp;
     let mut out = SeamSplit::default();
@@ -3400,6 +3428,7 @@ fn split_at_seam_merges<O: LoopObject>(
                     this_problem,
                     props,
                     resolve,
+                    closes,
                     depth + 1,
                 )?;
                 out.faces.extend_from_slice(&s.faces);
@@ -4305,6 +4334,7 @@ mod tests {
             0,
             (true, false),
             false,
+            (true, true),
         );
         // (the plane has no seam curve, so the merge after it may still fail; not on the
         // seam's vertex)
@@ -4336,9 +4366,64 @@ mod tests {
             p,
             None,
             &|_| None,
+            (true, true),
             MAX_SPLIT_AT_SEAM_DEPTH + 1,
         );
         assert!(matches!(e, Err(SolidError::InvalidInput { .. })));
+    }
+
+    /// #21491 (CodeRabbit on #21622): `move_seam`'s final split merges only across a
+    /// direction its net closes in; a problem the samples or props report in another
+    /// direction leaves the face as it is.
+    #[test]
+    fn split_at_seam_merges_only_across_a_direction_that_closes() {
+        use crate::primitive::api_primitives::create_cylinder;
+
+        let run = |closes: (bool, bool)| {
+            let mut k = Kernel::default();
+            let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+            let f = b
+                .faces()
+                .iter()
+                .find_map(|(f, _)| {
+                    let s = surface_deref(&b, f).ok()?;
+                    let d = s.natural_uv_domain_with_nurb(&k).ok()?;
+                    s.is_closed(&k, &d, SurfParamType::U, None, false)
+                        .ok()?
+                        .0
+                        .then_some(f)
+                })
+                .unwrap();
+            let mut cu = CurveClassification::<H>::new(&k);
+            let mut cv = CurveClassification::<H>::new(&k);
+            let p = SeamProblem {
+                crossed: SurfParamType::U,
+                missing: SurfParamType::U,
+                near_miss: SurfParamType::Neither,
+            };
+            let r = split_at_seam_depth(
+                &mut k,
+                &mut b,
+                None,
+                f,
+                &mut cu,
+                &mut cv,
+                p,
+                None,
+                &|_| None,
+                closes,
+                0,
+            );
+            (r, b.faces().len(), b.edges().len())
+        };
+        // the cylinder's three faces and three edges, untouched
+        let (masked, faces, edges) = run((false, true));
+        assert_eq!(masked.unwrap(), SeamSplit::default());
+        assert_eq!((faces, edges), (3, 3));
+        // unmasked, the same call goes on into the merge (which, with no classification
+        // handles here, refuses): the mask is what stops it
+        let (merged, _, _) = run((true, true));
+        assert!(merged.is_err());
     }
 
     #[test]
