@@ -739,6 +739,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
+    rows.push(row("component.insert_from_design", &format!("{}…", app.tr_label("Insert from Design")), "", "component", shown));
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
@@ -837,6 +838,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
         "component.insert_design" => FileAction::Command("component.insert_design").run(app),
+        "component.insert_from_design" => FileAction::Command("component.insert_from_design").run(app),
         "file.export_stl" => FileAction::Command("file.export_stl").run(app),
         "file.export_3mf" => FileAction::Command("file.export_3mf").run(app),
         "file.export_step" => FileAction::Command("file.export_step").run(app),

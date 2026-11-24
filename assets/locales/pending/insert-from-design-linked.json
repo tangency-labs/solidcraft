@@ -1,42 +1,74 @@
 {
   "en": {
+    "help.component.insert_from_design": "Picks parts and sub-assemblies out of another saved design, from a tree of tick boxes. Use it to copy them into this design with their timelines, or to keep them linked to the design they are in.",
     "insert_from_design.link": "Keep linked to {name}",
     "insert_from_design.link_detail": "Linked parts are not copied: this design reads them from {name}, Update Links brings in their changes, and they are edited there.",
+    "new_internal.in_part": "A part holds no parts. Finish Edit first: a new part goes into the assembly.",
+    "new_internal.made": "{name} is a new part of {design}. Model it now: it is stored in {design} as an internal component once it has a body and you activate the design again.",
+    "new_internal.stored": "{name} is stored in {design} as an internal component.",
     "ui.edit_in_place_inside": "This component is linked to a part inside {name}. Open {name} to edit it."
   },
   "ar": {
+    "help.component.insert_from_design": "يختار أجزاءً وتجميعات فرعية من تصميم محفوظ آخر، من شجرة مربعات اختيار. استخدمه لنسخها إلى هذا التصميم مع خطوطها الزمنية، أو لإبقائها مرتبطة بالتصميم الذي هي فيه.",
     "insert_from_design.link": "الإبقاء على الارتباط مع {name}",
     "insert_from_design.link_detail": "الأجزاء المرتبطة لا تُنسخ: يقرؤها هذا التصميم من {name}، ويجلب «تحديث الروابط» تغييراتها، وتُحرَّر هناك.",
+    "new_internal.in_part": "الجزء لا يحتوي أجزاءً. أنهِ التحرير أولًا: الجزء الجديد يوضع في التجميع.",
+    "new_internal.made": "{name} جزء جديد في {design}. صمِّمه الآن: يُخزَّن في {design} كمكوِّن داخلي عندما يصبح له جسم وتفعِّل التصميم من جديد.",
+    "new_internal.stored": "خُزِّن {name} في {design} كمكوِّن داخلي.",
     "ui.edit_in_place_inside": "هذا المكوِّن مرتبط بجزء داخل {name}. افتح {name} لتحريره."
   },
   "de": {
+    "help.component.insert_from_design": "Wählt Teile und Unterbaugruppen aus einer anderen gespeicherten Konstruktion, in einem Baum mit Kontrollkästchen. Verwenden Sie es, um sie mit ihren Zeitachsen in diese Konstruktion zu kopieren oder sie mit der Konstruktion verknüpft zu lassen, in der sie liegen.",
     "insert_from_design.link": "Mit {name} verknüpft lassen",
     "insert_from_design.link_detail": "Verknüpfte Teile werden nicht kopiert: Diese Konstruktion liest sie aus {name}, „Verknüpfungen aktualisieren“ übernimmt ihre Änderungen, und bearbeitet werden sie dort.",
+    "new_internal.in_part": "Ein Teil enthält keine Teile. Beenden Sie zuerst die Bearbeitung: Ein neues Teil kommt in die Baugruppe.",
+    "new_internal.made": "{name} ist ein neues Teil von {design}. Modellieren Sie es jetzt: Es wird in {design} als interne Komponente gespeichert, sobald es einen Körper hat und Sie die Konstruktion wieder aktivieren.",
+    "new_internal.stored": "{name} ist in {design} als interne Komponente gespeichert.",
     "ui.edit_in_place_inside": "Diese Komponente ist mit einem Teil in {name} verknüpft. Öffnen Sie {name}, um es zu bearbeiten."
   },
   "he": {
+    "help.component.insert_from_design": "בוחר חלקים ותת-הרכבות מתוך תכן שמור אחר, מעץ של תיבות סימון. השתמש בו כדי להעתיק אותם לתכן זה עם צירי הזמן שלהם, או כדי להשאיר אותם מקושרים לתכן שבו הם נמצאים.",
     "insert_from_design.link": "השאר מקושר אל {name}",
     "insert_from_design.link_detail": "חלקים מקושרים אינם מועתקים: תכן זה קורא אותם מתוך {name}, ״עדכן קישורים״ מביא את השינויים בהם, והם נערכים שם.",
+    "new_internal.in_part": "חלק אינו מכיל חלקים. סיים קודם את העריכה: חלק חדש נכנס להרכבה.",
+    "new_internal.made": "{name} הוא חלק חדש של {design}. בנה אותו עכשיו: הוא נשמר ב-{design} כרכיב פנימי ברגע שיש לו גוף ואתה מפעיל שוב את התכן.",
+    "new_internal.stored": "{name} נשמר ב-{design} כרכיב פנימי.",
     "ui.edit_in_place_inside": "רכיב זה מקושר לחלק שבתוך {name}. פתח את {name} כדי לערוך אותו."
   },
   "ja": {
+    "help.component.insert_from_design": "保存済みの別のデザインから、チェックボックスのツリーで部品とサブアセンブリを選びます。タイムラインごとこのデザインにコピーするとき、または元のデザインにリンクしたままにするときに使います。",
     "insert_from_design.link": "{name} にリンクしたままにする",
     "insert_from_design.link_detail": "リンクした部品はコピーされません。この設計は {name} から読み込み、「リンクを更新」で変更を取り込み、編集は {name} 側で行います。",
+    "new_internal.in_part": "部品の中に部品は作れません。先に編集を終了してください。新しい部品はアセンブリに入ります。",
+    "new_internal.made": "{name} は {design} の新しい部品です。このままモデリングしてください。ボディができてデザインを再びアクティブにすると、内部コンポーネントとして {design} に保存されます。",
+    "new_internal.stored": "{name} は内部コンポーネントとして {design} に保存されました。",
     "ui.edit_in_place_inside": "このコンポーネントは {name} 内の部品にリンクされています。編集するには {name} を開いてください。"
   },
   "ko": {
+    "help.component.insert_from_design": "저장된 다른 디자인에서 확인란 트리로 부품과 하위 어셈블리를 고릅니다. 타임라인과 함께 이 디자인으로 복사하거나, 원래 디자인에 연결된 채로 둘 때 사용합니다.",
     "insert_from_design.link": "{name}에 링크된 상태로 유지",
     "insert_from_design.link_detail": "링크된 부품은 복사되지 않습니다. 이 설계는 {name}에서 부품을 읽고, 링크 업데이트로 변경 사항을 가져오며, 편집은 그쪽에서 합니다.",
+    "new_internal.in_part": "부품에는 부품을 넣을 수 없습니다. 먼저 편집을 마치세요. 새 부품은 어셈블리에 들어갑니다.",
+    "new_internal.made": "{name}은(는) {design}의 새 부품입니다. 지금 모델링하세요. 바디가 생기고 디자인을 다시 활성화하면 내부 컴포넌트로 {design}에 저장됩니다.",
+    "new_internal.stored": "{name}이(가) 내부 컴포넌트로 {design}에 저장되었습니다.",
     "ui.edit_in_place_inside": "이 구성요소는 {name} 안의 부품에 링크되어 있습니다. 편집하려면 {name}을(를) 여십시오."
   },
   "vi": {
+    "help.component.insert_from_design": "Chọn chi tiết và cụm lắp con từ một thiết kế đã lưu khác, trong một cây ô đánh dấu. Dùng để sao chép chúng vào thiết kế này cùng dòng thời gian của chúng, hoặc để giữ chúng liên kết với thiết kế đang chứa chúng.",
     "insert_from_design.link": "Giữ liên kết với {name}",
     "insert_from_design.link_detail": "Chi tiết được liên kết không bị sao chép: thiết kế này đọc chúng từ {name}, Cập nhật liên kết đưa các thay đổi của chúng vào, và chúng được chỉnh sửa tại đó.",
+    "new_internal.in_part": "Chi tiết không chứa chi tiết. Hãy kết thúc chỉnh sửa trước: chi tiết mới được đặt vào cụm lắp.",
+    "new_internal.made": "{name} là chi tiết mới của {design}. Hãy dựng nó ngay: nó được lưu trong {design} như một thành phần nội bộ khi đã có khối và bạn kích hoạt lại thiết kế.",
+    "new_internal.stored": "{name} đã được lưu trong {design} như một thành phần nội bộ.",
     "ui.edit_in_place_inside": "Thành phần này được liên kết với một chi tiết bên trong {name}. Hãy mở {name} để chỉnh sửa."
   },
   "zh": {
+    "help.component.insert_from_design": "通过带复选框的树，从另一个已保存的设计中挑选零件和子装配。用于将它们连同时间线复制到本设计中，或让它们保持链接到所在的设计。",
     "insert_from_design.link": "保持与 {name} 的链接",
     "insert_from_design.link_detail": "链接的零件不会被复制：此设计从 {name} 读取它们，“更新链接”会带入其更改，编辑在 {name} 中进行。",
+    "new_internal.in_part": "零件不能包含零件。请先完成编辑：新零件会放入装配。",
+    "new_internal.made": "{name} 是 {design} 的新零件。现在即可建模：有了实体并重新激活设计后，它会作为内部组件存入 {design}。",
+    "new_internal.stored": "{name} 已作为内部组件存入 {design}。",
     "ui.edit_in_place_inside": "此组件链接到 {name} 内的零件。请打开 {name} 进行编辑。"
   }
 }

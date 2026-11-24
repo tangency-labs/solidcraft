@@ -733,7 +733,9 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let sc = scope(s, comp, CMD)?;
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(CMD, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !solidcraft_io::is_design_container_path(&file) {
+    // Under Parts and assemblies (experimental, #6892) the new design may be a part or an assembly.
+    let of_a_kind = super::super::experimental_file_kinds() && solidcraft_io::DesignKind::for_path(given).is_some();
+    if !solidcraft_io::is_design_container_path(&file) && !of_a_kind {
         return Err(bad(CMD, "the new design must be a .sc file"));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
@@ -784,6 +786,10 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let copies = copies_of(s, comp)?;
 
     part.path = s.path.clone();
+    // A part or an assembly file is saved as that kind.
+    if let Some(kind) = solidcraft_io::DesignKind::for_path(given).filter(|_| of_a_kind) {
+        part.design_kind = kind;
+    }
     part.execute("file.save", &json!({"path": shown}))?;
     // The link keeps what the new file holds, as Insert Design's does (#9739).
     if let Some(read) = file_sha256(&file, s.path.as_deref())

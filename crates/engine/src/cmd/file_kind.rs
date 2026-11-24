@@ -205,6 +205,14 @@ pub(crate) fn refusal_with(kind: DesignKind, id: &str, on: bool) -> Option<Strin
     }
 }
 
+/// Whether what is modelled in `s` now goes into a part being made in it: a component of the
+/// design that is active and not linked to a file. New Part makes one inside an assembly, and it
+/// becomes a part of its own when it is stored (`component.make_internal`), so the assembly still
+/// ends up holding parts from their own files.
+pub(crate) fn in_new_part(s: &Session) -> bool {
+    s.active_component != 0 && !s.doc.links.contains_key(&s.active_component)
+}
+
 /// The linked parts of `s` found neither at their link's path nor in a library folder, under
 /// Parts and assemblies (#6892, slice 4b): what `doc.open` names so the app can ask where they
 /// are. Their components keep their last bodies; `component.relink` points one at its file.

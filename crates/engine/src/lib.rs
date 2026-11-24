@@ -2870,7 +2870,7 @@ impl Session {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // A command that doesn't fit the open file's kind is refused before anything changes
         // (experimental, #6892).
-        if let Some(why) = cmd::kind_refusal(self.design_kind, spec.id) {
+        if let Some(why) = cmd::kind_refusal(self.design_kind, spec.id).filter(|_| !cmd::in_new_part(self)) {
             return Err(EngineError::Disabled(spec.id.to_string(), why));
         }
         self.execute_spec(spec, params)

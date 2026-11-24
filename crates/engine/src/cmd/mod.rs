@@ -123,6 +123,7 @@ pub(crate) use file::NAMES_MESSAGE;
 pub(crate) use file::READER_MESSAGE;
 pub(crate) use file::UP_MESSAGE;
 pub(crate) use file::import::realign_imports;
+pub(crate) use file::kind::in_new_part;
 pub use file::kind::{experimental_file_kinds, file_kinds_on_for_tests, refusal as kind_refusal, set_experimental_file_kinds};
 pub(crate) use file::mesh_crease_angle;
 pub(crate) use file::names_form;
@@ -506,7 +507,7 @@ impl CommandSpec {
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
         // A command that doesn't fit the open file's kind (experimental, #6892): disabled, with
         // what to do instead as its tooltip.
-        if let Some(why) = file::kind::refusal(s.design_kind, self.id) {
+        if let Some(why) = file::kind::refusal(s.design_kind, self.id).filter(|_| !file::kind::in_new_part(s)) {
             return Err(why);
         }
         if let Some(entry) = &s.active_sheet_sketch

@@ -1683,12 +1683,45 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
                 component_rows(app, rows, 0, 1, acts, &mut cache);
             }
             crate::render_workspace::scene::output(app, rows);
+        } else if let Some(context) = app.edit_in_place.active.clone() {
+            edited_in_place_rows(app, rows, &context, acts, &mut cache);
         } else {
             component_rows(app, rows, 0, 0, acts, &mut cache);
         }
     });
     crate::panel_runtime::report_content_extent(ui, top, output.content_height, true);
     app.tree.cache = Some(cache);
+}
+
+/// The tree while a part is edited in place: the assembly on top, its components under it, faded
+/// the way the 3D view fades the assembly around the part, and the part's own rows where the part
+/// is in the assembly. The faded rows only show where the part belongs: they take no clicks.
+fn edited_in_place_rows(
+    app: &mut SolveApp,
+    rows: &mut Rows<'_>,
+    context: &crate::edit_in_place::PartContext,
+    acts: &mut Actions,
+    cache: &mut cache::Cache,
+) {
+    let faded = |rows: &mut Rows<'_>, key: &str, depth: usize, label: &str, parent: bool| {
+        let row = Row { depth, fold: parent.then_some(true), icon: "component", label, name: true, dim: true, ..Default::default() };
+        node_row(rows, Spec { key, ..Default::default() }, row);
+    };
+    faded(rows, "edit_in_place:assembly", 0, &context.assembly_name, true);
+    let mut drawn = false;
+    for (index, row) in context.tree.iter().enumerate() {
+        let depth = row.depth.min(32) + 1;
+        if row.edited && !drawn {
+            drawn = true;
+            component_rows(app, rows, 0, depth, acts, cache);
+        } else {
+            let parent = context.tree.get(index + 1).is_some_and(|next| next.depth > row.depth);
+            faded(rows, &format!("edit_in_place:{index}"), depth, &row.name, parent);
+        }
+    }
+    if !drawn {
+        component_rows(app, rows, 0, 1, acts, cache);
+    }
 }
 
 /// Existing semantic rows, reusable by either presentation without a panel host.

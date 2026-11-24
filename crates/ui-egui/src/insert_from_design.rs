@@ -152,42 +152,52 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(solidcraft_ui_text::tr("insert_from_design.insert"), solidcraft_ui_text::tr("ui.cancel"), None)
         .show(ctx, valid, |ui| {
             ui_kit::text(ui, &detail, ui_kit::Text::Report("insert_from_design", false));
-            egui::ScrollArea::vertical().id_salt("insert_from_design_rows").max_height(t.control_height * 12.0).show(ui, |ui| {
-                // A row is shown while every sub-assembly above it is open.
-                let folded: Vec<String> = state.rows.iter().filter(|row| row.parent && !row.open).map(|row| row.pick.clone()).collect();
-                let rows = state.rows.clone();
-                for (index, row) in rows.iter().enumerate() {
-                    if folded.iter().any(|above| under(&row.pick, above)) {
-                        continue;
-                    }
-                    let part_mixed = mixed(&state, index);
-                    ui.push_id(&row.pick, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add_space(t.space_16 * row.depth.min(12) as f32);
-                            let (fold, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.control_height), egui::Sense::hover());
-                            if row.parent {
-                                let button = ui_kit::disclosure_button_at(ui, fold, row.open, solidcraft_ui_text::tr("insert_from_design.fold"));
-                                crate::scenario::publish_target(&format!("insert_from_design_fold:{}", row.pick), button.rect);
-                                if button.clicked()
-                                    && let Some(shown) = state.rows.get_mut(index)
-                                {
-                                    shown.open = !row.open;
+            // The tree is in a box of its own, its rows starting at the box's left edge.
+            ui_kit::list_frame(ui, "insert_from_design", |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("insert_from_design_rows")
+                        .auto_shrink([false, true])
+                        .max_height(t.control_height * 12.0)
+                        .show(ui, |ui| {
+                            // A row is shown while every sub-assembly above it is open.
+                            let folded: Vec<String> = state.rows.iter().filter(|row| row.parent && !row.open).map(|row| row.pick.clone()).collect();
+                            let rows = state.rows.clone();
+                            for (index, row) in rows.iter().enumerate() {
+                                if folded.iter().any(|above| under(&row.pick, above)) {
+                                    continue;
                                 }
-                            }
-                            let kind = solidcraft_ui_text::tr(match row.kind.as_str() {
-                                "assembly" => "insert_from_design.assembly",
-                                "part" => "insert_from_design.part",
-                                _ => "insert_from_design.design",
-                            });
-                            let mut on = row.ticked;
-                            let check = ui_kit::checkbox_indeterminate(ui, &format!("{} ({kind})", row.name), &mut on, part_mixed);
-                            crate::scenario::publish_target(&format!("insert_from_design:{}", row.pick), check.rect);
-                            if on != row.ticked {
-                                tick(&mut state, index, on);
+                                let part_mixed = mixed(&state, index);
+                                ui.push_id(&row.pick, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(t.space_16 * row.depth.min(12) as f32);
+                                        let (fold, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.control_height), egui::Sense::hover());
+                                        if row.parent {
+                                            let button =
+                                                ui_kit::disclosure_button_at(ui, fold, row.open, solidcraft_ui_text::tr("insert_from_design.fold"));
+                                            crate::scenario::publish_target(&format!("insert_from_design_fold:{}", row.pick), button.rect);
+                                            if button.clicked()
+                                                && let Some(shown) = state.rows.get_mut(index)
+                                            {
+                                                shown.open = !row.open;
+                                            }
+                                        }
+                                        let kind = solidcraft_ui_text::tr(match row.kind.as_str() {
+                                            "assembly" => "insert_from_design.assembly",
+                                            "part" => "insert_from_design.part",
+                                            _ => "insert_from_design.design",
+                                        });
+                                        let mut on = row.ticked;
+                                        let check = ui_kit::checkbox_indeterminate(ui, &format!("{} ({kind})", row.name), &mut on, part_mixed);
+                                        crate::scenario::publish_target(&format!("insert_from_design:{}", row.pick), check.rect);
+                                        if on != row.ticked {
+                                            tick(&mut state, index, on);
+                                        }
+                                    });
+                                });
                             }
                         });
-                    });
-                }
+                });
             });
             // Copied in (the default) or kept linked to the design picked from.
             let keep = ui_kit::checkbox(ui, &solidcraft_ui_text::format("insert_from_design.link", &[("name", &name)]), &mut state.link);

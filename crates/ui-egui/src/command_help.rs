@@ -20,6 +20,7 @@ pub const DOCUMENTED: &[&str] = &[
     "component.finish_edit",
     "component.from_bodies",
     "component.insert_design",
+    "component.insert_from_design",
     "component.properties",
     "component.revert_position",
     "component.update_links",

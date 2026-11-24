@@ -3066,3 +3066,74 @@ fn a_save_without_linked_bodies_keeps_an_internal_components_bodies() {
     assert!((volume(&mut alone) - 2000.0).abs() < 1e-6, "{}", volume(&mut alone));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// New Part inside a design: a component made in the design, with a body of its own, is not
+/// linked to anything. Make Internal moves its history to a part stored in the design, the way
+/// a linked one is stored: the Browser's component stays, its body stays where it was, the part
+/// has its own feature, and the file written on the way is gone. A component that holds
+/// components is stored as a sub-assembly.
+#[test]
+fn a_component_made_in_the_design_becomes_an_internal_component() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("new-part-inside");
+    let design = root.join("counter.sc");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 2, "body_name": "Plate"}));
+    run(&mut s, "file.save", json!({"path": design}));
+    let before = volume(&mut s);
+
+    run(&mut s, "component.create", json!({"parent": 0, "name": "spacer"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "base": [200, 0, 0], "body_name": "Spacer"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let with_spacer = volume(&mut s);
+    assert!((with_spacer - before - 1000.0).abs() < 1e-6, "{with_spacer}");
+
+    let made = run(&mut s, "component.make_internal", json!({"component": "spacer"}));
+    assert_eq!(made["member"], "spacer.scprt", "{made}");
+    assert!((volume(&mut s) - with_spacer).abs() < 1e-6, "the body is where it was");
+    let links = run(&mut s, "component.links", json!({}));
+    let listed = links["links"].as_array().unwrap();
+    assert!(listed.iter().any(|l| l["name"] == "spacer" && l["internal"] == true && l["found"] == true), "{links}");
+    let folder = root.join(".~counter.sc.parts");
+    assert!(folder.join("spacer.scprt").is_file());
+    assert!(!folder.join(".~new").exists(), "the file written on the way is removed");
+
+    // Saved, the design holds the part with its own box feature, and opens with it.
+    run(&mut s, "file.save", json!({}));
+    let held = solidcraft_io::internal_components(&std::fs::read(&design).unwrap()).unwrap();
+    let part = solidcraft_io::read_design(&held["spacer.scprt"]).unwrap();
+    assert_eq!(part.features.len(), 1, "the part has the component's history");
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design}));
+    assert!((volume(&mut again) - with_spacer).abs() < 1e-6);
+
+    // One that holds a component is stored as a sub-assembly.
+    run(&mut s, "component.create", json!({"parent": 0, "name": "frame"}));
+    run(&mut s, "component.create", json!({"parent": "frame", "name": "rail"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 40, "base": [300, 0, 0], "body_name": "Rail"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let made = run(&mut s, "component.make_internal", json!({"component": "frame"}));
+    assert_eq!(made["member"], "frame.scasm", "{made}");
+    assert!((volume(&mut s) - with_spacer - 1000.0).abs() < 1e-6);
+
+    // In an assembly, which refuses a body made from nothing, a new part is where one is made.
+    let hinge = root.join("hinge.scasm");
+    let mut assembly = Session::default();
+    run(&mut assembly, "file.new", json!({"kind": "assembly"}));
+    run(&mut assembly, "file.save", json!({"path": hinge}));
+    assert!(assembly.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).is_err());
+    run(&mut assembly, "component.create", json!({"parent": 0, "name": "pin"}));
+    run(&mut assembly, "solid.box", json!({"length": 2, "width": 2, "height": 30, "body_name": "Pin"}));
+    run(&mut assembly, "component.activate", json!({"component": "root"}));
+    let made = run(&mut assembly, "component.make_internal", json!({"component": "pin"}));
+    assert_eq!(made["member"], "pin.scprt", "{made}");
+    assert!((volume(&mut assembly) - 120.0).abs() < 1e-6);
+    run(&mut assembly, "file.save", json!({}));
+
+    // `path` is for a linked component only.
+    run(&mut s, "component.create", json!({"parent": 0, "name": "loose"}));
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "base": [400, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let refused = s.execute("component.make_internal", &json!({"component": "loose", "path": design})).unwrap_err().to_string();
+    assert!(refused.contains("not linked"), "{refused}");
+}

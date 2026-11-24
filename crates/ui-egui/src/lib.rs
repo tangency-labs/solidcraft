@@ -251,6 +251,7 @@ pub(crate) mod insert_from_design;
 pub(crate) mod internal_file;
 pub(crate) mod missing_links;
 pub mod mouse_gesture;
+pub(crate) mod new_internal;
 pub(crate) mod recovery_components;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -892,6 +893,8 @@ pub struct SolveApp {
     pub internal_file: Option<internal_file::InternalFile>,
     /// A design being picked from, for Insert from Design (#6892).
     pub insert_from_design: Option<insert_from_design::InsertFromDesign>,
+    /// Components made by New inside a design, waiting to be stored as internal components (#6892).
+    pub new_internal: Vec<new_internal::Pending>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1223,6 +1226,7 @@ impl SolveApp {
             recovery_components: None,
             internal_file: None,
             insert_from_design: None,
+            new_internal: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -4736,6 +4740,7 @@ impl SolveApp {
         recovery_components::show(self, ui.ctx());
         internal_file::show(self, ui.ctx());
         insert_from_design::show(self, ui.ctx());
+        new_internal::settle(self);
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

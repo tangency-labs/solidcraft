@@ -663,33 +663,25 @@ pub(crate) fn browser_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     let refreshing = app.edit_in_place.refresh.as_ref().is_some_and(|r| crate::documents::same_path(&r.assembly, &context.assembly));
     let key = if refreshing { "ui.edit_in_place_refreshing" } else { "ui.edit_in_place_banner" };
     let text = solidcraft_ui_text::format(key, &[("name", &context.assembly_name)]);
-    // Finish Edit sits at the right of the line, so leaving the part is at hand where the tree is.
+    // A notice band over the tree: where the part belongs on the left, and Finish Edit as a
+    // button at the right, so leaving the part is at hand where the tree is.
     let mut finish_edit = false;
-    ui.horizontal(|ui| {
-        ui.add_space(t.space_6);
-        crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(t.space_6);
-            let label = solidcraft_ui_text::tr("cmd.component_finish_edit");
-            let button = crate::ui_kit::text_button(ui, label, true);
-            crate::scenario::publish_target("edit_in_place:finish", button.rect);
-            finish_edit = button.clicked();
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_6 as i8)).show(ui, |ui| {
+        crate::ui_kit::banner(ui, crate::ui_kit::AssistantTone::Neutral, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_12;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let label = solidcraft_ui_text::tr("cmd.component_finish_edit");
+                    let button = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Small);
+                    crate::scenario::publish_target("edit_in_place:finish", button.rect);
+                    finish_edit = button.clicked();
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
+                    });
+                });
+            });
         });
     });
-    // The assembly's components, dull, with the part being edited lit: the same picture as the
-    // 3D view, where the rest of the assembly is faded around the part.
-    if context.tree.len() > 1 {
-        egui::ScrollArea::vertical().id_salt("edit_in_place_tree").max_height(t.control_height * 8.0).show(ui, |ui| {
-            for row in context.tree.iter() {
-                ui.horizontal(|ui| {
-                    ui.add_space(t.space_6 + t.space_12 * row.depth.min(12) as f32);
-                    let style = if row.edited { crate::ui_kit::Text::NameCell(true) } else { crate::ui_kit::Text::Hint("edit_in_place_tree") };
-                    crate::ui_kit::text(ui, &row.name, style);
-                });
-            }
-        });
-    }
-    ui.add_space(t.space_3);
     if finish_edit {
         finish(app);
     }

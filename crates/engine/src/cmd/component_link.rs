@@ -99,9 +99,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MAKE_INTERNAL_CONTRACT)
         .output(output_schema_for::<MakeInternalResult>)
         .params(
-        "component: id or name of a linked component — experimental (Parts and assemblies): copies its design file into this design's file as a \
-         stored part, unpacked beside this design while it is open, and links the component to that copy; the file it came from is left as it is; \
-         this design must be saved; returns member (the part's name inside the file), file (the unpacked file to open and edit) and previous_path",
+        "component: id or name of a component — experimental (Parts and assemblies): a linked one has its design file copied into this design's \
+         file as a stored part, unpacked beside this design while it is open, and is linked to that copy; the file it came from is left as it is; \
+         one that is not linked (made in this design) has its history, subcomponents and joints moved to such a stored part, as \
+         component.extract moves them to a file; this design must be saved; returns member (the part's name inside the file), file (the \
+         unpacked file to open and edit) and previous_path",
     ),
     CommandSpec::new("component.design_contents", "List Design Contents", crate::checked!("component.design_contents", design_contents))
         .icon("inspect")
@@ -2004,12 +2006,23 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "storing a part inside a design needs a folder to unpack it to, which the browser does not have"));
     }
     let comp = component_key(s, p, "component", cmd)?;
-    if !s.doc.links.contains_key(&comp) {
-        return Err(bad(cmd, "that component is not linked to a design"));
-    }
     let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the part is stored inside its file"))?;
     if s.read_only {
         return Err(bad(cmd, "this design was opened read-only"));
+    }
+    // A component made in this design (New Part, New Component) is not linked to anything yet:
+    // its history moves to a design of its own first, written inside the work folder, and that
+    // design is stored like any other. The file written on the way is removed again.
+    if !s.doc.links.contains_key(&comp) {
+        if str_(p, "path").is_some() {
+            return Err(bad(cmd, "`path` replaces what a linked component is linked to; this component is not linked"));
+        }
+        let folder = super::design_internal::work_folder(&own)
+            .ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?
+            .join(".~new");
+        let made = own_design_then_internal(s, comp, &folder, cmd);
+        let _ = std::fs::remove_dir_all(&folder);
+        return made;
     }
     // With `path`: linked to that file first, in this same step (replacing an internal component).
     if let Some(path) = str_(p, "path") {
@@ -2048,6 +2061,21 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// How deep sub-assemblies inside sub-assemblies are followed.
 const MEMBER_DEPTH: usize = 16;
+/// Make Internal for a component that is not linked: `component.extract` writes its history,
+/// subcomponents and joints to a design in `folder`, and Make Internal stores that design. A
+/// component that holds components becomes a sub-assembly, any other a part.
+fn own_design_then_internal(s: &mut Session, comp: u64, folder: &Path, cmd: &'static str) -> Result<Value> {
+    let name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    // A file name of the component's own: what a file name cannot hold becomes `_`.
+    let stem: String = name.trim().chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '_' }).take(80).collect();
+    let stem = if stem.trim().is_empty() { "part".to_string() } else { stem.trim().to_string() };
+    let holds_components = s.doc.components.iter().any(|c| c.parent == comp && c.id != comp);
+    let file = folder.join(format!("{stem}.{}", if holds_components { "scasm" } else { "scprt" }));
+    std::fs::create_dir_all(folder).map_err(|e| bad(cmd, format!("{}: {e}", folder.display())))?;
+    extract::extract(s, &json!({"component": comp, "path": file.to_string_lossy()}))?;
+    make_internal(s, &json!({"component": comp}))
+}
+
 /// The most picks one `component.insert_from_design` takes.
 const MAX_PICKS: usize = 256;
 

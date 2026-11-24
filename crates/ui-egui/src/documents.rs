@@ -2175,6 +2175,14 @@ pub fn new_design_of(app: &mut SolveApp, kind: Option<&str>) {
     if app.file_picker_busy() {
         return;
     }
+    // With a saved design shown, a new part or assembly is made inside it (#6892).
+    if let Some(kind) = kind
+        && !cfg!(target_arch = "wasm32")
+        && !active_is_blank(app)
+        && crate::new_internal::make(app, kind)
+    {
+        return;
+    }
     app.home.open = false;
     if !active_is_blank(app)
         && let Err(e) = open_tab(app, Session::default())
