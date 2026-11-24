@@ -815,7 +815,7 @@ mod tests {
         assert_eq!(err.blend_failure(), Some(&BlendFailure::EdgeWithoutCurve));
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            crate::error::SolidError::failed_routine_status(&err),
             Some(SM_ERR_NULL_POINTER)
         );
     }

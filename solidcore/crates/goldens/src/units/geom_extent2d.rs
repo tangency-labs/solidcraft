@@ -304,7 +304,6 @@ fn b(v: bool) -> f64 {
 fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
-        SolidError::Upstream { code, .. } => Ok(f64::from(*code)),
         e if crate::output::recorded_status(e).is_some() => {
             Ok(f64::from(crate::output::recorded_status(e).unwrap_or(-1)))
         }

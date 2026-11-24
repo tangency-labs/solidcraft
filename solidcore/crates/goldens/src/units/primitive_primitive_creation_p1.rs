@@ -554,7 +554,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             if consumed {
                 let result = output
                     .as_ref()
-                    .ok_or_else(|| solidcore::SolidError::null_pointer("difftest::primitive_p1"))?;
+                    .ok_or_else(|| solidcore::SolidError::port_invariant("difftest::primitive_p1", "no output B-rep"))?;
                 record.extend([
                     solidcore::topology::brep::p1::faces(result, None)?.len() as f64,
                     solidcore::topology::brep::p1::edges(result, None)?.len() as f64,

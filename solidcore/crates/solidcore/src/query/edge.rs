@@ -24,7 +24,7 @@
 //!   [`closest_point`] and the radial classifications, a missing radial partner,
 //!   face, surface, vertex use or mate) the port returns
 //!   [`SolidError::InvalidInput`]; `NER` returns `SM_ERR_NULL_POINTER`
-//!   ([`SolidError::null_pointer`]).
+//!   (a failure with status `SM_ERR_NULL_POINTER`).
 //! - **Out-params.** The boxes of [`calculate_bounding_box`] are asked for with a
 //!   [`BoundingBoxRequest`] and returned (upstream: caller-owned boxes, which are
 //!   default-constructed here, so `Init` / `ReSet` of an edge without curve give the

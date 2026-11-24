@@ -423,7 +423,7 @@ fn rust_values(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> 
                 )
                 .and_then(|c| match c.into_kind() {
                     CurveKind::Parabola(p) => Ok(p),
-                    _ => Err(SolidError::sm_err("difftest::curve_parabola::read_db")),
+                    _ => Err(crate::output::routine_failure("difftest::curve_parabola::read_db")),
                 })
             } else {
                 Parabola::read_from_db(&mut db, dim, version)

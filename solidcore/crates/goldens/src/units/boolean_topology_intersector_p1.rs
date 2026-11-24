@@ -3245,7 +3245,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {
+        Err(e @ SolidError::Failed(_)) => {
             o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
             Ok(None)
         }
@@ -3501,7 +3501,7 @@ pub(super) fn run_rust_script_counted(
                 if let Some(e) = &r.status {
                     o.pop();
                     o.push(match e {
-                        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+                        SolidError::Failed(_) => {
                             f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))
                         }
                         _ => NULL_DEREF,

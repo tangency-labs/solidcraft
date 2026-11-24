@@ -357,7 +357,7 @@ fn own_brep(
                             a[8] + fraction * (a[10] - a[8]),
                         );
                         let point = solidcore::topology::face::p2::surface(b, f)?
-                            .ok_or_else(|| SolidError::sm_err("query::api_queries fixture"))?
+                            .ok_or_else(|| crate::output::routine_failure("query::api_queries fixture"))?
                             .evaluate_point(k, uv)?;
                         let mut state = ArenaNotifyState::new(b);
                         let mut env = state.env(None);
@@ -570,7 +570,7 @@ impl<'a> Objects<'a> {
     fn live(&self, o: Object) -> Result<&LiveBrepObjects<'a, 'a>> {
         self.lives
             .get(o.0)
-            .ok_or(SolidError::sm_err("query api scene handle"))
+            .ok_or_else(|| crate::output::routine_failure("query api scene handle"))
     }
     fn map(o: Object, c: Option<CacheObject>) -> Option<Object> {
         c.map(|c| Object(o.0, c))
@@ -630,7 +630,7 @@ impl TopologyObjects<Object> for Objects<'_> {
     fn brep_cache(&self, o: Object) -> Result<&BrepCache<Object>> {
         self.caches
             .get(o.0)
-            .ok_or(SolidError::sm_err("query api scene cache"))
+            .ok_or_else(|| crate::output::routine_failure("query api scene cache"))
     }
     fn curve(&self, o: Object) -> Result<&Curve> {
         self.live(o)?.curve(o.1)
@@ -714,7 +714,7 @@ impl Contexts<'_> {
         self.0
             .get(o.0)
             .and_then(|c| c.face_queries())
-            .ok_or(SolidError::sm_err("query api face queries"))
+            .ok_or_else(|| crate::output::routine_failure("query api face queries"))
     }
 }
 impl SurfaceSolveContext<Object> for Contexts<'_> {
@@ -725,12 +725,12 @@ impl SurfaceSolveContext<Object> for Contexts<'_> {
         handle: Option<Object>,
     ) -> Result<SurfaceCache<Object>> {
         let Some(Object(i, c)) = handle else {
-            return Err(SolidError::sm_err("query api surface handle"));
+            return Err(crate::output::routine_failure("query api surface handle"));
         };
         let context = self
             .0
             .get_mut(i)
-            .ok_or(SolidError::sm_err("query api scene handle"))?;
+            .ok_or_else(|| crate::output::routine_failure("query api scene handle"))?;
         context
             .build_surface_cache(k, surface, Some(c))?
             .map_handles(|c| Ok(Object(i, c)))

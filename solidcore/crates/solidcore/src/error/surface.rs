@@ -1351,14 +1351,10 @@ mod tests {
         let cases = [(SurfaceFailure::Failed("x"), SM_ERR)];
         for (failure, code) in cases {
             let typed = SolidError::surface("surface::op", failure);
-            let before = SolidError::Upstream {
-                operation: "surface::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("surface::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -1378,10 +1374,13 @@ mod tests {
             .to_string(),
             "surface::op: the generator has no NURB form"
         );
-        assert_eq!(SolidError::sm_err("surface::op").surface_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("surface::op", SM_ERR).surface_failure(),
+            None
+        );
     }
 
-    /// The named causes of the general surface evaluation (TE-O-07) have their status, with
+    /// The named causes of the general surface evaluation have their status, with
     /// their own class.
     #[test]
     fn the_surface_evaluation_causes_keep_their_status_with_their_class() {
@@ -1554,11 +1553,7 @@ mod tests {
         ];
         for (operation, failure, code) in samples {
             let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine(operation, code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), before.kind(), "{typed:?}");
@@ -1575,11 +1570,11 @@ mod tests {
         )
         .at(face)
         .into_error();
-        let before = SolidError::Upstream {
-            operation: "surface::procedural_blend::recertify_faces",
-            code: SM_ERR,
-            entity: Some(face),
-        };
+        let before = SolidError::failed_routine_at(
+            "surface::procedural_blend::recertify_faces",
+            SM_ERR,
+            face,
+        );
         assert_eq!(typed.sm_status(), before.sm_status());
         assert_eq!(typed.failed_routine_status(), Some(SM_ERR));
         assert_eq!(typed.kind(), before.kind());
@@ -1774,7 +1769,11 @@ mod tests {
             let e = SolidError::surface("surface::op", failure);
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
             assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(code),
+                "{failure:?}"
+            );
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");
@@ -1799,7 +1798,7 @@ mod tests {
         }
     }
 
-    /// The named causes have their status, which `upstream_status` (which most goldens
+    /// The named causes have their status, which `failed_routine_status` (which most goldens
     /// units read) reports; their class says whose the failure is,
     /// and a cause chained under one decides whether it is a defect.
     #[test]
@@ -2000,7 +1999,7 @@ mod tests {
             let e = SolidError::surface(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -2085,7 +2084,11 @@ mod tests {
             let e = f.into_error();
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
             assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(code),
+                "{failure:?}"
+            );
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");

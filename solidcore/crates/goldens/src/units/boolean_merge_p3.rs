@@ -304,7 +304,7 @@ fn options(mask: u8) -> MergeOptions {
 fn status(error: &SolidError) -> i64 {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
+        SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
         _ => -1,
     }
 }
@@ -536,7 +536,7 @@ impl Pool {
         let slot = self
             .breps
             .get_mut(id)
-            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+            .ok_or_else(|| SolidError::port_invariant("harness::merge_p3", "no B-rep slot for the id"))?;
         Ok(std::mem::replace(slot, Brep::new()))
     }
     /// Put a B-rep back in its slot, or retire the slot when it was consumed.
@@ -558,7 +558,7 @@ impl Pool {
         }
         self.breps
             .get(id)
-            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))
+            .ok_or_else(|| SolidError::port_invariant("harness::merge_p3", "B-rep handle out of range"))
     }
     fn surface_key(&self, surface: (usize, usize)) -> solidcore::Result<ObjectKey> {
         let brep = self.brep(surface.0)?;
@@ -620,7 +620,7 @@ impl Pool {
         };
         let result = match self.engine.as_mut() {
             Some(engine) => action(engine, &mut a, &mut b),
-            None => Err(SolidError::null_pointer("harness::merge_p3")),
+            None => Err(SolidError::port_invariant("harness::merge_p3", "no engine after engine_mut")),
         };
         self.restore_brep(Some(p), Some(a));
         self.restore_brep(Some(o), Some(b));
@@ -904,7 +904,7 @@ impl PiecewiseAccess for Pool {
         let brep = self
             .breps
             .get_mut(a)
-            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+            .ok_or_else(|| SolidError::port_invariant("harness::merge_p3", "no B-rep slot for the id"))?;
         let caller = solidcore::geom::object::ObjectRef {
             key: brep.key(),
             type_code: solidcore::geom::a_object::BREP_TYPE,
@@ -924,7 +924,7 @@ impl PiecewiseAccess for Pool {
             let brep = self
                 .breps
                 .get_mut(id)
-                .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+                .ok_or_else(|| SolidError::port_invariant("harness::merge_p3", "no B-rep slot for the id"))?;
             destroy_brep(k, brep, &mut self.attributes)?;
             self.retired.insert(id);
         }

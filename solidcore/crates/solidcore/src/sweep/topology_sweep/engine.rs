@@ -1519,12 +1519,12 @@ mod tests {
         fn brep(&self, id: BrepId) -> Result<&Brep> {
             self.breps
                 .get(id.index() as usize)
-                .ok_or(SolidError::sm_err(OP))
+                .ok_or_else(|| SolidError::failed_routine(OP, crate::error::SM_ERR))
         }
         fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
             self.breps
                 .get_mut(id.index() as usize)
-                .ok_or(SolidError::sm_err(OP))
+                .ok_or_else(|| SolidError::failed_routine(OP, crate::error::SM_ERR))
         }
         fn kernel(&self, _: BrepId) -> Result<&Kernel> {
             Ok(&self.kernel)
@@ -1532,7 +1532,7 @@ mod tests {
         fn kernel_mut(&mut self, _: BrepId) -> Result<&mut Kernel> {
             self.mutable_calls += 1;
             if Some(self.mutable_calls) == self.fail_mutable_call {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::failed_routine(OP, crate::error::SM_ERR));
             }
             Ok(&mut self.kernel)
         }
@@ -1546,10 +1546,9 @@ mod tests {
                 &mut edge::NotifyEnv<'_>,
             ) -> Result<T>,
         ) -> Result<T> {
-            let brep = self
-                .breps
-                .get_mut(id.index() as usize)
-                .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            let brep = self.breps.get_mut(id.index() as usize).ok_or_else(|| {
+                SolidError::failed_routine("sweep test model", SM_ERR_NULL_POINTER)
+            })?;
             let face_objects =
                 |face: FaceId| service_object(id, crate::error::EntityRef::Face(face));
             let key_of = |entity| service_object(id, entity);
@@ -1583,17 +1582,20 @@ mod tests {
                     "aliased B-reps",
                 ));
             }
-            let (left, right) = self
-                .breps
-                .split_at_mut_checked(si.max(di))
-                .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            let (left, right) = self.breps.split_at_mut_checked(si.max(di)).ok_or_else(|| {
+                SolidError::failed_routine("sweep test model", SM_ERR_NULL_POINTER)
+            })?;
             let (src, dst) = if si < di {
                 (left.get_mut(si), right.first_mut())
             } else {
                 (right.first_mut(), left.get_mut(di))
             };
-            let src = src.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
-            let dst = dst.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            let src = src.ok_or_else(|| {
+                SolidError::failed_routine("sweep test model", SM_ERR_NULL_POINTER)
+            })?;
+            let dst = dst.ok_or_else(|| {
+                SolidError::failed_routine("sweep test model", SM_ERR_NULL_POINTER)
+            })?;
             let face_objects =
                 |face: FaceId| service_object(destination, crate::error::EntityRef::Face(face));
             let key_of = |entity| service_object(destination, entity);
@@ -1618,10 +1620,9 @@ mod tests {
             id: BrepId,
             body: impl FnOnce(&mut Brep, &mut edge::NotifyEnv<'_>) -> Result<T>,
         ) -> Result<T> {
-            let brep = self
-                .breps
-                .get_mut(id.index() as usize)
-                .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            let brep = self.breps.get_mut(id.index() as usize).ok_or_else(|| {
+                SolidError::failed_routine("sweep test model", SM_ERR_NULL_POINTER)
+            })?;
             let key_of = |entity| service_object(id, entity);
             let mut env = edge::NotifyEnv {
                 records: &mut self.records,
@@ -1726,7 +1727,7 @@ mod tests {
             self.marked = self.collect_marks;
             faces.push(face.1);
             // Upstream ignores soft errors, but retains partial outputs/marks.
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::failed_routine(OP, crate::error::SM_ERR))
         }
         fn infinite_region(&mut self, _: BrepId) -> Result<RegionId> {
             Ok(RegionId::from_index(0))
@@ -2009,8 +2010,9 @@ mod tests {
     fn merge_notifications_are_released_after_an_error() {
         let mut access = Access::new();
         let b = BrepId::from_index(0);
-        let result: Result<()> =
-            access.with_merge(b, b, b, 1e-5, 0.1, |_, _| Err(SolidError::sm_err(OP)));
+        let result: Result<()> = access.with_merge(b, b, b, 1e-5, 0.1, |_, _| {
+            Err(SolidError::failed_routine(OP, crate::error::SM_ERR))
+        });
         assert!(result.is_err());
         assert_eq!(access.deleted_merges, 1);
     }

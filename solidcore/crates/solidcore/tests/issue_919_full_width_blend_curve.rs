@@ -84,11 +84,7 @@ fn kinds(b: &Brep) -> Vec<&'static str> {
 fn issue_919_full_width_g2_round_is_refused() {
     let (result, b) = blended(R, 2);
     assert!(
-        result
-            .as_ref()
-            .err()
-            .and_then(solidcore::error::upstream_status)
-            == Some(SM_ERR),
+        result.as_ref().err().and_then(SolidError::sm_status) == Some(SM_ERR),
         "{result:?}"
     );
     // the cylinder as it was: its wall and two caps
@@ -100,7 +96,7 @@ fn issue_919_a_g1_round_is_not_a_gn_section() {
     for radius in [R, 9.99] {
         let (result, b) = blended(radius, 1);
         assert!(
-            matches!(&result, Err(e) if solidcore::error::upstream_status(e) == Some(SM_ERR_INVALID_INPUT)),
+            matches!(&result, Err(e) if e.sm_status() == Some(SM_ERR_INVALID_INPUT)),
             "r {radius}: {result:?}"
         );
         assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "r {radius}");

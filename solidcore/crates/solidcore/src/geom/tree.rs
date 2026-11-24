@@ -1898,7 +1898,10 @@ mod tests {
         assert_eq!(aux.node_class, NodeClass::Inside);
         assert!(aux.is_marked);
         assert!(tree
-            .map_objects::<u64>(|_| Err(SolidError::sm_err("test resolver")))
+            .map_objects::<u64>(|_| Err(SolidError::failed_routine(
+                "test resolver",
+                crate::error::SM_ERR
+            )))
             .is_err());
         assert_eq!(tree.owner_surface, Some(7));
     }

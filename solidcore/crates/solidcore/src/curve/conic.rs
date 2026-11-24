@@ -938,7 +938,7 @@ mod tests {
             Some(&CurveFailure::TooManyDerivatives { asked: 3, most: 2 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let p = e.evaluate(0.3, 0, false).unwrap();

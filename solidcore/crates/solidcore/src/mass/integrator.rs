@@ -1000,7 +1000,7 @@ mod tests {
         // Evaluator failing partway through [0.0, 1.0] and evaluator returning NaN/Inf.
         let partial_err = |t: f64| {
             if t >= 0.5 {
-                Err(SolidError::sm_err("test"))
+                Err(SolidError::failed_routine("test", crate::error::SM_ERR))
             } else {
                 Ok(0.5 + t)
             }

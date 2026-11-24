@@ -1231,11 +1231,7 @@ mod tests {
 
     /// The bare status a reviewed defect at `status` replaced.
     fn upstream(status: i32) -> SolidError {
-        SolidError::Upstream {
-            operation: "curve::op",
-            code: status,
-            entity: None,
-        }
+        SolidError::failed_routine("curve::op", status)
     }
 
     #[test]
@@ -1246,14 +1242,10 @@ mod tests {
         ];
         for (failure, code) in cases {
             let typed = SolidError::curve("curve::op", failure);
-            let before = SolidError::Upstream {
-                operation: "curve::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("curve::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -1270,7 +1262,10 @@ mod tests {
             SolidError::curve("curve::op", CurveFailure::SingleLinearCurve).to_string(),
             "curve::op: the only curve is a line, which spans no plane"
         );
-        assert_eq!(SolidError::sm_err("curve::op").curve_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("curve::op", SM_ERR).curve_failure(),
+            None
+        );
     }
 
     /// A typed cause keeps the status and kind of the bare status it replaced.
@@ -1348,7 +1343,7 @@ mod tests {
             assert_eq!(e.sm_status(), Some(SM_ERR));
             assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
             assert_eq!(e.failed_routine_status(), None);
-            assert_eq!(super::super::upstream_status(&e), None);
+            assert_eq!(SolidError::failed_routine_status(&e), None);
             assert_eq!(e.operation(), "curve::length_bound");
             assert_eq!(e.entity(), None);
             assert!(!refusal.is_failed_routine());
@@ -1360,7 +1355,7 @@ mod tests {
     }
 
     /// The named causes keep the status of the bare status they replace, and
-    /// `upstream_status` reads it, with the kind of what they check.
+    /// `failed_routine_status` reads it, with the kind of what they check.
     #[test]
     fn the_named_causes_keep_their_sites_statuses() {
         use crate::geom::vector3d::Vec3;
@@ -1706,7 +1701,11 @@ mod tests {
         for (cause, status, kind) in cases {
             let e = SolidError::curve("curve::op", cause);
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(status),
+                "{cause:?}"
+            );
             assert_eq!(e.kind(), kind, "{cause:?}");
             assert!(cause.is_failed_routine(), "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");

@@ -4500,13 +4500,19 @@ mod tests {
             .swap_uv_notifying(&k, &mut |_, _, op| {
                 events.push(op);
                 if events.len() == 3 {
-                    return Err(SolidError::sm_err("test::wr164::notify"));
+                    return Err(SolidError::failed_routine(
+                        "test::wr164::notify",
+                        crate::error::SM_ERR,
+                    ));
                 }
                 Ok(())
             })
             .unwrap_err();
         assert_eq!(err.operation(), "test::wr164::notify");
-        assert_eq!(err, SolidError::sm_err("test::wr164::notify"));
+        assert_eq!(
+            err,
+            SolidError::failed_routine("test::wr164::notify", crate::error::SM_ERR)
+        );
         assert_eq!(
             events,
             [

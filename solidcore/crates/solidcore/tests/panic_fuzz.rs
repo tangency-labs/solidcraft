@@ -1260,7 +1260,7 @@ fn run_prim(k: &mut Kernel, p: &Prim) -> solidcore::Result<Brep> {
         ),
         Prim::Swung(a, b, s) => {
             let (Some(a), Some(b)) = (curves_of(k, a), curves_of(k, b)) else {
-                return Err(solidcore::SolidError::sm_err("fuzz"));
+                return Err(fuzz_failure());
             };
             prim::create_swung_primitive(k, &a, &b, *s)
         }
@@ -1272,8 +1272,19 @@ fn run_prim(k: &mut Kernel, p: &Prim) -> solidcore::Result<Brep> {
     }
 }
 
+/// The fuzz driver's own failure (a profile without curves), with status `SM_ERR`.
+fn fuzz_failure() -> solidcore::SolidError {
+    solidcore::error::Failure::new(
+        "fuzz",
+        solidcore::error::geom::GeomFailure::CallFailed {
+            class: solidcore::error::ErrorKind::Failed,
+        },
+    )
+    .into_error()
+}
+
 fn run_sweep(k: &mut Kernel, s: &Sweep) -> solidcore::Result<Option<Brep>> {
-    let none = || solidcore::SolidError::sm_err("fuzz");
+    let none = fuzz_failure;
     let cs = |k: &Kernel, pr: &Profile| curves_of(k, pr).ok_or_else(none);
     Ok(Some(match s {
         Sweep::Linear(pr, dir, dist, cap, reps) => {

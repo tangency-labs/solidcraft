@@ -402,7 +402,7 @@ mod tests {
         let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z)?;
         let error = prepare_curve_sweep(&k, &[], &path, None, None, SweepOptions::default(), false)
             .err()
-            .ok_or_else(|| SolidError::sm_err("test"))?;
+            .ok_or_else(|| SolidError::failed_routine("test", crate::error::SM_ERR))?;
         assert_eq!(
             error.primitive_failure(),
             Some(&PrimitiveFailure::NoProfiles)
@@ -500,10 +500,9 @@ mod tests {
             let t = domain.evaluate(f64::from(step) / 8.0);
             max_z = max_z.max(prepared.path.evaluate_point(t)?.z.abs());
         }
-        let profile = prepared
-            .profiles
-            .first()
-            .ok_or_else(|| SolidError::sm_err("no prepared profile"))?;
+        let profile = prepared.profiles.first().ok_or_else(|| {
+            SolidError::failed_routine("no prepared profile", crate::error::SM_ERR)
+        })?;
         let profile_domain = profile.natural_interval();
         let start = profile.evaluate_point(profile_domain.min())?;
         let end = profile.evaluate_point(profile_domain.max())?;

@@ -3122,7 +3122,7 @@ mod tests {
         let curves = [side, composite];
         assert!(matches!(
             compute_crvs_normal(&k, &curves),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(SM_ERR)
         ));
     }
 

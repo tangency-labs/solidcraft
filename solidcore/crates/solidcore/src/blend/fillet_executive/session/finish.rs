@@ -1810,11 +1810,7 @@ mod ball_fit_tests {
         use crate::topology::EdgeId;
         let edge = Some(EntityRef::Edge(EdgeId::from_index(3)));
         // the refusal with a fit size
-        let upstream = SolidError::Upstream {
-            operation: "intersect::x",
-            code: 1001,
-            entity: edge,
-        };
+        let upstream = SolidError::failed_routine_at("intersect::x", 1001, edge);
         assert_eq!(refusable(&upstream), Some(("intersect::x", 1001, edge)));
         for typed in replaced_upstream("intersect::x", 1001, edge) {
             assert_eq!(refusable(&typed), refusable(&upstream), "{typed:?}");
@@ -1895,10 +1891,10 @@ mod ball_fit_tests {
         assert_eq!(after, before);
         assert_eq!(
             rooted_in(
-                SolidError::sm_err("op"),
+                SolidError::failed_routine("op", crate::error::SM_ERR),
                 SolidError::blend(OP, BlendFailure::CornerRefused)
             ),
-            SolidError::sm_err("op")
+            SolidError::failed_routine("op", crate::error::SM_ERR)
         );
     }
 
@@ -1926,7 +1922,7 @@ mod ball_fit_tests {
                     "blend::fillet_executive::session",
                     BlendFailure::FilletVertexWithoutCorner,
                 ),
-                SolidError::sm_err("op"),
+                SolidError::failed_routine("op", crate::error::SM_ERR),
             ),
         ];
         for root in unrelated {

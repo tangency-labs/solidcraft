@@ -132,7 +132,7 @@
 //!   fails part-way may have appended curves upstream; the Rust intersectors return
 //!   nothing on failure. `FindParameterAtArcLength`'s `SM_ERR_NOT_CONVERGING` is an
 //!   error where upstream `SER`s it.
-//! - **Failures (#15034, TE-B-02 #19810).** No check in this file decides a refusal (the
+//! - **Failures (#15034, #19810).** No check in this file decides a refusal (the
 //!   rail/edge-use miss at a corner that is not a blending corner is the vertex's
 //!   `NoIntRailEu` status, which the executive reads, not a failure). Each failure keeps
 //!   upstream's status and is built where it happens (its origin is that file and line):
@@ -5065,7 +5065,7 @@ fn find_stepoff_uv(
     super::p1::find_stepoff_uv(k, target, &as_assisted(fs), curve_param, stepoff_dist)
 }
 
-// The reviewed defects' reasons (TE-B-02, #19810), one per reason, shared by its sites.
+// The reviewed defects' reasons (#19810), one per reason, shared by its sites.
 
 /// A derivative list shorter than its evaluation's order.
 const SHORT_DERIVATIVES: &str =

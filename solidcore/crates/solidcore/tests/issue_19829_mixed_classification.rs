@@ -1,4 +1,4 @@
-//! tangency-labs/solidcraft#19829 (TE-B-F3): the Mixed corner's classification
+//! tangency-labs/solidcraft#19829: the Mixed corner's classification
 //! (`classify_mixed`) says "not mixed" as a value, `Ok(false)`, and a failure as an error
 //! with a named cause; its caller, `FilletCorner::create`, passes the error on instead of
 //! taking it for "no corner", and keeps every corner it chose before.
@@ -222,11 +222,7 @@ fn assert_edge_use_without_edge(err: &SolidError, eu: EdgeuseId) {
     );
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     assert!(!err.is_defect(), "{err}");
-    assert_eq!(
-        solidcore::error::upstream_status(err),
-        Some(SM_ERR_NULL_POINTER),
-        "{err}"
-    );
+    assert_eq!(err.sm_status(), Some(SM_ERR_NULL_POINTER), "{err}");
     assert!(
         format!("{err:?}").contains(&format!("{:?}", EntityRef::Edgeuse(eu))),
         "{err:?}"

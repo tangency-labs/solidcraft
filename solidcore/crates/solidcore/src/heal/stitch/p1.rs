@@ -45,7 +45,7 @@
 //! - `SelectTopologyToKeep` reads `SurfaceMaxDistanceBetween`'s gap even when the call
 //!   fails (upstream status ignored): the previous gap, as upstream's reused local.
 //!   Upstream reads an uninitialised local when the very first call fails; the port
-//!   returns [`SolidError::Upstream`] `SM_ERR` there.
+//!   returns a failure with status `SM_ERR` there.
 //! - `test_and_split_edge` records the live edge's zone tolerance on its curve for
 //!   the drop's cache, which cannot dereference the owning B-rep. The independent
 //!   stitch/snap tolerance is unchanged; no curve copy or extra arena lookup is

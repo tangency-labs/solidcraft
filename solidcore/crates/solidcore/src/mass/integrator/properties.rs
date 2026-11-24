@@ -3852,7 +3852,7 @@ mod tests {
             SolidError::Degenerate { .. }
         ));
         // any other status stays as it came
-        let other = SolidError::sm_err(OP);
+        let other = SolidError::failed_routine(OP, SM_ERR);
         assert_eq!(typed_failure(other.clone()), other);
     }
 

@@ -51,6 +51,10 @@ pub const MIN_GENERATED: usize = 3000;
 /// Status of injected evaluator failures (`SM_ERR_INVALID_INPUT`).
 const FAIL_STATUS: i32 = 1007;
 
+/// The operation of injected evaluator failures: an [`SolidError::InvalidInput`] of it
+/// records [`FAIL_STATUS`], as the shim's evaluator returns.
+const FAIL_OP: &str = "difftest::geom_local_solve1d::TestFn";
+
 /// `geom.local_solve1d` runner.
 pub struct Runner;
 
@@ -252,11 +256,7 @@ impl EvalFunction for TestFn {
             }
             out.found_answer = false;
             self.flags.push(sig);
-            return Err(SolidError::Upstream {
-                operation: "difftest::geom_local_solve1d::TestFn",
-                code: FAIL_STATUS,
-                entity: None,
-            });
+            return Err(SolidError::invalid_input(FAIL_OP, "injected evaluator failure"));
         }
         out.f = f;
         out.f_prime = fp;
@@ -274,6 +274,7 @@ fn harness(e: impl ToString) -> HarnessError {
 /// Status code of a Rust error (only upstream statuses are expected).
 fn status_of(e: &SolidError) -> Result<i64, HarnessError> {
     match e {
+        SolidError::InvalidInput { operation: FAIL_OP, .. } => Ok(i64::from(FAIL_STATUS)),
         err if crate::output::recorded_status(err).is_some() => Ok(i64::from(crate::output::recorded_status(err).unwrap_or(-1))),
         other => Err(harness(format!("unexpected error {other}"))),
     }

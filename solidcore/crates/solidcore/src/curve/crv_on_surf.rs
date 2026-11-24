@@ -2923,7 +2923,7 @@ mod tests {
                 // full volume chain and must not become a depth refusal.
                 assert!(matches!(
                     curve.transform(&k, &motion, Some(Vec3::new(2.0, 3.0, 4.0))),
-                    Err(e) if crate::error::upstream_status(&e) == Some(1001)
+                    Err(e) if SolidError::failed_routine_status(&e) == Some(1001)
                 ));
                 assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
             }
@@ -3130,7 +3130,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         assert_eq!(

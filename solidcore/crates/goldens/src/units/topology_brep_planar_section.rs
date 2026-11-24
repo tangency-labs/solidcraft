@@ -222,7 +222,7 @@ fn box_strut(k: &mut Kernel, size: [f64; 3], strut: [f64; 3]) -> SolidResult<Bre
     use solidcore::topology::face::p4 as face4;
     let mut b =
         solidcore::primitive::api_primitives::create_box(k, Vec3::ZERO, size[0], size[1], size[2])?;
-    let null = || SolidError::null_pointer("difftest::topology_brep_planar_section::box_strut");
+    let null = || SolidError::port_invariant("difftest::topology_brep_planar_section::box_strut", "box strut has no top face or vertex");
     let mut top = None;
     for f in brep1::faces(&b, None)? {
         let vs = face4::vertices(&b, f, None, false, None)?;

@@ -989,7 +989,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::IntervalOutsideBase)
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
     }
 
     #[test]
@@ -1007,7 +1007,7 @@ mod tests {
         let err = OffsetCurve::empty().evaluate_point(k, 0.0).unwrap_err();
         assert_eq!(err.curve_failure(), Some(&CurveFailure::OffsetWithoutBase));
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR_NULL_POINTER)
         );
     }
@@ -1070,7 +1070,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::NoOffsetDirection { t: 0.5 })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         assert!(c.evaluate(k, 0.5, 2, true, true).is_err());
     }
 
@@ -1097,7 +1097,7 @@ mod tests {
                 Some(&CurveFailure::NoOffsetDirection { t }),
                 "{err:?}"
             );
-            assert_eq!(crate::error::upstream_status(&err), Some(1001));
+            assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
             let err = c.evaluate(k, t, 1, true, true).unwrap_err();
             assert_eq!(
                 err.curve_failure(),

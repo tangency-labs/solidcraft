@@ -1362,25 +1362,8 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
 fn the_offset_refusals_are_typed() {
     use solidcore::error::offset::OffsetFailure;
     use solidcore::error::Failure;
-    use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
-    use solidcore::{FaceId, SolidError};
+    use solidcore::FaceId;
     let none = |_: solidcore::EntityRef| -> Option<crate::RecordEntity> { None };
-    let up = |code| SolidError::Upstream {
-        operation: "test",
-        code,
-        entity: None,
-    };
-    assert_eq!(
-        super::status(up(SM_ERR_OFFSET_WALLS_TOUCH), &none),
-        Error::WallsTouch
-    );
-    assert_eq!(
-        super::status(up(SM_ERR_OFFSET_EDGE_VANISHES), &none),
-        Error::OffsetRefused {
-            face: None,
-            why: crate::OffsetRefusal::EdgeVanishes,
-        }
-    );
     // the kernel's typed offset refusals (solidcore#2615)
     let refused = |o| Failure::new("test", o).into_error();
     assert_eq!(
@@ -1435,7 +1418,10 @@ fn the_offset_refusals_are_typed() {
             },
         }
     );
-    assert_eq!(super::status(up(1001), &none), Error::Status(1001));
+    assert_eq!(
+        super::status(crate::tests::routine_failure("test"), &none),
+        Error::Status(1001)
+    );
 }
 
 /// Each of the kernel's other offset refusals as [`Error::OffsetRefused`] (#14783): its reason,
@@ -1688,7 +1674,7 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
         })),
         Some(Error::WallFolds { largest: Some(1.0) })
     );
-    assert_eq!(super::refusal(&solidcore::SolidError::sm_err("x")), None);
+    assert_eq!(super::refusal(&crate::tests::routine_failure("x")), None);
     // `status` and `refusal` agree: `status` is the refusal, else the kernel's status
     let errors = [
         failed(OffsetFailure::Defect { why: "x" }),
@@ -1713,12 +1699,7 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
         failed(OffsetFailure::SeamOpened { face }),
         failed(OffsetFailure::Unsound { what }),
         failed(OffsetFailure::ExactCurveUncut),
-        solidcore::SolidError::sm_err("x"),
-        solidcore::SolidError::Upstream {
-            operation: "offset::x",
-            code: solidcore::error::SM_ERR_OFFSET_WALLS_TOUCH,
-            entity: None,
-        },
+        crate::tests::routine_failure("x"),
     ];
     for e in errors {
         let expected = super::refusal(&e).unwrap_or_else(|| crate::error::status(e.clone()));
@@ -1870,7 +1851,7 @@ fn an_unmeasurable_face_is_unsupported() {
             .face(f)?
             .surface
             .clone()
-            .ok_or(solidcore::SolidError::sm_err("test"))?;
+            .ok_or_else(|| crate::tests::routine_failure("test"))?;
         let off = solidcore::surface::offset_surface::OffsetSurface::new(k, 0.0, base, true, 0)?;
         b.face_mut(f)?.surface = Some(solidcore::surface::surface::Surface::from(off));
         super::room(k, &mut b, &[], 2.0)

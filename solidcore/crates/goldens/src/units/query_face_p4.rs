@@ -477,10 +477,10 @@ fn any_surface(
     };
     // a failed CreateCanonical or SwapUV: the shim's NULL surface
     let Ok(mut surface) = made else {
-        return Ok(Err(SolidError::sm_err(OP)));
+        return Ok(Err(crate::output::routine_failure(OP)));
     };
     if swap && surface.swap_uv(k).is_err() {
-        return Ok(Err(SolidError::sm_err(OP)));
+        return Ok(Err(crate::output::routine_failure(OP)));
     }
     let dom = match surface.natural_uv_domain_with_nurb(k) {
         Ok(d) => d,

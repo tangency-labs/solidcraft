@@ -239,7 +239,7 @@ fn probes(k: &Kernel, brep: &Brep, face: FaceId, input: &Inputs) -> SolidResult<
             let eu = edges
                 .first()
                 .copied()
-                .ok_or_else(|| SolidError::null_pointer("difftest::native_face::edgeuse"))?;
+                .ok_or_else(|| SolidError::port_invariant("difftest::native_face::edgeuse", "a boundary loop use has no edge uses"))?;
             let curve = solidcore::topology::edgeuse::p1::uv_trim_curve(brep, eu)?
                 .0
                 .ok_or_else(|| {

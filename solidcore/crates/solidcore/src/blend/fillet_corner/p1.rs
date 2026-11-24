@@ -3941,7 +3941,10 @@ mod tests {
                 visited.push(edge);
                 if edge == edges[1] {
                     *global_merge = false;
-                    return Err(SolidError::sm_err("defined edge failure"));
+                    return Err(SolidError::failed_routine(
+                        "defined edge failure",
+                        crate::error::SM_ERR,
+                    ));
                 }
                 Ok(())
             },
@@ -4004,7 +4007,10 @@ mod tests {
             |(pseudo, visited, _), vertex| {
                 visited.push(vertex);
                 if vertex == second {
-                    return Err(SolidError::null_pointer("defined calculator failure"));
+                    return Err(SolidError::failed_routine(
+                        "defined calculator failure",
+                        SM_ERR_NULL_POINTER,
+                    ));
                 }
                 pseudo
                     .fillet_vertex_mut(vertex)?
@@ -4045,7 +4051,7 @@ mod tests {
             SolidError::PreparationRequired {
                 operation: "calculator",
             },
-            SolidError::sm_err("calculator"),
+            SolidError::failed_routine("calculator", crate::error::SM_ERR),
         ]
     }
 
@@ -4229,9 +4235,12 @@ mod tests {
             assert_eq!(re_solved(Err(passed.clone()), sm_err), Err(passed));
         }
         // an error without a record has no cause to keep (no caller passes one)
-        let bare = SolidError::sm_err(OP_CONST_RAD);
+        let bare = SolidError::failed_routine(OP_CONST_RAD, crate::error::SM_ERR);
         assert_eq!(
-            keeping_cause(bare.clone(), SolidError::sm_err("re-solve")),
+            keeping_cause(
+                bare.clone(),
+                SolidError::failed_routine("re-solve", crate::error::SM_ERR)
+            ),
             bare
         );
     }

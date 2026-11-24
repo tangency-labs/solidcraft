@@ -27,7 +27,6 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::object::OBJECT_TYPE;
 use solidcore::math::EFF_ZERO;
 use solidcore::nurbs::math::NOW;
-use solidcore::SolidError;
 
 use super::blend_fillet_standard_solver_p1::{
     bcurve_of, dump_curve, status, uniform_knots, InlineCrv,
@@ -729,7 +728,11 @@ fn exec_step(
             let mut bevel = false;
             let r = x.set_bevel_corner(Some(H(*v)), |c| {
                 if c == H(0) {
-                    return Err(SolidError::null_pointer("harness::set_bevel"));
+                    return Err(solidcore::error::Failure::new(
+                        "harness::set_bevel",
+                        solidcore::error::blend::BlendFailure::BevelVertexNotFilleted,
+                    )
+                    .into_error());
                 }
                 bevel = true;
                 Ok(())

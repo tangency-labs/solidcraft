@@ -3054,11 +3054,7 @@ mod tests {
         ];
         for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine(operation, code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");

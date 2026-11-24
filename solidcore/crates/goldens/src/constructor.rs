@@ -132,7 +132,8 @@ fn make_curve_2d(c: &sm::Curve, bounds: Option<(f64, f64)>) -> Result<Curve, Sol
             dir,
             magnitude,
         } => {
-            let (lo, hi) = bounds.ok_or(SolidError::sm_err("difftest::constructor"))?;
+            let (lo, hi) =
+                bounds.ok_or_else(|| crate::output::routine_failure("difftest::constructor"))?;
             Ok(Curve::from(Line::bounded(
                 Point3::new(origin[0], origin[1], 0.0),
                 Point3::new(dir[0], dir[1], 0.0),
@@ -172,7 +173,7 @@ fn make_curve_2d(c: &sm::Curve, bounds: Option<(f64, f64)>) -> Result<Curve, Sol
                 },
             )?))
         }
-        _ => Err(SolidError::sm_err("difftest::constructor")),
+        _ => Err(crate::output::routine_failure("difftest::constructor")),
     }
 }
 

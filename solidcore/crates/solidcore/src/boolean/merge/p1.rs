@@ -1703,7 +1703,10 @@ mod tests {
         assert_eq!(ignore_failure::<()>(Err(cancelled.clone())), Err(cancelled));
         assert_eq!(ignore_failure(Ok(7)), Ok(Some(7)));
         assert_eq!(
-            ignore_failure::<()>(Err(SolidError::sm_err("ordinary-classification-failure"))),
+            ignore_failure::<()>(Err(SolidError::failed_routine(
+                "ordinary-classification-failure",
+                crate::error::SM_ERR
+            ))),
             Ok(None)
         );
         let unported = SolidError::unported("callee", "unit");
@@ -1739,7 +1742,7 @@ mod tests {
         let token = TemporaryBrepTransform {
             inverse: Some(Axis2Placement::IDENTITY),
         };
-        let error = SolidError::sm_err("failed-inverse-transform");
+        let error = SolidError::failed_routine("failed-inverse-transform", crate::error::SM_ERR);
         let mut restored = Vec::new();
         let result = token.restore(
             Some(&mut Brep::new()),
@@ -1776,11 +1779,7 @@ mod tests {
             a.set_locked_bounding_box(Some(bounds));
             b.set_locked_bounding_box(Some(bounds));
             let shift = temporary_brep_transform(&k, &k, &a, &b).unwrap();
-            let error = SolidError::Upstream {
-                operation: "failed-forward-transform",
-                code: 1027,
-                entity: None,
-            };
+            let error = SolidError::failed_routine("failed-forward-transform", 1027);
             let mut calls = Vec::new();
             let result = shift.apply(&mut a, &mut b, |brep, is_other, xfm, scale, scale_tol| {
                 assert_eq!(scale, None);
@@ -1814,12 +1813,15 @@ mod tests {
             shift: Some(Vec3::X),
         };
         let mut calls = 0;
-        let error = SolidError::sm_err("failed-undo");
+        let error = SolidError::failed_routine("failed-undo", crate::error::SM_ERR);
         let result = shift.apply(&mut Brep::new(), &mut Brep::new(), |_, _, _, _, _| {
             calls += 1;
             match calls {
                 1 => Ok(()),
-                2 => Err(SolidError::sm_err("failed-other-translation")),
+                2 => Err(SolidError::failed_routine(
+                    "failed-other-translation",
+                    crate::error::SM_ERR,
+                )),
                 _ => Err(error.clone()),
             }
         });
@@ -1830,15 +1832,23 @@ mod tests {
     #[test]
     fn checked_temporary_cleanup_attempts_every_survivor_and_returns_the_first_error() {
         for deleted in [(false, false), (false, true), (true, false), (true, true)] {
-            for body_result in [Ok(7), Err(SolidError::sm_err("failed-boolean"))] {
+            for body_result in [
+                Ok(7),
+                Err(SolidError::failed_routine(
+                    "failed-boolean",
+                    crate::error::SM_ERR,
+                )),
+            ] {
                 let token = TemporaryBrepTransform {
                     inverse: Some(Axis2Placement::IDENTITY),
                 };
                 let mut a = Some(Brep::new());
                 let mut b = Some(Brep::new());
                 let mut restored = Vec::new();
-                let first_error = SolidError::sm_err("primary-inverse");
-                let second_error = SolidError::sm_err("other-inverse");
+                let first_error =
+                    SolidError::failed_routine("primary-inverse", crate::error::SM_ERR);
+                let second_error =
+                    SolidError::failed_routine("other-inverse", crate::error::SM_ERR);
                 let result = token.run(
                     &mut a,
                     &mut b,
@@ -1923,7 +1933,14 @@ mod tests {
     #[test]
     fn temporary_translation_restores_survivors_after_every_result_exit() {
         for deletes in [(false, false), (true, false), (false, true), (true, true)] {
-            for result in [Ok(true), Ok(false), Err(SolidError::sm_err("scope-test"))] {
+            for result in [
+                Ok(true),
+                Ok(false),
+                Err(SolidError::failed_routine(
+                    "scope-test",
+                    crate::error::SM_ERR,
+                )),
+            ] {
                 let mut inverse = Axis2Placement::IDENTITY;
                 inverse.translate(Vec3::new(2001.0, -3002.0, 4003.0));
                 let token = TemporaryBrepTransform {

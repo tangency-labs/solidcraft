@@ -4322,7 +4322,7 @@ mod tests {
             _boundary_intersections: bool,
         ) -> Result<PointClassification<H>> {
             if self.classify_fails {
-                return Err(SolidError::sm_err("classify"));
+                return Err(SolidError::failed_routine("classify", crate::error::SM_ERR));
             }
             let idx = self.points.len();
             self.points.push(point);

@@ -11,6 +11,7 @@ use std::time::Duration;
 use solidcore::SolidError;
 use solidcore::error::Failure;
 use solidcore::error::boolean::BooleanFailure;
+use solidcore::error::geom::GeomFailure;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::mass::integrator::properties::brep_area;
@@ -518,7 +519,7 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
 
     let wrap = |cause: SolidError| Failure::new("test::stage", BooleanFailure::TreeBooleanFailed).caused_by(cause).into_error();
 
-    let status = wrap(SolidError::sm_err("test::inner"));
+    let status = wrap(routine_failure("test::inner"));
     assert!(status.sm_status().is_some());
     assert!(matches!(answer::<()>(Err(status)), Ok(None)));
 
@@ -536,7 +537,7 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
 }
 
 /// A Boolean failure that slice, sweep and the other users of the merge engine pass up reaches the
-/// caller as the SMLib status it stands for, as the `Upstream` it replaced did, not as a message;
+/// caller as the SMLib status it stands for, as the bare status it replaced did, not as a message;
 /// one whose cause chain holds unported code is not supported; another subsystem's failure keeps
 /// its message.
 #[test]
@@ -552,7 +553,7 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
         .into_error()
     };
     assert!(matches!(status(boolean(None)), Error::Status(1001)));
-    assert!(matches!(status(boolean(Some(SolidError::sm_err("test::inner")))), Error::Status(1001)));
+    assert!(matches!(status(boolean(Some(routine_failure("test::inner")))), Error::Status(1001)));
     assert!(matches!(status(boolean(Some(SolidError::unported("test::callee", "test.unit")))), Error::Unsupported));
     let floor = solidcore::error::curve::CurveFailure::LengthBelowFloor { asked: 1e-12, floor: 1e-10, pieces: 8 };
     let other = Failure::new("offset::offset_executive::p2", floor).into_error();
@@ -571,7 +572,6 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     let helix = PrimitiveFailure::HelixDeviates { deviation: 0.5, tolerance: 0.25 };
     assert!(matches!(status(primitive(helix)), Error::Status(1021)));
     // a mass-property, healing or geometry-utility failure passes on as the status it replaced
-    use solidcore::error::geom::GeomFailure;
     use solidcore::error::heal::HealFailure;
     use solidcore::error::mass::MassFailure;
     let mass = |f| Failure::new("mass::integrator", f).into_error();
@@ -584,4 +584,10 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(geom(GeomFailure::Disjoint { a: [0.0, 1.0], b: [2.0, 3.0] })), Error::Status(1001)));
     assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
     assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
+}
+
+/// A kernel routine's failure with status `SM_ERR` and nothing more about its cause, for the
+/// tests whose subject reads only that status.
+pub(super) fn routine_failure(operation: &'static str) -> SolidError {
+    Failure::new(operation, BooleanFailure::TreeBooleanFailed).into_error()
 }

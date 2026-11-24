@@ -135,7 +135,7 @@ impl Model {
         let mut keys = BTreeMap::new();
         let mut curve_keys = BTreeMap::new();
         for id in 0..64 {
-            let entity = entity(id).ok_or_else(|| SolidError::null_pointer("runner"))?;
+            let entity = entity(id).ok_or_else(|| SolidError::port_invariant("runner", "no fixture entity for the id"))?;
             let (brep, local) = match entity {
                 E::Vertex(b, v) => (b, R::Vertex(v)),
                 E::Edge(b, e) => (b, R::Edge(e)),
@@ -221,12 +221,12 @@ impl SweepAccess for Model {
     fn brep(&self, id: BrepId) -> Result<&Brep> {
         self.b
             .get(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("runner"))
+            .ok_or_else(|| SolidError::port_invariant("runner", "no B-rep for the id"))
     }
     fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
         self.b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("runner"))
+            .ok_or_else(|| SolidError::port_invariant("runner", "no B-rep for the id"))
     }
     fn kernel(&self, _id: BrepId) -> Result<&Kernel> {
         Ok(&self.k)
@@ -247,7 +247,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
         let face_objects =
             |face: FaceId| service_object(id, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(id, entity);
@@ -284,14 +284,14 @@ impl SweepAccess for Model {
         let (left, right) = self
             .b
             .split_at_mut_checked(si.max(di))
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
         let (src, dst) = if si < di {
             (left.get_mut(si), right.first_mut())
         } else {
             (right.first_mut(), left.get_mut(di))
         };
-        let src = src.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
-        let dst = dst.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+        let src = src.ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the source id"))?;
+        let dst = dst.ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the target id"))?;
         let face_objects =
             |face: FaceId| service_object(destination, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(destination, entity);
@@ -311,7 +311,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
         let key_of = |entity| service_object(id, entity);
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut self.records,
@@ -351,7 +351,7 @@ impl SweepAccess for Model {
         let key = self
             .keys
             .get(&e)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "entity not in the fixture key pool"))?;
         Ok(self
             .attributes
             .find_attribute(*key, ids::TAG)
@@ -368,7 +368,7 @@ impl SweepAccess for Model {
         let key = *self
             .keys
             .get(&e)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "entity not in the fixture key pool"))?;
         let h = self
             .attributes
             .insert(Attribute::tag(ids::TAG, tag, Behavior::Copy))?;
@@ -378,7 +378,7 @@ impl SweepAccess for Model {
         let key = self
             .curve_keys
             .get(&edge)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "no curve key for the edge"))?;
         Ok(self
             .attributes
             .find_attribute(*key, ids::TAG)
@@ -1174,7 +1174,7 @@ fn rust(i: &Input) -> Result<Output> {
         }
     }
     for id in 16..32 {
-        let tag = model.tag(entity(id).ok_or_else(|| SolidError::null_pointer("runner"))?)?;
+        let tag = model.tag(entity(id).ok_or_else(|| SolidError::port_invariant("runner", "no fixture entity for the id"))?)?;
         out.push(i64::from(tag.is_some()));
         out.extend(tag.unwrap_or_default().to_array());
     }

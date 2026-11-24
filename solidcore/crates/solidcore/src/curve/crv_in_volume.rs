@@ -1700,7 +1700,7 @@ mod tests {
             Some(&CurveFailure::KnotPastBreaks { knot: 2.0 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // a cache marked out of date, and one loaded with an undefined continuity
@@ -1773,7 +1773,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         assert_eq!(
@@ -1933,7 +1933,7 @@ mod tests {
             Some(&CurveFailure::BreaksNotCurrent)
         );
         assert_eq!(
-            crate::error::upstream_status(&mis_res),
+            SolidError::failed_routine_status(&mis_res),
             Some(crate::error::SM_ERR)
         );
         let (m_kn, m_mu) = mismatch.knots_ref(&k, None).unwrap();

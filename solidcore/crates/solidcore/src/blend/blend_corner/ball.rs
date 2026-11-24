@@ -102,7 +102,7 @@ pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError 
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
 /// construction reads (`input`), about `entity` where the check reads one, with the status
-/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// the site returned before ([`CornerInput::status`]). The entry points are public
 /// and take a caller's corner.
 #[track_caller]
 pub(super) fn bad_input(
@@ -536,7 +536,7 @@ fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for a missing edge or face surface the fork
+/// a failure with status `SM_ERR_NULL_POINTER` for a missing edge or face surface the fork
 /// dereferences (`NER`); those of the solver lookups, the convexity test and the
 /// quadric recognition.
 pub fn classify_ball(
@@ -974,7 +974,7 @@ fn ball_centre(
 ///
 /// `SM_ERR` where the corner is not as the Ball topology made it, the ball's centre does
 /// not hold, or a section's offset point cannot be solved onto the centre;
-/// [`SolidError::null_pointer`] for missing topology or geometry the fork dereferences;
+/// a failure with status `SM_ERR_NULL_POINTER` for missing topology or geometry the fork dereferences;
 /// those of the evaluations and the point solves.
 pub fn place_ball_contacts(
     k: &Kernel,
@@ -1339,7 +1339,7 @@ pub(crate) fn ball_triangle_patch(
 ///
 /// `SM_ERR` where the corner is not as the Ball topology made it, the ball does not hold,
 /// the patch's corners are not the corner's vertices, or its loop is other than three
-/// curves; [`SolidError::null_pointer`] for missing topology or geometry the fork
+/// curves; a failure with status `SM_ERR_NULL_POINTER` for missing topology or geometry the fork
 /// dereferences; those of the evaluations, the convexity test and the patch.
 pub fn ball_corner_edge_geom(
     k: &Kernel,
@@ -1493,7 +1493,7 @@ pub fn ball_corner_edge_geom(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without the patch, the fillet B-rep or a new face
+/// a failure with status `SM_ERR_NULL_POINTER` without the patch, the fillet B-rep or a new face
 /// (`NER`); those of the face construction.
 pub fn create_ball_patch(
     corner: &mut FilletCorner,
@@ -1631,7 +1631,7 @@ mod tests {
         );
         assert!(!err.is_defect() && !err.is_refusal(), "{err:?}");
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

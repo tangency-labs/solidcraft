@@ -242,7 +242,7 @@ fn frame_of(f: &FrameIn) -> (Axis2Placement, Option<Vec3>) {
 fn revolution(s: &Surface) -> solidcore::Result<&SurfOfRevolution> {
     match s.kind() {
         SurfaceKind::SurfOfRevolution(r) => Ok(r.as_ref()),
-        _ => Err(solidcore::SolidError::sm_err("difftest: not a surface of revolution")),
+        _ => Err(crate::output::routine_failure("difftest: not a surface of revolution")),
     }
 }
 

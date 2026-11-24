@@ -214,7 +214,7 @@ fn b_spline_part<'a>(
         SurfaceKind::Sphere(c) => Cow::Borrowed(c.base().base()),
         SurfaceKind::Torus(c) => Cow::Borrowed(c.base().base()),
         SurfaceKind::SurfOfRevolution(c) => Cow::Borrowed(c.base()),
-        _ => return Err(SolidError::sm_err("difftest::surface_approximate::b_spline_part")),
+        _ => return Err(crate::output::routine_failure("difftest::surface_approximate::b_spline_part")),
     })
 }
 

@@ -69,7 +69,7 @@
 //! each edge-use or face request is attempted at most once.
 //! The single-member `Remove` / `PostInsert` co-ports (`topology.brep_p3`, PR #204)
 //! return upstream's `SM_ERR` of `Remove` (a member not in this list) as
-//! [`SolidError::sm_err`], which callers that ignore it can tell apart. `PostInsert`
+//! a failure with status `SM_ERR`, which callers that ignore it can tell apart. `PostInsert`
 //! does no checks upstream; here it returns `InvalidInput` for a member that some list
 //! still holds (upstream would splice it into a second list), or for a face use
 //! going into a shell whose head is a wire or vertex use.
@@ -612,7 +612,7 @@ pub fn region_post_insert_shell(brep: &mut Brep, region: RegionId, shell: ShellI
 /// without members gets a NULL head).
 ///
 /// # Errors
-/// [`SolidError::sm_err`] (upstream's `SM_ERR` return) when the face use's owner is
+/// a failure with status `SM_ERR` (upstream's `SM_ERR` return) when the face use's owner is
 /// not this shell or it is missing from the list; `InvalidInput` for a shell whose
 /// head is not a face use; dangling ids.
 pub fn shell_remove_faceuse(brep: &mut Brep, shell: ShellId, faceuse: FaceuseId) -> Result<()> {

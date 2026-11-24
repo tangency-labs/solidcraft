@@ -1887,14 +1887,10 @@ mod tests {
                 None => Failure::new(operation, failure),
             }
             .into_error();
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: failure.entity(),
-            };
+            let before = SolidError::failed_routine_at(operation, code, failure.entity());
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), class, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), before.entity(), "{typed:?}");
@@ -1936,7 +1932,10 @@ mod tests {
             },
         );
         assert_eq!(folds.failed_routine_status(), None);
-        assert_eq!(SolidError::sm_err("offset::op").offset_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("offset::op", SM_ERR).offset_failure(),
+            None
+        );
     }
 
     /// Every offset failure's class, and whether it is a defect of the kernel, pinned. A new
@@ -2518,7 +2517,7 @@ mod tests {
             assert_eq!(o.kind(), *class, "{o:?}");
             assert_eq!(o.is_defect(), *defect, "{o:?}");
             // what replaced a bare status is a defect, or a cause named at a site of `offset_faces` or `offset_geometry_creation` that returned
-            // a status (TE-O-18, TE-O-19); `FaceCloses` and `DraftClosesWall` are refusals of
+            // a status; `FaceCloses` and `DraftClosesWall` are refusals of
             // their own, raised where no status was returned
             assert_eq!(o.is_failed_routine(), *replaces, "{o:?}");
         }
@@ -2536,11 +2535,7 @@ mod tests {
                 .into_error();
             super::super::tests::assert_defect(
                 &e,
-                &SolidError::Upstream {
-                    operation: "offset::op",
-                    code: status,
-                    entity: None,
-                },
+                &SolidError::failed_routine("offset::op", status),
                 "offset::op",
                 status,
                 &format!("offset::op: stage_failed: {why}"),
@@ -2556,7 +2551,7 @@ mod tests {
 
     /// The causes named at the bare and stage sites of `offset_faces` and
     /// `offset_geometry_creation` answer with the status of the site they replaced, for the
-    /// goldens (`upstream_status`), and name the input's entity where they carry one.
+    /// goldens (`failed_routine_status`), and name the input's entity where they carry one.
     #[test]
     fn the_named_offset_causes_keep_the_status_of_their_site() {
         let edge = EdgeId::from_index(4);
@@ -2616,7 +2611,7 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 None,
             ),
-            // and those of `offset_executive::p1` (TE-O-18)
+            // and those of `offset_executive::p1`
             (
                 OffsetFailure::OffsetBaseKindUnsupported { surface_type: 7 },
                 SM_ERR,
@@ -2650,7 +2645,7 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Faceuse(FaceuseId::from_index(2))),
             ),
-            // and those of `offset_executive::p2` (TE-O-18)
+            // and those of `offset_executive::p2`
             (OffsetFailure::BrepNotGiven, SM_ERR_NULL_POINTER, None),
             (
                 OffsetFailure::ShellLeavesNoCavity { distance: -5.0 },
@@ -2739,7 +2734,7 @@ mod tests {
             assert!(!cause.is_defect(), "{cause:?}");
             let e = SolidError::offset("offset::op", cause);
             assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
             assert_eq!(e.entity(), entity, "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");

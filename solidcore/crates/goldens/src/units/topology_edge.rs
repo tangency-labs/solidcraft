@@ -1101,7 +1101,7 @@ fn ellipse_wire(k: &mut Kernel, b: &mut Brep, src: &BrepIn) -> Result<(), SolidE
         Ellipse::new(k, center, x, y, domain, *rx, *ry, &opts)?
     };
     if curve.base().gw_nurb().is_none() {
-        return Err(SolidError::sm_err("topology_edge::ellipse_wire"));
+        return Err(crate::output::routine_failure("topology_edge::ellipse_wire"));
     }
     curve.edit_parameterization(k, &Extent1d::from_min_max(*n0, *n1), true, None)?;
     curve.set_out_of_bounds_enabled(*oob);

@@ -2876,9 +2876,9 @@ impl Surface {
     pub fn step_inversion_answered<T>(status: &Result<T>) -> bool {
         match status {
             Ok(_) => true,
-            // the status, not the variant: the answers come from each surface kind's inversion
+            // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
             Err(e) => matches!(
-                e.sm_status(),
+                e.failed_routine_status(),
                 Some(SM_ERR_NOT_WITHIN_TOLERANCE | SM_ERR_OUTSIDE_OF_DOMAIN)
             ),
         }
@@ -9054,16 +9054,15 @@ mod tests {
     /// replaced an analytic inversion's `Upstream` is the same answer.
     #[test]
     fn step_inversion_answered_reads_the_status_of_a_typed_failure() {
-        use crate::error::replaced_upstream_samples::replaced_upstream;
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
         for code in [SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN] {
-            let upstream: Result<()> = Err(SolidError::Upstream {
-                operation: "surface::x",
-                code,
-                entity: None,
-            });
+            let upstream: Result<()> = Err(SolidError::failed_routine("surface::x", code));
             assert!(Surface::step_inversion_answered(&upstream));
             for typed in replaced_upstream("surface::x", code, None) {
                 assert!(Surface::step_inversion_answered::<()>(&Err(typed)));
+            }
+            for native in native_failures("surface::x", code) {
+                assert!(!Surface::step_inversion_answered::<()>(&Err(native)));
             }
         }
         for other in replaced_upstream("surface::x", SM_ERR, None) {

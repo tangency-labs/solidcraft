@@ -3196,7 +3196,7 @@ mod tests {
     fn an_unresolved_edge_face_coincidence_keeps_the_glue_error() {
         let reason = crate::error::Reason::Boolean(BooleanFailure::CoincidenceUnresolved);
         for cause in [
-            SolidError::sm_err("glue"),
+            SolidError::failed_routine("glue", crate::error::SM_ERR),
             SolidError::blend(
                 "glue",
                 crate::error::blend::BlendFailure::Defect { why: "x" },
@@ -3221,7 +3221,7 @@ mod tests {
         }
         // a bare status under it leaves it unclassed, as it was; a defect under it
         // reads as a defect, a solidcore-side failure as no status answer
-        let bare = coincidence_unresolved(SolidError::sm_err("glue"));
+        let bare = coincidence_unresolved(SolidError::failed_routine("glue", crate::error::SM_ERR));
         assert!(!bare.is_defect() && !bare.is_refusal() && bare.is_status_answer());
         let stage = coincidence_unresolved(SolidError::blend(
             "glue",

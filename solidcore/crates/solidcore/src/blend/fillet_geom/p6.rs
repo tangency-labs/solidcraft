@@ -3866,7 +3866,10 @@ mod tests {
             &mut failed_orients,
             &|id, _| {
                 assert_eq!(id, actual_id);
-                Err(SolidError::sm_err("retained solver lookup"))
+                Err(SolidError::failed_routine(
+                    "retained solver lookup",
+                    crate::error::SM_ERR,
+                ))
             },
         )
         .unwrap_err();

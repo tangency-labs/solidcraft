@@ -158,7 +158,7 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
 /// construction reads (`input`), about `entity` where the check reads one, with the status
-/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// the site returned before ([`CornerInput::status`]). The entry points are public
 /// and take a caller's corner.
 #[track_caller]
 fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
@@ -166,7 +166,7 @@ fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) ->
 }
 
 /// [`bad_input`] with the site's own `status` where its C++ reports the condition otherwise
-/// than the kind's default ([`CornerInput::upstream_status`]): a failed state check,
+/// than the kind's default ([`CornerInput::status`]): a failed state check,
 /// `SE(SM_ERR)`, where the default is `SM_ERR_NULL_POINTER`.
 #[track_caller]
 fn bad_input_status(op: &'static str, input: CornerInput, status: i32) -> SolidError {
@@ -904,7 +904,7 @@ fn plane_normal(k: &Kernel, s: &Surface, tol: f64, op: &'static str) -> Result<V
 ///
 /// `SM_ERR` for a corner that is not a Mixed one of six vertices and seven edges, or
 /// with X or V not processed, T not planar, or a crossing not found;
-/// [`SolidError::null_pointer`] for missing rails or curves; those of the solves.
+/// a failure with status `SM_ERR_NULL_POINTER` for missing rails or curves; those of the solves.
 pub fn calc_mixed_vert_geom(
     k: &Kernel,
     target: &Brep,
@@ -1870,7 +1870,7 @@ pub fn calc_mixed_edge_geom(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without a face's surface, the fillet B-rep or a new face;
+/// a failure with status `SM_ERR_NULL_POINTER` without a face's surface, the fillet B-rep or a new face;
 /// those of the face construction.
 pub fn create_mixed_patches(
     corner: &mut FilletCorner,
@@ -1936,16 +1936,16 @@ mod tests {
 
     impl SweptSolvers for UnreachedSolvers {
         fn solver_of_edgeuse(&self, _: EdgeuseId) -> Result<&FilletSolver> {
-            Err(SolidError::null_pointer("test"))
+            Err(SolidError::failed_routine("test", SM_ERR_NULL_POINTER))
         }
         fn offset_radii_can_change(&self, _: EdgeuseId) -> Result<bool> {
-            Err(SolidError::null_pointer("test"))
+            Err(SolidError::failed_routine("test", SM_ERR_NULL_POINTER))
         }
         fn solver(&self, _: FilletSolverId) -> Result<&FilletSolver> {
-            Err(SolidError::null_pointer("test"))
+            Err(SolidError::failed_routine("test", SM_ERR_NULL_POINTER))
         }
         fn constant_offsets(&self, _: FilletSolverId) -> Result<Option<[f64; 2]>> {
-            Err(SolidError::null_pointer("test"))
+            Err(SolidError::failed_routine("test", SM_ERR_NULL_POINTER))
         }
     }
 
@@ -1962,7 +1962,7 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(
-            crate::error::upstream_status(err),
+            SolidError::failed_routine_status(err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -2081,7 +2081,7 @@ mod tests {
         assert!(!err.is_defect(), "{err:?}");
         assert_eq!(err.operation(), OP_VERT);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

@@ -603,7 +603,7 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
             .caused_by(cause)
             .into_error()
     };
-    let status = wrap(SolidError::sm_err("test::inner"));
+    let status = wrap(crate::tests::routine_failure("test::inner"));
     assert!(status.sm_status().is_some());
     assert!(matches!(answer::<()>(Err(status)), Ok(None)));
 

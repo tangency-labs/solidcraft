@@ -515,14 +515,10 @@ mod tests {
         ];
         for (failure, code) in cases {
             let typed = SolidError::geom("geom::op", failure);
-            let before = SolidError::Upstream {
-                operation: "geom::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("geom::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -542,7 +538,10 @@ mod tests {
             .kind(),
             ErrorKind::InvalidInput
         );
-        assert_eq!(SolidError::sm_err("geom::op").geom_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("geom::op", SM_ERR).geom_failure(),
+            None
+        );
     }
 
     /// A typed cause keeps the status of the bare status it replaced.
@@ -584,11 +583,7 @@ mod tests {
         let defect = GeomFailure::Defect { why };
         super::super::tests::assert_defect(
             &SolidError::geom("geom::op", defect),
-            &SolidError::Upstream {
-                operation: "geom::op",
-                code: SM_ERR,
-                entity: None,
-            },
+            &SolidError::failed_routine("geom::op", SM_ERR),
             "geom::op",
             SM_ERR,
             &format!("geom::op: stage_failed: {why}"),

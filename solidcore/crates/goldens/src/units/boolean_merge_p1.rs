@@ -824,7 +824,7 @@ impl NotifyCallback for Recorder {
                 key(b),
                 key(c),
             ]);
-            return Err(SolidError::sm_err("difftest::notify_callback"));
+            return Err(crate::output::routine_failure("difftest::notify_callback"));
         }
         Ok(())
     }
@@ -863,7 +863,7 @@ fn append_events(context: &Context, out: &mut Vec<f64>) -> solidcore::Result<()>
         .user_notify_callback()
         .and_then(NotifyCallback::as_any)
         .and_then(|a| a.downcast_ref::<Recorder>())
-        .ok_or_else(|| SolidError::null_pointer("difftest::recorder"))?;
+        .ok_or_else(|| SolidError::port_invariant("difftest::recorder", "the notify callback is not the recorder"))?;
     out.push(recorder.events.len() as f64);
     out.extend(recorder.events.iter().flatten().map(|&v| v as f64));
     Ok(())
@@ -1010,7 +1010,7 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, Soli
                 out.push(
                     records
                         .get(&key)
-                        .ok_or_else(|| SolidError::null_pointer("difftest::merge_copy"))?
+                        .ok_or_else(|| SolidError::port_invariant("difftest::merge_copy", "no copy record for the vertex key"))?
                         .all_flags() as f64,
                 );
                 out.push(
@@ -1126,7 +1126,7 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, Soli
             let edge = b
                 .edgeuse(sec)?
                 .edge
-                .ok_or_else(|| SolidError::null_pointer("difftest::radial"))?;
+                .ok_or_else(|| SolidError::port_invariant("difftest::radial", "the fixture edge use has no edge"))?;
             if i.op == 8 {
                 out.push(f64::from(
                     solidcore::query::edge::radial_sector_classify_between(
@@ -1194,7 +1194,7 @@ impl UnitDiff for Runner {
                 Output::err(format!(
                     "status_{}",
                     match e {
-                        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+                        SolidError::Failed(_) => {
                             e.sm_status().unwrap_or(-1)
                         }
                         _ => -1,

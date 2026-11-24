@@ -593,7 +593,6 @@ impl From<SolidError> for RunError {
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
     match result {
         Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
-        Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         Err(e @ SolidError::Failed(_)) => Ok((e.sm_status().unwrap_or(solidcore::error::SM_ERR), None)),
         Err(error) => Err(RunError::Kernel(error)),
@@ -2509,12 +2508,14 @@ mod tests {
 
     #[test]
     fn ordinary_statuses_remain_integer_observations_and_unported_never_becomes_1001() {
-        for status in [1001, 1006, 1007] {
-            let error = SolidError::Upstream {
-                operation: "test",
-                code: status,
-                entity: None,
-            };
+        use solidcore::error::geom::GeomFailure;
+        use solidcore::error::{ErrorKind, Failure};
+        for (reason, status) in [
+            (GeomFailure::CallFailed { class: ErrorKind::Failed }, 1001),
+            (GeomFailure::EdgeWithoutCurve, 1006),
+            (GeomFailure::ToleranceTooSmall { tolerance: 0.0 }, 1007),
+        ] {
+            let error = Failure::new("test", reason).into_error();
             assert_eq!(operation::<Brep>(Err(error)).unwrap().0, status);
         }
         let error = SolidError::unported("SmBrep::ShrinkGeometry", "topology.brep_p4");

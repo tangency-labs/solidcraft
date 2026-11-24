@@ -633,7 +633,10 @@ mod tests {
             &mut self,
             _: FilletCornerId,
         ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
-            Err(SolidError::null_pointer(OP))
+            Err(SolidError::failed_routine(
+                OP,
+                crate::error::SM_ERR_NULL_POINTER,
+            ))
         }
         fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
             (self.0)(id)

@@ -27,7 +27,7 @@
 //!   record). Their `Notify` calls (`SM_NO_CONSTRUCTION`, `SM_NO_DESTRUCTION`) are not
 //!   modelled, as in [`super::p1`].
 //! - **Null pointers.** Where upstream dereferences a null pointer the port returns
-//!   [`SolidError::InvalidInput`]; `NER` is [`SolidError::null_pointer`].
+//!   [`SolidError::InvalidInput`]; `NER` is a failure with status `SM_ERR_NULL_POINTER`.
 //! - **Out-params.** `EvaluateBinormalStepOff` returns all its outputs in a
 //!   [`BinormalEval`]; its optional inputs are a [`StepOffOptions`].
 //!   [`evaluate_binormal_step_off_into`] writes them in place for callers that read
@@ -328,7 +328,7 @@ impl Default for StepOffOptions {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; `SM_ERR` when the step leaves the
-/// face's UV domain; [`SolidError::null_pointer`] without face or surface;
+/// face's UV domain; a failure with status `SM_ERR_NULL_POINTER` without face or surface;
 /// [`SolidError::InvalidInput`] without face use; the evaluators' errors;
 /// [`SolidError::Unported`] from `EvaluateBinormal`'s deferred callees (see
 /// [`crate::topology::edgeuse::p3`]).
@@ -1881,7 +1881,7 @@ mod tests {
         );
 
         // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007): `Ok(true)`
-        // by default, `Err(Upstream { code: 1007 })` under opt-in.
+        // by default, an error with status 1007 under opt-in.
         let (mut lone_b, lone_eu) = lone_edgeuse();
         assert!(is_convex_radial_sector(&default_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap());
         let lone_err =

@@ -19,6 +19,18 @@ use solidcore::surface::surface_cache::SurfaceCache;
 use solidcore::topology::brep_cache::{BrepCache, CacheObject, CacheSource};
 use solidcore::{Brep, BrepId, FaceId, Kernel, Point2, Point3, Result, SolidError};
 
+/// The harness's own failure (a handle or record it does not hold), as the routine's
+/// failure with status `SM_ERR` that the kernel's scene answers with.
+fn harness_failure(operation: &'static str) -> SolidError {
+    solidcore::error::Failure::new(
+        operation,
+        solidcore::error::geom::GeomFailure::CallFailed {
+            class: solidcore::error::ErrorKind::Failed,
+        },
+    )
+    .into_error()
+}
+
 use solidcore::curve::curve::Curve;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -77,7 +89,7 @@ impl<'a> Pair<'a> {
     fn live(&self, o: Object) -> Result<&LiveBrepObjects<'a, 'a>> {
         self.lives
             .get(o.0)
-            .ok_or(SolidError::sm_err("brep pair handle"))
+            .ok_or_else(|| harness_failure("brep pair handle"))
     }
 
     fn map(o: Object, c: Option<CacheObject>) -> Option<Object> {
@@ -99,7 +111,7 @@ impl Contexts<'_> {
         self.0
             .get(o.0)
             .and_then(|c| c.face_queries())
-            .ok_or(SolidError::sm_err("brep pair face queries"))
+            .ok_or_else(|| harness_failure("brep pair face queries"))
     }
 }
 
@@ -111,12 +123,12 @@ impl SurfaceSolveContext<Object> for Contexts<'_> {
         handle: Option<Object>,
     ) -> Result<SurfaceCache<Object>> {
         let Some(Object(i, c)) = handle else {
-            return Err(SolidError::sm_err("brep pair surface handle"));
+            return Err(harness_failure("brep pair surface handle"));
         };
         let context = self
             .0
             .get_mut(i)
-            .ok_or(SolidError::sm_err("brep pair scene handle"))?;
+            .ok_or_else(|| harness_failure("brep pair scene handle"))?;
         context
             .build_surface_cache(k, surface, Some(c))?
             .map_handles(|c| Ok(Object(i, c)))
@@ -202,7 +214,7 @@ impl TopologyObjects<Object> for Pair<'_> {
     fn brep_cache(&self, o: Object) -> Result<&BrepCache<Object>> {
         self.caches
             .get(o.0)
-            .ok_or(SolidError::sm_err("brep pair cache"))
+            .ok_or_else(|| harness_failure("brep pair cache"))
     }
     fn curve(&self, o: Object) -> Result<&Curve> {
         self.live(o)?.curve(o.1)
@@ -263,7 +275,7 @@ impl TopologyObjects<Object> for Pair<'_> {
             ShapeMember::Vertex((b, v)) => Object(b.index() as usize, CacheObject::Vertex(v)),
             ShapeMember::Edge((b, e)) => Object(b.index() as usize, CacheObject::Edge(e)),
             ShapeMember::Face((b, f)) => Object(b.index() as usize, CacheObject::Face(f)),
-            ShapeMember::Other => return Err(SolidError::sm_err("brep pair shape handle")),
+            ShapeMember::Other => return Err(harness_failure("brep pair shape handle")),
         })
     }
 }

@@ -125,7 +125,7 @@ fn offset_1st(
         .surfaces
         .get(i)
         .and_then(Option::as_ref)
-        .ok_or(SolidError::sm_err("harness::offset_1st"))?
+        .ok_or_else(|| crate::output::routine_failure("harness::offset_1st"))?
         .surface
         .clone();
     s.surface
@@ -189,7 +189,7 @@ impl FilletSolverOps for HarnessSolver {
         guess_t: &mut Vec<f64>,
     ) -> solidcore::Result<Option<InitialValues>> {
         if self.init_fail {
-            return Err(SolidError::sm_err("harness::load_initial_values"));
+            return Err(crate::output::routine_failure("harness::load_initial_values"));
         }
         if self.extra {
             if let Some(e) = intervals.get_mut(4) {
@@ -214,9 +214,9 @@ impl FilletSolverOps for HarnessSolver {
         let x = load.x;
         let o1 = load.surf1_offset;
         if o1 + 1 >= x.len() || *np + 1 >= x.len() || *ne + 2 >= f.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(crate::output::routine_failure(OP));
         }
-        let at = |i: usize| x.get(i).copied().ok_or(SolidError::sm_err(OP));
+        let at = |i: usize| x.get(i).copied().ok_or_else(|| crate::output::routine_failure(OP));
         let (p, pu, pv) = offset_1st(k, &self.base, 0, Point2::new(at(o1)?, at(o1 + 1)?))?;
         let (q, qu, qv) = offset_1st(k, &self.base, 1, Point2::new(at(*np)?, at(*np + 1)?))?;
         let d = p - q;
@@ -253,7 +253,7 @@ impl FilletSolverOps for HarnessSolver {
         *np += 2;
         if self.extra {
             if *np >= x.len() || *ne >= f.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(crate::output::routine_failure(OP));
             }
             let v = at(*np)? - self.radius;
             if let Some(slot) = f.get_mut(*ne) {

@@ -247,14 +247,10 @@ mod tests {
         let cases = [(HealFailure::NotYetHealable, SM_ERR_NOTYET_HEAL_FACE)];
         for (failure, code) in cases {
             let typed = SolidError::heal("heal::op", failure);
-            let before = SolidError::Upstream {
-                operation: "heal::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("heal::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -266,7 +262,10 @@ mod tests {
             );
             assert_eq!(typed.heal_failure(), Some(&failure));
         }
-        assert_eq!(SolidError::sm_err("heal::op").heal_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("heal::op", SM_ERR).heal_failure(),
+            None
+        );
     }
 
     /// A reviewed defect is of class 127 with its status, and says why.
@@ -352,7 +351,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::heal("heal::op", failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.heal_failure(), Some(&failure));

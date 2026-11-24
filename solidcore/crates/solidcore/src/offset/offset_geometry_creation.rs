@@ -9474,7 +9474,7 @@ mod tests {
     #[test]
     fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {
         let k = Kernel::default();
-        let error = SolidError::sm_err("injected tangent-gap service");
+        let error = SolidError::failed_routine("injected tangent-gap service", SM_ERR);
         for fail_evaluation in [false, true] {
             let mut calls = Vec::new();
             let result = tangent_gap_samples(
@@ -9547,7 +9547,10 @@ mod tests {
             1e-6,
             |_, _, t| {
                 if t == 0.5 {
-                    Err(SolidError::sm_err("injected evaluation failure"))
+                    Err(SolidError::failed_routine(
+                        "injected evaluation failure",
+                        SM_ERR,
+                    ))
                 } else {
                     Ok(Vec3::X * t)
                 }

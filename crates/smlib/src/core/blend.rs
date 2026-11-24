@@ -48,7 +48,6 @@ pub(super) fn status(e: SolidError) -> Error {
         return Error::Refused(failed);
     }
     match e {
-        SolidError::Upstream { code, .. } => Error::Status(code),
         e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { operation, reason } => Error::Rejected { operation, reason },
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
@@ -63,7 +62,7 @@ pub(super) fn status(e: SolidError) -> Error {
 
 /// The kernel failures SolidCraft still passes on as the status they stand for ([`Error::Status`]),
 /// because solidcore-ops gives them no type of their own yet: each replaced a status its routine
-/// returned (`Upstream` before solidcore described it), whether or not it names an entity. A
+/// returned (a bare status before solidcore described it), whether or not it names an entity. A
 /// B-spline method's (`NurbsFailure::BSpline`); an intersection or classification, primitive
 /// (extrusion, revolution, skin, taper), mass-property, healing, geometry-utility, query,
 /// topology or surface routine's; and a sweep, curve or offset routine's that replaced a status
@@ -86,13 +85,13 @@ fn stands_for_status(e: &SolidError) -> bool {
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
 /// run), which solidcore names in its own terms as a [`SolidError::Failed`] from a
-/// `boolean::` stage where it once returned [`SolidError::Upstream`].
+/// `boolean::` stage where it once returned a bare status.
 fn is_boolean_failure(e: &SolidError) -> bool {
     matches!(e, SolidError::Failed(f) if f.operation.starts_with("boolean::"))
 }
 
 /// The status of a Boolean failure as the capi passes it on: the status the failure stands for
-/// ([`Error::Status`]), as the `Upstream` it replaced gave. A stage that failed because a call is
+/// ([`Error::Status`]), as the bare status it replaced gave. A stage that failed because a call is
 /// not ported is not that status ([`SolidError::is_status_answer`]): it is as unported code is,
 /// not supported.
 fn boolean_status(e: SolidError) -> Error {
@@ -592,7 +591,7 @@ mod tests {
     use super::*;
     use solidcore::error::Failure;
 
-    /// A B-spline method's failure passes on as the status it stands for, as the `Upstream` it
+    /// A B-spline method's failure passes on as the status it stands for, as the bare status it
     /// replaced did; a cancellation or unported call a B-spline method passes through is not one.
     #[test]
     fn b_spline_failures_pass_on_as_their_status() {
@@ -605,7 +604,7 @@ mod tests {
         assert!(matches!(status(SolidError::unported("SmX", "x")), Error::Unsupported));
     }
 
-    /// A sweep routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// A sweep routine's failure passes on as the status it replaced, as the bare status it replaced
     /// did; a railed loft's refusal, which replaced no status, keeps passing on as solidcore's text.
     #[test]
     fn sweep_failures_pass_on_as_their_status() {
@@ -620,7 +619,7 @@ mod tests {
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
     }
 
-    /// A curve routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// A curve routine's failure passes on as the status it replaced, as the bare status it replaced
     /// did; a length bracket's refusal, which replaced no status, keeps passing on as solidcore's
     /// text.
     #[test]
@@ -658,7 +657,7 @@ mod tests {
         assert_eq!(pick(&all, &[[3.1, 0.0, 0.0], [2.9, 0.0, 0.0]], 0.5, 1e-6, d).unwrap(), Ok((vec![3.0], vec![0])));
     }
 
-    /// A query's failure passes on as the status it replaced, as the `Upstream` it replaced did.
+    /// A query's failure passes on as the status it replaced, as the bare status it replaced did.
     #[test]
     fn query_failures_pass_on_as_their_status() {
         use solidcore::error::query::QueryFailure;
@@ -668,7 +667,7 @@ mod tests {
         assert!(matches!(status(query(QueryFailure::ZeroLengthVector)), Error::Status(1007)));
     }
 
-    /// A topology routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A topology routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names an entity.
     #[test]
     fn topology_failures_pass_on_as_their_status() {
@@ -684,7 +683,7 @@ mod tests {
         assert!(matches!(status(at), Error::Status(1001)));
     }
 
-    /// A surface routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A surface routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did.
     #[test]
     fn surface_failures_pass_on_as_their_status() {
@@ -709,7 +708,7 @@ mod tests {
         assert_eq!(ops.to_string(), "SMLib rejected the input: loop gap larger than tolerance (topology::brep::p7)");
     }
 
-    /// An offset routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// An offset routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names a face; an offset's refusal does not pass on as a
     /// status.
     #[test]
@@ -754,7 +753,7 @@ mod tests {
         assert!(!matches!(status(offset(OffsetFailure::Folds { face, distance: 2.0, largest: 1.0 })), Error::Refused(_) | Error::Status(_)));
     }
 
-    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A blend routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names an edge, and keeps solidcore's reason for it
     /// ([`Error::BlendFailed`]): a bare status names no cause the user or a report can act on.
     #[test]

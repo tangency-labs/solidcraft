@@ -180,9 +180,5 @@ fn a_path_shorter_than_the_tolerance_is_not_joined() {
     };
     let result = sweeps::create_curve_sweep(&mut k, &refs, Some(&path), None, None, Some(&options));
     let error = result.map(|r| r.brep.face_list().len()).unwrap_err();
-    assert_eq!(
-        solidcore::error::upstream_status(&error),
-        Some(1001),
-        "{error}"
-    );
+    assert_eq!(error.sm_status(), Some(1001), "{error}");
 }

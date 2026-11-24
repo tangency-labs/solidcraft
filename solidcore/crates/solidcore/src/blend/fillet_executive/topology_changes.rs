@@ -125,7 +125,10 @@ mod tests {
                 ));
             }
             if self.failing {
-                return Err(SolidError::sm_err("ordinary failed update"));
+                return Err(SolidError::failed_routine(
+                    "ordinary failed update",
+                    crate::error::SM_ERR,
+                ));
             }
             Ok(())
         }
@@ -171,7 +174,10 @@ mod tests {
             ..Changes::default()
         };
         let e = update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap_err();
-        assert_eq!(e, SolidError::sm_err("ordinary failed update"));
+        assert_eq!(
+            e,
+            SolidError::failed_routine("ordinary failed update", crate::error::SM_ERR)
+        );
         assert_eq!(changes.events, vec![(false, 20, 8)]);
     }
     #[test]

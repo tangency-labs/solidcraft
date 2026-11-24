@@ -273,7 +273,7 @@ fn apply_edits(k: &Kernel, b: &mut Brep, edits: &[Edit]) -> Result<(), SolidErro
             continue;
         }
         let at = u32::try_from(e.sel.unsigned_abs() % n as u64)
-            .map_err(|_| SolidError::sm_err("query_face_p2::apply_edits"))?;
+            .map_err(|_| crate::output::routine_failure("query_face_p2::apply_edits"))?;
         match kind {
             3 => {
                 let f = FaceId::from_index(at);

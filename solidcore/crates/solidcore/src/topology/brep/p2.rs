@@ -68,7 +68,7 @@
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
-//!   [`SolidError::null_pointer`]. Its intersection UV curve must be a plain
+//!   a failure with status `SM_ERR_NULL_POINTER`. Its intersection UV curve must be a plain
 //!   B-spline (`SM_CAST_PTR(SmBSplineCurve, ..)` also passes `SmLine` and the conics,
 //!   which the port treats as the null cast); the extended mating surface is always a
 //!   B-spline, so the intersector returns NURBS curves. A negative extension distance

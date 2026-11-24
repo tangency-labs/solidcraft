@@ -877,7 +877,7 @@ mod tests {
         let e = bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &b).unwrap_err();
         assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotFinite));
         assert_eq!(
-            crate::error::upstream_status(&e),
+            SolidError::failed_routine_status(&e),
             Some(crate::error::SM_ERR)
         );
         assert!(b.refused());
@@ -913,7 +913,7 @@ mod tests {
                 "side {side}"
             );
             assert_eq!(
-                crate::error::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(crate::error::SM_ERR)
             );
             assert!(small.refused(), "side {side}");
@@ -1027,7 +1027,7 @@ mod tests {
         let e = bounded(&mut p, &[0.0, 1.0, 2.0], &dom, &b).unwrap_err();
         assert_eq!(e.intersect_failure(), Some(&IntersectFailure::EmptyDomain));
         assert_eq!(
-            crate::error::upstream_status(&e),
+            SolidError::failed_routine_status(&e),
             Some(crate::error::SM_ERR)
         );
         assert!(b.refused());

@@ -354,14 +354,14 @@ fn notification_record(b: &Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
             TrackTopologyChanges::new(Some(BrepId::from_index(0)), 1, true, Some(&mut context));
         context
             .sys_notify_callback_mut()
-            .ok_or_else(|| SolidError::sm_err("notification tracker"))?
+            .ok_or_else(|| crate::output::routine_failure("notification tracker"))?
             .execute(PostEdit, v1, Some(v1), Some(brep), None)?;
         let mut out = notification_values(&tracker.lists());
         tracker.reset_arrays();
         out.extend(notification_values(&tracker.lists()));
         context
             .sys_notify_callback_mut()
-            .ok_or_else(|| SolidError::sm_err("notification tracker"))?
+            .ok_or_else(|| crate::output::routine_failure("notification tracker"))?
             .execute(PostEdit, v1, Some(v1), Some(brep), None)?;
         if i.mode != 1 {
             context.set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(2))));

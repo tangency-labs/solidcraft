@@ -544,7 +544,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                                 .get(i)
                                 .and_then(|r| r.get(j))
                                 .copied()
-                                .ok_or_else(|| SolidError::sm_err("difftest: short matrix"))?;
+                                .ok_or_else(|| crate::output::routine_failure("difftest: short matrix"))?;
                             o.extend([v.x, v.y, v.z]);
                         }
                     }

@@ -97,7 +97,7 @@ fn failed_reversal_is_observable_on_a_public_box_edge() {
     assert_eq!(before.trims, [true, false, true, false]);
     let failed = edge::reverse_orientation(&k, &mut b, e).expect_err("the reversal fails");
     assert_eq!(failed.operation(), "curve::curve::p2::Curve");
-    assert_eq!(solidcore::error::upstream_status(&failed), Some(1001));
+    assert_eq!(failed.sm_status(), Some(1001));
     assert_eq!(failed.entity(), None);
     assert_eq!(observe(&b, e, &eus), before);
     assert_eq!(b.face_list().len(), 6);

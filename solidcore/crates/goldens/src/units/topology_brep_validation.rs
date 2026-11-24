@@ -7,6 +7,7 @@
 //! checks themselves.
 
 use super::topology_edgeuse_p1::BrepIn;
+use crate::output::routine_failure;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -536,12 +537,8 @@ struct Constructor {
     edgeuse: Option<EdgeuseId>,
 }
 
-fn sm_err(op: &'static str) -> SolidError {
-    SolidError::sm_err(op)
-}
-
 fn opt_err<T>(x: Option<T>, op: &'static str) -> Result<T, SolidError> {
-    x.ok_or_else(|| sm_err(op))
+    x.ok_or_else(|| routine_failure(op))
 }
 
 /// `SmBrepConstructor`'s call `call` needs `part` open, and it is not.
@@ -622,7 +619,7 @@ impl Constructor {
             b.faceuse_mut(fu)?.shell = Some(shell);
             match &mut b.shell_mut(shell)?.members {
                 ShellMembers::Faceuses(v) => v.push(fu),
-                _ => return Err(sm_err(OP)),
+                _ => return Err(routine_failure(OP)),
             }
         }
         b.shell_mut(shell)?.faces.push(face);
@@ -761,7 +758,7 @@ impl Constructor {
             b.edgeuse_mut(eu2)?.ccw = Some(prev2);
         } else {
             // (the shim's loops are all SAME)
-            return Err(sm_err(OP));
+            return Err(routine_failure(OP));
         }
         // connect edge and edge uses: the first edge use has the edge's orientation
         if existing_edge.is_none() {
@@ -853,7 +850,7 @@ impl Constructor {
         for vu in vertexuses {
             let vu = opt_err(vu, OP)?;
             let VertexuseOwner::Edgeuse(Some(eu)) = b.vertexuse(vu)?.owner else {
-                return Err(sm_err(OP));
+                return Err(routine_failure(OP));
             };
             let e = opt_err(b.edgeuse(eu)?.edge, OP)?;
             let mate = opt_err(eu1p::mate(b, eu)?, OP)?;
@@ -915,7 +912,7 @@ impl Constructor {
             }
             let cw = opt_err(b.edgeuse(eu)?.cw, OP)?;
             if eu1p::mate(b, cw)? != Some(mate_ccw) {
-                return Err(sm_err(OP));
+                return Err(routine_failure(OP));
             }
         }
         self.loop_ = None;
@@ -1027,8 +1024,8 @@ fn sheet_grid(k: &mut Kernel, b: &mut Brep, count: usize, shared: u8) -> Result<
                 builder.end_edge()?;
                 continue;
             }
-            let a = *p.get(kk).ok_or_else(|| sm_err("sheet_grid"))?;
-            let c = *p.get((kk + 1) % 4).ok_or_else(|| sm_err("sheet_grid"))?;
+            let a = *p.get(kk).ok_or_else(|| routine_failure("sheet_grid"))?;
+            let c = *p.get((kk + 1) % 4).ok_or_else(|| routine_failure("sheet_grid"))?;
             let curve = Curve::from(Line::from_points(a, c, 3));
             let ivl = curve.natural_interval();
             builder.set_edge_curve(b, curve)?;

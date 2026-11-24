@@ -3830,7 +3830,7 @@ mod tests {
     #[test]
     fn ray_errors_without_an_upstream_status_propagate() {
         assert!(ray_success(&Ok(())).unwrap());
-        assert!(!ray_success(&Err(SolidError::sm_err(OP))).unwrap());
+        assert!(!ray_success(&Err(SolidError::failed_routine(OP, SM_ERR))).unwrap());
         assert!(!ray_success(&Err(SolidError::invalid_input(OP, "native"))).unwrap());
         let internal = [
             SolidError::Unported {

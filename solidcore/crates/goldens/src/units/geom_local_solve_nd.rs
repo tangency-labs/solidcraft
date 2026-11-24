@@ -44,7 +44,6 @@ const MAX_ITER: i64 = 1000;
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
 
-use solidcore::error::SM_ERR;
 /// Trace flag: a Jacobian was requested.
 const TRACE_JACOBIAN: i64 = 1;
 /// Trace flag: the call failed.
@@ -299,12 +298,8 @@ fn put(v: &mut [f64], i: usize, x: f64) {
     }
 }
 
-fn sm_err() -> SolidError {
-    SolidError::Upstream {
-        operation: "difftest::geom_local_solve_nd::TestEquations",
-        code: SM_ERR,
-        entity: None,
-    }
+fn equations_failure() -> SolidError {
+    crate::output::routine_failure("difftest::geom_local_solve_nd::TestEquations")
 }
 
 /// The test equation set (mirror of the shim's `ScTestENFO`).
@@ -351,7 +346,7 @@ impl EvalNFunctions for TestEquations<'_> {
         _periodicities: Option<&[bool]>,
     ) -> solidcore::Result<()> {
         if !self.set_intervals_ok {
-            return Err(sm_err());
+            return Err(equations_failure());
         }
         self.set_intervals_calls += 1;
         Ok(())
@@ -378,7 +373,7 @@ impl EvalNFunctions for TestEquations<'_> {
         }
         if fail {
             self.flags.push(flag | TRACE_FAILED);
-            return Err(sm_err());
+            return Err(equations_failure());
         }
         self.flags.push(flag);
 

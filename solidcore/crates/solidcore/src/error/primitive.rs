@@ -655,14 +655,10 @@ mod tests {
         ];
         for (failure, code) in cases {
             let typed = SolidError::primitive("primitive::op", failure);
-            let before = SolidError::Upstream {
-                operation: "primitive::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("primitive::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -686,7 +682,7 @@ mod tests {
             ErrorKind::NotWithinTolerance
         );
         assert_eq!(
-            SolidError::sm_err("primitive::op").primitive_failure(),
+            SolidError::failed_routine("primitive::op", SM_ERR).primitive_failure(),
             None
         );
     }
@@ -862,7 +858,7 @@ mod tests {
             let e = SolidError::primitive(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -1127,7 +1123,7 @@ mod tests {
             let e = SolidError::primitive(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.primitive_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");

@@ -1959,14 +1959,10 @@ mod tests {
                     Some(e) => SolidError::topology_at("topology::op", failure, e),
                     None => SolidError::topology("topology::op", failure),
                 };
-                let before = SolidError::Upstream {
-                    operation: "topology::op",
-                    code,
-                    entity,
-                };
+                let before = SolidError::failed_routine_at("topology::op", code, entity);
                 assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
                 assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-                assert_eq!(super::super::upstream_status(&typed), Some(code));
+                assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
                 assert_eq!(typed.kind(), before.kind(), "{failure:?}");
                 assert_eq!(typed.operation(), before.operation(), "{failure:?}");
                 assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -1995,7 +1991,10 @@ mod tests {
             SolidError::topology("topology::op", TopologyFailure::FacesNotCopiedOnce).kind(),
             ErrorKind::Failed
         );
-        assert_eq!(SolidError::sm_err("topology::op").topology_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("topology::op", SM_ERR).topology_failure(),
+            None
+        );
     }
 
     /// A sample from `brep/p1`: it keeps the operation, status, kind and entity of its
@@ -2009,11 +2008,7 @@ mod tests {
         )];
         for (operation, failure, code) in samples {
             let typed = SolidError::topology(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine(operation, code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), before.kind(), "{typed:?}");
@@ -2199,7 +2194,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::topology("topology::op", failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2253,7 +2248,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2306,7 +2301,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2402,7 +2397,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2466,7 +2461,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
@@ -2718,7 +2713,7 @@ mod tests {
             let e = SolidError::topology(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -2734,7 +2729,7 @@ mod tests {
             .with_status(SM_ERR)
             .into_error();
         assert_eq!(at_site.sm_status(), Some(SM_ERR));
-        assert_eq!(super::super::upstream_status(&at_site), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&at_site), Some(SM_ERR));
         assert_eq!(at_site.kind(), ErrorKind::InvalidInput);
         // A reviewed consistency defect keeps the assertion status of its check.
         let asserted = Failure::new(op, TopologyFailure::Defect { why: "x" })

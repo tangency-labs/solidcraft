@@ -916,7 +916,7 @@ fn setback_fillet_edges(
     }
     // SmApiSetBevelCorners ignores the ordinary StitchAndOrient return status.
     match stitch_and_orient(k, body, &StitchAndOrientOptions::default()) {
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
+        Ok(()) | Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
         Err(error) => Err(error.into()),
     }
 }
@@ -1011,7 +1011,7 @@ fn law_fillet_edges(
         session.do_fillet(k)?;
     }
     match stitch_and_orient(k, body, &StitchAndOrientOptions::default()) {
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
+        Ok(()) | Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
         Err(error) => Err(error),
     }
 }

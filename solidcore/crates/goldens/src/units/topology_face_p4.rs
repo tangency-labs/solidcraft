@@ -650,7 +650,6 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                         }
                     }
                 }
-                Err(SolidError::Upstream { code, .. }) => o.extend([f64::from(code), 0.0]),
                 Err(e) => return Err(fail(&e)),
             }
         }
@@ -709,9 +708,6 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                     flag(s.possible_problem),
                     f64::from(s.problem as i32),
                 ]),
-                Err(SolidError::Upstream { code, .. }) => {
-                    o.extend([f64::from(code), -1.0, 0.0, 0.0]);
-                }
                 Err(e) => return Err(fail(&e)),
             }
         }

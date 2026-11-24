@@ -155,7 +155,6 @@ fn check_input(spec: &SurfaceSpec, domain: Option<[f64; 4]>) -> Result<(), Strin
 
 fn rust_status(e: &SolidError) -> (i64, Option<String>) {
     match e {
-        SolidError::Upstream { code, .. } => (i64::from(*code), None),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => (
             SM_ERR_INVALID_INPUT,
             Some(format!("SM_ERR_INVALID_INPUT ({e})")),

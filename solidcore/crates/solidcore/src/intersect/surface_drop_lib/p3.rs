@@ -34,7 +34,7 @@
 //!   `SurfaceCurveMaxDistanceBetween` (its outputs are `0.0` after a failure, as
 //!   upstream initialises them). `GetNextPoint` returns a status upstream keeps
 //!   (see [`DropPt::get_next_point`]); a Rust error from it becomes its code
-//!   ([`SolidError::Upstream`]'s code, `SM_ERR_INVALID_INPUT` for
+//!   (the status a routine's failure keeps, `SM_ERR_INVALID_INPUT` for
 //!   [`SolidError::InvalidInput`], else `SM_ERR`). [`SolidError::Unported`] always
 //!   propagates. `IsClosed` answers `false` when it fails (upstream returns a
 //!   boolean).

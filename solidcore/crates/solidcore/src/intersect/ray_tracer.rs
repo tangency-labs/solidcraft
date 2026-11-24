@@ -1803,7 +1803,7 @@ mod tests {
             .add_surface_with_fetched_cache(&k, &surface, cache)
             .unwrap_err();
         assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotSetUp));
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 

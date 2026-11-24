@@ -459,11 +459,7 @@ impl NotifyCallback for Recorder {
             ]);
         }
         // ignored by Notify
-        Err(SolidError::Upstream {
-            operation: "recorder",
-            code: solidcore::error::SM_ERR,
-            entity: None,
-        })
+        Err(crate::output::routine_failure("recorder"))
     }
 }
 

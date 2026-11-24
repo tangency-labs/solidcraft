@@ -184,14 +184,10 @@ mod tests {
         ];
         for (failure, code) in cases {
             let typed = SolidError::mass("mass::op", failure);
-            let before = SolidError::Upstream {
-                operation: "mass::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("mass::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -207,7 +203,10 @@ mod tests {
             SolidError::mass("mass::op", MassFailure::StepControl).kind(),
             ErrorKind::Failed
         );
-        assert_eq!(SolidError::sm_err("mass::op").mass_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("mass::op", SM_ERR).mass_failure(),
+            None
+        );
     }
 
     /// The named causes of the mass properties have their status and class.
@@ -261,7 +260,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::mass("mass::op", failure);
             assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.mass_failure(), Some(&failure));

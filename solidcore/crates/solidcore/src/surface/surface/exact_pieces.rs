@@ -37,7 +37,6 @@ use crate::blend::fillet_section::series::{v_add, v_hull, v_scale, v_sub, V3, VZ
 use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
-use crate::error::blend::{BlendFailure, SectionProof};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
@@ -626,14 +625,11 @@ fn net_partials(
     out.ok_or_else(|| SolidError::port_invariant(OP, "a box of a UV curve without parts"))
 }
 
-/// Whether `e` is the certificate's own `SM_ERR` (a wide box's non-positive weight).
+/// Whether `e` is the certificate's own `SM_ERR` (a wide box's non-positive weight): a
+/// routine's failure with that status (its [`SolidError::failed_routine_status`], #13790).
 fn is_certificate_sm_err(e: &SolidError) -> bool {
-    matches!(
-        e.blend_failure(),
-        Some(BlendFailure::SectionNotProved(
-            SectionProof::FaceWeightPositive
-        ))
-    ) && e.operation() == "blend::fillet_section::certificate"
+    e.failed_routine_status() == Some(crate::error::SM_ERR)
+        && e.operation() == "blend::fillet_section::certificate"
 }
 
 /// Converts only `nurbs_partials_over_piece`'s wide-box non-positive-weight `SM_ERR` into
@@ -3020,25 +3016,28 @@ mod tests {
         assert!(certified_lift(&k, &bsp_srf, &uv_extrap, &c3_extrap, ivl, 1e-12).is_ok());
     }
 
-    /// The certificate's non-positive weight over a wide box subdivides the span; another
-    /// failure, or the same failure of another operation, propagates.
+    /// #13790: a typed `SM_ERR` that replaced the certificate's `Upstream` subdivides the
+    /// span as the `Upstream` does.
     #[test]
-    fn certificate_sm_err_is_the_certificate_s_weight_failure() {
+    fn certificate_sm_err_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
         let op = "blend::fillet_section::certificate";
-        let weight = || BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive);
-        let own = SolidError::blend(op, weight());
-        assert!(is_certificate_sm_err(&own));
-        assert!(matches!(partials_or_subdivide(Err(own)), Ok(None)));
-        for other in [
-            SolidError::blend("blend::fillet_section::feet_tm", weight()),
-            SolidError::blend(
-                op,
-                BlendFailure::SectionUnsupported(
-                    crate::error::blend::SectionLimit::FaceWeightNotPositive,
-                ),
-            ),
-            SolidError::port_invariant(op, "an offset UV box without parts"),
-        ] {
+        assert!(is_certificate_sm_err(&SolidError::failed_routine(
+            op,
+            crate::error::SM_ERR
+        )));
+        assert!(matches!(
+            partials_or_subdivide(Err(SolidError::failed_routine(op, crate::error::SM_ERR))),
+            Ok(None)
+        ));
+        for typed in replaced_upstream(op, crate::error::SM_ERR, None) {
+            assert!(is_certificate_sm_err(&typed), "{typed:?}");
+            assert!(matches!(partials_or_subdivide(Err(typed)), Ok(None)));
+        }
+        for other in replaced_upstream(op, 1006, None)
+            .into_iter()
+            .chain(native_failures(op, crate::error::SM_ERR))
+        {
             assert!(!is_certificate_sm_err(&other), "{other:?}");
             assert!(partials_or_subdivide(Err(other)).is_err());
         }

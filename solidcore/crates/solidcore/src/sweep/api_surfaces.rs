@@ -32,7 +32,7 @@
 //!   the other entry points dereference their curves unchecked upstream and take
 //!   references.
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR` is
-//!   [`SolidError::Upstream`] with [`crate::error::SM_ERR`]. Errors of the called
+//!   a failure with status [`crate::error::SM_ERR`]. Errors of the called
 //!   constructors pass through unchanged.
 //! - **Skin sources** (not upstream, tangency-labs/solidcore#3139).
 //!   [`create_skin_primitive_with_sources`] builds the skin [`create_skin_primitive`]

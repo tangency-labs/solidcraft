@@ -1323,7 +1323,10 @@ mod tests {
         ) -> Result<Option<i64>> {
             self.observed = Some((*manifold, *lamina, operation));
             if self.fail {
-                return Err(SolidError::null_pointer("test driver failure"));
+                return Err(SolidError::failed_routine(
+                    "test driver failure",
+                    crate::error::SM_ERR_NULL_POINTER,
+                ));
             }
             if self.undefined {
                 return Err(SolidError::invalid_input(
@@ -1354,7 +1357,10 @@ mod tests {
         }
         fn intersect_insert_relate(&mut self, _k: &mut Kernel) -> Result<()> {
             self.pairs.push((None, None));
-            Err(SolidError::sm_err("test::imprint"))
+            Err(SolidError::failed_routine(
+                "test::imprint",
+                crate::error::SM_ERR,
+            ))
         }
         fn clear_relationships(&mut self) -> Result<()> {
             unreachable!("clear_relationships after a failed IntersectInsertRelate")
@@ -1404,7 +1410,10 @@ mod tests {
         let mut k = Kernel::default();
         let mut driver = Trace::default();
         let error = piecewise_merge(&mut k, &mut driver, None, false, false).unwrap_err();
-        assert!(matches!(error, SolidError::Upstream { .. }), "{error:?}");
+        assert_eq!(
+            error,
+            SolidError::failed_routine("test::imprint", crate::error::SM_ERR)
+        );
         assert_eq!(driver.pairs, [(None, None)]);
     }
     #[test]
@@ -1805,13 +1814,11 @@ mod tests {
             BooleanOperation::Difference,
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            }
-        ));
+        assert_eq!(
+            error.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER),
+            "{error:?}"
+        );
         assert_eq!(
             driver.observed,
             Some((false, 1, BooleanOperation::Difference))

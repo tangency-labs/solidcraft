@@ -2674,7 +2674,7 @@ mod tests {
         // trillions of spans, despite this curve having only two control points.
         assert!(matches!(
             c.approximate_curve_base(&k, &[0.0, 1e100], -1e300, &opts),
-            Err(e) if crate::error::upstream_status(&e) == Some(1001)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(1001)
         ));
     }
 
@@ -2688,7 +2688,7 @@ mod tests {
         };
         assert!(matches!(
             c.approximate_curve_base(&Kernel::default(), &[f64::MAX * 0.75, f64::MAX], 0.0, &opts,),
-            Err(e) if crate::error::upstream_status(&e) == Some(1001)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(1001)
         ));
     }
 

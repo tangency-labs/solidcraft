@@ -135,7 +135,7 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&Curve>) -> solidcore::Result<()> {
             put_curve_nurb(o, e.base());
         }
         CurveKind::BSpline(c) => put_curve_nurb(o, c),
-        _ => return Err(SolidError::sm_err("difftest::surface_cone_p3::curve")),
+        _ => return Err(crate::output::routine_failure("difftest::surface_cone_p3::curve")),
     }
     put_ivl(o, &c.natural_interval());
     Ok(())

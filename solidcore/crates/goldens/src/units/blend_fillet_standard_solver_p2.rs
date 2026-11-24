@@ -486,17 +486,8 @@ fn rust_edgeuse_body(
                 d.min().x + fu * (d.max().x - d.min().x),
                 d.min().y + fv * (d.max().y - d.min().y),
             );
-            match s.surface.evaluate_point(&k, uv) {
-                Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
-                Err(e) if e.is_unported() => return Err(e),
-                Err(e) => {
-                    let st = match e {
-                        SolidError::Upstream { code, .. } => f64::from(code),
-                        _ => return Err(e),
-                    };
-                    v.extend([st, 0.0, 0.0, 0.0]);
-                }
-            }
+            let p = s.surface.evaluate_point(&k, uv)?;
+            v.extend([0.0, p.x, p.y, p.z]);
         }
     }
     let radial_face = match radial {

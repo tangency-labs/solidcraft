@@ -20,7 +20,7 @@
 //!   `SmLoop*`, or not a vertex where it calls `IsLoopVertex`, is
 //!   [`SolidError::InvalidInput`].
 //! - **Statuses and out-params.** `SM_SUCCESS` is `Ok(())`, `SM_ERR` (no loops, no
-//!   classification touch list to walk) [`SolidError::sm_err`], the
+//!   classification touch list to walk) a failure with status `SM_ERR`, the
 //!   `SM_ERR_INVALID_INPUT` checks [`SolidError::InvalidInput`] with the reasons
 //!   [`NOT_THIS_FACE`] and [`NO_SURFACE`]. `rLoops` and the out-params are passed in and
 //!   returned through `loops` and `out`, so they hold what upstream leaves in them on
@@ -450,7 +450,7 @@ fn touch_orient<O: Copy>(done: &[TouchData<O>], j1: usize) -> Result<OrientType>
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::sm_err`]) for a face without loops or a classification curve
+/// `SM_ERR` (a failure with status `SM_ERR`) for a face without loops or a classification curve
 /// without touches to walk; [`SolidError::InvalidInput`] ([`NOT_THIS_FACE`],
 /// [`NO_SURFACE`]) when the first loop is not on `face` or the face has no surface, and
 /// where upstream's behaviour is undefined (module docs); [`SolidError::InvalidInput`]

@@ -92,7 +92,7 @@ fn post_insert_vertexuse(
 /// # Errors
 ///
 /// `SM_ERR` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) when a fan walk takes more steps than the vertex
-/// has uses; [`SolidError::null_pointer`] for an edge use without loop neighbour,
+/// has uses; a failure with status `SM_ERR_NULL_POINTER` for an edge use without loop neighbour,
 /// radial or edge; [`SolidError::NotFound`] for a dangling id.
 pub fn split_vertex_by_fans(b: &mut Brep, v: VertexId) -> Result<Vec<VertexId>> {
     let null = || {

@@ -1249,7 +1249,10 @@ mod tests {
         let result: Result<()> = store.with_merge(dest, dest, source, 0.1, 0.2, |store, id| {
             store.run_merge(id, |k, driver| {
                 temporary = Some(driver.new_face_brep(k, dest)?);
-                Err(SolidError::sm_err("injected after native body allocation"))
+                Err(SolidError::failed_routine(
+                    "injected after native body allocation",
+                    crate::error::SM_ERR,
+                ))
             })
         });
         assert!(result.is_err());

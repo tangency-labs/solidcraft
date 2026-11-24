@@ -296,10 +296,10 @@ fn setup(k: &Kernel, pool: &Pool, i: &Input, other: bool) -> ScResult<CurveClass
     cc.set_interval(&Extent1d::from_min_max(
         b.first()
             .copied()
-            .ok_or_else(|| SolidError::sm_err("difftest::p5"))?,
+            .ok_or_else(|| crate::output::routine_failure("difftest::p5"))?,
         b.last()
             .copied()
-            .ok_or_else(|| SolidError::sm_err("difftest::p5"))?,
+            .ok_or_else(|| crate::output::routine_failure("difftest::p5"))?,
     ))?;
     // Match the native fixture's literal SetZoneTol3d, including zero.
     cc.set_src_zone_tol_3d(i.tol);
@@ -315,11 +315,11 @@ fn setup(k: &Kernel, pool: &Pool, i: &Input, other: bool) -> ScResult<CurveClass
                 bounds
                     .first()
                     .copied()
-                    .ok_or_else(|| SolidError::sm_err("difftest::p5"))?,
+                    .ok_or_else(|| crate::output::routine_failure("difftest::p5"))?,
                 bounds
                     .last()
                     .copied()
-                    .ok_or_else(|| SolidError::sm_err("difftest::p5"))?,
+                    .ok_or_else(|| crate::output::routine_failure("difftest::p5"))?,
             ),
             Some(&cc),
         );

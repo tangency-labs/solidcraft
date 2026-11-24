@@ -890,11 +890,7 @@ pub(super) mod tests {
         ];
         for (failure, code) in cases {
             let typed = SolidError::intersect("intersect::op", failure);
-            let before = SolidError::Upstream {
-                operation: "intersect::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("intersect::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
@@ -941,11 +937,7 @@ pub(super) mod tests {
                 .into_error();
             super::super::tests::assert_defect(
                 &e,
-                &SolidError::Upstream {
-                    operation: "intersect::op",
-                    code: status,
-                    entity: None,
-                },
+                &SolidError::failed_routine("intersect::op", status),
                 "intersect::op",
                 status,
                 &format!("intersect::op: stage_failed: {why}"),
@@ -954,11 +946,7 @@ pub(super) mod tests {
         }
         super::super::tests::assert_defect(
             &SolidError::intersect("intersect::op", defect),
-            &SolidError::Upstream {
-                operation: "intersect::op",
-                code: SM_ERR,
-                entity: None,
-            },
+            &SolidError::failed_routine("intersect::op", SM_ERR),
             "intersect::op",
             SM_ERR,
             &format!("intersect::op: stage_failed: {why}"),
@@ -967,7 +955,7 @@ pub(super) mod tests {
 
     /// The named causes of the drops, the point classification, the ray tracer and the
     /// intersection entries keep the status of the site each replaced, so
-    /// `upstream_status` reads what it did, and have their class.
+    /// `failed_routine_status` reads what it did, and have their class.
     #[test]
     fn the_drop_classification_and_ray_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -1022,7 +1010,7 @@ pub(super) mod tests {
             let e = SolidError::intersect(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1035,7 +1023,7 @@ pub(super) mod tests {
         let e = Failure::new(op, F::FaceWithoutSurface)
             .with_status(SM_ERR)
             .into_error();
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert_eq!(e.kind(), K::InvalidInput);
         // the cache build's error stays the cause, and decides defect or refusal
         let why = "a step the kernel got wrong";
@@ -1045,10 +1033,13 @@ pub(super) mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
+        );
     }
 
-    /// The marching surface/surface intersector's causes (#19844, TE-O-11 part 1) keep the
+    /// The marching surface/surface intersector's causes (#19844) keep the
     /// status of the site they replace and have their class.
     #[test]
     fn the_surface_intersector_causes_keep_their_status_and_have_their_class() {
@@ -1119,7 +1110,7 @@ pub(super) mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1143,7 +1134,7 @@ pub(super) mod tests {
             assert_eq!(e.cause(), Some(&cause));
             assert!(e.is_defect(), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1228,7 +1219,7 @@ pub(super) mod tests {
             let e = SolidError::intersect(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1253,6 +1244,9 @@ pub(super) mod tests {
             .into_error();
         assert!(e.is_defect());
         assert_eq!(e.kind(), K::StageFailed);
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
+        );
     }
 }

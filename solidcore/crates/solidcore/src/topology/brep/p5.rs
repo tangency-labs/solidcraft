@@ -163,10 +163,8 @@ pub const NO_VERTEX_SECTOR_OP: &str = "topology::brep::p5::make_edge_in_face";
 /// a failure that edited nothing.
 #[must_use]
 pub fn is_no_vertex_sector(error: &SolidError) -> bool {
-    matches!(
-        error.topology_failure(),
-        Some(TopologyFailure::NoVertexSector { .. })
-    ) && error.operation() == NO_VERTEX_SECTOR_OP
+    // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+    error.failed_routine_status().is_some() && error.operation() == NO_VERTEX_SECTOR_OP
 }
 
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
@@ -4490,13 +4488,13 @@ mod tests {
                 e.topology_failure(),
                 Some(&TopologyFailure::NoVertexSector { at_end })
             );
-            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert!(is_no_vertex_sector(&e), "{e}");
         }
         run(Some(()), 0).unwrap();
         let e = run(None, 0).unwrap_err();
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoFaceGiven));
-        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!is_no_vertex_sector(&e));
     }
 
@@ -4664,7 +4662,7 @@ mod tests {
     #[test]
     fn squeeze_cleanup_continues_after_typed_native_failures() {
         let errors = [
-            SolidError::sm_err("SmStitch::StitchVertexPairs"),
+            SolidError::failed_routine("SmStitch::StitchVertexPairs", crate::error::SM_ERR),
             SolidError::NotFound {
                 operation: "SmStitch::SplitEdgesWithVertices",
                 entity: crate::error::EntityRef::Edge(EdgeId::from_index(2)),
@@ -5044,23 +5042,22 @@ mod tests {
         assert!(b.vertices().is_empty());
     }
 
-    /// Only `MakeEdgeInFace`'s own no-sector failure is the unedited one: the same cause
-    /// from another operation, or another cause from this one, is not.
+    /// #13790: a typed failure that replaced the no-sector `Upstream` is the same
+    /// unedited failure.
     #[test]
-    fn no_vertex_sector_is_only_make_edge_in_face_s_own() {
-        let sector = TopologyFailure::NoVertexSector { at_end: true };
-        assert!(is_no_vertex_sector(&SolidError::topology(
-            NO_VERTEX_SECTOR_OP,
-            sector
-        )));
-        assert!(!is_no_vertex_sector(&SolidError::topology(
-            "topology::brep::p5::other",
-            sector
-        )));
-        assert!(!is_no_vertex_sector(&SolidError::topology(
-            NO_VERTEX_SECTOR_OP,
-            TopologyFailure::NoFaceGiven
-        )));
+    fn no_vertex_sector_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let upstream = SolidError::failed_routine(NO_VERTEX_SECTOR_OP, SM_ERR_NULL_POINTER);
+        assert!(is_no_vertex_sector(&upstream));
+        for typed in replaced_upstream(NO_VERTEX_SECTOR_OP, 1006, None) {
+            assert!(is_no_vertex_sector(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream("topology::brep::p5::other", 1006, None)
+            .into_iter()
+            .chain(native_failures(NO_VERTEX_SECTOR_OP, 1006))
+        {
+            assert!(!is_no_vertex_sector(&other), "{other:?}");
+        }
     }
 
     /// A wire edge whose curve is the UV line from `uv0` to `uv1` on `surface`, and the

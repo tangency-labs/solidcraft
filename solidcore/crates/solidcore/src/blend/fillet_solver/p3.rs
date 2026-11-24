@@ -1974,8 +1974,9 @@ mod tests {
         }
         fn setup_offset_values(&mut self, _t: &TsectPnt, d: Option<&mut f64>) -> Result<()> {
             if self.setup_fails {
-                return Err(SolidError::sm_err(
+                return Err(SolidError::failed_routine(
                     "test: the radius law cannot be evaluated",
+                    crate::error::SM_ERR,
                 ));
             }
             for s in self.base.surfaces.iter_mut().flatten() {

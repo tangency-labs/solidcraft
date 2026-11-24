@@ -3261,7 +3261,10 @@ mod tests {
         let e = missing_defect(OP_CC, EVAL_1ST);
         assert!(e.is_defect());
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
+        );
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::Defect { why: EVAL_1ST })

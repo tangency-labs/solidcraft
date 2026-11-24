@@ -103,7 +103,7 @@
 //!   the initialized [`Point2::UNDEF`]; unported errors still propagate.
 //! - **Null dereferences** upstream (a face, loop, edge use or vertex use without the
 //!   object it points to) are [`SolidError::InvalidInput`]; a face without surface is
-//!   `NER` ([`SolidError::null_pointer`]).
+//!   `NER` (a failure with status `SM_ERR_NULL_POINTER`).
 //! - **`sm_ClassifyParamOnFaces`** takes the faces' tolerances for
 //!   `SmTol::GetZoneTol3d_ForXSectResult(pFace1, pFace2)` (`SM_USE_OLDTOL`:
 //!   `SmFace::GetTolerance`).

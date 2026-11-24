@@ -353,7 +353,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
                     CurveKind::BSpline(c) => c.copy(),
                     CurveKind::Line(c) => c.base_with_nurb()?.into_owned(),
                     CurveKind::Ellipse(c) => c.base().copy(),
-                    _ => return Err(SolidError::sm_err("runner")),
+                    _ => return Err(crate::output::routine_failure("runner")),
                 };
                 Surface::from(BSplineSurface::create_linear_sweep(
                     &mut bs,

@@ -1969,7 +1969,10 @@ mod tests {
             k.context.set_doing_boolean(true);
             let r = b.infinite_region().unwrap();
             crate::topology::brep::p9::make_shell_vertex(b, Some(r), Vec3::ZERO, env)?;
-            Err(SolidError::sm_err("injected after native allocation"))
+            Err(SolidError::failed_routine(
+                "injected after native allocation",
+                crate::error::SM_ERR,
+            ))
         });
         assert!(error.is_err());
         assert_eq!(store.kernel(b).unwrap().tolerances.zone_tol_3d, 0.3);

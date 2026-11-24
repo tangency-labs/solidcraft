@@ -1524,7 +1524,7 @@ impl FilletGeom {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] (`SM_ERR_INVALID_INPUT`) for a rail index past 1.
+    /// A failure with status `SM_ERR_INVALID_INPUT` for a rail index past 1.
     pub fn set_offset_surface(
         &mut self,
         which: usize,
@@ -4882,7 +4882,7 @@ mod tests {
         Surface::from(BSplineSurface::from_nurb(nurb, false))
     }
 
-    /// #19827 (TE-B-F1): a point that no tolerance drops onto the surface is an answer,
+    /// #19827: a point that no tolerance drops onto the surface is an answer,
     /// `None`, not an error (upstream's `SM_ERR` "Unable to drop point"); a point on the
     /// surface drops.
     #[test]
@@ -4910,7 +4910,7 @@ mod tests {
         assert!(!hit.is_empty());
     }
 
-    /// #19827 (TE-B-F1): a start point that drops onto one surface but not the other gives
+    /// #19827: a start point that drops onto one surface but not the other gives
     /// no curve (`None`), before the direction is unitised, as upstream returns the drop's
     /// status before `Unitize`.
     #[test]

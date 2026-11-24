@@ -2114,7 +2114,7 @@ mod tests {
             );
             pair.set_vertex_point(k, arena_pair::encode(EntityRef::Vertex(v), false), Vec3::Y)?;
             pair.set_vertex_point(k, arena_pair::encode(EntityRef::Vertex(ov), true), Vec3::Z)?;
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::failed_routine(OP, crate::error::SM_ERR))
         })
         .unwrap();
         assert!(error.is_err());
@@ -2249,7 +2249,10 @@ mod tests {
                             Vec3::Z,
                         )?;
                         if fail {
-                            Err(SolidError::sm_err("test::after-notifications"))
+                            Err(SolidError::failed_routine(
+                                "test::after-notifications",
+                                crate::error::SM_ERR,
+                            ))
                         } else {
                             Ok(())
                         }

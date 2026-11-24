@@ -6044,7 +6044,10 @@ mod tests {
             reason: "a box crosses a knot line where the face or curve is not continuous enough",
         };
         assert!(matches!(through(other), Ok(None)));
-        assert!(matches!(through(SolidError::sm_err(OP)), Ok(None)));
+        assert!(matches!(
+            through(SolidError::failed_routine(OP, crate::error::SM_ERR)),
+            Ok(None)
+        ));
     }
 
     /// #14284, the two planes of `two_plane_span_bound_is_zero` at a square corner, the ball

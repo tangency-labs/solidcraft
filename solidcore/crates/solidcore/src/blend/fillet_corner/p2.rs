@@ -934,7 +934,7 @@ impl FilletCorner {
             // certificate past its work budget carries a status but is work given up.
             Err(e) if e.failed_routine_status().is_some() && !e.is_not_certified() => Ok(false),
             // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every error
-            // whose `upstream_status()` is `None` (`NotFound`, `Degenerate`, ...): no
+            // whose `failed_routine_status` is `None` (`NotFound`, `Degenerate`, ...): no
             // surface was added either, and none of them is an upstream FALSE to patch
             // over, so they are passed on.
             Err(e) => Err(e),
@@ -2171,7 +2171,10 @@ mod tests {
         );
         assert_eq!(soft::<()>(Err(e.clone())), Err(e.clone()));
         assert_eq!(soft(Ok(2)), Ok(Some(2)));
-        assert_eq!(soft::<()>(Err(SolidError::sm_err("t"))), Ok(None));
+        assert_eq!(
+            soft::<()>(Err(SolidError::failed_routine("t", SM_ERR))),
+            Ok(None)
+        );
     }
 
     /// A rail's or the corner's face without its surface (the corner sites through
@@ -2654,7 +2657,7 @@ mod tests {
                 BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
             ),
             SolidError::blend("re-solve", BlendFailure::Defect { why: "x" }),
-            SolidError::sm_err("re-solve"),
+            SolidError::failed_routine("re-solve", SM_ERR),
         ] {
             let unable = || patch_miss(OP_VAR_RAD, CornerPatchMiss::VariableRadiusReSolveFailed);
             let e = super::super::p1::re_solved(Err(cause.clone()), unable).unwrap_err();

@@ -1377,7 +1377,7 @@ fn stage_errors() -> [SolidError; 5] {
             .into_error()
     };
     [
-        SolidError::sm_err("test::stage"),
+        SolidError::failed_routine("test::stage", SM_ERR),
         SolidError::blend("test::stage", BlendFailure::Defect { why: "x" }),
         over(SolidError::blend(
             "test::corner",
@@ -1581,7 +1581,7 @@ fn do_filleting_keeps_the_failure_of_the_fillet_body() {
         };
         executive.do_filleting(&mut Kernel::default(), &mut access, None)
     };
-    let stage = SolidError::sm_err("test::stage");
+    let stage = SolidError::failed_routine("test::stage", SM_ERR);
     let e = run(stage.clone()).unwrap_err();
     let created = e.cause().unwrap().clone();
     assert_failure_keeps(&created, &stage);

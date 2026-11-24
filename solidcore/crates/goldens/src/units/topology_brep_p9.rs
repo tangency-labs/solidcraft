@@ -459,7 +459,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 } else {
                     EntityRef::Vertex(
                         solidcore::topology::edge::start_vertex(&b, edge)?
-                            .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?,
+                            .ok_or_else(|| crate::output::routine_failure("difftest::brep_p9"))?,
                     )
                 };
                 let mut pc = PointClassification::new(zone_tol3d(&k, 1e-7));
@@ -527,7 +527,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 let surface = f
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?
+                    .ok_or_else(|| crate::output::routine_failure("difftest::brep_p9"))?
                     .clone();
                 let y = if i.variant == 1 { 2.0 } else { 0.5 };
                 let (x0, x1) = if i.variant == 2 {

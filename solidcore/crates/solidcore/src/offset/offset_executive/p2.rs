@@ -4677,7 +4677,7 @@ mod tests {
             );
             assert_eq!(kernel.context.doing_boolean(), previous);
             for error in [
-                SolidError::sm_err(OP_SOLID),
+                SolidError::failed_routine(OP_SOLID, crate::error::SM_ERR),
                 SolidError::unported("SmBrep::ShrinkGeometry", "topology.brep_p4"),
             ] {
                 let result: Result<()> = with_doing_boolean(&mut kernel, |kernel| {
@@ -5120,13 +5120,9 @@ mod tests {
     #[test]
     fn static_offset_collapses_only_ordinary_statuses() {
         for error in [
-            SolidError::null_pointer(OP_SOLID),
+            SolidError::failed_routine(OP_SOLID, SM_ERR_NULL_POINTER),
             SolidError::invalid_input(OP_SOLID, "bad topology"),
-            SolidError::Upstream {
-                operation: OP_SOLID,
-                code: 1023,
-                entity: None,
-            },
+            SolidError::failed_routine(OP_SOLID, 1023),
         ] {
             let collapsed = collapse_offset_status::<()>(Err(error.clone()));
             let failure = collapsed.as_ref().unwrap_err();
@@ -5314,7 +5310,10 @@ mod tests {
                         assert!(kernels.primary.context.is_mark_locked(mark));
                         assert_eq!(kernels.primary.context.current_mark(mark), before);
                         if exit == 1 {
-                            return Err(SolidError::sm_err("test::early"));
+                            return Err(SolidError::failed_routine(
+                                "test::early",
+                                crate::error::SM_ERR,
+                            ));
                         }
                         *other = None;
                         if exit == 2 {
@@ -5425,7 +5424,10 @@ mod tests {
                             attributes,
                             BooleanOperation::Difference,
                         )?;
-                        Err(SolidError::sm_err("test::after-notify"))
+                        Err(SolidError::failed_routine(
+                            "test::after-notify",
+                            crate::error::SM_ERR,
+                        ))
                     },
                 ),
                 SM_ERR,
@@ -6350,7 +6352,7 @@ mod tests {
         assert!(brep_is_manifold_solid(&thin).unwrap());
     }
 
-    /// TE-O-18 part 5 (#19851): what the offset and the shell refuse of their input, and
+    /// #19851: what the offset and the shell refuse of their input, and
     /// the extended offset's refusals, are named offset causes that keep the status upstream
     /// returned.
     #[test]
@@ -6494,7 +6496,7 @@ mod tests {
         );
     }
 
-    /// TE-O-18 part 5 (#19851): a link of the input's B-rep, or the executive's own offset
+    /// #19851: a link of the input's B-rep, or the executive's own offset
     /// B-rep, that is not there is a defect that says which, with the status of upstream's
     /// `NER`.
     #[test]
@@ -6594,7 +6596,7 @@ mod tests {
         );
     }
 
-    /// TE-O-18 part 6 (#19851): the shell's difference missing an operand or its result,
+    /// #19851: the shell's difference missing an operand or its result,
     /// and a sheet's wall without a surface, are defects that say which, with the status of
     /// upstream's `NER`.
     #[test]

@@ -1881,7 +1881,7 @@ impl<O: LoopObject> FaceProps<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when `exe_heal_op` is before
+    /// `SM_ERR` (a failure's status) when `exe_heal_op` is before
     /// [`HealerOpType::FixTolsizes`]; [`SolidError::InvalidInput`] for a face without
     /// surface or face use, and for a handle type that cannot name the face's B-rep
     /// objects (`SmFace::HasSeamProblem`, see the module docs); the errors of the

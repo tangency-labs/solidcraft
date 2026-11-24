@@ -2358,10 +2358,13 @@ mod tests {
             &mut Brep::new(),
             &mut (),
             0,
-            |_, _, (), _| Err(SolidError::sm_err("main vertex")),
+            |_, _, (), _| Err(SolidError::failed_routine("main vertex", SM_ERR)),
             |(), _, _, _| Ok(0),
         );
-        assert_eq!(r.unwrap_err(), SolidError::sm_err("main vertex"));
+        assert_eq!(
+            r.unwrap_err(),
+            SolidError::failed_routine("main vertex", SM_ERR)
+        );
         assert!(!fb.fillet_vertex(a).unwrap().is_processed());
     }
 

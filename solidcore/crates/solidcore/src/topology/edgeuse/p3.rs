@@ -25,7 +25,7 @@
 //! - **Null pointers.** Where upstream dereferences a null pointer (an edge use
 //!   without face use, face, surface, edge, edge curve, primary edge use or start
 //!   vertex) the port returns [`SolidError::InvalidInput`]; `NER` is
-//!   [`SolidError::null_pointer`], `SER` the callee's error.
+//!   a failure with status `SM_ERR_NULL_POINTER`, `SER` the callee's error.
 //! - **Surface owner.** `CreateUVTrimCurve` clears the surface's owner
 //!   (`SmTemporaryChangeValue`) for the rest of the call, so the solvers do not trim
 //!   to the face; the port works on a copy of the face's surface whose owner is

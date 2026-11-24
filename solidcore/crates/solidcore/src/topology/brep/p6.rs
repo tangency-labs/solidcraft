@@ -2685,7 +2685,7 @@ mod tests {
             shell: Some(ShellId::from_index(7)),
             region: Some(RegionId::from_index(11)),
         };
-        let error = SolidError::sm_err("native::split");
+        let error = SolidError::failed_routine("native::split", crate::error::SM_ERR);
         let attempt = finish_split_attempt(partial(), Err(error.clone())).unwrap();
         assert_eq!(attempt.status, Err(error));
         assert_eq!(attempt.shell, Some(ShellId::from_index(7)));

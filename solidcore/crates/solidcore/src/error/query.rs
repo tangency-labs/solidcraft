@@ -422,7 +422,11 @@ mod tests {
         for (failure, code, kind) in cases {
             let e = SolidError::query("query::op", failure);
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(code),
+                "{failure:?}"
+            );
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.query_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");
@@ -431,7 +435,10 @@ mod tests {
             SolidError::query("query::op", F::FaceWithoutSurface).to_string(),
             "query::op: the face has no surface"
         );
-        assert_eq!(SolidError::sm_err("query::op").query_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("query::op", SM_ERR).query_failure(),
+            None
+        );
     }
 
     /// A reviewed defect is of class 127 with its status, and says why.

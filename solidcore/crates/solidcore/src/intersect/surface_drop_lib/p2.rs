@@ -20,8 +20,8 @@
 //!   `GetNextPoint`'s last try, `SM_ERR`); `SetProperties`' two `SM_ERR` returns for a
 //!   zero or normal-parallel curve tangent and every propagated callee failure (`SER`)
 //!   are errors. `GetNextPoint` stores the status of `SetProperties` (and goes on with
-//!   its second try): an error there becomes its code, the `code` of a
-//!   [`SolidError::Upstream`], `SM_ERR_INVALID_INPUT` for [`SolidError::InvalidInput`]
+//!   its second try): an error there becomes its code, the status a routine's
+//!   failure keeps, `SM_ERR_INVALID_INPUT` for [`SolidError::InvalidInput`]
 //!   and `SM_ERR` for any other variant (Rust errors do not carry every upstream
 //!   code); [`SolidError::Unported`] always propagates.
 //! - **Offset surface.** `DropCurve`'s `SmOffsetSurface` always offsets the drop
@@ -1887,7 +1887,7 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::DegenerateTangent)
         );
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert!(
             matches!(
                 e.cause(),

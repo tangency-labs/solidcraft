@@ -347,7 +347,7 @@ fn rust_sphere_made(k: &Kernel, s: &SphereIn, make: bool) -> Result<solidcore::R
         }
         sp.make_nurb(k)?;
         if sp.base().base().gw_nurb().is_none() {
-            return Err(SolidError::sm_err("difftest::surface_sphere"));
+            return Err(crate::output::routine_failure("difftest::surface_sphere"));
         }
         Ok(sp)
     }))

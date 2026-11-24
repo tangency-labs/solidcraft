@@ -422,7 +422,7 @@ fn build_mixed_box(k: &mut Kernel, size: [f64; 3]) -> SolidResult<Brep> {
     let nurb = match b.face(face)?.surface.as_ref().map(Surface::kind) {
         Some(SurfaceKind::Plane(p)) => Surface::from(p.base_with_nurb()?.into_owned()),
         _ => {
-            return Err(SolidError::sm_err(
+            return Err(crate::output::routine_failure(
                 "difftest::topology_api_files::build_mixed_box: face 0 is not a plane",
             ))
         }

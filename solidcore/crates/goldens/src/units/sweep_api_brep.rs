@@ -904,7 +904,7 @@ fn rust_observation(k: &Kernel, body: &mut Brep, fine: bool) -> solidcore::Resul
         for fraction in [0.17, 0.37, 0.83] {
             let result = match &e.curve {
                 Some(c) => c.evaluate_point(k, e.interval.evaluate(fraction)),
-                None => Err(SolidError::sm_err("harness::linear_observation")),
+                None => Err(crate::output::routine_failure("harness::linear_observation")),
             };
             match result {
                 Ok(p) => flat.extend([0.0, p.x, p.y, p.z]),

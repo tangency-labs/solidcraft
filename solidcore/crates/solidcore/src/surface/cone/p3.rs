@@ -2212,7 +2212,7 @@ mod tests {
                 assert_eq!(request.approx_tol_3d, Some(0.0123));
                 assert_eq!(request.ang_tol_rad, Some(0.456));
                 assert!(matches!(request.other, IntersectTarget::Surface(s) if core::ptr::eq(s, &raw const torus)));
-                Err(SolidError::sm_err("test::general_dispatch"))
+                Err(SolidError::failed_routine("test::general_dispatch", crate::error::SM_ERR))
             }).unwrap_err();
         assert_eq!(error.operation(), "test::general_dispatch");
     }
@@ -2235,7 +2235,12 @@ mod tests {
                 [true, true],
                 None,
                 None,
-                |_| Err(SolidError::sm_err("test::general_dispatch")),
+                |_| {
+                    Err(SolidError::failed_routine(
+                        "test::general_dispatch",
+                        crate::error::SM_ERR,
+                    ))
+                },
             )
             .unwrap_err();
         assert_ne!(error.operation(), "test::general_dispatch");

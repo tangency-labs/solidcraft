@@ -75,7 +75,7 @@
 //!   the bit. The extension returning no curve at all (its `Ok(None)`: the parameter lies
 //!   inside the NURB's own bounds, possible only if they disagreed with
 //!   `natural_interval`) is a `NULL` dereference upstream and `SM_ERR_NULL_POINTER`
-//!   ([`SolidError::null_pointer`]) here. A continued law whose radius or slope is not
+//!   (a failure with status `SM_ERR_NULL_POINTER`) here. A continued law whose radius or slope is not
 //!   finite (it overflowed) is refused ([`RoundRefusal::LawRadiusUnusable`], naming the
 //!   station); upstream passes it on.
 //! - `GetClassType` / `GetClassTypeString` (the `SM_COMMON` statics) are not ported.
@@ -1433,7 +1433,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) when `vertex` has no entry
+    /// `SM_ERR_NULL_POINTER` (a failure with status `SM_ERR_NULL_POINTER`) when `vertex` has no entry
     /// (`NER`); [`SolidError::InvalidInput`] when its entry is still the pending
     /// edge-use list (upstream casts the list to a corner); those of `set_bevel`.
     pub fn set_bevel_corner(

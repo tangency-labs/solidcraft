@@ -1422,7 +1422,7 @@ pub fn is_point_solution_across_closed_seam_boundary<O: Copy>(
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) for a cache type other than `SM_OC_CURVE`.
+/// `SM_ERR` (a failure's status) for a cache type other than `SM_OC_CURVE`.
 pub fn validate_curve_cache(
     cache_type: ObjectCacheType,
     old: Option<CacheId>,
@@ -3207,7 +3207,7 @@ mod tests {
         );
         assert!(matches!(
             q.evaluate_equations(k, &[0.25, 0.5], &mut f, None),
-            Err(e) if crate::error::upstream_status(&e).is_some()
+            Err(e) if SolidError::failed_routine_status(&e).is_some()
         ));
     }
 

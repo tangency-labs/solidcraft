@@ -3591,7 +3591,7 @@ mod tests {
             _uv2: Point2,
             _point: &mut TsectPnt,
         ) -> Result<bool> {
-            Err(SolidError::sm_err("test"))
+            Err(SolidError::failed_routine("test", crate::error::SM_ERR))
         }
 
         fn compute_point_values(
@@ -3627,7 +3627,7 @@ mod tests {
             *flags = StepSolve::default();
             flags.clipped = self.unclipped_landing.is_none();
             if self.fail {
-                return Err(SolidError::sm_err("test"));
+                return Err(SolidError::failed_routine("test", crate::error::SM_ERR));
             }
             if let Some(landing) = self.unclipped_landing {
                 for s in SRFS {
@@ -4132,7 +4132,7 @@ mod tests {
             self.calls += 1;
             self.starts.push([uv1, uv2]);
             if self.calls <= self.err_first {
-                return Err(SolidError::sm_err("test"));
+                return Err(SolidError::failed_routine("test", crate::error::SM_ERR));
             }
             if self.calls <= self.fail_first {
                 return Ok(false);
@@ -4172,7 +4172,7 @@ mod tests {
             _flags: &mut StepSolve,
             _next: &mut TsectPnt,
         ) -> Result<()> {
-            Err(SolidError::sm_err("test"))
+            Err(SolidError::failed_routine("test", crate::error::SM_ERR))
         }
 
         fn compute_surface_values(

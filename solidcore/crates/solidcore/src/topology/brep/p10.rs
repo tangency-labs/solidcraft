@@ -2671,18 +2671,18 @@ fn test_closure_split_region_at_faceuse(
         OP_CLOSURE,
         "edge use without face use",
     ))?;
-    let attempt = p6::test_closure_split_region_attempt(
+    match p6::test_closure_split_region(
         k,
         b,
         &mut Marks::default(),
         env,
         do_infinite_region_testing,
         fu,
-    )?;
-    Ok(attempt
-        .status
-        .ok()
-        .map(|()| (attempt.shell, attempt.region)))
+    ) {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.failed_routine_status().is_some() => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 fn find_and_set_infinite_region(
@@ -3159,7 +3159,10 @@ mod tests {
     fn cancellation_status_subdivision_retains_control_errors() {
         assert_eq!(required_subdivision_iso_line(Ok(7)), Ok(7));
         assert_eq!(
-            required_subdivision_iso_line::<()>(Err(SolidError::sm_err("ordinary-iso-line"))),
+            required_subdivision_iso_line::<()>(Err(SolidError::failed_routine(
+                "ordinary-iso-line",
+                crate::error::SM_ERR
+            ))),
             Err(SolidError::invalid_input(OP_SUBDIVIDE, "no iso line"))
         );
         for error in [

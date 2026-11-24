@@ -546,7 +546,7 @@ impl solidcore::blend::fillet_geom::p3::SplitCorners for FixedCornerType {
         &mut self,
         _: FilletCornerId,
     ) -> solidcore::Result<&mut solidcore::blend::fillet_corner::p3::FilletCorner> {
-        Err(SolidError::null_pointer("difftest::blend_fillet_solver_p5"))
+        Err(SolidError::port_invariant("difftest::blend_fillet_solver_p5", "the fixture has no corner table"))
     }
     fn corner_type(&self, _: FilletCornerId) -> solidcore::Result<FilletCornerType> {
         Ok(self.0)

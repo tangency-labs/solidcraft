@@ -21,7 +21,7 @@
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
 //! the C++ reports for it (crate-private, read through [`crate::SolidError::sm_status`] and
-//! `upstream_status`); it never decides the type. The status a cause gives unless its
+//! `failed_routine_status`); it never decides the type. The status a cause gives unless its
 //! site says otherwise is named in its doc.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No cause
@@ -249,7 +249,7 @@ pub enum BlendFailure {
     /// the corner steps (`crate::blend::fillet_corner`) are public and read a `FilletCorner`
     /// and a `FilletBrep` that a caller can build part by part, while the fillet executive
     /// builds them whole before it runs the steps. Status that of the site it replaces
-    /// ([`CornerInput::upstream_status`] unless the site says otherwise).
+    /// ([`CornerInput::status`] unless the site says otherwise).
     CornerInputInvalid {
         /// What the corner or its pseudo-B-rep lacks or holds otherwise.
         input: CornerInput,
@@ -266,7 +266,7 @@ pub enum BlendFailure {
     },
     /// A fillet corner's surface, patch or face that the corner does not make: the miss
     /// named. Its class and status are the miss's ([`CornerPatchMiss::class`],
-    /// [`CornerPatchMiss::upstream_status`]).
+    /// [`CornerPatchMiss::status`]).
     CornerPatchNotMade(CornerPatchMiss),
     /// The drop of a degenerate corner's vertex onto one of its blend's base surfaces found
     /// `solutions` points, not one, and the side of a periodic seam the face's trim lies on
@@ -282,7 +282,7 @@ pub enum BlendFailure {
     CornerRefused,
     /// A fillet corner whose edges meet in a shape the corner topology does not build: the
     /// shape named. Unsupported ([`ErrorKind::Unsupported`]), a fact of the body's edges at
-    /// the vertex; status that of the site it replaces ([`CornerShape::upstream_status`]).
+    /// the vertex; status that of the site it replaces ([`CornerShape::status`]).
     CornerShapeNotBuilt(CornerShape),
     /// The intersection of two surfaces at a fillet corner (two fillet surfaces, or a
     /// fillet surface and a side face's extended surface) failed: the intersection's
@@ -3304,7 +3304,7 @@ mod tests {
         assert!(sited.sized());
     }
 
-    /// One of each cause the fillet geometry's `p2.rs` names (TE-B-02, #19810).
+    /// One of each cause the fillet geometry's `p2.rs` names (#19810).
     fn fillet_geom_p2_causes() -> [BlendFailure; 16] {
         let face = crate::topology::FaceId::from_index(3);
         [
@@ -3368,7 +3368,7 @@ mod tests {
         }
     }
 
-    /// The causes of the fillet geometry's `p2.rs` (TE-B-02, #19810): each class, status and
+    /// The causes of the fillet geometry's `p2.rs` (#19810): each class, status and
     /// message; none a defect or a refusal, and each stands in for its status.
     #[test]
     fn the_fillet_geometry_p2_causes_keep_their_status_and_name_their_class() {
@@ -3462,7 +3462,11 @@ mod tests {
             assert_eq!(e.kind(), class, "{cause:?}");
             assert_eq!(e.blend_failure(), Some(&cause));
             assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(status),
+                "{cause:?}"
+            );
             assert!(!e.is_defect() && !e.is_refusal() && !e.sized(), "{cause:?}");
             assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
         }
@@ -3603,7 +3607,7 @@ mod tests {
         assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
     }
 
-    /// TE-B-03 (#19811): the causes of the fillet geometry's part 4 keep the status of the
+    /// #19811: the causes of the fillet geometry's part 4 keep the status of the
     /// `SER`/`NER` they replace, take their class from the cause and word their numbers.
     #[test]
     fn the_fillet_corner_geometry_causes_keep_their_status_and_name_their_numbers() {
@@ -4217,8 +4221,8 @@ mod tests {
         );
         // errors without a record are returned as they are
         assert_eq!(
-            SolidError::sm_err("blend::op").or_at(at_edge),
-            SolidError::sm_err("blend::op")
+            SolidError::failed_routine("blend::op", SM_ERR).or_at(at_edge),
+            SolidError::failed_routine("blend::op", SM_ERR)
         );
         // the decisions that read a failure's entity read the untyped entity, which `or_at`
         // never writes

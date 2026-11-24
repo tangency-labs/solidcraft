@@ -652,7 +652,10 @@ mod tests {
     fn cancellation_status_face_assertion_failures_are_not_inconclusive() {
         assert_eq!(ignored_assert_result(Ok(7)), Ok(Some(7)));
         assert_eq!(
-            ignored_assert_result::<()>(Err(SolidError::sm_err("ordinary-solve"))),
+            ignored_assert_result::<()>(Err(SolidError::failed_routine(
+                "ordinary-solve",
+                crate::error::SM_ERR
+            ))),
             Ok(None)
         );
         for error in [

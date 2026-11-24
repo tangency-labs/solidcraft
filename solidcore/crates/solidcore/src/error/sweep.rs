@@ -827,14 +827,10 @@ mod tests {
         ];
         for (failure, code, kind) in cases {
             let typed = SolidError::sweep("sweep::op", failure);
-            let before = SolidError::Upstream {
-                operation: "sweep::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("sweep::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert_eq!(failure.kind(), kind, "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -865,7 +861,10 @@ mod tests {
             SolidError::sweep("sweep::op", SweepFailure::FaceAlreadySwept).to_string(),
             "sweep::op: the face was already swept"
         );
-        assert_eq!(SolidError::sm_err("sweep::op").sweep_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("sweep::op", SM_ERR).sweep_failure(),
+            None
+        );
     }
 
     /// A railed loft's refusal reports what it reported before the sweep routines' failures
@@ -882,7 +881,7 @@ mod tests {
         assert_eq!(e.sm_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
         assert_eq!(e.failed_routine_status(), None);
-        assert_eq!(super::super::upstream_status(&e), None);
+        assert_eq!(SolidError::failed_routine_status(&e), None);
         assert!(!cap.is_failed_routine());
         assert!(e.is_status_answer());
         assert!(!e.is_port_failure());

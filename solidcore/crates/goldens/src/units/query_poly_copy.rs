@@ -260,7 +260,7 @@ fn dump(
     for h in at {
         let a = store
             .get(h)
-            .ok_or_else(|| solidcore::SolidError::sm_err("difftest::query_poly_copy::dump"))?;
+            .ok_or_else(|| crate::output::routine_failure("difftest::query_poly_copy::dump"))?;
         o.push(a.attribute_id() as f64);
         o.push(f64::from(a.behavior().code()));
         o.push(src_attrs.iter().position(|&x| x == h).map_or(-2.0, |i| i as f64));

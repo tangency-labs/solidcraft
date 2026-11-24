@@ -585,7 +585,7 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
                     dom[1] + fv * (dom[3] - dom[1]),
                 );
                 let pt = solidcore::topology::face::p2::surface(b, face)?
-                    .ok_or_else(|| SolidError::sm_err("difftest::face_p3::vertex_loop"))?
+                    .ok_or_else(|| crate::output::routine_failure("difftest::face_p3::vertex_loop"))?
                     .evaluate_point(k, uv)?;
                 let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(b);
                 let mut env = state.env(None);

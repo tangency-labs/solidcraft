@@ -106,7 +106,9 @@ fn max_patch_normal_angle(setback: f64) -> solidcore::Result<f64> {
                     .uvs
                     .first()
                     .copied()
-                    .ok_or(solidcore::SolidError::sm_err("issue_1170"))?;
+                    .ok_or_else(|| {
+                        solidcore::SolidError::port_invariant("issue_1170", "no closest point")
+                    })?;
                 s.evaluate_normal(&k, uv, Side::Left, Side::Left)
             };
             // the normals' angle either way round, from the cross product, which resolves

@@ -250,7 +250,8 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
-        Err(SolidError::Upstream { code, .. }) => f64::from(*code),
+        // the evaluator's own failure, `SM_ERR`
+        Err(e) if e.operation() == EVAL_OP => f64::from(crate::output::recorded_status(e).unwrap_or(-1)),
         // Upstream's NLib flag without an error number (see the module docs of
         // `solidcore::nurbs::nurbs_srf`).
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => 1000.0,
@@ -296,11 +297,14 @@ fn push_constants(o: &mut Vec<f64>, r: &SolidResult<NetConstants>) {
     }
 }
 
+/// The operation of the evaluator's failure ([`evaluator`]).
+const EVAL_OP: &str = "SmBSplineSurface::EvaluatePoint";
+
 /// `SmBSplineSurface::EvaluatePoint`: `N_SrfEvalPt` at `NL_LEFT`, `SM_ERR` on failure.
 fn evaluator(s: &Surface) -> impl FnMut(Point2) -> SolidResult<Point3> + '_ {
     |uv: Point2| {
         s.eval(uv.x, uv.y, Side::Left, Side::Left)
-            .map_err(|_| SolidError::sm_err("SmBSplineSurface::EvaluatePoint"))
+            .map_err(|_| crate::output::routine_failure(EVAL_OP))
     }
 }
 

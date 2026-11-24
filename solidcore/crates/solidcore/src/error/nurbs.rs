@@ -960,9 +960,6 @@ pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
     }
 }
 
-/// [`super::upstream_status`], kept at the path the goldens runners first read it from.
-pub use super::upstream_status;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -970,11 +967,7 @@ mod tests {
 
     /// The bare status a reviewed defect at `status` replaced.
     fn upstream(code: i32) -> SolidError {
-        SolidError::Upstream {
-            operation: "nurbs::op",
-            code,
-            entity: None,
-        }
+        SolidError::failed_routine("nurbs::op", code)
     }
 
     /// A typed cause keeps the status of the bare status it replaced.
@@ -995,7 +988,7 @@ mod tests {
     }
 
     /// The named causes keep the status of the bare status they replace, so
-    /// `upstream_status()` reads it, and carry the class of what they check.
+    /// `failed_routine_status` reads it, and carry the class of what they check.
     #[test]
     fn the_named_causes_keep_their_status_and_name_their_class() {
         let invalid = [

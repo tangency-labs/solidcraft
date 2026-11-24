@@ -2493,7 +2493,7 @@ mod tests {
                 .merge_intervals_using(vertices_only, |_, index, vertex_pass| {
                     visited.push((index, vertex_pass));
                     if index == 1 && (vertices_only || !vertex_pass) {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::failed_routine(OP, crate::error::SM_ERR));
                     }
                     Ok(MergedTopology {
                         faces: vec![H],
@@ -2503,10 +2503,7 @@ mod tests {
                 })
                 .unwrap_err();
             let completed = if vertices_only { 1 } else { 4 };
-            assert!(matches!(
-                failure.error,
-                SolidError::Upstream { code: 1001, .. }
-            ));
+            assert_eq!(failure.error.failed_routine_status(), Some(1001));
             assert_eq!(failure.merged.faces.len(), completed);
             assert_eq!(failure.merged.edges.len(), 2 * completed);
             assert_eq!(failure.merged.vertices.len(), 3 * completed);

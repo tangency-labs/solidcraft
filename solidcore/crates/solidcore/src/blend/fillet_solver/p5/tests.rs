@@ -122,7 +122,10 @@ impl SplitCorners for TestCorners {
         &mut self,
         _: FilletCornerId,
     ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
-        Err(SolidError::sm_err("no corner"))
+        Err(SolidError::failed_routine(
+            "no corner",
+            crate::error::SM_ERR,
+        ))
     }
     fn corner_type(&self, _: FilletCornerId) -> Result<FilletCornerType> {
         Ok(self.0.expect("the corner type is not asked"))
@@ -227,7 +230,10 @@ impl Script {
     fn call(&mut self, name: &'static str) -> Result<()> {
         self.calls.push(name.into());
         if self.fail == Some(name) {
-            Err(SolidError::sm_err("regression"))
+            Err(SolidError::failed_routine(
+                "regression",
+                crate::error::SM_ERR,
+            ))
         } else {
             Ok(())
         }
@@ -238,7 +244,10 @@ impl RecoveryOps for Script {
         self.calls.push(format!("full{which}"));
         c.fillets.geom_mut(g)?.need_split = true;
         if which == 1 && self.fail == Some("full1") {
-            return Err(SolidError::sm_err("regression"));
+            return Err(SolidError::failed_routine(
+                "regression",
+                crate::error::SM_ERR,
+            ));
         }
         Ok(())
     }
@@ -447,7 +456,7 @@ fn failed_first_full_rollover_stops_before_second() {
     impl RecoveryOps for Failing {
         fn full(&mut self, _: &mut Recovery<'_>, _: FilletGeomId, which: usize) -> Result<()> {
             assert_eq!(which, 0);
-            Err(SolidError::sm_err("first"))
+            Err(SolidError::failed_routine("first", crate::error::SM_ERR))
         }
     }
     let mut f = Fixture::new([&[1.0], &[1.0]], true);
@@ -455,7 +464,7 @@ fn failed_first_full_rollover_stops_before_second() {
     f.corners = TestCorners(Some(FilletCornerType::NByTwo));
     assert_eq!(
         f.context().process(id, &mut vec![], &mut Failing),
-        Err(SolidError::sm_err("first"))
+        Err(SolidError::failed_routine("first", crate::error::SM_ERR))
     );
 }
 #[test]
@@ -703,7 +712,7 @@ fn failed_end_connection_retains_completed_mutations_and_stops_the_walk() {
                 .as_mut()
                 .unwrap()
                 .remove_at(index)?;
-            Err(SolidError::sm_err("connect"))
+            Err(SolidError::failed_routine("connect", crate::error::SM_ERR))
         }
     }
     let k = Kernel::default();
@@ -711,7 +720,7 @@ fn failed_end_connection_retains_completed_mutations_and_stops_the_walk() {
     let r = rail(&k, &mut fb, &[0.1, 0.9999, 1.0], false);
     assert_eq!(
         squeeze_rail(&k, &mut fb, r, 1e-5, &mut Connect),
-        Err(SolidError::sm_err("connect"))
+        Err(SolidError::failed_routine("connect", crate::error::SM_ERR))
     );
     assert_eq!(fb.fillet_edge(r).unwrap().curve_class().unwrap().size(), 2);
 }
@@ -730,7 +739,10 @@ fn a_failed_copy_status_is_returned() {
     };
     assert_eq!(
         f.context().process(id, &mut vec![], &mut script),
-        Err(SolidError::sm_err("regression"))
+        Err(SolidError::failed_routine(
+            "regression",
+            crate::error::SM_ERR
+        ))
     );
     assert_eq!(script.calls.last().map(String::as_str), Some("copy_offset"));
 }
@@ -761,7 +773,10 @@ fn refinement_receives_rail_index_geom_and_short_list_and_preserves_warning_only
             assert_eq!(fb.geom(geom)?.rail(which), Some(rail));
             self.called = true;
             fb.fillet_edge_mut(rail)?.set_status(FilStatus::Processed);
-            Err(SolidError::sm_err("warning-only"))
+            Err(SolidError::failed_routine(
+                "warning-only",
+                crate::error::SM_ERR,
+            ))
         }
     }
     let mut f = Fixture::new([&[1.0], &[0.1, 0.2, 0.2001, 0.8, 0.8001, 1.0]], false);
@@ -845,7 +860,10 @@ fn support_intersection_failure_marks_the_edge_and_keeps_existing_curve() {
             assert!(request.start_direction.is_none());
             assert!(request.end_direction.is_none());
             assert!(request.reference_point.is_none());
-            Err(SolidError::sm_err("intersection"))
+            Err(SolidError::failed_routine(
+                "intersection",
+                crate::error::SM_ERR,
+            ))
         }
     }
     let mut f = Fixture::new([&[1.0], &[1.0]], false);

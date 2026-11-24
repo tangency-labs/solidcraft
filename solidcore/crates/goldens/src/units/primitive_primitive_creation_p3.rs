@@ -60,7 +60,7 @@ fn error(e: &SolidError) -> f64 {
 }
 fn curve(data: &[f64]) -> Result<BSplineCurve> {
     let [kind, x, y, z, a, b, c] = data else {
-        return Err(SolidError::sm_err("fixture"));
+        return Err(crate::output::routine_failure("fixture"));
     };
     if *kind == 0. {
         BSplineCurve::create_line_segment(3, Vec3::new(*x, *y, *z), Vec3::new(*a, *b, *c))
@@ -621,9 +621,9 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
                 curvature: solidcore::surface::surface::p2::CurvatureType::from_code(
                     data[0] as u64,
                 )
-                .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                .ok_or_else(|| crate::output::routine_failure("fixture"))?,
                 ends: solidcore::surface::surface::p2::BlendEndType::from_code(data[1] as u64)
-                    .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                    .ok_or_else(|| crate::output::routine_failure("fixture"))?,
                 curves_direction: data[2] as u64,
                 start_tangent_length: data[3],
                 end_tangent_length: data[4],

@@ -647,7 +647,7 @@ mod tests {
         expected.add_point(end);
         let normal = boxes
             .normal
-            .ok_or_else(|| SolidError::sm_err("no normal box"))?;
+            .ok_or_else(|| SolidError::failed_routine("no normal box", crate::error::SM_ERR))?;
         assert_eq!(
             (normal.min(), normal.max()),
             (expected.min(), expected.max())

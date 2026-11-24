@@ -76,8 +76,11 @@ fn main() -> Result<()> {
     );
     let status = match &result {
         Ok(()) => 0,
-        Err(SolidError::Upstream { code, .. }) => i64::from(*code),
-        Err(e) => return Err(e.clone()),
+        // a failure the C++ reports by its status: that status
+        Err(e) => match e.sm_status() {
+            Some(code) => i64::from(code),
+            None => return Err(e.clone()),
+        },
     };
     let b = store.brep(target)?;
     let vertices: Vec<_> = b.vertices().ids().collect();
@@ -134,10 +137,13 @@ fn main() -> Result<()> {
             );
         }
         ints.push(edge.edgeuses.len() as i64);
-        let curve = edge
-            .curve
-            .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("wire_sweep"))?;
+        let curve = edge.curve.as_ref().ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "wire_sweep",
+                solidcore::error::geom::GeomFailure::EdgeWithoutCurve,
+            )
+            .into_error()
+        })?;
         ints.push(curve.type_code());
         values.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);
         for f in [0., 0.25, 0.5, 0.75, 1.] {

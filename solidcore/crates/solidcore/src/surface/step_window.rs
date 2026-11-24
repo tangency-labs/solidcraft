@@ -2509,11 +2509,7 @@ mod tests {
     #[test]
     fn off_surface_reads_the_status_of_a_typed_failure() {
         use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
-        let upstream = SolidError::Upstream {
-            operation: "surface::x",
-            code: SM_ERR_NOT_WITHIN_TOLERANCE,
-            entity: None,
-        };
+        let upstream = SolidError::failed_routine("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE);
         assert!(is_off_surface(&upstream));
         for typed in replaced_upstream("surface::x", SM_ERR_NOT_WITHIN_TOLERANCE, None) {
             assert!(is_off_surface(&typed), "{typed:?}");

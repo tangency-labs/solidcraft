@@ -1018,7 +1018,10 @@ mod tests {
             if x[0] == 1.0 && ((x[1] < 0.25) == self.reject_scaled) {
                 // Failed evaluators may leave apparently converged output.
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::bounded_linear"));
+                return Err(SolidError::failed_routine(
+                    "test::bounded_linear",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = x[0] - 3.0;
             f[1] = x[1] - 0.5;
@@ -1070,7 +1073,10 @@ mod tests {
         ) -> Result<bool> {
             if x[0] != 0.0 {
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::only_initial"));
+                return Err(SolidError::failed_routine(
+                    "test::only_initial",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = -2.0;
             if let Some(j) = jacobian {
@@ -1108,7 +1114,10 @@ mod tests {
             self.calls += 1;
             if self.calls == 4 {
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::best_reevaluation"));
+                return Err(SolidError::failed_routine(
+                    "test::best_reevaluation",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = x[0] * x[0] * x[0] - 2.0 * x[0] + 2.0;
             if let Some(j) = jacobian {

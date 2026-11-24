@@ -1790,7 +1790,7 @@ fn single_vertex_sphere_brep(
         b.sync_face_surface_tolerance(face)?;
         // StartAndEndSingleVertexLoop: StartLoop(SM_OT_SAME), the first (outer) loop
         let lp = LoopId::from_index(
-            u32::try_from(b.loops().len()).map_err(|_| SolidError::sm_err(OP_SVS))?,
+            u32::try_from(b.loops().len()).map_err(|_| crate::output::routine_failure(OP_SVS))?,
         );
         let lu1 = b.add_loopuse_record(Loopuse {
             faceuse: Some(fu1),
@@ -1814,7 +1814,7 @@ fn single_vertex_sphere_brep(
             loopuse: Some(lu1),
         })?;
         if l != lp {
-            return Err(SolidError::sm_err(OP_SVS));
+            return Err(crate::output::routine_failure(OP_SVS));
         }
         b.face_mut(face)?.loops.push(l);
         let vu1 = b.add_vertexuse_record(Vertexuse {
@@ -1843,7 +1843,7 @@ fn single_vertex_sphere_brep(
             let f = b
                 .faceuse(fu)?
                 .face
-                .ok_or_else(|| SolidError::sm_err(OP_SVS))?;
+                .ok_or_else(|| crate::output::routine_failure(OP_SVS))?;
             edges.extend(face_p4::edges(b, f, None, false, None)?);
             vertices.extend(face_p4::vertices(b, f, None, false, None)?);
         }
