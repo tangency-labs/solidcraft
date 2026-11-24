@@ -30,6 +30,7 @@ pub mod matrix;
 pub mod object;
 pub mod periodic_extent1d;
 pub mod plane_height;
+pub mod plane_placement;
 pub mod point_set;
 pub mod polar_box;
 pub mod polynomial;

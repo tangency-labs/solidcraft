@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde_json::{Value, json};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::Vec3;
 use solidcraft_doc::{
     AxisRef, BodyName, Dir, Direction, Extent, ExtrudeConvention, FeatureKind, Operation, PatternKind, PlaneRef, RevolveConvention, SketchId,
 };
@@ -155,17 +155,16 @@ fn kind(
             let (axis, origin, direction) = axis(s, sketch, source_axis)?;
             let state = s.model.state();
             let solved = state.sketch(sketch.id).ok_or("The revolution's sketch could not be evaluated.")?;
-            let unit = direction.normalized().ok_or("The revolution axis has no direction.")?;
-            if unit.dot(solved.plane.normal()).abs() > 1e-7 || solved.plane.height(origin).abs() > 1e-6 {
-                return Err("The revolution axis does not lie in the sketch plane.".into());
-            }
-            let local_origin = solved.plane.to_local(origin);
-            let local_dir = Vec2::new(unit.dot(solved.plane.x), unit.dot(solved.plane.y));
+            let planar = solidcore_ops::plane_placement::axis_in_plane(&solved.plane, origin, direction).map_err(|off| match off {
+                solidcore_ops::plane_placement::AxisOffPlane::NoDirection => "The revolution axis has no direction.",
+                solidcore_ops::plane_placement::AxisOffPlane::OffPlane => "The revolution axis does not lie in the sketch plane.",
+            })?;
+            let (local_origin, local_dir) = (planar.origin, planar.direction);
             let mut signs = BTreeSet::new();
             for region in solidcraft_doc::select_profiles(solved, &profiles).map_err(|error| error.to_string())? {
                 let canonical =
                     solidcraft_kernel::canonical_revolve_axis(&solved.plane, &region, local_origin, local_dir).map_err(|e| e.to_string())?;
-                signs.insert(if canonical.dot(unit) < 0.0 { -1 } else { 1 });
+                signs.insert(if planar.opposes(canonical) { -1 } else { 1 });
             }
             if signs.len() > 1 {
                 return Err("Profiles on both sides of the revolution axis need separate operations.".into());

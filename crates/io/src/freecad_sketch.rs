@@ -719,16 +719,14 @@ fn recover_plane(object: &RawObject, objects: &HashMap<&str, &RawObject>, parent
     match global_frame(&object.source_name, objects, parents) {
         Some(frame) => {
             sketch.plane = frame;
-            if let Some((_, _, datum)) = &sketch.datum {
-                let delta = frame.origin - datum.origin;
-                let sideways = delta - datum.normal() * delta.dot(datum.normal());
-                if sideways.len() > 1e-7 || frame.normal().dot(datum.normal()) < 1.0 - 1e-10 {
-                    warn(
-                        &mut sketch.warnings,
-                        "The sketch plane is preserved, but its complex datum attachment becomes independent.",
-                        "The attachment includes a translation within the datum plane or a tilt relative to it. The imported sketch keeps its saved position and orientation, but does not follow edits to the imported datum plane. Normal offsets and rotation within a datum plane retain their attachment.",
-                    );
-                }
+            if let Some((_, _, datum)) = &sketch.datum
+                && solidcore_ops::plane_placement::normal_offset(datum, &frame).is_none()
+            {
+                warn(
+                    &mut sketch.warnings,
+                    "The sketch plane is preserved, but its complex datum attachment becomes independent.",
+                    "The attachment includes a translation within the datum plane or a tilt relative to it. The imported sketch keeps its saved position and orientation, but does not follow edits to the imported datum plane. Normal offsets and rotation within a datum plane retain their attachment.",
+                );
             }
         }
         None => {

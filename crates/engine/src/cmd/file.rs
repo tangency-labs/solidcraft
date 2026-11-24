@@ -1989,15 +1989,11 @@ fn freecad_feature_name(s: &Session, label: &str) -> String {
     name
 }
 
+/// Whether the sketch sits on its datum plane offset along the datum's normal and also turned
+/// about it (more than 1e-9 rad).
 fn freecad_datum_has_in_plane_rotation(source: &solidcraft_io::FreeCadSketch) -> bool {
     let Some((_, _, datum)) = &source.datum else { return false };
-    let delta = source.plane.origin - datum.origin;
-    let distance = delta.dot(datum.normal());
-    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
-        return false;
-    }
-    let angle = datum.normal().dot(datum.x.cross(source.plane.x)).atan2(datum.x.dot(source.plane.x));
-    angle.abs() > 1e-9
+    solidcore_ops::plane_placement::normal_offset(datum, &source.plane).is_some_and(|offset| offset.rotation.abs() > 1e-9)
 }
 
 fn freecad_sketch_plane(
@@ -2008,11 +2004,10 @@ fn freecad_sketch_plane(
 ) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::{FeatureKind, PlaneRef};
     let Some((source_name, label, datum)) = &source.datum else { return Ok(freecad_explicit_plane(source.plane)) };
-    let delta = source.plane.origin - datum.origin;
-    let distance = delta.dot(datum.normal());
-    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
+    let Some(solidcore_ops::plane_placement::NormalOffset { distance, .. }) = solidcore_ops::plane_placement::normal_offset(datum, &source.plane)
+    else {
         return Ok(freecad_explicit_plane(source.plane));
-    }
+    };
     // AtAngle stores its axis in world coordinates. An imported in-plane rotation must stay
     // frozen until the plane model can express an axis that follows the datum's origin and normal.
     if freecad_datum_has_in_plane_rotation(source) {

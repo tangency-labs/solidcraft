@@ -84,6 +84,7 @@ pub mod outline;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
+pub mod plane_placement;
 pub mod point_identity;
 pub mod prism;
 pub mod provenance;
