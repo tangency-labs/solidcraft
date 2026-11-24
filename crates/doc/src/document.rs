@@ -3983,7 +3983,9 @@ pub struct Feature {
     /// `Sweep`) built from a profile sketch owned by another component: the rigid transform of
     /// this feature's component relative to the lowest common ancestor of both components at
     /// feature creation time. Later moves or joints on this component then carry the built body
-    /// rigidly with it, while moves of the sketch's own component still propagate.
+    /// rigidly with it, while moves of the sketch's own component still propagate. A sweep with
+    /// guide rails ignores this frame: its profile and its rails are read through their live
+    /// placement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
