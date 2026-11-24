@@ -219,7 +219,8 @@ pub(crate) fn map_paths(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> St
 /// named: its component links', then its drawings' sources'. The read-only side of [`map_paths`].
 #[cfg_attr(not(test), expect(dead_code, reason = "a design pack (#9857) lists the files it packs here"))]
 pub(crate) fn linked_files(doc: &Document, from: Option<&str>) -> Vec<PathBuf> {
-    let links = doc.links.values().map(|link| link.path.as_str());
+    // A link to a design that came from the session names no file: it is not a file to pack.
+    let links = doc.links.values().map(|link| link.path.as_str()).filter(|path| !path.is_empty());
     let sources = doc.drawings.iter().flat_map(|d| d.sources.iter().filter_map(|source| source.path.as_deref()));
     let mut seen = BTreeSet::new();
     links.chain(sources).map(|path| absolute(&resolve(from, path))).filter(|file| seen.insert(file.clone())).collect()
@@ -231,7 +232,9 @@ type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
-    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
+    // A link to a design that came from the session names no file: it stays as it is.
+    let links: BTreeMap<u64, DesignLink> =
+        doc.links.iter().map(|(c, l)| (*c, DesignLink { path: if l.path.is_empty() { String::new() } else { map(&l.path) }, ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
     ((links != doc.links).then_some(links), sources.then_some(drawings))

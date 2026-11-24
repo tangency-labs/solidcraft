@@ -187,20 +187,27 @@ pub(crate) fn certify_side(
         for x in 0..4 {
             let r = q[x] + t * i[x] - k * b[x];
             let allow = allow_q * (k.abs() * b[x].abs() + t * i[x].abs() + q[x].abs());
-            if !matches!(
-                r.abs().partial_cmp(&allow),
-                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-            ) {
+            // (an overflow makes both sides infinite, and `inf <= inf` would accept it)
+            if !(r.is_finite()
+                && allow.is_finite()
+                && matches!(
+                    r.abs().partial_cmp(&allow),
+                    Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                ))
+            {
                 return Err(format!(
                     "column {j}: Q + t I - k B = {r:e} > {allow:e} (t {t}, k {k})"
                 ));
             }
             let ra = a[x] - ((1.0 - 1.0 / pf) * b[x] + q[x] / pf);
             let allow = allow_a * (b[x].abs() + q[x].abs());
-            if !matches!(
-                ra.abs().partial_cmp(&allow),
-                Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-            ) {
+            if !(ra.is_finite()
+                && allow.is_finite()
+                && matches!(
+                    ra.abs().partial_cmp(&allow),
+                    Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                ))
+            {
                 return Err(format!(
                     "column {j}: A off the ruled span by {ra:e} > {allow:e}"
                 ));
@@ -996,6 +1003,20 @@ mod tests {
         let bad = net_with(|i| if i == 4 { f64::NAN } else { i as f64 });
         let e = certify_side(&bad, true, true, 1.0).unwrap_err();
         assert!(e.contains("non-finite"), "{e}");
+    }
+
+    /// #21383 review: an infinite coordinate fails the certificate, and so does a finite
+    /// net whose residual overflows (`k B` past `f64::MAX`), where `inf <= inf` let both
+    /// the residual and its allowance through.
+    #[test]
+    fn an_infinite_or_overflowing_residual_fails_the_side_certificate() {
+        let inf = net_with(|i| if i == 4 { f64::INFINITY } else { i as f64 });
+        let e = certify_side(&inf, true, true, 1.0).unwrap_err();
+        assert!(e.contains("non-finite"), "{e}");
+        let huge = net_with(|i| i as f64 * 4.0e307);
+        assert!(huge.cpts().iter().flatten().all(|c| c.x.is_finite()));
+        let e = certify_side(&huge, true, true, 1.0).unwrap_err();
+        assert!(e.contains("Q + t I - k B"), "{e}");
     }
 
     /// A planar degree-2 surface with unit weights and a linear parametrisation, whose
