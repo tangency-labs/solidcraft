@@ -12,6 +12,7 @@ use solidcraft_engine::plugin::ui::{DesignKind, DockZone, WorkspaceSpec};
 use crate::panel_runtime::*;
 use crate::{SolveApp, plugins};
 
+type HookReply = Result<solidcraft_engine::plugin::PanelUpdates, String>;
 type CommandQueue = Rc<RefCell<VecDeque<(String, String)>>>;
 
 #[derive(Clone)]
@@ -44,7 +45,7 @@ struct QueuedHook {
 struct RunningHook {
     workspace: String,
     document: HookDocument,
-    receiver: Receiver<Result<(), String>>,
+    receiver: Receiver<HookReply>,
 }
 
 #[derive(Default)]
@@ -227,6 +228,29 @@ pub(crate) fn enter(app: &mut SolveApp, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Leave the plugin workspace whatever happens, so the user can always reach a built-in one.
+/// When the layout cannot be switched back, the plugin state is reset anyway and the reason is
+/// returned for the caller to show.
+pub(crate) fn leave_best_effort(app: &mut SolveApp) -> Option<String> {
+    let reason = leave(app).err()?;
+    if let Some(workspace) = app.plugin_workspaces.active.take() {
+        match app.plugin_workspaces.previous.take() {
+            Some((tab, _)) => app.ui.tab = tab,
+            None if app.ui.tab == "PLUGIN" => app.ui.tab = "MODEL".into(),
+            None => {}
+        }
+        app.plugin_workspaces.base_layout = None;
+        app.plugin_workspaces.drawing_document = None;
+        queue_hook(app, workspace, false);
+    }
+    Some(reason)
+}
+
+#[cfg(test)]
+pub(crate) fn lose_return_layout(app: &mut SolveApp) {
+    app.plugin_workspaces.previous = None;
+}
+
 pub(crate) fn leave(app: &mut SolveApp) -> Result<(), String> {
     let Some(workspace) = app.plugin_workspaces.active.take() else { return Ok(()) };
     let Some((tab, layout)) = app.plugin_workspaces.previous.clone() else {
@@ -290,8 +314,12 @@ pub(crate) fn poll_hook(app: &mut SolveApp) {
     match completion {
         Ok((document, id, result)) => {
             app.plugin_workspaces.running = None;
-            if let Err(error) = result {
-                report_hook_error(app, &document, id, error);
+            match result {
+                // The hook ran against a snapshot; only its panel updates reach this design, and
+                // only if it is still the design the hook started in.
+                Ok(updates) if document.is_current(app) => solidcraft_engine::plugin::adopt_panel_updates(&mut app.session, updates),
+                Ok(_) => {}
+                Err(error) => report_hook_error(app, &document, id, error),
             }
         }
         Err(TryRecvError::Disconnected) => app.plugin_workspaces.running = None,
@@ -300,7 +328,7 @@ pub(crate) fn poll_hook(app: &mut SolveApp) {
 }
 
 #[cfg(test)]
-pub(crate) fn hook_reply_channel(app: &mut SolveApp, workspace: &str) -> std::sync::mpsc::Sender<Result<(), String>> {
+pub(crate) fn hook_reply_channel(app: &mut SolveApp, workspace: &str) -> std::sync::mpsc::Sender<HookReply> {
     let (sender, receiver) = std::sync::mpsc::channel();
     app.plugin_workspaces.running = Some(RunningHook { workspace: workspace.to_owned(), document: HookDocument::current(app), receiver });
     sender
@@ -328,7 +356,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         crate::plugins::sync_policy(app);
         let mut session = app.session.scratch();
         session.disabled_plugins = app.session.disabled_plugins.clone();
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::channel::<HookReply>();
         let id = workspace.id.clone();
         #[cfg(not(target_arch = "wasm32"))]
         let package_changed = app_error("ui.plugin_workspace.updated");
@@ -343,7 +371,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                         solidcraft_engine::plugin::run_workspace_hook(&mut session, package, &workspace.spec.id, entering)
                     })
-                    .map(|_| ())
+                    .map(|(_, updates)| updates)
                     .map_err(|error| error.to_string());
                 let _ = sender.send(result);
             })

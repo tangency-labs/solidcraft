@@ -397,7 +397,7 @@ registry. The host supplies all drawing, theme colours, plugin badges and panel 
 draws the panels with the same widgets as any docked panel. Workspace panel placements must
 respect each panel's allowed zones and place each panel only once. Each workspace has at most six
 ribbon tabs and 60 ribbon entries. `builtin_panels` names existing host panels to retain, such as
-`browser`.
+`browser`; one the layout the user came from does not have is left out, and entering never fails for it.
 
 While a plugin workspace is shown it holds exactly the panels it places; the plugin's other
 panels open again in the built-in workspaces. Entering a workspace seeds its declared panel
@@ -408,11 +408,15 @@ registered workspace panels requires restarting SolidCraft before re-entry. No d
 default changes. Missing, disabled or unsupported plugins leave Design and Render available.
 
 `on_enter` and `on_exit` name optional `read` command entries. Their parameters contain
-`{"workspace":"cam"}` in this example. They run on a worker against a snapshot; the switch
+`{"workspace":"cam"}` in this example, so the entry's `input_schema` must accept that object;
+a hook whose schema refuses it fails. Hooks are read-only: no folder is writable and no command
+that reaches files runs, whatever the grants. The only thing a hook may change is its own
+plugin's panels (`ui.set-data`, `show-panel`); the host adopts those updates when the hook
+finishes, if the design is still the one it started in. They run on a worker against a snapshot; the switch
 continues and failures appear in the workspace. Each hook receives at most one second, 1,000,000
 fuel and 32 MiB of memory, respecting lower package and user limits; an explicit stack request is
 capped at 256 KiB. Narrowing these budgets preserves the approval for the original manifest and
-component. Read hooks cannot call edit commands or write files, even with grants. The host adopts
+component. Read hooks cannot call edit commands. The host adopts
 no computed design, camera, selection or undo history from a hook, on success or failure.
 A queued hook is dropped if its design is no longer active when it would start. Hook failures
 remain in Messages after leaving the workspace. A result from an earlier design does not replace

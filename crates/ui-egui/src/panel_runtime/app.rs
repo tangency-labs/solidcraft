@@ -1675,11 +1675,8 @@ impl AppPanelRuntime {
         let mut layout = base.clone();
         layout.workspace = id.clone();
         layout.extent_priority_context = ExtentPriorityContext::default();
-        for builtin in &workspace.spec.builtin_panels {
-            if !layout.instances.iter().any(|instance| instance.id.0 == *builtin && !instance.id.0.starts_with(super::plugin::PREFIX)) {
-                return Err(error(Rule::MissingTarget, "workspace names an unavailable built-in panel"));
-            }
-        }
+        // A built-in panel the layout the user came from does not have (closed, or never part of
+        // it) is left out: a manifest that validated never fails the switch.
         layout.instances.retain(|instance| workspace.spec.builtin_panels.contains(&instance.id.0));
         let retained = layout.instances.iter().map(|instance| instance.id.clone()).collect::<std::collections::BTreeSet<_>>();
         for section in &mut layout.sections {

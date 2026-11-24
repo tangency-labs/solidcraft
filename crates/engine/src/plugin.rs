@@ -90,6 +90,9 @@ pub struct AppState {
     pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
+    /// Set by the host for a workspace enter or exit hook: grouped commands that reach files are
+    /// refused and no folder is writable, whatever the grant store says. Never guest-visible.
+    pub(crate) workspace_hook: bool,
     pub packages: BTreeMap<String, String>,
     /// Transient, host-drawn panel state. Never serialised into a design.
     pub panels: BTreeMap<String, PanelPackage>,
@@ -461,7 +464,24 @@ pub fn run_with_ui_event(
     ui_event: Option<&ui::UiEvent>,
 ) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
-    run_package(session, package, entry, params, ui_event).map_err(messages::named(&name, None))
+    run_package(session, package, entry, params, ui_event, false).map_err(messages::named(&name, None))
+}
+
+/// What a workspace hook changed in its own plugin's panels. Nothing else leaves a hook.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PanelUpdates {
+    pub plugin: String,
+    /// The package approval the hook ran against; updates for another approval are dropped.
+    pub approval: String,
+    pub data: BTreeMap<String, ui::PanelData>,
+    /// Panels the hook asked to show or hide.
+    pub visible: BTreeMap<String, bool>,
+}
+
+impl PanelUpdates {
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty() && self.visible.is_empty()
+    }
 }
 
 /// Run a workspace's optional enter or exit entry against a discarded snapshot.
@@ -469,9 +489,16 @@ pub fn run_with_ui_event(
 /// The window calls this on its worker, so switching never waits for guest code. Hooks have
 /// at most one second, one million fuel and 32 MiB, or the package's or user's lower budget.
 /// The execution copy retains the original approval hash: narrowing a call's limits never
-/// changes which exact package the user approved. No computed state, camera or history is
-/// adopted, even if a host command classified as read changes transient session state.
-pub fn run_workspace_hook(session: &mut Session, mut package: Package, workspace: &str, entering: bool) -> Result<crate::schema::plugin::RunResult> {
+/// changes which exact package the user approved. A hook is read-only: no folder is writable
+/// and no command that reaches files runs. It adopts no computed state, camera or history, even
+/// if a host command classified as read changes transient session state. Its panel updates are
+/// returned as [`PanelUpdates`]; [`adopt_panel_updates`] applies them to the live session.
+pub fn run_workspace_hook(
+    session: &mut Session,
+    mut package: Package,
+    workspace: &str,
+    entering: bool,
+) -> Result<(crate::schema::plugin::RunResult, PanelUpdates)> {
     let name = package.manifest.name.clone();
     let result = (|| {
         let mut scratch = session.scratch();
@@ -488,15 +515,21 @@ pub fn run_workspace_hook(session: &mut Session, mut package: Package, workspace
             .ok_or_else(|| error("workspace hooks require ui@0.1"))?;
         let workspace_spec = declarations.workspaces.iter().find(|spec| spec.id == workspace).ok_or_else(|| error("unknown workspace"))?;
         let hook = if entering { &workspace_spec.on_enter } else { &workspace_spec.on_exit };
-        let Some(entry) = hook.clone() else {
-            return Ok(crate::schema::plugin::RunResult {
-                forms: vec![],
-                form_validation: None,
-                result: json!({}),
-                sketch_exits: vec![],
-                view: None,
-                param_warnings: vec![],
-            });
+        let hook = hook.clone();
+        let plugin = package.manifest.id.clone();
+        let approval = package.approval.clone();
+        let Some(entry) = hook else {
+            return Ok((
+                crate::schema::plugin::RunResult {
+                    forms: vec![],
+                    form_validation: None,
+                    result: json!({}),
+                    sketch_exits: vec![],
+                    view: None,
+                    param_warnings: vec![],
+                },
+                PanelUpdates { plugin, approval, ..Default::default() },
+            ));
         };
         let ceilings = host_limits_for(&scratch, &package.manifest.id, &package.approval);
         let runtime = package.manifest.runtime.as_mut().ok_or_else(|| error("no executable runtime"))?;
@@ -504,23 +537,51 @@ pub fn run_workspace_hook(session: &mut Session, mut package: Package, workspace
         if declared.kind != EntryKind::Command || declared.effect != Effect::Read {
             return Err(error("workspace hooks must be read-only command entries"));
         }
+        let params = json!({"workspace": workspace});
+        craft_plugin::check_input(&declared.input_schema, &params)
+            .map_err(|reason| error(format!("the hook entry {entry} must accept {{\"workspace\": <id>}}: {reason}")))?;
         runtime.limits = workspace_hook_limits(&runtime.limits, ceilings);
-        // Grouped read commands also receive no write authority. The component's own
-        // files interface already rejects writes from a read entry.
-        for grant in scratch.plugin_state.grants.values_mut() {
-            for folder in &mut grant.folders {
-                folder.write = false;
+        let before = scratch.plugin_state.panels.get(&plugin).cloned();
+        let result = run_package(&mut scratch, package, &entry, &params, None, true)?;
+        let mut updates = PanelUpdates { plugin: plugin.clone(), approval, ..Default::default() };
+        if let Some(after) = scratch.plugin_state.panels.get(&plugin) {
+            for (id, data) in &after.data {
+                if before.as_ref().and_then(|b| b.data.get(id)).unwrap_or(&ui::PanelData::default()) != data {
+                    updates.data.insert(id.clone(), data.clone());
+                }
+            }
+            for (id, revision) in &after.visibility_revision {
+                if before.as_ref().and_then(|b| b.visibility_revision.get(id)).copied().unwrap_or(0) != *revision {
+                    updates.visible.insert(id.clone(), after.visible.get(id).copied().unwrap_or(true));
+                }
             }
         }
-        let mut result = run_package(&mut scratch, package, &entry, &json!({"workspace": workspace}), None)?;
         // A hook is observational: it adopts no form, sketch exit or camera move.
+        let mut result = result;
         result.forms.clear();
         result.form_validation = None;
         result.sketch_exits.clear();
         result.view = None;
-        Ok(result)
+        Ok((result, updates))
     })();
     result.map_err(messages::named(&name, None))
+}
+
+/// Apply the panel changes a workspace hook made, to the live session. Only the plugin's own
+/// panels change, and only when the package is the one the hook ran against.
+pub fn adopt_panel_updates(session: &mut Session, updates: PanelUpdates) {
+    let Some(package) = session.plugin_state.panels.get_mut(&updates.plugin).filter(|package| package.approval == updates.approval) else { return };
+    for (id, data) in updates.data {
+        if let Some(slot) = package.data.get_mut(&id) {
+            *slot = data;
+        }
+    }
+    for (id, visible) in updates.visible {
+        if let Some(revision) = package.visibility_revision.get_mut(&id) {
+            *revision = revision.saturating_add(1);
+            package.visible.insert(id, visible);
+        }
+    }
 }
 
 fn workspace_hook_limits(requested: &Limits, ceilings: HostLimits) -> Limits {
@@ -538,6 +599,7 @@ fn run_package(
     entry: &str,
     params: &serde_json::Value,
     ui_event: Option<&ui::UiEvent>,
+    read_only: bool,
 ) -> Result<crate::schema::plugin::RunResult> {
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
@@ -571,10 +633,17 @@ fn run_package(
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
         // and for `file` commands the granted folders the manifest may both read and write.
-        let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+        let mut grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+        if read_only {
+            // After the last grant-store refresh, so nothing can restore write access.
+            for folder in &mut grants.folders {
+                folder.write = false;
+            }
+        }
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         panels::register_package(&mut scratch, &package)?;
+        scratch.plugin_state.workspace_hook = read_only;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
         scratch.plugin_state.storage_caller =
@@ -635,7 +704,7 @@ fn run_package(
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (params, ui_event);
+        let _ = (params, ui_event, read_only);
         Err(error("plugin execution requires an x86-64 or AArch64 native build with the plugins feature"))
     }
 }
@@ -789,6 +858,13 @@ impl PluginHost for SolidCraftHost {
                 || catalog_command(name).is_none_or(|command| command.effect != Effect::Read))
         {
             return Err(HostError::PermissionDenied { permission: format!("edit command {name} from read entry") });
+        }
+        // A workspace hook may not reach files: only the input readers, which are confined to
+        // read-only folders, and no other grouped command, whatever its declared effect.
+        if self.session.plugin_state.workspace_hook
+            && command_group(name).is_some_and(|group| !(matches!(group, "file" | "doc") && input_only_command(name)))
+        {
+            return Err(HostError::PermissionDenied { permission: format!("command {name} from a workspace hook") });
         }
         if catalog_command(name).is_none() {
             return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });

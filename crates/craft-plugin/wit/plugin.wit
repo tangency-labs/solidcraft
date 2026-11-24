@@ -306,7 +306,9 @@ interface ui {
     panels: list<tuple<dock-zone, list<string>>>,
     /// Host panels kept, for example "browser".
     builtin-panels: list<string>,
-    /// Read-only entries with a 1 s deadline.
+    /// Names of `read` command entries the host runs on entering and leaving the workspace, with
+    /// the input `{"workspace": id}` (the entry's input schema must accept it), a 1 s deadline,
+    /// no file writes, and no authority except updating this plugin's own panels.
     on-enter: option<string>,
     on-exit: option<string>,
   }
@@ -345,7 +347,8 @@ interface ui-provider {
   describe: func() -> declarations;
   /// The host turns user actions into events. They run as ordinary commands.
   on-event: func(event: ui-event) -> result<_, plugin-error>;
-  /// Called when a plugin workspace is entered or left, if declared.
+  /// Reserved; the host does not call these. A workspace's hooks are the `read` command entries named
+  /// by `on-enter` and `on-exit` in its `workspace-spec`.
   on-enter: func(workspace: string) -> result<_, plugin-error>;
   on-exit: func(workspace: string) -> result<_, plugin-error>;
 }

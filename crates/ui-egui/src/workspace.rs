@@ -57,7 +57,11 @@ pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
     if !matches!(workspace, "design" | "render" | "drawing") {
         return Err(app.tr("ui.plugin_workspace.unknown").to_owned());
     }
-    crate::plugin_workspaces::leave(app)?;
+    // Leaving is best effort: a plugin workspace that cannot restore its layout must never trap
+    // the user away from the built-in workspaces.
+    if let Some(reason) = crate::plugin_workspaces::leave_best_effort(app) {
+        app.messages.push(&reason, true, crate::now_ms());
+    }
     if app.preferences.workspace_follows_view {
         return focus_workspace(app, workspace);
     }
@@ -1446,6 +1450,32 @@ mod tests {
         );
         enter(&mut h.app, "plugin:manufacture/cam").unwrap();
         assert!(h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout().containing(&instance).unwrap().collapsed);
+    }
+
+    #[test]
+    fn entering_a_plugin_workspace_skips_a_builtin_panel_the_layout_does_not_have() {
+        let mut h = crate::scenario::Harness::new();
+        let mut plugin = workspace_plugin();
+        plugin.declarations.workspaces[0].builtin_panels = vec!["browser".into(), "no-such-panel".into()];
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        assert_eq!(crate::plugin_workspaces::active_id(&h.app), Some("plugin:manufacture/cam"));
+        let layout = h.app.panel_runtime.as_ref().unwrap().runtime().layout().layout();
+        assert!(layout.instances.iter().any(|instance| instance.id.0 == "browser"));
+        assert!(!layout.instances.iter().any(|instance| instance.id.0 == "no-such-panel"));
+    }
+
+    #[test]
+    fn a_plugin_workspace_that_cannot_restore_its_layout_never_traps_the_user() {
+        let mut h = crate::scenario::Harness::new();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        crate::plugin_workspaces::lose_return_layout(&mut h.app);
+        assert!(crate::plugin_workspaces::leave(&mut h.app).is_err());
+        enter(&mut h.app, "design").unwrap();
+        assert!(crate::plugin_workspaces::active_id(&h.app).is_none());
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(h.app.messages.iter().any(|message| message.error), "the reason is kept in Messages");
     }
 
     #[test]

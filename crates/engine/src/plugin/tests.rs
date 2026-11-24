@@ -200,7 +200,7 @@ fn workspace_hooks_require_enabled_plugins_and_the_ui_capability() {
     assert!(run_workspace_hook(&mut session, package(workspace_manifest()), "missing", true).unwrap_err().to_string().contains("unknown workspace"));
     let mut value = workspace_manifest();
     value["runtime"]["ui"]["workspaces"][0]["on_enter"] = Value::Null;
-    assert_eq!(run_workspace_hook(&mut session, package(value), "manufacture", true).unwrap().result, json!({}));
+    assert_eq!(run_workspace_hook(&mut session, package(value), "manufacture", true).unwrap().0.result, json!({}));
     assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
     assert_eq!(session.plugin_state, state);
     assert!(session.undo.is_empty() && session.redo.is_empty());
@@ -1060,8 +1060,15 @@ mod native {
             }
         }
     }
+    fn sync_panels_for_test(session: &mut Session, fixture: &Fixture) {
+        panels::register_package(session, &read_package(&fixture.path()).unwrap()).unwrap();
+    }
     /// A ui@0.1 plugin whose `make` entry is read-only and runs `command` once, then posts to its panel.
     fn workspace_fixture(command: &str, args: &str) -> Fixture {
+        workspace_fixture_running(command, args, "call $box")
+    }
+    /// The same plugin, whose entry runs `code` in place of its one command call.
+    fn workspace_fixture_running(command: &str, args: &str, code: &str) -> Fixture {
         let fixture = Fixture::new("call $box");
         let mut manifest = workspace_manifest();
         manifest["runtime"]["commands"] = json!([command]);
@@ -1078,7 +1085,9 @@ mod native {
             .replace("__COMMAND__", command)
             .replace("__COMMAND_LEN__", &command.len().to_string())
             .replace("__ARGS__", &args.replace('"', "\\22"))
-            .replace("__ARGS_LEN__", &args.len().to_string());
+            .replace("__ARGS_LEN__", &args.len().to_string())
+            .replacen("      call $box\n      i32.const 6016", &format!("      {code}\n      i32.const 6016"), 1);
+        assert!(source.contains(code), "the entry body is replaced");
         std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
         std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
         fixture
@@ -1096,7 +1105,7 @@ mod native {
         let camera = session.camera;
         let token = session.design_token();
         for entering in [true, false] {
-            let result = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", entering).unwrap();
+            let (result, _) = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", entering).unwrap();
             assert!(result.sketch_exits.is_empty() && result.view.is_none());
             assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
             assert_eq!(session.plugin_state, state, "the hook's panel data and grants stay in its scratch session");
@@ -1104,6 +1113,121 @@ mod native {
             assert_eq!(session.camera, camera);
             assert_eq!(session.design_token(), token);
         }
+    }
+
+    #[test]
+    fn workspace_hooks_stop_at_the_fuel_and_memory_caps() {
+        for (code, diagnostic) in [("(loop $forever br $forever)", "1000000 fuel"), ("i32.const 10000 memory.grow drop", "32 MiB")] {
+            let f = workspace_fixture_running("document.inspect", "{}", code);
+            let mut session = Session::default();
+            let before = session.doc.clone();
+            let token = session.design_token();
+            let error = run_workspace_hook(&mut session, read_package(&f.path()).unwrap(), "manufacture", true).unwrap_err();
+            assert!(error.to_string().contains(diagnostic), "{code}: {error}");
+            assert!(std::sync::Arc::ptr_eq(&session.doc, &before));
+            assert_eq!(session.design_token(), token);
+        }
+    }
+
+    #[test]
+    fn workspace_hooks_run_under_the_one_second_deadline() {
+        // The fuel cap ends any guest loop in milliseconds, so the deadline is checked where it is
+        // set: a package asking for minutes still gets one second, and a smaller ask is kept.
+        let long = Limits { fuel: u64::MAX, memory_mib: 256, deadline_ms: 600_000, stack_kib: None };
+        assert_eq!(workspace_hook_limits(&long, HostLimits::default()).deadline_ms, 1000);
+        assert_eq!(workspace_hook_limits(&Limits { deadline_ms: 50, ..long }, HostLimits::default()).deadline_ms, 50);
+    }
+
+    #[test]
+    fn workspace_hooks_write_no_file_through_a_granted_folder() {
+        // The guest's own write-file: an edit entry, so only the stripped write grant stands in the way.
+        let f = Fixture::new("");
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(true)).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants {
+                package_hash: Some(package.approval.clone()),
+                folders: vec![FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true }],
+                ..Default::default()
+            },
+        );
+        let state = session.plugin_state.clone();
+        let error = run_package(&mut session.scratch(), package, "make", &json!({}), None, true).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.starts_with("files.write")), "{error}");
+        assert!(!f.0.join("sample/secret.txt").exists());
+        assert_eq!(session.plugin_state, state);
+        // The same call without the hook flag does write: the refusal comes from the flag.
+        let package = read_package(&f.path()).unwrap();
+        let mut scratch = session.scratch();
+        run_package(&mut scratch, package, "make", &json!({}), None, false).unwrap();
+        assert!(f.0.join("sample/secret.txt").exists());
+    }
+
+    #[test]
+    fn workspace_hooks_refuse_a_grouped_read_command_that_writes_a_file() {
+        let f = workspace_fixture("file.export", r#"{"path":"hook-export.step","format":"step"}"#);
+        let mut m: Value = serde_json::from_slice(&std::fs::read(f.0.join("sample/plugin.json")).unwrap()).unwrap();
+        m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.execute("solid.box", &json!({"length":1,"width":2,"height":3})).unwrap();
+        session.plugin_state.grants.insert(
+            "sample".into(),
+            Grants {
+                package_hash: Some(package.approval.clone()),
+                command_groups: BTreeSet::from(["file".into()]),
+                folders: vec![FileGrant { name: "project".into(), folder: f.0.join("sample"), read: true, write: true }],
+                ..Default::default()
+            },
+        );
+        let error = run_workspace_hook(&mut session, package, "manufacture", true).unwrap_err();
+        assert!(error.to_string().contains("from a workspace hook"), "{error}");
+        assert!(!f.0.join("sample/hook-export.step").exists());
+    }
+
+    #[test]
+    fn a_failed_workspace_hook_leaves_plugin_state_and_grants_unchanged() {
+        let f = workspace_fixture_running("document.inspect", "{}", "(loop $forever br $forever)");
+        let package = read_package(&f.path()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(package.approval.clone()), ..Default::default() });
+        let state = session.plugin_state.clone();
+        assert!(run_workspace_hook(&mut session, package, "manufacture", true).is_err());
+        assert_eq!(session.plugin_state, state);
+    }
+
+    #[test]
+    fn workspace_hooks_hand_back_only_their_panel_updates() {
+        let f = workspace_fixture("document.inspect", "{}");
+        let package = read_package(&f.path()).unwrap();
+        let approval = package.approval.clone();
+        let mut session = Session::default();
+        session.plugin_state.grants.insert("sample".into(), Grants { package_hash: Some(approval.clone()), ..Default::default() });
+        sync_panels_for_test(&mut session, &f);
+        let doc = session.doc.clone();
+        let (_, updates) = run_workspace_hook(&mut session, package, "manufacture", true).unwrap();
+        assert_eq!((updates.plugin.as_str(), updates.approval.as_str()), ("sample", approval.as_str()));
+        assert!(updates.data.contains_key("jobs"), "the hook filled its panel");
+        assert!(session.plugin_panels().iter().all(|panel| panel.data.values().is_empty()), "nothing is adopted until the window asks");
+        adopt_panel_updates(&mut session, updates.clone());
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&ui::UiValue::Text("ready".into())));
+        assert!(std::sync::Arc::ptr_eq(&session.doc, &doc));
+        // Updates for another approval of the package are dropped.
+        let mut stale = updates;
+        stale.approval = "other".into();
+        session.plugin_state.panels.get_mut("sample").unwrap().data.get_mut("jobs").unwrap().clear_data();
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), None);
+        adopt_panel_updates(&mut session, stale);
+        session.merge_plugin_panel_data();
+        assert_eq!(session.plugin_panels()[0].data.get("/jobs/0/state"), None, "another approval's updates are not adopted");
     }
 
     #[test]
