@@ -782,4 +782,36 @@ mod tests {
         let start = solidcore_ops::pcurve::eval(&pcs[1][0], 0.0).unwrap();
         assert!((start[0] - 0.5).abs() < 1e-12, "{start:?}");
     }
+
+    /// #21750: a piece that starts a hair (1e-15) off the axis has its angle's rate enclosed
+    /// within about ±1e29, so its angle range spans more quarters than an f64 counter can step.
+    #[test]
+    fn a_piece_whose_angle_range_spans_more_quarters_than_a_float_can_count_is_unbounded() {
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ax = Axis {
+                origin: Vec3::new(0.0, 0.0, 0.0),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, 1.0, 0.0),
+                z: Vec3::new(0.0, 0.0, 1.0),
+                radius: Box::new(|_| 1.0),
+            };
+            for i in 0..32 {
+                let gap = 1e-15 * (1.0 + f64::from(i) / 32.0);
+                let source = Source::Line { start: [gap, gap, 0.0], direction: [1.0, 1.0, 0.0] };
+                let end = |t: f64| End { t, theta: (gap + t).atan2(gap + t), u: 0.0, v: 0.0, du: 0.0, dv: 0.0, d_theta: 0.0 };
+                let verdict = match lift_bound(&ax, &source, [end(0.0), end(1.0)]) {
+                    Ok(Verdict::Unbounded) => "unbounded".to_string(),
+                    Ok(Verdict::Kink(at)) => format!("a kink at {at}"),
+                    Ok(Verdict::Within(bound)) => format!("within {bound}"),
+                    Err(e) => e,
+                };
+                send.send((gap, verdict)).unwrap();
+            }
+        });
+        for _ in 0..32 {
+            let (gap, verdict) = receive.recv_timeout(std::time::Duration::from_secs(20)).expect("lift_bound did not return within 20 s");
+            assert_eq!(verdict, "unbounded", "gap {gap}");
+        }
+    }
 }
