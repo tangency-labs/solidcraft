@@ -116,6 +116,7 @@ pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2
     let Some(form) = b.ops_body() else {
         return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
     };
+    let (ops, _) = &*form;
     let (o, x, y) = (plane.origin, plane.x, plane.y);
     form.0
         .levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
