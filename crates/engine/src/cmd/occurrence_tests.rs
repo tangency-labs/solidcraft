@@ -2859,3 +2859,42 @@ fn component_names_count_characters_not_bytes() {
     let error = s.execute("component.rename", &json!({"component": component, "name": "ł".repeat(129)})).unwrap_err().to_string();
     assert!(error.contains("1…128 characters"), "{error}");
 }
+
+/// The Browser's index of placed bodies (their path, by world name) makes the design's name
+/// index once for the whole walk, not once at every placement: naming each placement on its own
+/// built the index for every placement, and on a 100-printer assembly that was 14 s inside one
+/// frame on the window thread.
+#[test]
+fn the_browser_body_paths_make_the_name_index_once() {
+    let mut s = Session::default();
+    let (assembly_component, assembly) = created(&mut s, "Assembly");
+    run(&mut s, "component.activate", json!({"component": assembly_component}));
+    let (part, _) = created(&mut s, "Part");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Part"}));
+    let mut copies = Vec::new();
+    for i in 0..130 {
+        let o = run(&mut s, "occurrence.copy", json!({"component": part, "translate": [i as f64 * 10.0, 0.0, 0.0]}));
+        copies.push(o["occurrence"].as_u64().unwrap());
+    }
+    let (doc, state) = (s.doc.clone(), s.model.state());
+    crate::occurrences::NAME_INDEXES.with(|n| n.set(0));
+    let paths = crate::occurrences::body_paths(&doc, &state);
+    assert_eq!(crate::occurrences::NAME_INDEXES.with(std::cell::Cell::get), 1, "one name index for the 131 placements");
+    // Every placed body is named at its own path, exactly as `Session::occurrence_placement`
+    // names it: the Browser's answer is the same one.
+    let mut named = 0;
+    for o in &copies {
+        let path = vec![assembly, *o];
+        let placement = s.occurrence_placement(&path).unwrap();
+        for body in &placement.bodies {
+            assert_eq!(paths.get(&body.world), Some(&path), "{body:?}");
+            named += 1;
+        }
+    }
+    assert_eq!(named, copies.len(), "each copy's body");
+    // Every entry names a body at the path it is placed at, and nothing else.
+    for (world, path) in &paths {
+        let placement = s.occurrence_placement(path).expect("a path the index named");
+        assert!(placement.bodies.iter().any(|b| &b.world == world), "{world} at {path:?}");
+    }
+}

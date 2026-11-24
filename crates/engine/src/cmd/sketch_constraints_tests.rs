@@ -2161,3 +2161,91 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
     assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
 }
+
+/// An arc's centre and radius, as the sketch holds them.
+fn round_of(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, f64) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, .. } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    (sk.point(c).unwrap(), sk.radius(i).unwrap())
+}
+
+/// Where the point halfway along an arc lies, from the arc as the sketch holds it, and the middle
+/// of its chord.
+fn arc_middles(sk: &solidcraft_sketch::Sketch, id: &str) -> (Vec2, Vec2) {
+    let i = sk.curve_index(id).unwrap();
+    let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[i].kind else { panic!("{id} is not an arc") };
+    let (centre, start, end) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+    let mut sweep = (end - centre).angle() - (start - centre).angle();
+    while sweep <= 0.0 {
+        sweep += std::f64::consts::TAU;
+    }
+    let half = (start - centre).angle() + sweep / 2.0;
+    let radius = centre.dist(start);
+    (centre + Vec2::new(radius * half.cos(), radius * half.sin()), (start + end) * 0.5)
+}
+
+/// MidPoint on an arc: the point goes halfway along the arc, which is not the middle of its
+/// chord, from a point and an arc picked either way round or given as `point` and `line`; it
+/// stays there when the arc's radius is dimensioned afterwards (#16860).
+#[test]
+fn midpoint_holds_a_point_halfway_along_an_arc() {
+    for form in 0..3 {
+        let mut s = new_sketch();
+        let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+        run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+        let params = match form {
+            0 => json!({"point": "m", "line": arc}),
+            1 => json!({"a": "m", "b": arc}),
+            _ => json!({"a": arc, "b": "m"}),
+        };
+        let made = run(&mut s, "sketch.constraint.midpoint", params);
+        assert_eq!(made["sketch"]["solved"], true, "form {form}: {made}");
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (middle, chord) = arc_middles(&sk, &arc);
+        assert!(m.dist(middle) < 1e-5, "form {form}: {m:?} should be halfway along the arc, at {middle:?}");
+        // The arc stays and the point comes to it, whichever way it was named: halfway along the
+        // arc, not at the middle of its chord (5, 5).
+        let r = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+        assert!(m.dist(Vec2::new(r, r)) < 1e-5, "form {form}: {m:?}");
+        assert!(m.dist(chord) > 1.0, "form {form}: not the middle of the chord {chord:?}: {m:?}");
+        run(&mut s, "sketch.dimension", json!({"entities": [arc], "value": 20}));
+        let sk = sketch(&s);
+        let m = sk.point(sk.resolve_point("m").unwrap()).unwrap();
+        let (centre, radius) = round_of(&sk, &arc);
+        assert!((radius - 20.0).abs() < 1e-6, "form {form}: radius {radius}");
+        assert!(m.dist(arc_middles(&sk, &arc).0) < 1e-5, "form {form}: still halfway along the arc: {m:?} (centre {centre:?})");
+    }
+}
+
+/// What MidPoint on an arc refuses: a circle, which has no middle, and one of the arc's own
+/// ends, which would shrink the arc to a point.
+#[test]
+fn midpoint_refuses_a_circle_and_an_end_of_the_arc() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 0], "radius": 5}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": "m", "b": circle})).unwrap_err().to_string();
+    assert!(e.contains("a point and a line or an arc"), "{e}");
+    let end = sketch(&s).curves.iter().find_map(|c| (c.id == arc).then(|| c.kind.ends())).flatten().unwrap().0;
+    let end = sketch(&s).points[end].id.clone();
+    let e = s.execute("sketch.constraint.midpoint", &json!({"a": end, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("an arc's own end"), "{e}");
+}
+
+/// A menu or toolbar offers MidPoint for a point picked with an arc, but not with a circle, which
+/// has no ends (#16860).
+#[test]
+fn midpoint_is_offered_for_a_point_and_an_arc_but_not_a_circle() {
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}))["curves"])[0].clone();
+    run(&mut s, "sketch.point", json!({"point": [3, 1], "id": "m", "connect": false}));
+    let midpoint = crate::find_command("sketch.constraint.midpoint").unwrap();
+    let pick = |curve: &str| vec![crate::Sel::SketchPoint { id: "m".into() }, crate::Sel::SketchCurve { id: curve.into(), sketch: None }];
+    s.selection = pick(&arc);
+    assert!(midpoint.for_selection(&s).is_some(), "a point and an arc");
+    s.selection = pick(&circle);
+    assert!(midpoint.for_selection(&s).is_none(), "a point and a circle");
+}

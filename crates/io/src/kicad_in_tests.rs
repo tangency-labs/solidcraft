@@ -1166,6 +1166,61 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
     }
 }
 
+/// `(drill … (offset dx dy))` moves a pad's copper off its hole, in the pad's own frame: the hole
+/// stays at the pad's position (checked with kicad-cli 10: its drill file and copper plot). Library
+/// footprints use it for hand-soldering pads and module castellations (Adafruit Feather, Raspberry
+/// Pi Pico, TO-92 HandSolder); an SMD pad writes it without a drill size.
+#[test]
+fn a_pad_offset_moves_the_copper_off_its_hole() {
+    let front_copper = |at: &str, pad: &str| {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 40 20) (layer "Edge.Cuts"))
+              (footprint "test:Offset" (layer "F.Cu") (at {at})
+                (property "Reference" "J1")
+                {pad}))"#
+        );
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+        let mut load = |_: &str| Err("not used".to_string());
+        let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
+        let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
+        let drills: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        let area = copper_area(&imported, "Copper F.Cu", 0.035);
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+        let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("front copper");
+        let points = mesh.positions.as_chunks::<3>().0;
+        let low = |i: usize| points.iter().map(|p| p[i]).fold(f64::MAX, f64::min);
+        let high = |i: usize| points.iter().map(|p| p[i]).fold(f64::MIN, f64::max);
+        ([low(0), high(0), low(1), high(1)], area, drills)
+    };
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    // A 3 × 2 pad drilled 1 mm, its copper 0.5 mm to the right of the hole: copper from X 9 to 12
+    // (KiCad's Y 9 to 11, -11 to -9 here), the hole still at the footprint's origin and inside it.
+    let (extent, area, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 0 0) (size 3 2) (drill 1 (offset 0.5 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [9.0, 12.0, -11.0, -9.0]), "{extent:?}");
+    assert_eq!(drills, [[10.0, -10.0]], "the hole stays at the pad's position");
+    let expected = 6.0 - std::f64::consts::PI * 0.25;
+    assert!((area - expected).abs() < 0.05, "the hole opens the shifted copper: {area} vs {expected}");
+
+    // A pad turned a quarter turn turns its offset too: (3, 0) puts the copper 3 mm up the board
+    // (KiCad's Y 6 to 8 for a pad at Y 10).
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 10 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+
+    // An SMD pad has an offset and no drill: the copper moves and no hole comes in.
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" smd rect (at 0 5) (size 1 1) (drill (offset 3 0)) (layers "F.Cu"))"#);
+    assert!(near(extent, [12.5, 13.5, -15.5, -14.5]), "{extent:?}");
+    assert!(drills.is_empty(), "{drills:?}");
+
+    // On a turned footprint the file writes the pad's angle on the board (90° here), and the offset
+    // turns with the pad: KiCad draws this copper from X 19 to 21 and Y 6 to 8, hole at (20, 10).
+    let (extent, _, drills) = front_copper("20 10 90", r#"(pad "1" thru_hole rect (at 0 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+}
+
 #[test]
 fn a_stroke_is_one_outline_with_mitered_corners() {
     let region = stroke_region(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], 2.0, false).expect("a stroke outline");
@@ -1388,4 +1443,86 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
     // The pad with the via's drill open through it: the pad data names no drill of its own.
     let expected = 9.0 - std::f64::consts::PI * 0.3 * 0.3;
     assert!((area - expected).abs() < 0.05, "{area} vs {expected}");
+}
+
+/// A pour with a square hole, as KiCad saves a fill: one outline that runs in to the hole along a
+/// zero-width bridge, round the hole and back out along the same line.
+const BRIDGED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 10)
+      (xy 8 10) (xy 8 12) (xy 12 12) (xy 12 8) (xy 8 8) (xy 8 10) (xy 2 10)))))"#;
+
+#[test]
+fn a_fill_s_bridges_to_its_holes_are_taken_out() {
+    let board = parse_kicad_board(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    // The outline and the hole, each a loop of its own, and no edge run both ways.
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4], "{:?}", zone.contours);
+    // Drawn, the pour's open edges are the outline and the hole's, not the bridge as well.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &imported.feature.kind else { panic!("expected a mesh import") };
+    let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("the pour");
+    let points = mesh.positions.as_chunks::<3>().0;
+    let mut uses: HashMap<(u32, u32), i32> = HashMap::new();
+    for [a, b, c] in mesh.triangles.as_chunks::<3>().0.iter().copied() {
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            *uses.entry((p.min(q), p.max(q))).or_default() += 1;
+        }
+    }
+    let open: f64 = uses
+        .iter()
+        .filter(|(_, n)| **n == 1)
+        .map(|((p, q), _)| {
+            let (p, q) = (points[*p as usize], points[*q as usize]);
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2)).sqrt()
+        })
+        .sum();
+    assert!((open - (64.0 + 16.0)).abs() < 1e-6, "open edges {open} mm: the bridge is drawn");
+}
+
+/// Two holes, the second bridged on from the first, as KiCad's fill joins neighbouring holes.
+const CHAINED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 6) (xy 4 6) (xy 4 8) (xy 8 8)
+      (xy 8 6) (xy 12 6) (xy 12 8) (xy 16 8) (xy 16 4) (xy 12 4) (xy 12 6) (xy 8 6) (xy 8 4) (xy 4 4) (xy 4 6) (xy 2 6)))))"#;
+
+#[test]
+fn a_fill_s_holes_bridged_one_to_the_next_are_each_a_loop() {
+    let board = parse_kicad_board(CHAINED_FILL.as_bytes(), "chained.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4, 4], "the outline and two holes: {:?}", zone.contours);
+}
+
+#[test]
+fn a_hatched_fill_s_thousands_of_holes_are_taken_apart_in_one_pass() {
+    // One pour, 2500 holes each bridged from its bottom edge: 17,500 points in one polygon.
+    const HOLES: usize = 2500;
+    let width = 2.0 * HOLES as f64 + 1.0;
+    let mut pts = String::from("(xy 0 0)");
+    for i in 0..HOLES {
+        let (x0, x1) = (2.0 * i as f64 + 0.5, 2.0 * i as f64 + 1.5);
+        pts += &format!(" (xy {x0} 0) (xy {x0} 1) (xy {x0} 2) (xy {x1} 2) (xy {x1} 1) (xy {x0} 1) (xy {x0} 0)");
+    }
+    pts += &format!(" (xy {width} 0) (xy {width} 3) (xy 0 3)");
+    let text = format!(
+        r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -1 -1) (end {} 4) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu") (filled_polygon (layer "F.Cu") (pts {pts}))))"#,
+        width + 1.0
+    );
+    let board = parse_kicad_board(text.as_bytes(), "hatched.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    assert_eq!(zone.contours.len(), HOLES + 1, "the outline and every hole");
+    assert!(zone.contours.iter().all(|c| c.len() == 4), "each a plain rectangle");
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(text.as_bytes(), "hatched.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }

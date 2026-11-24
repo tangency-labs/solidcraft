@@ -107,6 +107,7 @@ use crate::curve::curve::p5::{
     is_point_solution_across_closed_seam_boundary, local_property_analysis,
 };
 use crate::curve::curve_cache::CurveCache;
+use crate::error::curve::CurveFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -1569,56 +1570,87 @@ impl Curve {
         // curves come nearest, a point (fork 04b42b4, case 3e). A separation that changes sides
         // is left to the merged range (`contacts_seen_through_tolerance`, WR-647), and so is
         // one that vanishes to numeric zero (it has no side).
-        if k.fixes.simple_coincidence_crossing_is_point {
-            let this_a = self.evaluate_point(k, first.0)?;
-            let this_b = self.evaluate_point(k, last.0)?;
-            let other_a = other.evaluate_point(k, first.1)?;
-            let other_b = other.evaluate_point(k, last.1)?;
-            // The side is taken across this curve, its tangent's component removed. An end
-            // of one curve that runs past the other's end drops onto that end, and the
-            // pair's difference then points along the curves, forward at one end and back at
-            // the other, for two curves that lie on each other; upstream took that for a
-            // crossing.
-            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
-            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
-            let scaled_zero =
-                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
-            let changes_sides = separation_a.length() > scaled_zero
-                && separation_b.length() > scaled_zero
-                && separation_a.dot(separation_b) < 0.0;
-            if !changes_sides && distance_between > scaled_zero {
-                let (found, mut nearest) = self.local_curve_solve(
-                    k,
-                    &ivl_t1,
-                    other,
-                    &ivl_t2,
-                    SolverOperation::Minimize,
-                    tol,
-                    None,
-                    None,
-                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
-                    objects,
-                )?;
-                if !found {
-                    // curves within tolerance but no nearest point found
-                    return Err(SolidError::curve_failed(
-                        "curve::simple_coincidence_checker (nearest)",
-                        "the curves are within tolerance but no nearest point was found",
-                    ));
-                }
-                nearest.num_variables = 2;
-                nearest.num_objects = 2;
-                nearest.solution_type = SolutionType::SingleValue;
-                nearest.objects[0] = objects[0];
-                nearest.objects[1] = objects[1];
-                return Ok(vec![nearest]);
+        if k.fixes.simple_coincidence_crossing_is_point
+            && self.approaches_without_crossing(
+                k,
+                other,
+                (first.0, first.1),
+                (last.0, last.1),
+                distance_between,
+            )?
+        {
+            let (found, mut nearest) = self.local_curve_solve(
+                k,
+                &ivl_t1,
+                other,
+                &ivl_t2,
+                SolverOperation::Minimize,
+                tol,
+                None,
+                None,
+                [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                objects,
+            )?;
+            if !found {
+                // curves within tolerance but no nearest point found
+                return Err(SolidError::curve(
+                    "curve::simple_coincidence_checker (nearest)",
+                    CurveFailure::NearestNotFound,
+                ));
             }
+            nearest.num_variables = 2;
+            nearest.num_objects = 2;
+            nearest.solution_type = SolutionType::SingleValue;
+            nearest.objects[0] = objects[0];
+            nearest.objects[1] = objects[1];
+            return Ok(vec![nearest]);
         }
 
         // add 1 coincident intersection to solution array (whether a range found here is a
         // crossing seen through the tolerance is decided on the merged range, in
         // `GlobalCurveIntersect`: one span pair cannot tell, see WR-647 in the header)
         Ok(vec![pair_solution(objects, first, Some(last))])
+    }
+
+    /// Not upstream (case 3e, WR-647): whether a stretch of this curve over which `other`
+    /// stays within tolerance is an approach rather than a coincidence. The stretch runs
+    /// from the parameter pair `first` to `last` (this curve's, then `other`'s), and
+    /// `distance_between` is the largest distance between the curves over it. An approach
+    /// keeps one side without vanishing: the separation across this curve does not change
+    /// sides between the two ends, and the largest distance is above numeric zero. A
+    /// separation that changes sides is a crossing seen through the tolerance, and one that
+    /// vanishes has no side. The side is taken across this curve, with its tangent's
+    /// component removed. Where an end of one curve runs past the other's end, it drops
+    /// onto that end. The pair's difference then points along the curves, forward at one
+    /// end and back at the other, for two curves that lie on each other, and upstream took
+    /// that for a crossing.
+    ///
+    /// [`Curve::simple_coincidence_checker`] asks this under
+    /// `Kernel::fixes.simple_coincidence_crossing_is_point`. The face/face tangency witness
+    /// ([`crate::intersect::curve_class::witness`]) asks it of a merged range's own ends.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    pub(crate) fn approaches_without_crossing(
+        &self,
+        k: &Kernel,
+        other: &Self,
+        first: (f64, f64),
+        last: (f64, f64),
+        distance_between: f64,
+    ) -> Result<bool> {
+        let this_a = self.evaluate_point(k, first.0)?;
+        let this_b = self.evaluate_point(k, last.0)?;
+        let other_a = other.evaluate_point(k, first.1)?;
+        let other_b = other.evaluate_point(k, last.1)?;
+        let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+        let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
+        let scaled_zero = EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+        let changes_sides = separation_a.length() > scaled_zero
+            && separation_b.length() > scaled_zero
+            && separation_a.dot(separation_b) < 0.0;
+        Ok(!changes_sides && distance_between > scaled_zero)
     }
 
     /// `v` without its component along this curve's tangent at `t`; `v` itself where the
@@ -2345,30 +2377,28 @@ impl Curve {
             if surface.approx_eq(k, curve.surface())? {
                 let ends = curve.uv_curve().ends(k)?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
-                let drop_target =
-                    |target: Option<Point3>, current: Point3| -> Result<Option<Point3>> {
-                        let Some(target) = target else {
-                            return Ok(None);
-                        };
-                        let options = crate::surface::surface::p5::DropPointOptions {
-                            guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
-                            ..Default::default()
-                        };
-                        // (status ignored upstream; as the fork a failed drop is passed on
-                        // and a target that does not drop onto the surface has no UV
-                        // point, SM_ERR, tangency-labs/smlib 8311f8e)
-                        let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
-                            k, target, &domain, &options,
-                        )?;
-                        if !dropped.success {
-                            return Err(SolidError::curve_failed(
-                                OP_DEFORM,
-                                "the point did not drop onto the surface",
-                            ));
-                        }
-                        let uv = dropped.result_uv;
-                        Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
+                let drop_target = |target: Option<Point3>,
+                                   current: Point3|
+                 -> Result<Option<Point3>> {
+                    let Some(target) = target else {
+                        return Ok(None);
                     };
+                    let options = crate::surface::surface::p5::DropPointOptions {
+                        guess_uv: Some(crate::math::Vec2::new(current.x, current.y)),
+                        ..Default::default()
+                    };
+                    // (status ignored upstream; as the fork a failed drop is passed on
+                    // and a target that does not drop onto the surface has no UV
+                    // point, SM_ERR, tangency-labs/smlib 8311f8e)
+                    let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+                        k, target, &domain, &options,
+                    )?;
+                    if !dropped.success {
+                        return Err(SolidError::curve(OP_DEFORM, CurveFailure::TargetDidNotDrop));
+                    }
+                    let uv = dropped.result_uv;
+                    Ok(Some(Point3::new(uv.x, uv.y, 0.0)))
+                };
                 let start = drop_target(tgt_start, ends.start)?;
                 let end = drop_target(tgt_end, ends.end)?;
                 let (start, end) = if orientation
@@ -2506,7 +2536,7 @@ impl Curve {
 
 /// Whether every corner coordinate of `b` is a number within
 /// [`crate::limits::MAX_COORDINATE_MAGNITUDE`].
-pub(super) fn is_measurable_box(b: &Extent3d) -> bool {
+pub(crate) fn is_measurable_box(b: &Extent3d) -> bool {
     let (min, max) = (b.min(), b.max());
     [min.x, min.y, min.z, max.x, max.y, max.z]
         .iter()

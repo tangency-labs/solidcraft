@@ -418,7 +418,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
@@ -1247,34 +1247,39 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        // On several selected features an entry acts on them all or cannot be used; the entries
+        // that take one feature go through `one_row`.
+        let rule = crate::timeline::menu_rule(app, id);
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, edit_label, edit_icon, on)).clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && crate::ui_kit::menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
+            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Rename Feature", "rename").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on)).clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        // The entry for every selected feature takes this one's place. With the rule off it is
+        // an extra entry, and this one still acts on this feature alone.
+        if !rule.many && crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
-        // An extra entry for the selection; the one above still acts on this feature alone.
         if let Some((label, params)) = crate::timeline::suppress_selected(app, id)
             && crate::ui_kit::menu::button(ui, &label, "suppress").clicked()
         {
             let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
-        if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on)).clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }
@@ -2275,7 +2280,8 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Profile"}})).unwrap();
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id: profile }], "the row under the feature is the sketch");
         h.step(&json!({"click": {"handle": "timeline:Profile"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Edit Feature"})).unwrap();
+        // A sketch's row names the item as the Browser does (#14366).
+        h.step(&json!({"widget": "Edit Sketch"})).unwrap();
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(profile));
         assert!(row_y("timeline:Profile") < row_y("timeline:rollback") && row_y("timeline:rollback") < row_y("timeline:Block"));

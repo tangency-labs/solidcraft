@@ -1834,7 +1834,9 @@ mod tests {
         h.frames(2);
         assert!(!placing_dimension(&h.app), "and Esc puts it down");
 
-        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M"}));
+        // M is now Sketch Move's default. Explicitly replace that sketch binding.
+        let bound = h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M", "replace": true}));
+        assert!(bound["error"].is_null(), "{bound}");
         h.step(&json!({"key":"D"})).unwrap();
         h.frames(2);
         assert!(!placing_dimension(&h.app), "the old key no longer starts it");
