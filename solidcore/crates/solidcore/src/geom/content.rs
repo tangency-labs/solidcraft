@@ -185,12 +185,20 @@ mod tests {
         let faces = b
             .faces()
             .iter()
-            .map(|(_, f)| f.surface.as_ref().and_then(crate::surface::surface::Surface::content_id))
+            .map(|(_, f)| {
+                f.surface
+                    .as_ref()
+                    .and_then(crate::surface::surface::Surface::content_id)
+            })
             .collect();
         let edges = b
             .edges()
             .iter()
-            .map(|(_, e)| e.curve.as_ref().and_then(crate::curve::curve::Curve::content_id))
+            .map(|(_, e)| {
+                e.curve
+                    .as_ref()
+                    .and_then(crate::curve::curve::Curve::content_id)
+            })
             .collect();
         (faces, edges)
     }
