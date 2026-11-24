@@ -3687,3 +3687,54 @@ fn iso_line_across_a_round_hole_stops_at_both_sides() {
         assert!((point.dist(center) - 5.0).abs() < 1e-7);
     }
 }
+
+/// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with
+/// corners 1e-9 apart stop the triangulation library on an assertion; the mesher's own guard
+/// catches it and returns an internal error, but the crash reports read [`guarded`], which did
+/// not count the mesher's guard, so a caught panic was reported as a crash.
+#[test]
+fn a_panic_the_mesher_catches_counts_as_guarded() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let loops = vec![
+        vec![
+            [1.999999999609, 4.000000000408],
+            [2.999999999249, 5.77e-10],
+            [1.000000000478, 2.000000000614],
+            [1.000000000991, 1.000000000228],
+            [2.000000000482, 3.99999999949],
+            [1.999999999672, -9.53e-10],
+            [3.000000000364, 0.99999999994],
+            [-1.05e-10, 3.999999999914],
+            [1.999999999286, 1.000000000788],
+        ],
+        vec![
+            [4.000000000261, 1.999999999246],
+            [1.999999999553, -4.57e-10],
+            [1.999999999469, 1.000000000877],
+            [3.999999999666, 2.000000000137],
+            [3.76e-10, 2.99999999915],
+            [4.000000000737, 3.000000000668],
+            [1.000000000447, 1.000000000422],
+            [0.999999999585, 0.999999999164],
+            [0.999999999585, 3.000000000598],
+        ],
+    ];
+    let me = std::thread::current().id();
+    let (panics, unguarded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (p, u) = (panics.clone(), unguarded.clone());
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            p.fetch_add(1, Ordering::SeqCst);
+            if !guarded() {
+                u.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }));
+    let result = solidcore_tess::triangulate_planar(&loops);
+    std::panic::set_hook(prev);
+    assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
+    assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
+    assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
+}
