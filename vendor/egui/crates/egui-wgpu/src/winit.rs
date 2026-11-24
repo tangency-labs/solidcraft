@@ -641,9 +641,9 @@ impl Painter {
         capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
-        // SolidCraft: a device lost while the frame is drawn, after its probe, panics inside wgpu
-        // at the first queue write to meet it (#10240). That panic is survived like a loss the
-        // probe meets: the painter draws nothing more and the app restarts.
+        // SolidCraft: a device lost while the frame is drawn panics inside wgpu at the first
+        // queue write to meet it (#4172, #10240). That panic is survived: the probe in `survive`
+        // marks the loss, the painter draws nothing more and the app restarts.
         let watch = self.render_state.as_ref().map(|rs| {
             (
                 rs.device_lost.clone(),
@@ -881,25 +881,6 @@ impl Painter {
             let texture = frame.texture.clone();
             crate::AcquiredFrame::new(frame, texture)
         });
-
-        // SolidCraft: before the uploads, a probe asks the driver whether the device is still
-        // there. The first queue write to meet a lost device panics inside wgpu (#4172, #6528);
-        // the probe meets it instead, marks it lost, and the frame is dropped unpresented.
-        if render_state
-            .device_lost
-            .probe(&render_state.device, &render_state.queue)
-        {
-            if let Some(effect) = &render_state.renderer.read().frame_compositor {
-                effect.suspend();
-            }
-            render_queue_guard.commands_submitted = true;
-            log::error!(
-                "The graphics device was lost: {}",
-                render_state.device_lost.reason().unwrap_or_default()
-            );
-            self.context.request_repaint_of(viewport_id);
-            return vsync_sec;
-        }
 
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as

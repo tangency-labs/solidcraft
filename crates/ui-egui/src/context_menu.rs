@@ -158,6 +158,30 @@ pub enum Target {
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
+/// Collision Shape ▸ a choice for `target` (a body, or a component's bodies).
+fn collision_menu(app: &SolveApp, target: serde_json::Value) -> Item {
+    let mut menu = cmd(app, "body.collision", "Collision Shape");
+    // Each choice shows its own shape; the command's icon is the body.
+    menu.children = [
+        ("auto", "Automatic", "collision_auto"),
+        ("mesh", "Full mesh", "mesh_body"),
+        ("box", "Box", "box"),
+        ("cylinder", "Cylinder", "cylinder"),
+        ("sphere", "Sphere", "sphere"),
+        ("none", "No collision", "contact_off"),
+    ]
+    .into_iter()
+    .map(|(shape, label, icon)| {
+        let mut p = target.clone();
+        p["shape"] = json!(shape);
+        let mut item = cmd(app, "body.collision", label).with(p);
+        item.icon = icon.into();
+        item
+    })
+    .collect();
+    menu
+}
+
 pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
     let info = solidcraft_engine::find_command(id).map(|c| c.info(&app.session));
     let shortcut = match id {
@@ -1029,7 +1053,25 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
-        v.extend(body_items(app, &sel_bodies(app), false));
+        let mut items = body_items(app, &sel_bodies(app), false);
+        let all_bodies = selected_viewport_bodies(app);
+        let all_hidden = !all_bodies.is_empty() && all_bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+        let mut isolate = viewport_isolate_item(app, &all_bodies);
+        for item in &mut items {
+            match item.id.as_str() {
+                "ui.hide" | "ui.show" => {
+                    item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
+                    item.params = Some(json!({ "bodies": all_bodies }));
+                }
+                "ui.isolate" => {
+                    if let Some(replacement) = isolate.take() {
+                        *item = replacement;
+                    }
+                }
+                _ => {}
+            }
+        }
+        v.extend(items);
     } else if !occ_paths.is_empty() {
         let all_hidden = occ_paths.iter().all(|path| app.session.occurrence_hidden(path));
         v.push(act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "visible": all_hidden, "paths": occ_paths })));
@@ -1135,6 +1177,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
+        v.push(collision_menu(app, json!({ "body": b })));
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
@@ -1557,6 +1600,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id != 0 {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
+    v.push(collision_menu(app, json!({ "component": id })));
     v.push(Item::sep());
     v.push(
         act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
@@ -2163,7 +2207,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
-            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
+            let default_name = crate::export_name::default_for_bodies(app, &bodies);
+            let name = crate::export_name::offered(app, body, &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
@@ -4729,6 +4774,21 @@ mod tests {
         assert_eq!(item.params, Some(json!({"members": [{"feature": rail, "line": line_of(&h, rail, &bodies[3])}]})), "the row's own tube");
     }
 
+    /// Collision Shape ▸ each choice shows its own shape, a drawn icon and not the body's cube
+    /// the command has, nor the placeholder.
+    #[test]
+    fn each_collision_shape_choice_has_its_own_icon() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        let menu = items(&h.app, &Target::Body { name: "Block".into() });
+        let shapes = menu.iter().find(|i| i.id == "body.collision").expect("a body offers Collision Shape");
+        let icons: Vec<&str> = shapes.children.iter().map(|c| &*c.icon).collect();
+        assert_eq!(icons, ["collision_auto", "mesh_body", "box", "cylinder", "sphere", "contact_off"]);
+        for icon in icons {
+            assert!(!crate::icon_svg::resolve(icon).placeholder, "{icon} is drawn");
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Viewport and multi-selection Isolate / Show/Hide
 
@@ -4932,6 +4992,98 @@ mod tests {
             .find(|i| i.label == "Isolate")
             .expect("other body menu offers Isolate");
         assert_eq!(other.params, Some(json!({ "bodies": ["BoxC"] })));
+    }
+
+    #[test]
+    fn viewport_body_isolate_keeps_sibling_bodies_of_occurrence() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let c_bodies = h.app.session.occurrence_bodies(&[occ_c], true).unwrap();
+        assert_eq!(a_bodies.len(), 2);
+
+        h.app.session.selection = vec![Sel::Body { name: a_bodies[0].clone() }];
+
+        // Viewport Isolate promotes occurrence body selection to occurrence isolation so sibling
+        // bodies of the same component stay visible.
+        let vp_menu = items(&h.app, &Target::Viewport);
+        let vp_isolate = vp_menu.iter().find(|i| i.label == "Isolate").cloned().expect("viewport body menu offers Isolate");
+        assert_eq!(vp_isolate.id, "ui.isolateOccurrence");
+        assert_eq!(vp_isolate.params, Some(json!({ "paths": [[occ_a]] })));
+
+        // Browser body row keeps body-level Isolate behavior.
+        let browser_isolate = items(&h.app, &Target::Body { name: a_bodies[0].clone() })
+            .into_iter()
+            .find(|i| i.label == "Isolate")
+            .expect("browser body menu offers Isolate");
+        assert_eq!(browser_isolate.id, "ui.isolate");
+        assert_eq!(browser_isolate.params, Some(json!({ "bodies": [a_bodies[0]] })));
+
+        run_item(&mut h.app, &vp_isolate, Pos2::ZERO);
+        assert!(!h.app.session.occurrence_hidden(&[occ_a]));
+        assert!(h.app.session.occurrence_hidden(&[occ_b]) && h.app.session.occurrence_hidden(&[occ_c]));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)), "sibling body of CompA stays visible");
+        assert!(b_bodies.iter().all(|b| !h.app.session.body_visible(b)));
+        assert!(!h.app.session.body_visible(&c_bodies[0]));
+    }
+
+    #[test]
+    fn viewport_mixed_root_body_and_occurrence_visibility_and_isolate_include_both() {
+        let (mut h, [occ_a, occ_b, occ_c]) = three_component_assembly();
+        for (name, x) in [("RootKeep", 120), ("RootOther", 160)] {
+            h.app
+                .run(
+                    "solid.box",
+                    json!({
+                        "length": 10,
+                        "width": 10,
+                        "height": 10,
+                        "corner": [x, 0, 0],
+                        "operation": "new_body",
+                        "body_name": name,
+                    }),
+                )
+                .unwrap();
+        }
+        let a_bodies = h.app.session.occurrence_bodies(&[occ_a], true).unwrap();
+        let b_bodies = h.app.session.occurrence_bodies(&[occ_b], true).unwrap();
+        let mut expected_bodies = vec!["RootKeep".to_string()];
+        expected_bodies.extend(a_bodies.iter().cloned());
+
+        h.app.session.selection = vec![Sel::Body { name: "RootKeep".into() }, Sel::Occurrence { path: vec![occ_a] }];
+
+        // Show/Hide includes both the root body and the occurrence's bodies.
+        let vp_menu = items(&h.app, &Target::Viewport);
+        let hide = vp_menu.iter().find(|i| i.label == "Show/Hide").cloned().expect("viewport menu offers Show/Hide");
+        assert_eq!(hide.id, "ui.hide");
+        assert_eq!(hide.params, Some(json!({ "bodies": expected_bodies })));
+
+        let isolate = vp_menu.iter().find(|i| i.label == "Isolate").cloned().expect("viewport menu offers Isolate");
+        assert_eq!(isolate.id, "ui.isolate");
+        assert_eq!(isolate.params, Some(json!({ "bodies": expected_bodies })));
+
+        run_item(&mut h.app, &hide, Pos2::ZERO);
+        assert!(!h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| !h.app.session.body_visible(b)));
+        assert!(h.app.session.body_visible("RootOther"));
+        assert!(b_bodies.iter().all(|b| h.app.session.body_visible(b)));
+
+        let show = items(&h.app, &Target::Viewport)
+            .into_iter()
+            .find(|i| i.label == "Show/Hide")
+            .expect("viewport menu offers Show/Hide when all selected bodies are hidden");
+        assert_eq!(show.id, "ui.show");
+        assert_eq!(show.params, Some(json!({ "bodies": expected_bodies })));
+        run_item(&mut h.app, &show, Pos2::ZERO);
+        assert!(h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)));
+
+        // Isolate keeps the root body and every body of CompA visible while hiding the rest.
+        run_item(&mut h.app, &isolate, Pos2::ZERO);
+        assert!(h.app.session.body_visible("RootKeep"));
+        assert!(a_bodies.iter().all(|b| h.app.session.body_visible(b)));
+        assert!(!h.app.session.body_visible("RootOther"));
+        assert!(h.app.session.occurrence_hidden(&[occ_b]) && h.app.session.occurrence_hidden(&[occ_c]));
     }
 }
 
