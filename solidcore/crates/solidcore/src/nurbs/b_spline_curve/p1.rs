@@ -1956,6 +1956,28 @@ impl<'a> ExpandedKnots<'a> {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The NURB is written when
+/// present; whether it is borrowed decides no evaluation.
+impl crate::geom::content::Content for BSplineCurve {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            dim,
+            nurb,
+            nurb_is_borrowed: _,
+            out_of_bounds_enabled,
+            knot_type,
+            form,
+        } = self;
+        d.tag(0xB5C);
+        d.u64(*dim);
+        nurb.content(d)?;
+        d.bool(*out_of_bounds_enabled);
+        d.hashed(knot_type);
+        d.hashed(form);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

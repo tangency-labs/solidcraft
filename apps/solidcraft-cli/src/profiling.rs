@@ -38,12 +38,13 @@ impl Profiling {
     /// Stop recording, print the table on stderr and write the trace.
     pub fn finish(self) -> Result<(), String> {
         profile::set_enabled(false);
-        eprint!("{}", profile::report().table(TOP));
+        // Every line of the table ends in a line break, and `note!` adds the last one back.
+        solidcraft_engine::note!("{}", profile::report().table(TOP).trim_end_matches('\n'));
         if let Some(path) = self.trace {
             let mut bytes = Vec::new();
             profile::write_chrome_trace(&mut bytes).map_err(|e| format!("{path}: {e}"))?;
             std::fs::write(&path, bytes).map_err(|e| format!("{path}: {e}"))?;
-            eprintln!("profile: trace written to {path} (open it in chrome://tracing or ui.perfetto.dev)");
+            solidcraft_engine::note!("profile: trace written to {path} (open it in chrome://tracing or ui.perfetto.dev)");
         }
         Ok(())
     }
