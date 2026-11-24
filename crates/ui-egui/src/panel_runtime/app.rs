@@ -917,7 +917,7 @@ impl AppPanelRuntime {
                         app.shell.browser = Some(rect);
                         crate::scenario::publish_rect("browser:card", rect);
                     }
-                    "history" => {
+                    "history" | "timeline-2d" => {
                         app.shell.history = Some(rect);
                         crate::scenario::publish_rect("history:card", rect);
                         crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
@@ -1407,6 +1407,12 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            // The 2D Timeline shows only at the bottom: a History on the left has no switch.
+            let view = ControlId(super::production::TIMELINE_VIEW.into());
+            host.set_header_action_visible(InstanceId("history".into()), view.clone(), !app.preferences.timeline_left);
+            for instance in ["history", "timeline-2d"] {
+                host.set_header_action_trailing(InstanceId(instance.into()), view.clone());
+            }
             host.set_header_content(InstanceId("browser".into()), browser_header);
             // The open search box holds the magnifier.
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
@@ -1674,9 +1680,14 @@ impl crate::SolveApp {
             self.shell.cards = cards;
             self.shell.status_bar = status_bar;
         }
+        // Home can open a document after the services tick. Bind the restored panel
+        // visibility to that document before the host delivers its lifecycle events.
+        let restoring = self.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|prefs| prefs.pending.is_some());
+        let refresh = if restoring { super::production::refresh_production(self) } else { Ok(()) };
         match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
+                    refresh?;
                     integration.sync_native_direction(direction)?;
                     integration.set_keyboard_shortcuts(shortcuts);
                     if let Some(host) = &mut integration.host {

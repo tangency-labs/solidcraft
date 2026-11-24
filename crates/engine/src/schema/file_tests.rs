@@ -53,6 +53,7 @@ fn schemas_and_the_key_check_agree() {
             "format",
             "geometry",
             "history",
+            "linked_bodies",
             "max_points",
             "names",
             "new_tab",
@@ -68,7 +69,7 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
-    assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
+    assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id", "linked_bodies"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
 }
 
