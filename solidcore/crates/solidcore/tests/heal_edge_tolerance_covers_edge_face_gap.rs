@@ -2193,10 +2193,10 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
             0x4000a10fe9b1ffdc,
             0x4050316570dd0323,
             0x4050a9c381d7a010,
-            0x40151aaab4b86a07,
+            0x40151aaab4b86a06,
             0x3f6aed5192670ba2,
-            0x3f66b6ad970f3f0b,
-            0xbf3c98793964744e,
+            0x3f66b6ad970f3739,
+            0xbf3c987939646d0c,
         ],
     ),
 ];
