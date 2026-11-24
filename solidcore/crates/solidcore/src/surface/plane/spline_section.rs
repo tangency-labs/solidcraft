@@ -1,4 +1,4 @@
-//! Plane sections of a two-row spline loft. If each row has a constant signed
+//! Plane sections of a loft between translated spline profiles. If each row has a constant signed
 //! height and the heights have opposite signs, the plane equation on the net
 //! is linear in the loft parameter and independent of the profile parameter.
 //! The isocurve keeps the knots of the profile, including across joined spans.
@@ -39,22 +39,39 @@ fn iso_parameter(spline: &BSplineSurface, plane: &Plane) -> Option<(SurfParamTyp
     if lo != start || hi != end || lo >= hi {
         return None;
     }
-    let row_height = |row| {
-        let at = |i| {
-            let pt = if direction == SurfParamType::U {
+    let pair = |i| {
+        let at = |row| {
+            if direction == SurfParamType::U {
                 net.cpt(row, i)
             } else {
                 net.cpt(i, row)
-            };
-            height(plane, pt.ok()?)
+            }
         };
-        let h = at(0)?;
-        (1..=last)
-            .all(|i| at(i).is_some_and(|v| exact::is_zero(&exact::sub(&v, &h))))
-            .then_some(h)
+        Some((at(0).ok()?, at(1).ok()?))
     };
-    let a = row_height(0)?;
-    let b = row_height(1)?;
+    let (first, other) = pair(0)?;
+    let a = height(plane, first)?;
+    let b = height(plane, other)?;
+    // The profile and its translate have the same knots and derivatives. On a
+    // twisted ruled surface the rails used to construct adjoining rounds also
+    // depend on the surface parameterization; keep their usual intersection.
+    let displacement = |p: CPoint, q: CPoint| {
+        [(p.x, q.x), (p.y, q.y), (p.z, q.z)].map(|(x, y)| exact::sub(&[y], &[x]))
+    };
+    let shift = displacement(first, other);
+    for i in 1..=last {
+        let (p, q) = pair(i)?;
+        if (q.w != NOW && q.w != 1.0)
+            || q.z == NOZ
+            || !exact::is_zero(&exact::sub(&height(plane, p)?, &a))
+            || !displacement(p, q)
+                .iter()
+                .zip(&shift)
+                .all(|(delta, reference)| exact::is_zero(&exact::sub(delta, reference)))
+        {
+            return None;
+        }
+    }
     if exact::sign(&a) * exact::sign(&b) != -1 {
         return None;
     }

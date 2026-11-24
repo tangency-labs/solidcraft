@@ -1888,20 +1888,20 @@ mod tests {
     use crate::error::SM_ERR_WARNING;
 
     #[test]
-    fn two_parallel_spline_rows_give_one_section_in_either_parameter_direction() {
+    fn translated_spline_rows_give_one_section_in_either_parameter_direction() {
         use crate::nurbs::math::CPoint;
         use crate::surface::plane::spline_section;
 
         let k = Kernel::default();
         let plane = rect();
-        // Two different quadratic profiles, at z = -1 and z = 3. Their z = 0
+        // A quadratic profile and its translate, at z = -1 and z = 3. Their z = 0
         // section is one quarter of the way between corresponding points.
-        let row = |z, y| {
-            [(-1.0, 0.0), (0.0, y), (1.0, 0.0)]
+        let row = |z, shift| {
+            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
                 .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
                 .to_vec()
         };
-        let mut rows = vec![row(-1.0, 1.0), row(3.0, 3.0)];
+        let mut rows = vec![row(-1.0, 0.0), row(3.0, 2.0)];
         let make = |rows: &[Vec<CPoint>]| {
             BSplineSurface::from_data(
                 1,
@@ -1940,7 +1940,7 @@ mod tests {
             let iv = c.natural_interval();
             for f in [0.0, 0.5, 1.0] {
                 let t = 0.25 + 0.5 * f;
-                let expected = Vec3::new(2.0 * t - 1.0, 3.0 * t * (1.0 - t), 0.0);
+                let expected = Vec3::new(2.0 * t - 1.0, 0.5 + 2.0 * t * (1.0 - t), 0.0);
                 assert!(
                     c.evaluate_point(&k, iv.evaluate(f))
                         .unwrap()
@@ -1949,19 +1949,29 @@ mod tests {
                 );
             }
         }
-        // One out-of-plane interior pole makes the heights vary within the row.
-        rows[1][1].z += 1e-10;
-        let twisted = make(&rows);
-        assert!(spline_section::intersect(
-            &k,
-            &twisted,
-            &twisted.natural_uv_domain(),
-            &plane,
-            &plane.natural_uv_domain(),
-            1e-6
-        )
-        .unwrap()
-        .is_none());
+        // Both profiles still lie in parallel planes, but their middle poles
+        // now move by a different vector than their endpoints (a twisted loft).
+        let defers = |rows: &[Vec<CPoint>]| {
+            let loft = make(rows);
+            spline_section::intersect(
+                &k,
+                &loft,
+                &loft.natural_uv_domain(),
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .is_none()
+        };
+        let mut twisted = rows.clone();
+        twisted[1][1].y += 1e-10;
+        assert!(defers(&twisted));
+        // The profiles can also remain translates but leave their respective planes.
+        for row in &mut rows {
+            row[1].z += 0.125;
+        }
+        assert!(defers(&rows));
     }
 
     #[test]
