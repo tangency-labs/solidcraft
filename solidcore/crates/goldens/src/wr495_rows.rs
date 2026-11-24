@@ -444,7 +444,13 @@ fn row_line(u: &dyn UnitDiff, case: &str) -> String {
     };
     let unproved: Vec<usize> = bodies
         .iter()
-        .map(|c| unproved(c.brep.as_ref().unwrap_or_else(|e| panic!("{case}: {e}")), false).len())
+        .map(|c| {
+            unproved(
+                c.brep.as_ref().unwrap_or_else(|e| panic!("{case}: {e}")),
+                false,
+            )
+            .len()
+        })
         .collect();
     format!("    Row {{ case: {case:?}, fact: {fact}, unproved: &{unproved:?} }},\n")
 }
@@ -474,7 +480,9 @@ fn main_facts() {
     for (name, id, rows) in units {
         let u = unit(id);
         let n = rows.len();
-        s.push_str(&format!("\n/// `{id}`'s moved rows.\nconst {name}: [Row; {n}] = [\n"));
+        s.push_str(&format!(
+            "\n/// `{id}`'s moved rows.\nconst {name}: [Row; {n}] = [\n"
+        ));
         for row in rows {
             s.push_str(&row_line(u.as_ref(), row.case));
         }

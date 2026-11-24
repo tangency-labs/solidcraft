@@ -1252,17 +1252,7 @@ mod local_operation {
         let t1 = b.edgeuse(u1).unwrap().uv_trim_curve.clone();
         b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
-        super::certify_body(
-            "gen0002",
-            &out,
-            "",
-            b,
-            Some(&mut raw),
-            &[],
-            &[],
-            true,
-            &[],
-        );
+        super::certify_body("gen0002", &out, "", b, Some(&mut raw), &[], &[], true, &[]);
     }
 }
 
