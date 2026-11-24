@@ -357,6 +357,10 @@ pub struct ViewportState {
         std::sync::Mutex<std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)>>,
     /// The stable palette slots of the model scene (body faces, edges, placements).
     pub(crate) palette: std::sync::Mutex<crate::scene_palette::PaletteArena>,
+    /// Where the model scene draws a body as an instance: its mesh's index in the scene's
+    /// instance list, and the body's row in that mesh's placements. A whole-body hover names its
+    /// placement with this, so the cull tints that one row instead of drawing a copy of it.
+    pub(crate) instanced_at: std::sync::Mutex<std::collections::HashMap<String, (u32, u32)>>,
     /// Each body's resolved look, kept while its geometry and the design's appearance state are
     /// the same: a theme or visibility rebuild does not resolve every face again.
     appearance: std::sync::Mutex<AppearanceCache>,
@@ -2347,6 +2351,9 @@ struct Instances {
     meshes: Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
     /// Where a mesh's look already is in `meshes`, so placing a body is a lookup, not a scan.
     by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook), usize>,
+    /// Each body placed as an instance, and where: its mesh's index in `meshes` and its row in
+    /// that mesh's placements ([`Instances::finish`] publishes it for the hover).
+    placed: std::collections::HashMap<String, (u32, u32)>,
     kept: InstancedTris,
     lods: crate::mesh_lod::MeshLods,
     /// The parts of meshes drawn a look at a time, from the last scene and made in this one.
@@ -2396,6 +2403,7 @@ impl Instances {
             candidates,
             meshes: Vec::new(),
             by_mesh: std::collections::HashMap::new(),
+            placed: std::collections::HashMap::new(),
             kept,
             lods: app.viewport.mesh_lods.clone(),
             parts,
@@ -2532,13 +2540,22 @@ impl Instances {
             }
         };
         let (_, inst) = self.meshes.get_mut(at)?;
+        let row = u32::try_from(inst.instances.len() / solidcraft_viewport_gpu::view::INSTANCE_SIZE).unwrap_or(0);
         inst.place_moved(rows, col, edge.0, edge.1, motion);
+        if let Some(b) = body {
+            self.placed.insert(b.name.clone(), (u32::try_from(at).unwrap_or(u32::MAX), row));
+        }
         Some(())
     }
 
     /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
     /// only some bodies, the others' too: their levels of detail stay).
     fn finish(self, app: &SolveApp, whole: bool) -> Vec<crate::gpu::InstancedMesh> {
+        // Where each body's placement is, for a whole-body hover to name (the cull tints that
+        // row): the scene's own instance list, published with it.
+        if let Ok(mut at) = app.viewport.instanced_at.lock() {
+            *at = self.placed.clone();
+        }
         // A whole scene's meshes waiting for levels: filled in when made ([`publish_levels`]).
         if whole && let Ok(mut w) = app.viewport.lod_waiting.lock() {
             w.clone_from(&self.waiting);
