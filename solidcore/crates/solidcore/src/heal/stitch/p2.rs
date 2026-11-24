@@ -35,7 +35,8 @@
 //!   the same curve round it, where each face there meets that curve once (`RadialGlue`;
 //!   #2506, not upstream).
 //! - `DoStitching`'s region nesting sets the void flags by nesting
-//!   (`SM_VS_NESTEDSOLID`) where every shell is closed and there are more than two
+//!   (`SM_VS_NESTEDSOLID`) where the faces came in loose (no region but the infinite
+//!   one), no lamina edge is left, every shell is closed and there are more than two
 //!   regions, so a cavity sewn from loose faces is a void; upstream only swaps the
 //!   infinite region's flag (`SM_VS_INFINITEREGION_SWAP`) and leaves it solid (not
 //!   upstream, WR-21540, as WR-569 for `StitchIntoSolid`).
@@ -496,6 +497,9 @@ impl Stitch<'_> {
     ) -> Result<()> {
         let tol_3d = self.stitch_tol_3d();
         k.check_cancelled("heal::stitch::p2::Stitch::do_stitching")?;
+        // (not upstream, WR-21540) loose faces: no region but the infinite one, so every
+        // region after the gluing is one the gluing made
+        let loose = bp1::regions(b, None)?.len() <= 1;
         // (status not checked)
         ignore_status(self.edit_brep_pre_edit(k, b))?;
 
@@ -974,13 +978,16 @@ impl Stitch<'_> {
             // Not upstream (WR-21540, as WR-569 for `stitch_into_solid`): each closed shell
             // the glue closed split off a new region, solid, and upstream only finds the
             // infinite region, so the region inside a shell nested in another (a cavity)
-            // stays solid. Where no lamina edge is left and every shell is closed the
-            // regions are a nested solid model: material inside the outer shell, a void
-            // inside a shell within it, and so on. The flags are set once the gluing is
-            // done, from the nesting alone: a split cannot tell them, as a cavity's shell
-            // may close before the shell around it. With two regions both settings give
+            // stays solid. When the faces came in loose and no lamina edge is left and
+            // every shell is closed, the regions are a nested solid model: material inside
+            // the outer shell, a void inside a shell within it, and so on. The flags are
+            // set once the gluing is done, from the nesting alone: a split cannot tell
+            // them, as a cavity's shell may close before the shell around it. A B-rep that
+            // came in with regions keeps their flags (a solid enclosed in material stays a
+            // solid, which a defeature then refuses). With two regions both settings give
             // the same flags.
-            let void_setting = if regions > 2 && out.lamina_edges == 0 && every_shell_closed(b)? {
+            let nested = loose && regions > 2 && out.lamina_edges == 0 && every_shell_closed(b)?;
+            let void_setting = if nested {
                 SetRegionVoidType::NestedSolid
             } else {
                 SetRegionVoidType::InfiniteRegionSwap

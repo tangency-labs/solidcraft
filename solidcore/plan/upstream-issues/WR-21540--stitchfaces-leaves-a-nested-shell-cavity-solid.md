@@ -6,7 +6,7 @@
 - **Trigger:** `StitchFaces` on the loose faces of a closed body with a closed cavity: a cube's faces with those of a smaller cube inside it, or a part read from STEP as a `BREP_WITH_VOIDS`, unstitched and stitched again (SolidCraft issue #21540).
 - **How found:** SolidCraft issue #21540: Stitch refused a part with a cavity.
 - **Confirmed:** in the port, which follows `DoStitching` and `TestClosureSplitRegion` here: `stitch_faces_leaves_a_closed_cavity_void` (`crates/solidcore/src/heal/stitch/p2.rs`) fails without the port's deviation. The C++ was not run on these faces.
-- **Rust port:** where the stitch leaves every shell closed and more than two regions, `Stitch::do_stitching` (`heal/stitch/p2.rs`) sets the void flags by nesting (`SetRegionVoidType::NestedSolid`), as `stitch_into_solid` does for WR-569. With open shells, or two regions, it keeps upstream's swap.
+- **Rust port:** where the faces came in loose (the B-rep had no region but the infinite one) and the stitch leaves no lamina edge, every shell closed and more than two regions, `Stitch::do_stitching` (`heal/stitch/p2.rs`) sets the void flags by nesting (`SetRegionVoidType::NestedSolid`), as `stitch_into_solid` does for WR-569. Otherwise it keeps upstream's swap: a B-rep that came in with regions keeps their flags (a solid ball inside a groove that a defeature fills stays a solid, and the defeature refuses to enclose it), and with open shells or two regions nothing changes.
 
 ![Two panels, each an outer shell with an inner shell inside it. Left, upstream: the region between the shells is material and so is the region inside the inner shell. Right, the port: the region inside the inner shell is a void.](WR-21540--stitched-cavity.svg)
 
