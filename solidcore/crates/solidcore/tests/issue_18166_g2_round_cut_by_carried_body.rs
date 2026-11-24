@@ -30,7 +30,6 @@ use solidcore::Kernel;
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
-    "revolve_analytic_profile_faces",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "analytic_copy_keeps_parameterization",
