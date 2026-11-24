@@ -1166,6 +1166,61 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
     }
 }
 
+/// `(drill … (offset dx dy))` moves a pad's copper off its hole, in the pad's own frame: the hole
+/// stays at the pad's position (checked with kicad-cli 10: its drill file and copper plot). Library
+/// footprints use it for hand-soldering pads and module castellations (Adafruit Feather, Raspberry
+/// Pi Pico, TO-92 HandSolder); an SMD pad writes it without a drill size.
+#[test]
+fn a_pad_offset_moves_the_copper_off_its_hole() {
+    let front_copper = |at: &str, pad: &str| {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 40 20) (layer "Edge.Cuts"))
+              (footprint "test:Offset" (layer "F.Cu") (at {at})
+                (property "Reference" "J1")
+                {pad}))"#
+        );
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+        let mut load = |_: &str| Err("not used".to_string());
+        let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
+        let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
+        let drills: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        let area = copper_area(&imported, "Copper F.Cu", 0.035);
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+        let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("front copper");
+        let points = mesh.positions.as_chunks::<3>().0;
+        let low = |i: usize| points.iter().map(|p| p[i]).fold(f64::MAX, f64::min);
+        let high = |i: usize| points.iter().map(|p| p[i]).fold(f64::MIN, f64::max);
+        ([low(0), high(0), low(1), high(1)], area, drills)
+    };
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    // A 3 × 2 pad drilled 1 mm, its copper 0.5 mm to the right of the hole: copper from X 9 to 12
+    // (KiCad's Y 9 to 11, -11 to -9 here), the hole still at the footprint's origin and inside it.
+    let (extent, area, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 0 0) (size 3 2) (drill 1 (offset 0.5 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [9.0, 12.0, -11.0, -9.0]), "{extent:?}");
+    assert_eq!(drills, [[10.0, -10.0]], "the hole stays at the pad's position");
+    let expected = 6.0 - std::f64::consts::PI * 0.25;
+    assert!((area - expected).abs() < 0.05, "the hole opens the shifted copper: {area} vs {expected}");
+
+    // A pad turned a quarter turn turns its offset too: (3, 0) puts the copper 3 mm up the board
+    // (KiCad's Y 6 to 8 for a pad at Y 10).
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 10 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+
+    // An SMD pad has an offset and no drill: the copper moves and no hole comes in.
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" smd rect (at 0 5) (size 1 1) (drill (offset 3 0)) (layers "F.Cu"))"#);
+    assert!(near(extent, [12.5, 13.5, -15.5, -14.5]), "{extent:?}");
+    assert!(drills.is_empty(), "{drills:?}");
+
+    // On a turned footprint the file writes the pad's angle on the board (90° here), and the offset
+    // turns with the pad: KiCad draws this copper from X 19 to 21 and Y 6 to 8, hole at (20, 10).
+    let (extent, _, drills) = front_copper("20 10 90", r#"(pad "1" thru_hole rect (at 0 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+}
+
 #[test]
 fn a_stroke_is_one_outline_with_mitered_corners() {
     let region = stroke_region(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], 2.0, false).expect("a stroke outline");

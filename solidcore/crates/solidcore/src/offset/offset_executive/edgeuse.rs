@@ -591,6 +591,11 @@ impl FaceQueries<Handle> for EdgeBrep<'_> {
         face2::tolerance(self.brep(arena), f)
     }
 
+    fn face_has_loopuses(&self, face: Handle) -> Result<bool> {
+        let (arena, f) = face.face()?;
+        crate::topology::face::p4::has_loopuses(self.brep(arena), f)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,

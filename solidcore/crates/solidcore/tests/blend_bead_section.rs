@@ -2479,3 +2479,56 @@ fn an_obtuse_toe_is_refused_naming_the_edge() {
     assert_eq!(named_edge(&err), Some(edge), "{err:?}");
     assert!(smb(&k, &b) == before, "the corner changed");
 }
+
+/// #21138: a leg below the body's resolution (eight times its tolerance) is a toe on the edge
+/// within tolerance, a sliver, and is refused as a chamfer's setback that small is (#21004):
+/// `SizeBelowResolution` naming the edge and the leg, before anything is built and before
+/// the sagitta's bound. In the square corner a distance of 0.001 at an angle of 1e-300 gives
+/// the second leg 0.001 sin(1e-300) / sin(pi/2 + 1e-300) = 1e-303; a leg of 1e-9 given as a
+/// distance is refused alike. The same distance at 22.5 degrees (second leg 0.001 tan(22.5
+/// degrees) = 0.000414) builds.
+#[test]
+fn a_leg_below_the_body_s_resolution_is_refused_naming_the_edge() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let tolerance = b.tolerance();
+    let before = smb(&k, &b);
+    let sliver = ChamferSize::DistanceAngle {
+        distance: 0.001,
+        angle: 1e-300,
+    };
+    for (size, sagitta, leg) in [
+        (sliver, 0.0, 1e-303),
+        (sliver, 1.0, 1e-303),
+        (ChamferSize::Distances([SETBACK, 1e-9]), 0.0, 1e-9),
+    ] {
+        let err = beads_apart(&mut k, &mut b, &[edge], &[size], sagitta, &[]).unwrap_err();
+        let Some(&BlendFailure::SizeBelowResolution {
+            size: got,
+            tolerance: t,
+        }) = err.blend_failure()
+        else {
+            panic!("{size:?}, sagitta {sagitta}: {err:?}");
+        };
+        // the leg below resolution, not the distance asked: positive, finite, a sliver
+        assert!(got > 0.0 && (got - leg).abs() <= 1e-12 * leg, "{got} {leg}");
+        assert_eq!(t, tolerance);
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err:?}");
+        assert_eq!(err.entity(), Some(EntityRef::Edge(edge)), "{err:?}");
+        assert_eq!(named_edge(&err), Some(edge), "{err:?}");
+        assert_eq!(err.operation(), "blend::weld_bead");
+        assert_eq!(
+            solidcore::error::upstream_status(&err),
+            Some(solidcore::error::SM_ERR_INVALID_INPUT)
+        );
+        assert!(smb(&k, &b) == before, "the corner changed");
+    }
+    let good = ChamferSize::DistanceAngle {
+        distance: 0.001,
+        angle: PI / 8.0,
+    };
+    let beads = beads_apart(&mut k, &mut b, &[edge], &[good], 0.0, &[]).unwrap();
+    assert_eq!(beads.len(), 1);
+    assert!(smb(&k, &b) == before, "the corner changed");
+}
