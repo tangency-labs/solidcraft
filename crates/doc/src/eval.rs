@@ -1924,6 +1924,16 @@ pub struct Model {
     /// The [`placement_digest`] each [`pose_only`] feature was last evaluated at, by feature id.
     /// Their fingerprints leave it out, so a pose change doesn't reach the features after them.
     poses: std::collections::HashMap<u64, u64>,
+    /// `evaluate` returns without waiting for the SMLib checks of its last features still running
+    /// ([`Model::set_background_checks`]).
+    background_checks: bool,
+    /// The checks the last `evaluate` left running ([`Model::settle_feature_checks`]).
+    feature_checks: Option<Arc<overlap::Pending>>,
+    /// A check refusal settled after its evaluation returned, for the next `evaluate` to fail the
+    /// refused feature with.
+    carried_refusal: Option<overlap::Carried>,
+    /// A check refusal was settled that no evaluation has brought in yet.
+    feature_refusal_owed: bool,
 }
 
 /// A failed sketch built for its editor (#12085): `shown` is the final state `base` with that
@@ -3956,6 +3966,52 @@ impl Model {
         Model::default()
     }
 
+    /// Let `evaluate` return without waiting for the SMLib checks of the bodies its last features
+    /// keep (the checks under [`kernel::Validation::EachFeature`] that run beside the features
+    /// after them): the results show at once and the checks end beside the caller, which settles
+    /// them ([`Model::settle_feature_checks`]). Off (the default), `evaluate` waits for every
+    /// check, as before. The verdicts, results and refusals are the same either way: what a check
+    /// refuses fails its feature in the next evaluation, as it would have failed in this one.
+    /// Until the checks end, their results are held out of the cache and a save keeps no model
+    /// ([`Model::saved_now`]), and the next `evaluate` waits for them before it starts.
+    pub fn set_background_checks(&mut self, on: bool) {
+        self.background_checks = on;
+    }
+
+    /// The SMLib checks the last evaluation left running have not been settled yet
+    /// ([`Model::settle_feature_checks`]).
+    pub fn checking_features(&self) -> bool {
+        self.feature_checks.is_some()
+    }
+
+    /// Settle the SMLib checks the last evaluation left running ([`Model::set_background_checks`])
+    /// once they have ended, or, with `wait`, after waiting for them. Their held results go into
+    /// the cache as the checks before them pass. A check that refused a feature's bodies marks
+    /// that feature and every result after it stale (keeping their geometry until the next
+    /// `evaluate`), and the next `evaluate` fails the feature, on the same inputs, with the
+    /// check's error. Returns whether an evaluation is owed to such a refusal: settled now or by
+    /// an earlier call, and not evaluated since.
+    pub fn settle_feature_checks(&mut self, wait: bool) -> bool {
+        if let Some(pending) = self.feature_checks.clone()
+            && let Some(outcome) = pending.outcome(wait, &self.cache, &self.kept)
+        {
+            self.feature_checks = None;
+            if let Some(refused) = outcome {
+                if let Some(at) = self.results.iter().position(|r| r.id == refused.id) {
+                    for r in self.results.iter_mut().skip(at) {
+                        r.stale = true;
+                    }
+                }
+                // The fingerprints from the refused feature on are no longer the results'.
+                self.fingerprinted = None;
+                self.placement_inputs = None;
+                self.carried_refusal = Some(refused);
+                self.feature_refusal_owed = true;
+            }
+        }
+        self.feature_refusal_owed
+    }
+
     /// An import's SMLib check of its parts is still running ([`kernel::ImportReport::checks`]).
     pub fn checking_imports(&self) -> bool {
         self.results.iter().any(|r| r.import_report.as_ref().is_some_and(|i| i.checking()))
@@ -4350,6 +4406,10 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        // The checks the last evaluation left running stand before anything is built on them.
+        self.settle_feature_checks(true);
+        self.feature_refusal_owed = false;
+        let carried = self.carried_refusal.take();
         let prepared_meshes = self.prepared_meshes.take();
         // A failed sketch held for its editor is built again from the evaluated design: when the
         // sketch and every feature after it fail, the results end in the state they ended in
@@ -4565,6 +4625,11 @@ impl Model {
                 }
                 // The same feature on the same inputs: its earlier result.
                 let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
+                // A check that refused this feature's bodies on these inputs after its evaluation
+                // returned: it fails as it would have failed there.
+                if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
+                    checks.refuse(i, c.failure.clone());
+                }
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4771,7 +4836,7 @@ impl Model {
                     };
                     let name = f.name.clone();
                     let (after, inputs) = after;
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
+                    r = checks.start(i, f.id, key.whole, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
                 }
                 if r.is_ok() && cached.is_none() {
                     // Profiles picked by curves that no longer bound a profile exactly were found
@@ -4911,14 +4976,16 @@ impl Model {
                     state: state.clone(),
                 });
             }
-            // Every check still running ends before the results stand.
-            if let Some(refused) = checks.settle(true, &self.cache, &self.kept) {
+            // Every check still running ends before the results stand, unless they are left to end
+            // beside the caller ([`Model::set_background_checks`]): those that ended are settled.
+            if let Some(refused) = checks.settle(!self.background_checks, &self.cache, &self.kept) {
                 back = Some(refused);
                 continue 'pass;
             }
             // Main's evaluate loop ends the pass here; Pattern-of-components reconcile runs from Session::refresh.
             break;
         }
+        self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
