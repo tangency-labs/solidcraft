@@ -594,12 +594,15 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
         // Name keeps a larger share and a shared content floor so long identifiers stay readable
         // and every section's columns line up (#8533, #8551 review).
+        // Name, Expression and Value stop at about their width in the default card, so a wider
+        // window goes to Comment (#18846). Comment's header divider still sets a width, which the
+        // grid keeps with the other dragged widths; a double-click returns it to automatic.
         vec![
             GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
-            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor),
+            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor).max_width(t.form_card_width * 0.75),
             GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
-            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
-            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
+            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click().max_width(t.form_card_width * 0.75),
+            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex().max_width(t.form_card_width * 0.5),
             GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
             GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
         ]
@@ -2792,6 +2795,141 @@ mod tests {
         let fav = crate::scenario::handle_at("param:favorite:w").expect("Favorites expression");
         let user = crate::scenario::handle_at("param:w").expect("User Parameters expression");
         assert!((fav.x - user.x).abs() < 1.0, "Expression columns lined up: favorites {fav:?} user {user:?}");
+    }
+
+    /// #18846 (a wider Parameters window widened every column a little and Comment least): past the
+    /// default card, extra width goes to Comment. Its header divider still sets its width, as in
+    /// the shared grid, and the dialog opens again at that width.
+    #[test]
+    fn a_wider_card_widens_comment_and_a_dragged_comment_width_is_remembered() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.app.run("parameters.add", json!({"name": "wall", "expression": "1.2 mm", "comment": "Wall thickness"})).unwrap();
+        let heading = |label: &str| {
+            solidcraft_ui_registry::rects("dialog:column:").into_iter().find(|(name, _)| name.ends_with(&format!(":{label}"))).expect("heading")
+        };
+        let open = |h: &mut crate::scenario::Harness| {
+            h.app.start("parameters.change");
+            h.frames(6);
+        };
+        open(&mut h);
+        let (_, comment) = heading("Comment");
+        let (_, name) = heading("Name");
+        let default_card = crate::scenario::rect_of("dialog:header").expect("card header").width();
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+
+        // A card dragged much wider than its default: Comment takes nearly all of the extra width.
+        h.ctx.data_mut(|m| m.insert_persisted(egui::Id::unique(SIZE.width), default_card + 500.0));
+        open(&mut h);
+        let (table, wide) = heading("Comment");
+        assert!(wide.width() > comment.width() + 300.0, "Comment widens with the card: {comment:?} -> {wide:?}");
+        assert!(heading("Name").1.width() < name.width() + 100.0, "Name stops near its default width");
+
+        // Comment's divider (column 5, before Actions) sets its width, and the width is kept.
+        let id = table.trim_start_matches("dialog:column:").trim_end_matches(":Comment").to_owned();
+        let divider = crate::scenario::rect_of(&format!("dialog:column_divider:{id}:5")).expect("Comment has a divider");
+        h.step(&json!({"drag": [[divider.center().x, divider.center().y], [divider.center().x - 150.0, divider.center().y]]})).unwrap();
+        h.frames(3);
+        let dragged = heading("Comment").1;
+        assert!(dragged.width() < wide.width() - 100.0, "the drag narrowed Comment: {wide:?} -> {dragged:?}");
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+        open(&mut h);
+        let reopened = heading("Comment").1;
+        assert!((reopened.width() - dragged.width()).abs() < 1.0, "the dialog opens at the dragged width: {dragged:?} -> {reopened:?}");
+    }
+
+    /// The heading and table id of a column in the user parameters table.
+    fn user_heading(label: &str) -> (String, egui::Rect) {
+        solidcraft_ui_registry::rects("dialog:column:user:").into_iter().find(|(name, _)| name.ends_with(&format!(":{label}"))).expect("heading")
+    }
+
+    /// Points between the Actions column and the right edge of the table's viewport: 8 or so when
+    /// the table fills its card.
+    fn user_table_empty() -> f32 {
+        let viewport = crate::scenario::rect_of("dialog:table:user:viewport").expect("viewport");
+        viewport.right() - user_heading("Actions").1.right()
+    }
+
+    /// A Harness with one parameter that has a long comment, the Parameters card opened once to
+    /// measure its default width, then closed. Returns the default card width.
+    fn params_with_comment() -> (crate::scenario::Harness, f32) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.app
+            .run(
+                "parameters.add",
+                json!({"name": "wall", "expression": "1.2 mm", "comment": "Wall thickness of the outer shell, measured at the thinnest point"}),
+            )
+            .unwrap();
+        h.app.start("parameters.change");
+        h.frames(6);
+        let card = crate::scenario::rect_of("dialog:header").expect("card header").width();
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+        (h, card)
+    }
+
+    fn reopen_params(h: &mut crate::scenario::Harness) {
+        h.app.start("parameters.change");
+        h.frames(6);
+    }
+
+    /// #18846 review: Comment dragged narrower at the default size, then the card widened by 500
+    /// points. Comment keeps the dragged width and the other columns take the extra width, as
+    /// they did before the caps, so the table still fills the card.
+    #[test]
+    fn a_dragged_comment_leaves_no_empty_space_in_a_wider_card() {
+        let (mut h, card) = params_with_comment();
+        reopen_params(&mut h);
+        let divider = crate::scenario::rect_of("dialog:column_divider:user:5").expect("Comment has a divider");
+        h.step(&json!({"drag": [[divider.center().x, divider.center().y], [divider.center().x - 40.0, divider.center().y]]})).unwrap();
+        h.frames(3);
+        let dragged = user_heading("Comment").1.width();
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(2);
+        h.ctx.data_mut(|m| m.insert_persisted(egui::Id::unique(SIZE.width), card + 500.0));
+        reopen_params(&mut h);
+        assert!((user_heading("Comment").1.width() - dragged).abs() < 1.0, "Comment keeps its dragged width");
+        let empty = user_table_empty();
+        assert!(empty < 20.0, "the table fills the widened card, {empty} points left empty");
+    }
+
+    /// A Comment width saved by an older release (slot 5 of the grid's stored widths) behaves as a
+    /// dragged one: it is kept, and the widened card is still filled.
+    #[test]
+    fn a_comment_width_saved_by_an_older_release_still_fills_a_wider_card() {
+        let (mut h, card) = params_with_comment();
+        h.ctx.data_mut(|m| m.insert_persisted(columns_id(), vec![None, None, None, None, None, Some(90.0_f32), None]));
+        h.ctx.data_mut(|m| m.insert_persisted(egui::Id::unique(SIZE.width), card + 500.0));
+        reopen_params(&mut h);
+        assert!((user_heading("Comment").1.width() - 90.0).abs() < 1.5, "the saved width is kept");
+        let empty = user_table_empty();
+        assert!(empty < 20.0, "the table fills the widened card, {empty} points left empty");
+    }
+
+    /// A double-click on Comment's divider forgets the dragged width: Comment goes back to taking
+    /// a wide card's spare width, and the Name, Expression and Value caps apply again.
+    #[test]
+    fn a_double_click_returns_comment_to_its_automatic_width() {
+        let (mut h, card) = params_with_comment();
+        h.ctx.data_mut(|m| m.insert_persisted(egui::Id::unique(SIZE.width), card + 500.0));
+        reopen_params(&mut h);
+        let auto = user_heading("Comment").1.width();
+        let divider = crate::scenario::rect_of("dialog:column_divider:user:5").expect("divider");
+        h.step(&json!({"drag": [[divider.center().x, divider.center().y], [divider.center().x - 200.0, divider.center().y]]})).unwrap();
+        h.frames(3);
+        assert!(user_heading("Comment").1.width() < auto - 150.0, "the drag narrowed Comment");
+        let divider = crate::scenario::rect_of("dialog:column_divider:user:5").expect("divider");
+        h.step(&json!({"click": [divider.center().x, divider.center().y], "double": true})).unwrap();
+        h.frames(3);
+        let reset = user_heading("Comment").1.width();
+        assert!((reset - auto).abs() < 1.0, "double-click returns Comment to {auto}, got {reset}");
+        let stored: Vec<Option<f32>> = h.ctx.data_mut(|m| m.get_persisted(columns_id())).unwrap_or_default();
+        assert_eq!(stored.get(5).copied().flatten(), None, "the stored width is forgotten: {stored:?}");
     }
 
     #[test]

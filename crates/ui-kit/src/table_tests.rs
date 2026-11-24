@@ -442,3 +442,104 @@ fn a_frozen_column_too_wide_for_the_view_scrolls_with_the_rest() {
     draw(false);
     assert!(registry::rect_of("dialog:table:too_wide:row:cell:Name").unwrap().left() < name.left() - 100.0, "the name column scrolled away");
 }
+
+/// The widths `column_widths` gives `columns` in a table `available` points wide.
+fn widths_at(columns: &[Column<'_>], available: f32) -> Vec<f32> {
+    let ctx = crate::test_support::context();
+    let mut out = Vec::new();
+    harness::frame(&ctx, vec![], |ui| out = column_widths(ui, columns, available));
+    out
+}
+
+#[test]
+fn capped_columns_stop_growing_and_leave_a_wider_table_to_the_uncapped_one() {
+    let columns = [
+        Column::new("Name", 2.0).flex().max_width(Some(150.0)),
+        Column::new("Value", 1.0).flex().max_width(Some(80.0)),
+        Column::new("Comment", 1.0).flex(),
+    ];
+    let narrow = widths_at(&columns, 400.0);
+    let wide = widths_at(&columns, 900.0);
+    let wider = widths_at(&columns, 1100.0);
+    assert!(narrow[0] <= 150.0 + 0.5 && narrow[1] <= 80.0 + 0.5, "{narrow:?}");
+    assert!((wide[0] - 150.0).abs() <= 0.5 && (wide[1] - 80.0).abs() <= 0.5, "{wide:?}");
+    // Past the caps every extra point goes to Comment.
+    assert!((wider[2] - wide[2] - 200.0).abs() <= 1.0, "{wide:?} then {wider:?}");
+    assert!((wider[0] - wide[0]).abs() <= 0.5 && (wider[1] - wide[1]).abs() <= 0.5);
+}
+
+#[test]
+fn width_a_cap_gives_back_reaches_a_column_held_at_its_minimum() {
+    // The light column's portion is under its minimum, so it starts at the minimum; the heavy
+    // column is then capped, and the width it gives back must go to the light column.
+    let m = 60.0_f32.max(Tokens::get().control_height);
+    let columns = [Column::new("Comment", 1.0).flex().min_content_width(m), Column::new("Name", 9.0).flex().min_content_width(m).max_width(Some(m))];
+    let spacing = Tokens::get().space_8 * 3.0;
+    let widths = widths_at(&columns, 5.0 * m + spacing);
+    assert!((widths[1] - m).abs() <= 0.5, "{widths:?}");
+    assert!((widths[0] - 4.0 * m).abs() <= 1.0, "{widths:?}");
+}
+
+#[test]
+fn a_cap_never_takes_a_column_under_its_content_minimum() {
+    let columns = [Column::new("Name", 1.0).flex().min_content_width(200.0).max_width(Some(120.0)), Column::new("Comment", 1.0).flex()];
+    let widths = widths_at(&columns, 900.0);
+    assert!((widths[0] - 200.0).abs() <= 0.5, "{widths:?}");
+}
+
+/// A column dragged to a width holds it whatever the table's width, while capped columns beside
+/// it still stop at their caps and an undragged column takes the rest.
+#[test]
+fn a_dragged_column_holds_its_width_beside_capped_columns() {
+    let columns = |stored| {
+        [
+            Column::new("Name", 1.0).flex().max_width(Some(120.0)),
+            Column::new("Comment", 1.0).flex().manual_width(stored),
+            Column::new("Notes", 1.0).flex(),
+        ]
+    };
+    let wide = widths_at(&columns(Some(300.0)), 800.0);
+    let wider = widths_at(&columns(Some(300.0)), 1000.0);
+    assert!((wide[1] - 300.0).abs() <= 0.5 && (wider[1] - 300.0).abs() <= 0.5, "{wide:?} then {wider:?}");
+    assert!((wide[0] - 120.0).abs() <= 0.5 && (wider[0] - 120.0).abs() <= 0.5, "{wide:?} then {wider:?}");
+    assert!((wider[2] - wide[2] - 200.0).abs() <= 1.0, "the undragged column takes the extra width: {wide:?} then {wider:?}");
+    // Without a stored width, Comment shares again.
+    let auto = widths_at(&columns(None), 1000.0);
+    assert!((auto[1] - auto[2]).abs() <= 1.0, "{auto:?}");
+}
+
+/// Every column but the last keeps its header divider, capped or not.
+#[test]
+fn capped_columns_keep_their_dividers() {
+    let ctx = crate::test_support::context();
+    let columns =
+        [Column::new("Name", 1.0).flex().max_width(Some(120.0)), Column::new("Comment", 1.0).flex(), Column::new("Actions", 0.0).icon_only()];
+    let key = egui::Id::unique("capped_dividers");
+    for _ in 0..2 {
+        harness::frame(&ctx, vec![], |ui| {
+            ui.set_width(600.0);
+            table_custom(ui, "capdiv", &columns, "Empty", |ui, table| table.headers_resizable(ui, key, |_, _| false));
+        });
+    }
+    assert!(registry::rect_of("dialog:column_divider:capdiv:0").is_some(), "Name keeps its divider");
+    assert!(registry::rect_of("dialog:column_divider:capdiv:1").is_some(), "Comment keeps its divider");
+}
+
+/// When the only uncapped column has been dragged to a width (#18846), the capped columns stop
+/// at nothing and share the rest by weight, so the table still fills its width.
+#[test]
+fn caps_are_dropped_when_every_uncapped_column_was_dragged() {
+    let columns = [
+        Column::new("Name", 2.0).flex().max_width(Some(120.0)),
+        Column::new("Value", 1.0).flex().max_width(Some(80.0)),
+        Column::new("Comment", 1.0).flex().manual_width(Some(60.0)),
+    ];
+    let spacing = Tokens::get().space_8 * 4.0;
+    for available in [600.0, 1000.0] {
+        let widths = widths_at(&columns, available);
+        assert!((widths[2] - 60.0).abs() <= 0.5, "the dragged column keeps its width: {widths:?}");
+        let total: f32 = widths.iter().sum();
+        assert!((total + spacing - available).abs() <= 1.0, "the table fills {available}: {widths:?}");
+        assert!((widths[0] - 2.0 * widths[1]).abs() <= 1.0, "the others share by weight: {widths:?}");
+    }
+}
