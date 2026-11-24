@@ -1206,13 +1206,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             enter |= expr_row(ui, "Diameter", diameter);
             // A pipe is a solid rod or a hollow tube (#18344). The Type row says which one, and the
             // Wall row stays where it was: a thickness typed in it makes a tube, as it always did,
-            // so nothing the user typed is ever dropped.
-            let was_hollow = *hollow;
+            // so nothing the user typed is ever dropped. Choosing Solid does not empty the Wall row:
+            // the thickness the user typed stays there, and the command carries it.
             choice_row(ui, "Type", "pipe_type", hollow, &PIPE_TYPES);
-            if was_hollow == 1 && *hollow == 0 {
-                // Solid: the pipe has no wall, so the field empties as it did before the Type row.
-                wall.clear();
-            }
             let was_wall = (*wall).clone();
             enter |= hint_row(ui, "Wall", wall, if *hollow == 1 { tr("ui.thickness") } else { tr("solid") });
             if *wall != was_wall {

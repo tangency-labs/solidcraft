@@ -981,6 +981,38 @@ fn the_pipe_window_keeps_its_wall_row_and_says_which_pipe_it_makes() {
         assert_eq!(*hollow, 0, "an empty wall row is a solid rod");
     }
 }
+
+/// #18344: a thickness typed in the Wall row is never dropped. Choosing Solid in the Type row
+/// leaves the thickness where the user typed it, and the command carries it.
+#[test]
+fn the_pipe_window_keeps_the_typed_wall_when_the_type_becomes_solid() {
+    let mut h = fixture();
+    h.app.home.open = false;
+    let d = representative(&h, "solid.pipe");
+    h.app.dialog = Some(d);
+    h.frames(2);
+    // A thickness typed in the wall row.
+    h.step(&json!({"click": {"handle": "dialog:Wall"}})).unwrap();
+    h.step(&json!({"text": "2 mm"})).unwrap();
+    h.frames(2);
+    {
+        let Kind::Pipe { hollow, wall, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("no pipe") };
+        assert_eq!(wall, "2 mm", "the wall row holds the thickness that was typed in it");
+        assert_eq!(*hollow, 1, "a thickness in the wall row makes a tube");
+    }
+    // Solid, in the Type row.
+    h.step(&json!({"click": {"handle": "dialog:Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Type:Solid"}})).unwrap();
+    h.frames(2);
+    {
+        let Kind::Pipe { hollow, wall, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("no pipe") };
+        assert_eq!(*hollow, 0, "the type row says solid");
+        assert_eq!(wall, "2 mm", "the thickness typed in the wall row is never dropped");
+    }
+    // The command carries the thickness the user typed: a wall in the window is the pipe's wall.
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["wall"], "2 mm", "{:?}", commands[0].1);
+}
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
