@@ -6656,6 +6656,9 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
 #[derive(Clone)]
 struct HoverBlock {
     key: u64,
+    /// The placement a whole-body hover tints in place (the cull writes the palette entry into
+    /// its row): kept with the cached scene so a cache-hit frame still names it.
+    hover_place: Option<(u32, u32, u32)>,
     state: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     doc: std::sync::Arc<solidcraft_engine::doc::Document>,
     /// The colours the block's palette indices refer to.
@@ -6972,6 +6975,16 @@ fn light_whole_body(
     // In the entry for the body's motion slot, so its lit placements move with the body.
     let slot = body_slots.slots(&b.name).map_or(crate::gpu::UNMOVED_SLOT, |s| s.motion);
     let colour = std::sync::Arc::make_mut(&mut feedback.palette).intern_moved(lit.colour, slot);
+    // A whole-body hover on a placement is the model's own draw in the hover palette entry: the
+    // cull writes it into that placement's instance row, so no copy of the geometry is built.
+    // Selected bodies (whose highlight can mix with a hover), faces, edges and block bodies keep
+    // today's path.
+    if !lit.selected
+        && let Some((draw, row)) = app.viewport.instanced_at.lock().ok().and_then(|m| m.get(&b.name).copied())
+    {
+        feedback.hover_place = Some((draw, row, colour.0));
+        return true;
+    }
     if instances.add(app, b, colour) {
         return true;
     }
@@ -7271,6 +7284,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         sc.lit_instanced_hidden = cached.lit_instanced_hidden;
         sc.planned = cached.planned;
         sc.hover_instanced = cached.hover_instanced;
+        sc.hover_place = cached.hover_place;
         sc.selected_instanced = cached.selected_instanced;
         return sc;
     }
@@ -7768,6 +7782,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 hover_face_instanced: hover_face_instanced.clone(),
                 selected_face_instanced: selected_face_instanced.clone(),
                 hover_instanced: hover_instanced.clone(),
+                hover_place: feedback.hover_place,
                 selected_instanced: selected_instanced.clone(),
                 recoloured: recoloured.clone(),
                 lit_edges: lit_edges.clone(),
@@ -8298,8 +8313,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.ctx().request_repaint();
         }
         let hk = highlight_key_with_projection(app, || proj);
+        let mut hover_place = None;
         if hk != app.viewport.hl_key {
             let hl = build_highlight_with_projection(app, || proj);
+            hover_place = hl.hover_place;
             if let Ok(mut slot) = app.viewport.hl_slot.lock() {
                 *slot = Some(hl);
             }
@@ -8317,7 +8334,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
             selection_all: app.session.all_bodies_selected(),
-            hover_place: None,
+            hover_place,
             product_lights: None,
             ssaa,
             ao_samples,
