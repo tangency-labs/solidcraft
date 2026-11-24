@@ -66,3 +66,37 @@ fn weld_panel_type_ids_match_the_engine_contract() {
     }
     assert!(start(&app, "weld.create").is_some());
 }
+
+#[test]
+fn weld_dialog_host_fills_available_tool_height_with_pinned_actions() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("weld.create");
+    h.frames(3);
+    let card = h.app.viewport.dialog_rect.expect("visible weld card");
+    let header = crate::scenario::rect_of("dialog:header").expect("shared header");
+    let body = crate::scenario::rect_of("dialog:body:viewport").expect("body viewport");
+    let footer = crate::scenario::rect_of("dialog:footer").expect("shared footer");
+    let define = crate::scenario::rect_of("weld:define_symbol").expect("Define symbol");
+    let ok = crate::scenario::rect_of("dialog:ok").expect("OK");
+    let cancel = crate::scenario::rect_of("dialog:cancel").expect("Cancel");
+    let t = Tokens::get();
+    let vp = crate::agent_chat::tool_space(&h.app, crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap()));
+    let drag_bounds = crate::shell::tool_drag_rect(&h.app, vp);
+    let gap = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Feature).gap();
+    assert!((card.bottom() - (drag_bounds.bottom() - gap)).abs() <= 1.0);
+    assert!((header.top() - card.top()).abs() <= 1.0);
+    assert!((footer.bottom() - card.bottom()).abs() <= 1.0);
+    assert!(header.bottom() <= body.top());
+    assert!(body.bottom() <= footer.top() + 0.5);
+    for button in [define, cancel, ok] {
+        assert!(footer.contains_rect(button));
+    }
+    for button in [cancel, ok] {
+        assert!((button.height() - t.form_button_height).abs() <= 0.5);
+    }
+    assert!(!define.intersects(cancel));
+    assert!(!cancel.intersects(ok));
+    println!(
+        "live dialog headless host: card {card:?}; header {header:?}; body {body:?}; footer {footer:?}; Define {define:?}; Cancel {cancel:?}; OK {ok:?}"
+    );
+}

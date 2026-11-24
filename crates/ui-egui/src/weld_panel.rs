@@ -355,17 +355,32 @@ pub(super) struct Measurements {
     #[cfg(test)]
     pub type_choices: Vec<ChoiceMeasurements>,
     pub more_button: Option<Rect>,
-    #[cfg(test)]
-    pub done_check: Option<Rect>,
-    #[cfg(test)]
-    pub strip_hint: Option<Rect>,
-    #[cfg(test)]
-    pub strip_hint_text: Option<Rect>,
-    #[cfg(test)]
-    pub strip_hint_lines: usize,
+    pub header: Option<Rect>,
+    pub body: Option<Rect>,
+    pub preview: Option<Rect>,
+    pub footer: Option<Rect>,
+    pub define: Option<Rect>,
+    pub cancel: Option<Rect>,
+    pub ok: Option<Rect>,
 }
 
-/// Content-height floating card, 344 points wide in the standard app metrics.
+/// Scrollable content only; the host supplies the shared tool-panel chrome.
+pub fn show_body(ui: &mut Ui, state: &mut WeldPanelState, tokens: &Tokens) -> WeldPanelEvent {
+    sections::show_body_measured(ui, state, tokens).0
+}
+
+/// Bounded tool card, 344 points wide in the standard app metrics.
 pub fn show(ui: &mut Ui, state: &mut WeldPanelState, tokens: &Tokens) -> WeldPanelEvent {
     sections::show_measured(ui, state, tokens).0
+}
+
+/// Contents of a Panel already placed by the live dialog host.
+pub(crate) fn show_contents(
+    ui: &mut Ui,
+    state: &mut WeldPanelState,
+    tokens: &Tokens,
+    height: f32,
+    extra_body: impl FnOnce(&mut Ui),
+) -> WeldPanelEvent {
+    sections::show_contents_measured(ui, state, tokens, height, extra_body).0
 }

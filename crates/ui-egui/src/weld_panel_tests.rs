@@ -37,8 +37,6 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     let (_, m) = render(&ctx, &mut state, false, vec![]);
     let board = [
-        ("header", 44.0),
-        ("strip", 60.0),
         // The revised board uses a 66-point choice row (8 points taller than its first export).
         ("type", 154.0),
         ("where", 170.0),
@@ -64,7 +62,7 @@ fn weld_panel_fillet_board_section_heights_and_order() {
     for pair in m.sections.windows(2) {
         close(pair[0].1.bottom(), pair[1].1.top(), 0.5);
     }
-    close(m.card.expect("card").height(), 1382.0, 12.0);
+    close(m.card.expect("card").height(), 3600.0, 0.5);
 }
 
 #[test]
@@ -160,13 +158,13 @@ fn weld_panel_actions_and_type_selection_emit_events_without_commands() {
     let ctx = context();
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    let symbol = m.widgets.first().expect("symbol").center();
+    let symbol = m.define.expect("Define symbol").center();
     assert_eq!(click(&ctx, &mut state, symbol), WeldPanelEvent::DefineSymbol);
-    let cancel = m.widgets.get(1).expect("cancel").center();
+    let cancel = m.cancel.expect("Cancel").center();
     assert_eq!(click(&ctx, &mut state, cancel), WeldPanelEvent::Cancel);
-    let done = m.widgets.get(2).expect("done").center();
+    let done = m.ok.expect("OK").center();
     assert_eq!(click(&ctx, &mut state, done), WeldPanelEvent::Done);
-    let groove = m.widgets.get(4).expect("groove choice").center();
+    let groove = m.type_choices[1].button.center();
     assert_eq!(click(&ctx, &mut state, groove), WeldPanelEvent::TypePicked(WeldType::Groove));
     assert_eq!(state.weld_type, WeldType::Groove);
     assert_eq!(state.size.a, "3.0");
@@ -402,75 +400,6 @@ fn weld_panel_horizontal_host_keeps_width_and_vertical_section_order() {
     }
 }
 
-#[test]
-fn weld_panel_symbol_strip_fits_preview_hint_and_right_aligned_actions() {
-    for dark in [false, true] {
-        let ctx = context();
-        solidcraft_theme::set_dark(dark);
-        solidcraft_theme::apply(&ctx);
-        let t = Tokens::get();
-        let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
-        let mut measured = None;
-        let mut output =
-            ctx.run_ui(RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 3600.0))), ..Default::default() }, |ui| {
-                ui.set_width(344.0);
-                measured = Some(sections::show_measured(ui, &mut state, &t).1);
-            });
-        output.textures_delta.clear();
-        let m = measured.expect("card");
-        let strip = section(&m, "strip");
-        let preview = m.widgets.first().expect("symbol preview");
-        let hint = m.strip_hint.expect("hint column");
-        let hint_text = m.strip_hint_text.expect("hint text");
-        let cancel = m.widgets[1];
-        let done = m.widgets[2];
-        assert!((109.5..=150.5).contains(&preview.width()));
-        let remaining = strip.width() - 24.0 - cancel.width() - done.width() - 96.0 - 3.0 * 6.0;
-        close(preview.width(), remaining.clamp(110.0, 150.0), 0.5);
-        close(preview.height(), 44.0, 0.5);
-        close(hint.width(), 96.0, 0.5);
-        assert_eq!(m.strip_hint_lines, 2);
-        close(hint_text.center().y, strip.center().y, 0.5);
-        close(strip.right() - done.right(), 12.0, 0.5);
-        close(preview.left() - strip.left(), 12.0, 0.5);
-        let items = [*preview, hint, cancel, done];
-        for item in items {
-            assert!(m.card.expect("card").expand(0.5).contains_rect(item));
-            close(item.center().y, strip.center().y, 0.5);
-        }
-        for pair in items.windows(2) {
-            assert!(!pair[0].intersects(pair[1]), "strip items overlap: {pair:?}");
-            close(pair[1].left() - pair[0].right(), 6.0, 0.5);
-        }
-        assert!(hint.expand(0.5).contains_rect(hint_text));
-        let painted_hint = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.job.text == tr("ui.weld.symbol") => Some(text),
-                _ => None,
-            })
-            .expect("the external hint is painted");
-        assert!(!painted_hint.galley.elided);
-        assert_eq!(painted_hint.galley.rows.len(), 2);
-        assert!(painted_hint.galley.job.sections.iter().all(|section| section.format.font_id.size == 11.5 && section.format.color == t.form_dim));
-        assert_eq!(painted_hint.galley.rect.translate(painted_hint.pos.to_vec2()), hint_text);
-        let check = m.done_check.expect("Done check");
-        close(check.width(), 14.0, 0.5);
-        close(check.height(), 14.0, 0.5);
-        assert!(m.widgets[2].contains_rect(check));
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(r) if r.rect == strip && r.fill == t.dialog_footer)));
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { points, stroke } if stroke.color == t.dialog_rule && points.iter().all(|p| (p.y - strip.bottom()).abs() < 0.5))));
-        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == tr("ui.weld.symbol") && preview.intersects(text.galley.rect.translate(text.pos.to_vec2())))));
-        println!(
-            "dark={dark}: strip-relative item rects (x,y,width,height): {:?}; hint text {:?}, {} lines",
-            items.map(|r| (r.left() - strip.left(), r.top() - strip.top(), r.width(), r.height())),
-            hint_text.translate(-strip.min.to_vec2()),
-            m.strip_hint_lines
-        );
-    }
-}
-
 fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Shape>, Vec<String>) {
     let ctx = context();
     solidcraft_theme::set_dark(dark);
@@ -488,6 +417,79 @@ fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Sh
     output.textures_delta.clear();
     let shapes = output.shapes.into_iter().map(|shape| shape.shape).filter(|shape| shape.visual_bounding_rect().is_positive()).collect();
     (defined, rect, shapes, expected_labels)
+}
+
+#[test]
+fn weld_panel_700_point_card_pins_chrome_while_only_body_scrolls() {
+    for dark in [false, true] {
+        let ctx = context();
+        solidcraft_theme::set_dark(dark);
+        solidcraft_theme::apply(&ctx);
+        let mut state = WeldPanelState::specimen(WeldType::Fillet, true);
+        let mut frame = |events| {
+            let mut measured = None;
+            let mut output = ctx.run_ui(
+                RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 900.0))), events, ..Default::default() },
+                |ui| {
+                    ui.set_width(344.0);
+                    ui.set_max_height(700.0);
+                    measured = Some(sections::show_measured(ui, &mut state, &Tokens::get()).1);
+                },
+            );
+            output.textures_delta.clear();
+            measured.expect("card")
+        };
+        let before = frame(vec![]);
+        let body = before.body.expect("body viewport");
+        frame(vec![
+            Event::PointerMoved(body.center()),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                source: egui::MouseWheelSource::Unknown,
+                delta: vec2(0.0, -400.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            },
+        ]);
+        // ScrollArea consumes the wheel after laying out its current content. Measure the
+        // following frame, when the retained body offset has been applied to the sections.
+        let after = frame(vec![]);
+        let card = after.card.expect("card");
+        let header = after.header.expect("header");
+        let footer = after.footer.expect("footer");
+        let preview = after.preview.expect("sticky preview");
+        close(card.height(), 700.0, 0.5);
+        close(header.top(), card.top() + 1.0, 0.5);
+        assert_eq!(before.header, after.header);
+        assert_eq!(before.footer, after.footer);
+        assert!(section(&after, "type").top() < section(&before, "type").top(), "body scroll moved its content");
+        close(footer.bottom(), card.bottom() - 1.0, 0.5);
+        assert!(footer.contains_rect(preview), "the symbol button is part of the footer bar");
+        close(body.bottom(), footer.top(), 0.5);
+        assert!(header.bottom() <= body.top());
+        let buttons = [after.define.expect("Define symbol"), after.cancel.expect("Cancel"), after.ok.expect("OK")];
+        for button in buttons {
+            assert!(footer.contains_rect(button));
+        }
+        for button in &buttons[1..] {
+            close(button.height(), Tokens::get().form_button_height, 0.5);
+        }
+        for pair in buttons.windows(2) {
+            assert!(!pair[0].intersects(pair[1]));
+        }
+        // Compare the actual shared footer, rather than duplicating its width formula.
+        let mut reference = None;
+        let mut output = ctx.run_ui(RawInput::default(), |ui| {
+            ui.set_width(342.0);
+            crate::ui_kit::footer(ui, "OK", tr("ui.weld.cancel"), true, crate::ui_kit::Footer::default());
+            reference = Some((solidcraft_ui_registry::rect_of("dialog:cancel").unwrap(), solidcraft_ui_registry::rect_of("dialog:ok").unwrap()));
+        });
+        output.textures_delta.clear();
+        let (cancel, ok) = reference.unwrap();
+        assert_eq!(buttons[1].size(), cancel.size());
+        assert_eq!(buttons[2].size(), ok.size());
+        println!("dark={dark}: card {card:?}; header {header:?}; body {body:?}; preview {preview:?}; footer {footer:?}; buttons {buttons:?}");
+    }
 }
 
 #[test]
@@ -519,7 +521,7 @@ fn weld_symbol_fillet_a3_paints_geometry_and_draw_labels_inside_preview_in_both_
 #[test]
 fn weld_symbol_unsupported_type_paints_the_dimmed_icon_and_undefined_hint() {
     for dark in [false, true] {
-        let mut state = WeldPanelState { weld_type: WeldType::Spot, ..Default::default() };
+        let state = WeldPanelState { weld_type: WeldType::Spot, ..Default::default() };
         let (defined, rect, shapes, labels) = symbol_frame(&state, dark);
         assert!(!defined);
         assert!(labels.is_empty());
@@ -533,18 +535,6 @@ fn weld_symbol_unsupported_type_paints_the_dimmed_icon_and_undefined_hint() {
         assert!(rect.contains_rect(mesh.calc_bounds()));
         assert!(!mesh.vertices.is_empty());
         assert!(mesh.vertices.iter().all(|vertex| (1..255).contains(&vertex.color.a())), "placeholder is visible and dimmed");
-        let ctx = context();
-        let mut output = ctx.run_ui(RawInput::default(), |ui| {
-            show(ui, &mut state, &Tokens::get());
-        });
-        output.textures_delta.clear();
-        assert!(
-            output
-                .shapes
-                .iter()
-                .any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == tr("ui.weld.symbol_undefined")))
-        );
-        assert_eq!(tr("ui.weld.symbol_undefined"), "Symbol not defined yet");
     }
 }
 
@@ -564,6 +554,17 @@ fn weld_symbol_invalid_sizes_paint_basic_geometry_without_panicking() {
             assert!(shapes.iter().all(|shape| rect.contains_rect(shape.visual_bounding_rect())));
         }
     }
+}
+
+#[test]
+fn weld_symbol_flipped_side_moves_the_weld_to_the_other_side_of_the_line() {
+    let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
+    state.flip_side = true;
+    let record = symbol::record(&state).expect("record");
+    assert!(record.arrow_side.is_none() && record.other_side.is_some());
+    state.flip_side = false;
+    let record = symbol::record(&state).expect("record");
+    assert!(record.arrow_side.is_some() && record.other_side.is_none());
 }
 
 #[test]
@@ -603,16 +604,13 @@ fn weld_symbol_record_maps_size_contour_sides_flags_and_process() {
 }
 
 #[test]
-fn weld_symbol_iso_a_identification_dashes_have_equal_end_marks() {
+fn weld_symbol_strip_has_one_reference_line_and_an_arrow_but_no_dashed_line() {
     let (defined, _, shapes, _) = symbol_frame(&WeldPanelState::default(), false);
     assert!(defined);
-    let lengths: Vec<_> = shapes
-        .iter()
-        .filter_map(|shape| match shape {
-            egui::Shape::LineSegment { points, .. } => Some(points[0].distance(points[1])),
-            _ => None,
-        })
-        .collect();
-    assert!(lengths.len() > 2);
-    close(*lengths.first().expect("first dash"), *lengths.last().expect("last dash"), 0.01);
+    assert!(
+        !shapes.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { .. })),
+        "a dashed identification line would be drawn as separate dash segments"
+    );
+    let filled = shapes.iter().filter(|shape| matches!(shape, egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT)).count();
+    assert!(filled >= 1, "the arrow head is a filled triangle");
 }

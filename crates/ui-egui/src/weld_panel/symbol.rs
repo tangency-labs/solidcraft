@@ -1,12 +1,7 @@
 //! Local ISO A preview; this does not create a model weld or a drawing annotation.
 use super::*;
-use egui::{Color32, FontId, Shape, Stroke, pos2, vec2};
-use solidcore_record::Seg2;
-use solidcraft_engine::geom::{
-    Seg2Geom,
-    paper::{Dashes, Item},
-    weld,
-};
+use egui::{FontId, vec2};
+use solidcraft_engine::geom::weld;
 
 pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
     let (kind, value) = match state.weld_type {
@@ -31,9 +26,16 @@ pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
             Face::Concave => weld::Contour::Concave,
         }),
     };
+    let (arrow_side, other_side) = if state.both_sides {
+        (Some(side.clone()), Some(side))
+    } else if on_other_side(state) {
+        (None, Some(side))
+    } else {
+        (Some(side), None)
+    };
     let record = weld::Weld {
-        arrow_side: Some(side.clone()),
-        other_side: state.both_sides.then_some(side),
+        arrow_side,
+        other_side,
         all_round: state.all_around,
         field: state.field_weld,
         tail: super::sections::look::process_number(state.process).map(str::to_owned),
@@ -42,15 +44,25 @@ pub(super) fn record(state: &WeldPanelState) -> weld::Result<weld::Weld> {
     Ok(record)
 }
 
+/// The weld sits on the far side of the joint: the symbol goes above the dashed line.
+fn on_other_side(state: &WeldPanelState) -> bool {
+    match state.weld_type {
+        WeldType::Groove => state.root_side == 1,
+        _ => state.flip_side,
+    }
+}
+
 fn basic(state: &WeldPanelState) -> Option<weld::Weld> {
     let kind = match state.weld_type {
         WeldType::Fillet => weld::Kind::Fillet,
         WeldType::Groove => weld::Kind::SingleVButt,
         _ => return None,
     };
+    let side = Some(weld::WeldSide { kind, size: None, length_mm: None, intermittent: None, contour: None });
+    let other = on_other_side(state);
     Some(weld::Weld {
-        arrow_side: Some(weld::WeldSide { kind, size: None, length_mm: None, intermittent: None, contour: None }),
-        other_side: None,
+        arrow_side: if other { None } else { side.clone() },
+        other_side: if other { side } else { None },
         all_round: false,
         field: false,
         tail: None,
@@ -65,118 +77,72 @@ fn format_number(value: f64) -> weld::Result<(String, f64)> {
 }
 
 pub(super) fn drawing(ui: &Ui, record: &weld::Weld, t: &Tokens) -> weld::Result<weld::Drawing> {
-    record.draw(
-        weld::Convention::Iso2553_2019A { identification: weld::IdentificationLine::Above },
-        weld::Style { height_mm: f64::from(t.font_caption), width_mm: f64::from(t.space_2 / 2.0) },
-        format_number,
-        |text, height| f64::from(ui.painter().layout_no_wrap(text.into(), FontId::proportional(height as f32), t.form_ink).size().x),
-    )
+    // One continuous reference line, as on the board's strip (no dashed identification line).
+    let h = f64::from(t.font_caption);
+    let width = f64::from(t.space_2 / 2.0);
+    let mut drawing =
+        record.draw(weld::Convention::Iso2553_2019B, weld::Style { height_mm: h, width_mm: width }, format_number, |text, height| {
+            f64::from(ui.painter().layout_no_wrap(text.into(), FontId::proportional(height as f32), t.form_ink).size().x)
+        })?;
+    add_arrow(&mut drawing, h, width);
+    Ok(drawing)
 }
 
-fn points(path: &[Seg2]) -> Vec<egui::Pos2> {
-    // These are bounded, locally generated symbol curves, flattened for display only.
-    let mut points: Vec<_> = path.iter().flat_map(|seg| seg.polyline(0.05)).map(|p| pos2(p.x as f32, -p.y as f32)).collect();
-    points.dedup();
-    if points.len() > 1 && points.first() == points.last() {
-        points.pop();
-    }
-    points
+/// The arrow leader at the left end of the reference line, pointing down-left at the joint.
+fn add_arrow(drawing: &mut weld::Drawing, h: f64, width: f64) {
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_engine::geom::paper::Item;
+    let tip = Vec2::new(-1.4 * h, -2.0 * h);
+    let along = Vec2::new(-0.57, -0.82);
+    let side = Vec2::new(0.82, -0.57);
+    let base = Vec2::new(tip.x - along.x * 1.2 * h, tip.y - along.y * 1.2 * h);
+    let left = Vec2::new(base.x + side.x * 0.45 * h, base.y + side.y * 0.45 * h);
+    let right = Vec2::new(base.x - side.x * 0.45 * h, base.y - side.y * 0.45 * h);
+    drawing.items.push(Item::Stroke { path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: base }], closed: false, width_mm: width, pattern: None });
+    drawing.items.push(Item::Fill {
+        region: Region2 {
+            outer: Loop2 { segs: vec![Seg2::Line { a: tip, b: left }, Seg2::Line { a: left, b: right }, Seg2::Line { a: right, b: tip }] },
+            holes: Vec::new(),
+        },
+    });
 }
 
-fn dashed(points: &[egui::Pos2], stroke: Stroke, pattern: &Dashes) -> Vec<Shape> {
-    // Paper phase consumes the pattern at the start; egui's dash offset instead adds a gap.
-    let mut phase = pattern.phase_mm as f32;
-    let mut index = 0;
-    for (i, length) in pattern.lengths_mm.iter().enumerate() {
-        index = i;
-        if phase < *length as f32 {
-            break;
-        }
-        phase -= *length as f32;
-    }
-    let Some(length) = pattern.lengths_mm.get(index) else { return Vec::new() };
-    let mut remaining = *length as f32 - phase;
-    let mut shapes = Vec::new();
-    for pair in points.windows(2) {
-        let length = pair[0].distance(pair[1]);
-        let mut along = 0.0;
-        // Draw's validated local pattern has positive lengths and bounded coordinates.
-        for _ in 0..10_000 {
-            if along >= length || remaining <= 0.0 {
-                break;
-            }
-            let available = length - along;
-            let finishes_dash = remaining <= available;
-            let end = if finishes_dash { along + remaining } else { length };
-            if index.is_multiple_of(2) {
-                shapes.push(Shape::line_segment([pair[0].lerp(pair[1], along / length), pair[0].lerp(pair[1], end / length)], stroke));
-            }
-            if finishes_dash {
-                index = (index + 1) % pattern.lengths_mm.len();
-                let Some(next) = pattern.lengths_mm.get(index) else { break };
-                remaining = *next as f32;
-            } else {
-                remaining -= available;
-            }
-            along = end;
-        }
-    }
-    shapes
+fn prepared(ui: &Ui, state: &WeldPanelState, t: &Tokens) -> (Option<weld::Drawing>, bool) {
+    let complete = record(state).and_then(|record| drawing(ui, &record, t));
+    let defined = complete.is_ok();
+    (complete.ok().or_else(|| basic(state).and_then(|record| drawing(ui, &record, t).ok())), defined)
 }
 
-fn shapes(ui: &Ui, drawing: &weld::Drawing, color: Color32) -> Vec<Shape> {
-    let mut shapes = Vec::new();
-    for item in &drawing.items {
-        match item {
-            Item::Stroke { path, closed, width_mm, pattern } => {
-                let mut points = points(path);
-                let stroke = Stroke::new(*width_mm as f32, color);
-                if let Some(pattern) = pattern {
-                    if *closed && let Some(first) = points.first().copied() {
-                        points.push(first);
-                    }
-                    shapes.extend(dashed(&points, stroke, pattern));
-                } else if *closed {
-                    shapes.push(Shape::closed_line(points, stroke));
-                } else {
-                    shapes.push(Shape::line(points, stroke));
-                }
-            }
-            // Weld::draw currently emits only a convex triangular field flag, without holes.
-            Item::Fill { region } => shapes.push(Shape::convex_polygon(points(&region.outer.segs), color, Stroke::NONE)),
-            Item::Text(_) | Item::Picture(_) => {}
-        }
-    }
-    for label in &drawing.text {
-        let galley = ui.painter().layout_no_wrap(label.text.clone(), FontId::proportional(label.height_mm as f32), color);
-        let baseline = galley.rows.first().and_then(|r| r.glyphs.first().map(|g| r.pos.y + g.pos.y)).unwrap_or(0.0);
-        let at = pos2(label.baseline.x as f32, -label.baseline.y as f32 - baseline);
-        shapes.push(Shape::galley(at, galley, color));
-    }
-    shapes
+/// The symbol keeps one scale whatever the state: four text heights of paper fill `height`.
+pub(super) fn scale(height: f32, t: &Tokens) -> f32 {
+    height / (4.0 * t.font_caption)
+}
+
+/// Width of the ink at the constant scale, or None when only the placeholder icon shows.
+pub(super) fn natural_width(ui: &Ui, height: f32, state: &WeldPanelState, t: &Tokens) -> Option<f32> {
+    let (drawing, _) = prepared(ui, state, t);
+    let probe = Rect::from_min_size(egui::Pos2::ZERO, vec2(10_000.0, height));
+    crate::weld_symbol_paint::centre_in_rect(&drawing?, probe, scale(height, t), ui.painter()).map(|fit| fit.size.x)
+}
+
+/// A floor on the box width so it does not jump between short and long symbols.
+pub(super) fn min_width(height: f32, t: &Tokens) -> f32 {
+    10.0 * t.font_caption * scale(height, t)
 }
 
 /// Returns whether a complete symbol is defined; the caller uses that for the strip hint.
 pub(super) fn paint(ui: &Ui, rect: Rect, state: &WeldPanelState, t: &Tokens) -> bool {
-    let complete = record(state).and_then(|record| drawing(ui, &record, t));
-    let defined = complete.is_ok();
-    let drawing = complete.ok().or_else(|| basic(state).and_then(|record| drawing(ui, &record, t).ok()));
+    let (drawing, defined) = prepared(ui, state, t);
     let Some(drawing) = drawing else {
         let icon = Rect::from_center_size(rect.center(), vec2(t.control_height + t.space_4, t.control_height + t.space_4));
         crate::ui_kit::icons::paint_icon(ui.painter(), icon, "weld_symbol", 0.4);
         return false;
     };
-    let mut shapes = shapes(ui, &drawing, if defined { t.form_ink } else { t.form_dim });
-    let bounds = shapes.iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
-    if !bounds.is_finite() || !bounds.is_positive() {
-        return false;
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    let ink = if defined { t.form_ink } else { t.form_dim };
+    let inner = rect.shrink2(vec2(t.space_4, t.space_2));
+    if let Some(fit) = crate::weld_symbol_paint::centre_in_rect(&drawing, inner, scale(inner.height(), t), &painter) {
+        crate::weld_symbol_paint::paint(&drawing, |point| fit.map(point), fit.pixels_per_mm, ink, 1.0, &painter);
     }
-    let inner = rect.shrink(t.space_4);
-    let scale = (inner.width() / bounds.width()).min(inner.height() / bounds.height()).min(1.0);
-    let transform = egui::emath::TSTransform::new(inner.center().to_vec2() - bounds.center().to_vec2() * scale, scale);
-    for shape in &mut shapes {
-        shape.transform(transform);
-    }
-    ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())).extend(shapes);
     defined
 }

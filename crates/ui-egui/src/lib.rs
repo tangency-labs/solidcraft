@@ -430,6 +430,7 @@ mod viewport_status_fixture;
 mod weld_figures;
 #[doc(hidden)]
 pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;

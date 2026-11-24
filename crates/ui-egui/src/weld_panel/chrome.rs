@@ -49,92 +49,24 @@ pub(super) fn more_button(ui: &mut Ui, m: &mut Measurements, rect: Rect, t: &Tok
     response
 }
 
-pub(super) fn header(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measurements, event: &mut WeldPanelEvent) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.form_header_height + t.space_4), Sense::hover());
-    let icon = Rect::from_center_size(pos2(rect.left() + t.space_12 + t.space_12, rect.center().y), vec2(t.space_24, t.space_24));
-    kit::icons::paint_icon(ui.painter(), icon, "weld", 1.0);
-    ui.painter().text(
-        pos2(icon.right() + t.space_8, rect.center().y),
-        Align2::LEFT_CENTER,
-        tr("ui.weld.title"),
-        kit::type_face::semibold(t.font_heading),
-        t.form_ink,
-    );
-    let width = ui.painter().layout_no_wrap(state.number.clone(), FontId::monospace(t.font_body), t.form_ink).size().x + t.space_16;
-    let mut chip =
-        child(ui, Rect::from_min_size(pos2(rect.right() - t.space_12 - width, rect.center().y - t.space_12), vec2(width, t.space_24)), "number");
-    kit::settings_chip(&mut chip, &state.number, kit::SettingsChip { monospace: true, ..Default::default() })
-        .backing_on_hover_text(tr("ui.weld.number_tip"));
-    rule(ui, t, rect.bottom());
-    m.sections.push(("header", rect));
-
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height + 2.0 * t.space_16), Sense::hover());
-    ui.painter().rect_filled(rect, 0, t.dialog_footer);
-    let cancel_text = ui.painter().layout_no_wrap(tr("ui.weld.cancel").into(), FontId::proportional(t.font_label), t.form_ink);
-    let done_text = ui.painter().layout_no_wrap(tr("ui.weld.done").into(), kit::type_face::semibold(t.font_label), t.on_accent);
-    let hint_width = t.space_24 * 4.0;
-    let gap = t.space_6;
-    let minimum_preview = t.form_label_width + t.space_24 + t.space_16;
-    let preferred_preview = t.form_label_width * 2.0 + t.space_10;
-    let inner_width = rect.width() - 2.0 * t.space_12;
-    let cancel_content = cancel_text.size().x.ceil();
-    let done_content = done_text.size().x.ceil() + t.space_14 + t.space_6;
-    // Keep all four items in the card: only the actions' horizontal padding compresses.
-    let action_room = inner_width - hint_width - minimum_preview - 3.0 * gap;
-    let action_padding = ((action_room - cancel_content - done_content) / 2.0).clamp(0.0, 2.0 * t.space_8);
-    let cancel_width = cancel_content + action_padding;
-    let done_width = done_content + action_padding;
-    let preview_width = (inner_width - cancel_width - done_width - hint_width - 3.0 * gap).clamp(minimum_preview, preferred_preview);
-    let symbol = Rect::from_min_size(rect.min + vec2(t.space_12, t.space_8), vec2(preview_width, t.form_header_height + t.space_4));
-    let preview = at_button(ui, m, symbol, "symbol", "", Button::Normal).backing_on_hover_text(tr("ui.weld.symbol_tip"));
-    preview.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.symbol_tip")));
-    let symbol_defined = symbol::paint(ui, symbol, state, t);
-    if preview.clicked() {
-        *event = WeldPanelEvent::DefineSymbol;
+/// The live symbol as a button in the footer's free left slot; true when clicked.
+pub(super) fn footer_symbol(ui: &mut Ui, band: Rect, right: f32, state: &WeldPanelState, t: &Tokens, m: &mut Measurements) -> bool {
+    let slot = Rect::from_min_max(pos2(band.left() + t.space_12, band.top() + t.space_6), pos2(right, band.bottom() - t.space_6));
+    if slot.width() <= 0.0 || slot.height() <= 0.0 {
+        return false;
     }
-    let done = Rect::from_center_size(pos2(rect.right() - t.space_12 - done_width / 2.0, rect.center().y), vec2(done_width, t.control_height));
-    let cancel = Rect::from_center_size(pos2(done.left() - gap - cancel_width / 2.0, rect.center().y), vec2(cancel_width, t.control_height));
-    let hint = Rect::from_min_size(pos2(cancel.left() - gap - hint_width, symbol.top()), vec2(hint_width, symbol.height()));
-    let mut job = egui::text::LayoutJob::single_section(
-        tr(if symbol_defined { "ui.weld.symbol" } else { "ui.weld.symbol_undefined" }).into(),
-        egui::TextFormat {
-            font_id: FontId::proportional(t.font_caption),
-            color: t.form_dim,
-            line_height: Some(t.font_caption * 1.3),
-            ..Default::default()
-        },
-    );
-    job.wrap.max_width = hint.width();
-    job.wrap.max_rows = 2;
-    let hint_text = ui.fonts_mut(|fonts| fonts.layout_job(job));
-    let hint_at = pos2(hint.left(), hint.center().y - hint_text.size().y / 2.0);
-    #[cfg(test)]
-    {
-        m.strip_hint = Some(hint);
-        m.strip_hint_text = Some(hint_text.rect.translate(hint_at.to_vec2()));
-        m.strip_hint_lines = hint_text.rows.len();
-    }
-    ui.painter().with_clip_rect(hint.intersect(ui.clip_rect())).galley(hint_at, hint_text, t.form_dim);
-    let cancel_response = at_button(ui, m, cancel, "cancel", "", Button::Normal);
-    cancel_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.cancel")));
-    ui.painter().galley(cancel.center() - cancel_text.size() / 2.0, cancel_text, t.form_ink);
-    if cancel_response.clicked() {
-        *event = WeldPanelEvent::Cancel;
-    }
-    let done_response = at_button(ui, m, done, "done", "", Button::Primary);
-    done_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.done")));
-    let check_left = done.center().x - (t.space_14 + t.space_6 + done_text.size().x) / 2.0;
-    let check = Rect::from_center_size(pos2(check_left + t.space_14 / 2.0, done.center().y), vec2(t.space_14, t.space_14));
-    #[cfg(test)]
-    {
-        m.done_check = Some(check);
-    }
-    let point = |x: f32, y: f32| check.min + vec2(x, y) * (t.space_14 / t.space_24);
-    ui.painter().add(egui::Shape::line(vec![point(5.0, 12.5), point(9.5, 17.0), point(19.0, 7.0)], egui::Stroke::new(t.space_2, t.on_accent)));
-    ui.painter().galley(pos2(check.right() + t.space_6, done.center().y - done_text.size().y / 2.0), done_text, t.on_accent);
-    if done_response.clicked() {
-        *event = WeldPanelEvent::Done;
-    }
-    rule(ui, t, rect.bottom());
-    m.sections.push(("strip", rect));
+    // Only as wide as the symbol needs (the icon placeholder is square), left-aligned.
+    let pad = t.space_4;
+    let inner_height = slot.height() - t.space_2 * 2.0;
+    let ink = symbol::natural_width(ui, inner_height, state, t).unwrap_or(inner_height);
+    let wanted = ink.max(symbol::min_width(inner_height, t)) + pad * 2.0;
+    let rect = Rect::from_min_size(slot.min, vec2(wanted.min(slot.width()), slot.height()));
+    let response = at_button(ui, m, rect, "symbol", "", Button::Normal).backing_on_hover_text(tr("ui.weld.symbol_tip"));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.symbol_tip")));
+    symbol::paint(ui, rect, state, t);
+    m.preview = Some(rect);
+    m.define = Some(rect);
+    solidcraft_ui_registry::publish_rect("weld:preview", rect);
+    solidcraft_ui_registry::publish_target("weld:define_symbol", rect);
+    response.clicked()
 }

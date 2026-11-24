@@ -110,7 +110,7 @@ pub(crate) fn event(app: &mut SolveApp, d: &mut Dialog, event: WeldPanelEvent) -
     true
 }
 
-/// The existing panel owns its kit backing; the host only supplies floating placement and scrolling.
+/// Use the same Panel placement and surface as the other tool dialogs.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context, mut d: Dialog) {
     // Undo or a programmatic create can change the next number while the form is open.
     if let Kind::Weld(state) = &mut d.kind {
@@ -122,26 +122,40 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, mut d: Dialog) {
         app.dialog = Some(d);
         return;
     }
-    let width = t.form_card_width + 2.0 * (t.space_24 + t.space_16);
-    let position = egui::pos2((vp.right() - width - t.space_16).max(vp.left()), vp.top() + t.space_16);
-    let response = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Feature)
-        .area(egui::Id::unique("weld_create_panel"))
-        .default_pos(position)
-        .movable(true)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height((vp.height() - t.space_24).max(t.control_height))
-                .show(ui, |ui| {
-                    let event =
-                        if let Kind::Weld(state) = &mut d.kind { crate::weld_panel::show(ui, &mut state.panel, &t) } else { WeldPanelEvent::None };
-                    crate::dialogs::error_rows(app, ctx, &mut d, ui);
-                    event
-                })
-                .inner
-        });
-    app.viewport.dialog_rect = Some(response.response.rect);
-    crate::scenario::publish_rect("dialog:window", response.response.rect);
-    let requested = if std::mem::take(&mut d.confirm) { WeldPanelEvent::Done } else { response.inner };
+    let placement = crate::shell::editor_space(app, vp);
+    let side = crate::frame::Side::Right;
+    let top = crate::shell::panel_top(app, placement, placement.bottom(), side);
+    let drag_bounds = crate::shell::tool_drag_rect(app, vp);
+    let docked = egui::pos2(side.anchor_x(placement), top);
+    let moved = crate::frame::dock_offset(ctx, side.dialog_offset_key());
+    let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
+    let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
+    let panel = crate::ui_kit::Panel::new(app.tr("ui.weld.title"), egui::Id::unique("weld_create_panel"), anchor, drag_bounds, side, frame)
+        .width(t.form_card_width + 2.0 * (t.space_24 + t.space_16));
+    let frame = panel.positioned_frame(ctx);
+    let gap = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Feature).gap();
+    let size = egui::vec2(
+        (panel.width.min(drag_bounds.width()) - frame.total_margin().sum().x).max(0.0),
+        (drag_bounds.bottom() - panel.bounded_anchor(ctx).y - gap - frame.total_margin().sum().y).max(0.0),
+    );
+    let mut painted = false;
+    let mut local = if let Kind::Weld(state) = &mut d.kind { std::mem::take(&mut state.panel) } else { WeldPanelState::default() };
+    let response = panel.fixed_window(ctx, size).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
+        let title = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(size.x, t.form_header_height));
+        crate::frame::drag_dock(ui, title, side.dialog_offset_key(), moved, panel.bounded_anchor(ctx) - docked);
+        crate::weld_panel::show_contents(ui, &mut local, &t, size.y, |ui| crate::dialogs::error_rows(app, ctx, &mut d, ui))
+    });
+    if let Kind::Weld(state) = &mut d.kind {
+        state.panel = local;
+    }
+    app.viewport.dialog_rect = response.as_ref().filter(|_| painted).map(|r| r.response.rect);
+    if let Some(rect) = app.viewport.dialog_rect {
+        crate::scenario::publish_rect("dialog:window", rect);
+        crate::scenario::publish_rect("dialog:outer", rect);
+        crate::scenario::publish_target("dialog:card", rect);
+    }
+    let requested = if std::mem::take(&mut d.confirm) { WeldPanelEvent::Done } else { response.and_then(|r| r.inner).unwrap_or_default() };
     if event(app, &mut d, requested) {
         app.dialog = Some(d);
     }

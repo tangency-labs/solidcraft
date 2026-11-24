@@ -586,48 +586,107 @@ fn advanced(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens, m: &mut Measure
     m.sections.push(("advanced", rect));
 }
 
-pub(super) fn show_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens) -> (WeldPanelEvent, Measurements) {
+pub(super) fn show_body_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens) -> (WeldPanelEvent, Measurements) {
     let mut event = WeldPanelEvent::None;
     let mut measured = Measurements::default();
-    let frame = kit::Panel::feature_frame(ui.ctx(), kit::LayoutMode::Floating, kit::frame::Side::Left);
-    let response = Container::show_backing(ui, frame, |ui| {
-        ui.set_width(card_width(t) - frame.total_margin().sum().x);
-        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-            kit::scope(ui, |ui| {
-                ui.spacing_mut().item_spacing = vec2(t.space_6, 0.0);
-                ui.spacing_mut().interact_size.y = t.space_14;
-                chrome::header(ui, state, t, &mut measured, &mut event);
-                types(ui, state, t, &mut measured, &mut event);
-                where_section(ui, state, t, &mut measured, &mut event);
-                size::show(ui, state, t, &mut measured);
-                face(ui, state, t, &mut measured);
-                extent(ui, state, t, &mut measured);
-                flags(ui, state, t, &mut measured);
-                look::show(ui, state, t, &mut measured);
-                notices(ui, state, t, &mut measured, &mut event);
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.form_footer_height), Sense::hover());
-                rule(ui, t, rect.top());
-                let button = rect.shrink2(vec2(t.space_14, t.space_10));
-                if at_button(ui, &mut measured, button, "new_bead", tr("ui.weld.new_bead"), Button::Normal)
-                    .backing_on_hover_text(tr("ui.weld.new_bead_tip"))
-                    .clicked()
-                {
-                    event = WeldPanelEvent::NewBead;
-                }
-                kit::icons::paint_icon(
-                    ui.painter(),
-                    Rect::from_center_size(
-                        pos2(button.center().x - t.form_label_width, button.center().y),
-                        vec2(t.space_16 + t.space_2, t.space_16 + t.space_2),
-                    ),
-                    "weld_new_bead",
-                    1.0,
-                );
-                measured.sections.push(("buttons", rect));
-                advanced(ui, state, t, &mut measured);
-            })
-        });
+    kit::scope(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(t.space_6, 0.0);
+        ui.spacing_mut().interact_size.y = t.space_14;
+        types(ui, state, t, &mut measured, &mut event);
+        where_section(ui, state, t, &mut measured, &mut event);
+        size::show(ui, state, t, &mut measured);
+        face(ui, state, t, &mut measured);
+        extent(ui, state, t, &mut measured);
+        flags(ui, state, t, &mut measured);
+        look::show(ui, state, t, &mut measured);
+        notices(ui, state, t, &mut measured, &mut event);
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.form_footer_height), Sense::hover());
+        rule(ui, t, rect.top());
+        let button = rect.shrink2(vec2(t.space_14, t.space_10));
+        if at_button(ui, &mut measured, button, "new_bead", tr("ui.weld.new_bead"), Button::Normal)
+            .backing_on_hover_text(tr("ui.weld.new_bead_tip"))
+            .clicked()
+        {
+            event = WeldPanelEvent::NewBead;
+        }
+        kit::icons::paint_icon(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(button.center().x - t.form_label_width, button.center().y),
+                vec2(t.space_16 + t.space_2, t.space_16 + t.space_2),
+            ),
+            "weld_new_bead",
+            1.0,
+        );
+        measured.sections.push(("buttons", rect));
+        advanced(ui, state, t, &mut measured);
     });
-    measured.card = Some(response.response.rect);
+    (event, measured)
+}
+
+pub(super) fn show_measured(ui: &mut Ui, state: &mut WeldPanelState, t: &Tokens) -> (WeldPanelEvent, Measurements) {
+    let frame = kit::Panel::feature_frame(ui.ctx(), kit::LayoutMode::Floating, kit::frame::Side::Left);
+    let height = ui.available_height();
+    let shown = Container::show_backing(ui, frame, |ui| {
+        ui.set_width(card_width(t) - frame.total_margin().sum().x);
+        show_contents_measured(ui, state, t, height - frame.total_margin().sum().y, |_| {})
+    });
+    let (event, mut measured) = shown.inner;
+    measured.card = Some(shown.response.rect);
+    (event, measured)
+}
+
+/// Compose content inside the host's Panel surface. Only the middle body scrolls.
+pub(super) fn show_contents_measured(
+    ui: &mut Ui,
+    state: &mut WeldPanelState,
+    t: &Tokens,
+    height: f32,
+    extra: impl FnOnce(&mut Ui),
+) -> (WeldPanelEvent, Measurements) {
+    let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), height.max(0.0)), Sense::hover());
+    let mut content = child(ui, card, "weld_card");
+    let ui = &mut content;
+    ui.set_clip_rect(ui.clip_rect().intersect(card));
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let mut event = WeldPanelEvent::None;
+    let mut close = false;
+    kit::panel::header(ui, "weld", tr("ui.weld.title"), || close = true);
+    let header = solidcraft_ui_registry::rect_of("dialog:header");
+    let body_height = (card.bottom() - ui.cursor().top() - t.form_footer_height).max(0.0);
+    let scroll = egui::ScrollArea::vertical().id_salt("weld_body").max_height(body_height).min_scrolled_height(0.0).auto_shrink([false, false]).show(
+        ui,
+        |ui| {
+            let result = show_body_measured(ui, state, t);
+            extra(ui);
+            result
+        },
+    );
+    let (body_event, mut measured) = scroll.inner;
+    if body_event != WeldPanelEvent::None {
+        event = body_event;
+    }
+    measured.card = Some(card);
+    measured.header = header;
+    measured.body = Some(scroll.inner_rect);
+    solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);
+    solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
+    let footer = kit::footer(ui, tr("OK"), tr("ui.weld.cancel"), true, kit::Footer::default());
+    measured.footer = solidcraft_ui_registry::rect_of("dialog:footer");
+    measured.cancel = solidcraft_ui_registry::rect_of("dialog:cancel");
+    measured.ok = solidcraft_ui_registry::rect_of("dialog:ok");
+    // The public footer API has no left callback. The clickable symbol fills the footer's free
+    // left slot; the shared action painter alone owns the buttons' sizing, order and style.
+    if let (Some(band), Some(cancel), Some(ok)) = (measured.footer, measured.cancel, measured.ok) {
+        let right = cancel.left().min(ok.left()) - t.space_8;
+        if chrome::footer_symbol(ui, band, right, state, t, &mut measured) {
+            event = WeldPanelEvent::DefineSymbol;
+        }
+    }
+    if close || footer == kit::Action::Cancel {
+        event = WeldPanelEvent::Cancel;
+    } else if footer == kit::Action::Ok {
+        event = WeldPanelEvent::Done;
+    }
     (event, measured)
 }
