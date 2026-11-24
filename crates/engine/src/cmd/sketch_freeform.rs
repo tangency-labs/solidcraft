@@ -134,7 +134,7 @@ fn cuts(sk: &Sketch, ci: usize, geo: &Geometry, cmd: &str) -> Result<Vec<Boundar
         if oi == ci
             || (shape.is_some() && !curve.kind.is_freeform())
             || own_axes.contains(&Some(oi))
-            || curve.spline_handle_of.as_ref() == Some(&target.id)
+            || curve.spline_guide_owner() == Some(target.id.as_str())
         {
             continue;
         }

@@ -903,6 +903,7 @@ impl Sketch {
                 fixed: false,
                 infinite: false,
                 spline_handle_of: None,
+                spline_control_polygon_of: None,
             });
         }
         for li in &lay.lone {
@@ -988,7 +989,7 @@ impl Sketch {
     /// sketch's own curves and constraints on it move to the new entities that match the old
     /// ones (`rebuild_link`). Returns `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
-        self.update_link_read(id, geom, false).map(|(rebuilt, _)| rebuilt)
+        self.update_link_read(id, geom, false, &[]).map(|(rebuilt, _)| rebuilt)
     }
 
     /// Record which model edge each curve of link `id` stands for: `names[i]` is the persistent
@@ -1012,12 +1013,22 @@ impl Sketch {
     /// their ids as long as each stays on the same loop of the face (an outer rim is never taken
     /// for a hole) (#18711). Otherwise as [`Sketch::update_link`]. Either way the link records
     /// the names of the edges its curves stand for now, where it knows them.
+    /// A unique whole edge also keeps its curve id across representation changes,
+    /// when its endpoints certify the same extent and an unambiguous direction.
     pub fn update_link_named(&mut self, id: &str, geom: &[LinkGeom], names: &[String]) -> Result<bool> {
+        // An exact Edge link predates per-curve edge names. One curve on each
+        // reading covers that link's entire named edge, just as a face's pieces do.
+        let edge = self
+            .link(id)
+            .filter(|l| l.kind == LinkKind::Project && matches!(l.source, LinkSource::Edge { .. }))
+            .and_then(|l| l.edge_name.clone())
+            .filter(|_| geom.len() == 1 && self.link_curves(id).len() == 1);
+        let names = if names.is_empty() { edge.as_ref().map(std::slice::from_ref).unwrap_or(names) } else { names };
         let unique = |v: &[String]| {
             let mut seen = std::collections::BTreeSet::new();
             !v.is_empty() && v.iter().all(|n| !n.is_empty() && seen.insert(n.as_str()))
         };
-        let stored = self.link(id).map(|l| l.curve_edges.clone()).unwrap_or_default();
+        let stored = self.link(id).map(|l| l.curve_edges.clone()).filter(|v| !v.is_empty()).unwrap_or_else(|| edge.iter().cloned().collect());
         let by_name: Option<Vec<usize>> = (names.len() == geom.len()
             && stored.len() == geom.len()
             && self.link_curves(id).len() == stored.len()
@@ -1029,7 +1040,22 @@ impl Sketch {
             Some(order) => order.iter().filter_map(|j| Some((geom.get(*j)?.clone(), names.get(*j)?.clone()))).unzip(),
             None => (geom.to_vec(), names.to_vec()),
         };
-        let (rebuilt, read) = self.update_link_read(id, &geom, by_name.is_some())?;
+        // A missing or split neighbour does not erase another edge's identity.
+        // Only a name occurring once in each reading covers one whole edge.
+        let indices = |names: &[String]| {
+            let mut map = std::collections::BTreeMap::new();
+            for (i, name) in names.iter().enumerate().filter(|(_, n)| !n.is_empty()) {
+                map.entry(name.clone()).and_modify(|index| *index = None).or_insert(Some(i));
+            }
+            map
+        };
+        let identities = if stored.len() == self.link_curves(id).len() && names.len() == geom.len() {
+            let (old, fresh) = (indices(&stored), indices(&names));
+            old.iter().filter_map(|(name, i)| Some(((*i)?, fresh.get(name).copied().flatten()?))).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let (rebuilt, read) = self.update_link_read(id, &geom, by_name.is_some(), &identities)?;
         let edges: Vec<String> = match read {
             Some(read) if names.len() == geom.len() => read.iter().filter_map(|j| names.get(*j).cloned()).collect(),
             _ => Vec::new(),
@@ -1045,7 +1071,13 @@ impl Sketch {
     /// order), the piece of `geom` it stands for, where that is known (the link's curves are
     /// `geom` one for one). `in_name_order`: `geom` was put in the order of the link's curves by
     /// their edges' names ([`Sketch::update_link_named`]).
-    fn update_link_read(&mut self, id: &str, geom: &[LinkGeom], in_name_order: bool) -> Result<(bool, Option<Vec<usize>>)> {
+    fn update_link_read(
+        &mut self,
+        id: &str,
+        geom: &[LinkGeom],
+        in_name_order: bool,
+        identities: &[(usize, usize)],
+    ) -> Result<(bool, Option<Vec<usize>>)> {
         let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
         };
@@ -1211,9 +1243,19 @@ impl Sketch {
                     if let Some(fresh_pos) = fresh_pos
                         && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| near_point(p.pos, *q)))
                     {
-                        for (pi, q) in points.iter().zip(fresh_pos) {
-                            if let Some(p) = self.points.get_mut(*pi) {
-                                p.pos = q;
+                        // A face whose loops meet at a corner has coincident duplicate edges and
+                        // vertices in the model there, and what a later feature makes of them
+                        // depends on coordinates well below any tolerance (#15049). Such a link
+                        // was never moved by a re-read before the corner was accepted (#20621),
+                        // so a re-read that agrees to within one point's merge distance leaves
+                        // its points as saved. Radii and conic shapes still follow the face.
+                        let keep_points = loops::meets_at_corner(&lay.curves, lay.pts.len())
+                            && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| p.pos.dist(*q) <= MERGE_TOL));
+                        if !keep_points {
+                            for (pi, q) in points.iter().zip(fresh_pos) {
+                                if let Some(p) = self.points.get_mut(*pi) {
+                                    p.pos = q;
+                                }
                             }
                         }
                         for (ci, c) in curves.iter().zip(&lay.curves) {
@@ -1496,7 +1538,7 @@ impl Sketch {
             return Ok((true, None));
         }
         // Rebuild: new entities, and what the sketch held on the old ones moves to them.
-        self.rebuild_link(id, &lay, &points, &curves, cur.as_deref())?;
+        self.rebuild_link(id, &lay, &points, &curves, cur.as_deref(), if one_for_one { identities } else { &[] })?;
         Ok((true, in_order()))
     }
 

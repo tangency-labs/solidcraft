@@ -21,18 +21,12 @@ use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2_list};
 use crate::schema::sketch_create::{
-    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams,
-    ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlKnotsSplineParams, ControlPointSplineParams, DrawResult,
-    EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
-    InfiniteLineParams, LineTypeResult, MidpointLineParams,
-    SketchTextParams, SlotCenterPointParams, SplineControlPolygonParams,
-    SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
-    SplineInsertResult, SplineRemovePointParams, SplineRemoveResult,
-    SplineResetHandlesParams, SplineResetHandlesResult,
-    SplineReverseParams, SplineReverseResult, TextChange,
-    TextEditResult, TextExpressions, TextResult, ThreeTangentCircleParams,
-    ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
+    ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
+    ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineControlPolygonParams, SplineHandlesParams,
+    SplineHandlesResult, SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult,
+    SplineResetHandlesParams, SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions,
+    TextResult, ThreeTangentCircleParams, ToleranceSplineParams, ToleranceSplineResult, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -407,7 +401,7 @@ type TextValues = (String, Vec2, f64, f64, Option<String>, TextStyle, TextExprs)
 /// A text's source from a command's parameters: what is given replaces what `old` has (the
 /// defaults, for a new text); what is left out stays, an expression with its number. A number
 /// replaces an expression. An input that is not understood is refused, not ignored.
-fn text_source(doc: &solidcraft_doc::Document, p: &Value, cmd: &str, old: Option<TextValues>) -> Result<LinkSource> {
+fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, cmd: &str, old: Option<TextValues>) -> Result<LinkSource> {
     let (t0, mut at, mut height, mut angle, f0, s0, mut exprs) =
         old.unwrap_or((String::new(), Vec2::ZERO, 5.0, 0.0, None, TextStyle::default(), TextExprs::default()));
     let text = match (p.get("text").filter(|v| !v.is_null()), p.get("text_expression").filter(|v| !v.is_null())) {
@@ -455,7 +449,8 @@ fn text_source(doc: &solidcraft_doc::Document, p: &Value, cmd: &str, old: Option
     let font = match p.get("font") {
         None | Some(Value::Null) => f0,
         Some(Value::String(f)) if f.trim().is_empty() => None,
-        Some(Value::String(f)) => Some(f.trim().to_string()),
+        // A font file relative to the design's folder is kept whole, as a saved design is read (#20502).
+        Some(Value::String(f)) => Some(super::design_link::whole_font(design, f).unwrap_or_else(|| f.trim().to_string())),
         Some(_) => return Err(bad(cmd, "`font` must be a font family name or a font file path")),
     };
     let style = text_style(p, cmd, s0)?;
@@ -484,7 +479,7 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("at").is_none_or(Value::is_null) {
         return Err(bad(cmd, AT_MUST));
     }
-    let src = text_source(&s.doc, p, cmd, None)?;
+    let src = text_source(&s.doc, s.path.as_deref(), p, cmd, None)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let exprs = text_exprs(&src);
     let (l, curves, guide) = sketch_store::update(s, id, |_, _, sk| {
@@ -590,11 +585,12 @@ pub(crate) const MAX_TEXT_EDITS: usize = 1000;
 fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.edit_text";
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let design = s.path.clone();
     let edited = sketch_store::update(s, id, |_, doc, sk| {
         // The numbers its expressions give now (a parameter may have changed since the sketch was
         // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
         let _ = doc.apply_text_values(&doc.param_values().0, sk);
-        apply_text_edits(sk, doc, p)
+        apply_text_edits(sk, doc, design.as_deref(), p)
     })?;
     reply(edited)
 }
@@ -604,26 +600,27 @@ fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_text_live(s: &mut Session, p: &Value) -> Result<(Value, Option<crate::LiveEdit>)> {
     let cmd = "sketch.edit_text";
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let design = s.path.clone();
     let (out, report) = super::sketch::edit_solved(s, id, false, solidcraft_sketch::Analysis::Full, |sk, doc| {
-        Ok((apply_text_edits(sk, doc, p)?, super::sketch::Left::Unsolved))
+        Ok((apply_text_edits(sk, doc, design.as_deref(), p)?, super::sketch::Left::Unsolved))
     })?;
     Ok((reply(out)?, report.map(|report| crate::LiveEdit { sketch: id, report })))
 }
 
 /// `sketch.edit_text`'s change: one text's (`link` or `entity`), or each of `edits` in turn.
 /// One command, so the features after the sketch are rebuilt once for all of them.
-fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -> Result<EditTextResult> {
+fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value) -> Result<EditTextResult> {
     let cmd = "sketch.edit_text";
     match p.get("edits") {
         None | Some(Value::Null) => {
-            let change = apply_text_edit(sk, doc, p)?;
+            let change = apply_text_edit(sk, doc, design, p)?;
             Ok(EditTextResult::One(TextResult { change, created: None, param_warnings: Vec::new() }))
         }
         Some(Value::Array(edits)) => {
             if edits.is_empty() || edits.len() > MAX_TEXT_EDITS {
                 return Err(bad(cmd, format!("`edits` must hold 1 to {MAX_TEXT_EDITS} edits")));
             }
-            let outs = edits.iter().map(|e| apply_text_edit(sk, doc, e)).collect::<Result<Vec<_>>>()?;
+            let outs = edits.iter().map(|e| apply_text_edit(sk, doc, design, e)).collect::<Result<Vec<_>>>()?;
             Ok(EditTextResult::Many(TextEditsResult { edits: outs, created: None, param_warnings: Vec::new() }))
         }
         Some(_) => Err(bad(cmd, "`edits` must be a list of edits")),
@@ -632,7 +629,7 @@ fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) 
 
 /// `sketch.edit_text`'s change to its sketch: the text source's new values and its outlines
 /// regenerated from them.
-fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -> Result<TextChange> {
+fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value) -> Result<TextChange> {
     let cmd = "sketch.edit_text";
     let l = match (str_(p, "link"), str_(p, "entity")) {
         (Some(l), _) => l.to_string(),
@@ -643,7 +640,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -
         Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, exprs),
         _ => return Err(bad(cmd, format!("`{l}` is not text"))),
     };
-    let src = text_source(doc, p, cmd, Some(old))?;
+    let src = text_source(doc, design, p, cmd, Some(old))?;
     let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
     if geom.is_empty() {
         return Err(bad(cmd, "the text makes no outline"));
@@ -1643,9 +1640,13 @@ mod blend_tests {
         let spline = ids(&run(&mut s, "sketch.spline.control_point", json!({"points":["origin",[10,2],[20,15],[30,10]]}))["curves"])[0].clone();
         let sides = ids(&run(&mut s, "sketch.spline.control_polygon", json!({"curve":spline}))["curves"]);
         assert_eq!(sides.len(), 3);
+        let sk = sketch(&s);
+        let point = sk.points[sk.resolve_point(&format!("{}.end", sides[0])).unwrap()].id.clone();
+        run(&mut s, "sketch.construction", json!({"points":[point],"value":true}));
+        assert!(sketch(&s).points.iter().any(|p| p.id == point && p.construction));
         let before = s.doc.to_json();
         assert!(s.execute("sketch.spline.control_polygon", &json!({"curve":spline})).is_err());
-        assert!(s.execute("sketch.construction", &json!({"curves":[sides[0]],"value":false})).is_err());
+        assert!(s.execute("sketch.construction", &json!({"curves":[sides[0]],"points":[point],"value":false})).is_err());
         assert_eq!(s.doc.to_json(), before);
         run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line":sides[0],"mode":"horizontal"}));
         run(&mut s, "sketch.dimension", json!({"entities":[sides[0]],"type":"length","value":"leg"}));
@@ -1677,7 +1678,8 @@ mod blend_tests {
             ids(&run(&mut s, "sketch.spline.control_point", json!({"points":[[0,0],[0,20],[30,20],[30,0]],"control_polygon":true}))["curves"])[0]
                 .clone();
         let sk = sketch(&s);
-        let (index, side) = sk.curves.iter().enumerate().find(|(_, curve)| curve.spline_handle_of.as_deref() == Some(spline.as_str())).unwrap();
+        let (index, side) =
+            sk.curves.iter().enumerate().find(|(_, curve)| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str())).unwrap();
         let side = side.id.clone();
         assert!(crate::view::sketch_curve_visible(&sk, index));
         run(&mut s, "sketch.dimension", json!({"entities":[side],"type":"length","value":"25 mm"}));

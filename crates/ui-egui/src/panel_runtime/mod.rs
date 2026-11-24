@@ -7,9 +7,10 @@ mod host;
 mod interaction;
 mod layout;
 #[cfg(not(target_arch = "wasm32"))]
-mod native;
+pub(crate) mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ui;
+mod plugin;
 mod preferences;
 mod production;
 mod runtime;
@@ -24,6 +25,7 @@ pub use interaction::*;
 pub use layout::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeMonitor;
+pub(crate) use plugin::queue_selection;
 pub(crate) use preferences::PanelLayoutSnapshot;
 pub(crate) use preferences::panel_layout_matches;
 pub(crate) use preferences::panel_layout_snapshot;

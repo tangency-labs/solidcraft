@@ -1,10 +1,38 @@
 {
+  "ar": {
+    "cmd.sketch_spline_control_polygon": "إضافة مضلع التحكم",
+    "sketch.show_control_polygons": "إظهار مضلعات التحكم"
+  },
+  "de": {
+    "cmd.sketch_spline_control_polygon": "Kontrollpolygon hinzufügen",
+    "sketch.show_control_polygons": "Kontrollpolygone anzeigen"
+  },
   "en": {
     "cmd.sketch_spline_control_polygon": "Add Control Polygon",
     "sketch.show_control_polygons": "Show control polygons"
   },
+  "he": {
+    "cmd.sketch_spline_control_polygon": "הוספת מצולע בקרה",
+    "sketch.show_control_polygons": "הצגת מצולעי בקרה"
+  },
   "it": {
     "cmd.sketch_spline_control_polygon": "Aggiungi poligono di controllo",
     "sketch.show_control_polygons": "Mostra poligoni di controllo"
+  },
+  "ja": {
+    "cmd.sketch_spline_control_polygon": "制御多角形を追加",
+    "sketch.show_control_polygons": "制御多角形を表示"
+  },
+  "ko": {
+    "cmd.sketch_spline_control_polygon": "제어 다각형 추가",
+    "sketch.show_control_polygons": "제어 다각형 표시"
+  },
+  "vi": {
+    "cmd.sketch_spline_control_polygon": "Thêm đa giác điều khiển",
+    "sketch.show_control_polygons": "Hiển thị đa giác điều khiển"
+  },
+  "zh": {
+    "cmd.sketch_spline_control_polygon": "添加控制多边形",
+    "sketch.show_control_polygons": "显示控制多边形"
   }
 }

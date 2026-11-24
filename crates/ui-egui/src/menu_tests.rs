@@ -3006,7 +3006,7 @@ fn control_polygon_menu_makes_the_spline_sides_pickable() {
         .sketch
         .curves
         .iter()
-        .filter(|curve| curve.spline_handle_of.as_deref() == Some(spline.as_str()))
+        .filter(|curve| curve.spline_control_polygon_of.as_deref() == Some(spline.as_str()))
         .nth(1)
         .unwrap()
         .id

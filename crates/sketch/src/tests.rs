@@ -30,7 +30,8 @@ thread_local! {
     static ID_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// A linear search for a point or curve by id on this thread.
+/// A linear search of a sketch's points, curves or pattern relations on this thread (a call of
+/// `point_index`, `curve_index` or `pattern_relation_ids`).
 pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
@@ -337,6 +338,63 @@ fn conflicting_constraints_fail_and_restore() {
     assert_eq!(sk.points, before.points);
 }
 
+/// A solve under a cancelled token ([`crate::cancel`], the app's Cancel) stops before
+/// its first iteration: the sketch fails and keeps its geometry. The same solve uncancelled
+/// iterates and solves.
+#[test]
+fn cancelled_solve_stops_and_restores() {
+    let build = || {
+        let mut sk = Sketch::new();
+        let l = rect(&mut sk, [v(0.3, -0.2), v(38.0, 1.0), v(41.0, 29.0), v(-1.0, 31.0)]);
+        use ConstraintKind::*;
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 40.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 30.0 }, None).unwrap();
+        sk
+    };
+    let token = crate::cancel::CancelToken::new();
+    token.cancel();
+    let mut sk = build();
+    let before = sk.points.clone();
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert_eq!(rep.iterations, 0, "{rep:?}");
+    assert_eq!(sk.points, before);
+    let mut sk = build();
+    let rep = seeded(false, || solve(&mut sk));
+    assert!(rep.ok() && rep.iterations > 0, "{rep:?}");
+}
+
+/// Cancel stops a solve part way: a long chain whose last link conflicts keeps LM iterating
+/// over every link; cancelled at a fixed point of its work (the token's 2,000th check, inside
+/// its first iterations), it stops there, with fewer iterations than it does uncancelled,
+/// failed, and its geometry as it was.
+#[test]
+fn cancel_stops_a_solve_part_way() {
+    let mut sk = Sketch::new();
+    let mut prev = 0usize;
+    let mut last = 0;
+    for i in 0..400 {
+        let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
+        last = sk.add_line_pts(prev, p, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l: last }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l: last, value: 10.0 }, None).unwrap();
+        prev = p;
+    }
+    sk.add_constraint(ConstraintKind::Vertical { l: last }, None).unwrap();
+    let free = seeded(false, || solve(&mut sk.clone()));
+    assert!(free.iterations > 2, "{free:?}");
+    let before = sk.points.clone();
+    let token = crate::cancel::CancelToken::after_polls(2_000);
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert!(rep.iterations < free.iterations, "{} iterations cancelled, {} not", rep.iterations, free.iterations);
+    assert_eq!(sk.points, before);
+}
+
 #[test]
 fn circles_tangent_equal_concentric() {
     let mut sk = Sketch::new();
@@ -497,6 +555,32 @@ fn midpoint_symmetry_point_on_curve_arc() {
     let (ax, _) = line_pts(&sk, axis);
     assert!((sk.points[s1].pos.x + sk.points[s2].pos.x - 2.0 * ax.x).abs() < 1e-7);
     assert!((sk.points[s1].pos.y - sk.points[s2].pos.y).abs() < 1e-7);
+}
+
+/// Four closed strips laid out as a # shut off a 6 x 6 square inside none of them: the one gap
+/// (#19963). Four open lines laid out as a # close off the same square, which was drawn by them,
+/// so it is no gap; neither is a region inside a strip or where two strips cross.
+#[test]
+fn enclosed_gaps_are_regions_crossing_closed_loops_shut_off() {
+    let mut sk = Sketch::new();
+    for (x0, y0, x1, y1) in [(-6.0, 3.0, 6.0, 4.0), (-6.0, -4.0, 6.0, -3.0), (-4.0, -6.0, -3.0, 6.0), (3.0, -6.0, 4.0, 6.0)] {
+        rect(&mut sk, [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)]);
+    }
+    let ps = find_profiles(&sk);
+    let gaps = enclosed_gaps(&sk, &ps);
+    assert_eq!(gaps.len(), ps.len());
+    let found: Vec<f64> = ps.iter().zip(&gaps).filter(|(_, g)| **g).map(|(p, _)| p.area).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0] - 36.0).abs() < 1e-9, "{found:?}");
+    assert!(ps.iter().zip(&gaps).filter(|(_, g)| !**g).all(|(p, _)| !p.region.contains(v(0.0, 0.0))));
+
+    let mut open = Sketch::new();
+    for (a, b) in [(v(-6.0, 3.0), v(6.0, 3.0)), (v(-6.0, -3.0), v(6.0, -3.0)), (v(-3.0, -6.0), v(-3.0, 6.0)), (v(3.0, -6.0), v(3.0, 6.0))] {
+        open.add_line(a, b, None, None, None).unwrap();
+    }
+    let ps = find_profiles(&open);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert_eq!(enclosed_gaps(&open, &ps), [false]);
 }
 
 #[test]
@@ -1583,6 +1667,26 @@ fn closed_control_polygon_shares_points_including_the_closing_side() {
 }
 
 #[test]
+fn control_polygon_ownership_round_trips_from_the_original_field() {
+    let mut sketch = Sketch::default();
+    let pts = [v(0.0, 10.0), v(10.0, 20.0), v(20.0, 10.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline =
+        sketch.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+
+    let mut old = serde_json::to_value(&sketch).unwrap();
+    for side in sides {
+        let curve = old["curves"][side].as_object_mut().unwrap();
+        assert!(!curve.contains_key("spline_handle_of"));
+        let owner = curve.remove("spline_control_polygon_of").unwrap();
+        curve.insert("spline_handle_of".into(), owner);
+    }
+    let reopened: Sketch = serde_json::from_value(old).unwrap();
+    assert_eq!(reopened, sketch);
+    reopened.validate_spline_handles().unwrap();
+}
+
+#[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
     // piece is that Bézier, and profile measurement must keep using the curve, not its chords.
@@ -1989,6 +2093,52 @@ fn a_fillet_follows_its_corner_when_the_corner_mirrors() {
     assert!((sweep_deg(&sk, arc) - 90.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
     assert!(sk.center(arc).unwrap().dist(v(35.0, 15.0)) < 1e-6, "{:?}", sk.center(arc));
+}
+
+#[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_corner_mirrors() {
+    // The fillet carries a point at its middle. When the corner mirrors, the arc is stored the
+    // other way round (its ends swapped), which puts the middle at the opposite end of the
+    // circle: the solve must either keep the point at the middle of the arc or fail.
+    let (mut sk, _, arc, _, _, far2) = filleted_corner();
+    let m = sk.add_point(v(38.0, 12.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    let q = sk.add_point(v(40.0, -20.0), None).unwrap();
+    sk.points[q].fixed = true;
+    sk.add_constraint(ConstraintKind::Coincident { p: far2, q }, None).unwrap();
+    let rep = solve(&mut sk);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_solve_swaps_its_ends() {
+    // The corner of `a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference`
+    // with a point at the arc's middle: judged against a mirrored reference the arc is swapped
+    // after the solve. The point must end at the middle of the arc that stays, or the solve fails.
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    let m = sk.add_point(v(37.0, 11.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
 }
 
 #[test]
@@ -2433,6 +2583,205 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// A sketch shaped like a hostile design file. One circular pattern copy names, at every
+/// reference, the last of `n` points, `n` curves and `2n` constraints, the last a pattern relation.
+/// Then `m` patterns that need no copies (a circular one of count 1 and a 1 by 1 rectangular one
+/// in turn) each name the last curve, by its start point as the centre or as both directions.
+fn sketch_naming_its_last_ids(n: usize, m: usize) -> Sketch {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let (point, curve) = (sk.points[a].clone(), sk.curves[line].clone());
+    sk.points.extend((0..n).map(|i| SPoint { id: format!("q{i}"), ..point.clone() }));
+    sk.curves.extend((0..n).map(|i| Curve { id: format!("c{i}"), ..curve.clone() }));
+    let constraint = |id: String, kind| Constraint { id, kind, param: None, driven: false, text: None };
+    sk.constraints.extend((0..2 * n - 1).map(|i| constraint(format!("k{i}"), ConstraintKind::Fix { p: a })));
+    let relation = ConstraintKind::PatternPoint { p: 0, q: a, center: Some(0), angle: PI, offset: Vec2::ZERO, directions: [None, None] };
+    sk.constraints.push(constraint("kz".into(), relation));
+    let (p, c) = (format!("q{}", n - 1), format!("c{}", n - 1));
+    let instance =
+        PatternInstance { index: [1, 0], curves: vec![c.clone(); n], points: vec![(p.clone(), p); n], constraints: vec!["kz".into(); 2 * n] };
+    let kind = SketchPatternKind::Circular { center: "origin".into(), count: 2, angle: 180.0, alignment: PatternAlignment::Right, reversed: false };
+    sk.patterns.push(SketchPattern {
+        id: "pat".into(),
+        entities: vec![c.clone()],
+        kind,
+        count_expression: None,
+        instances: vec![instance],
+        expressions: Default::default(),
+    });
+    sk.patterns.extend((0..m).map(|i| {
+        let kind = if i % 2 == 0 {
+            SketchPatternKind::Circular { center: format!("{c}.start"), count: 1, angle: 180.0, alignment: PatternAlignment::Right, reversed: false }
+        } else {
+            SketchPatternKind::Rectangular {
+                dir: v(1.0, 0.0),
+                dir2: None,
+                direction: Some(c.clone()),
+                direction2: Some(c.clone()),
+                count: 1,
+                spacing: 1.0,
+                count2: 1,
+                spacing2: 1.0,
+                alignment: PatternAlignment::Right,
+                alignment2: PatternAlignment::Right,
+                reversed: false,
+                reversed2: false,
+            }
+        };
+        SketchPattern {
+            id: format!("pat{i}"),
+            entities: vec![c.clone()],
+            kind,
+            count_expression: None,
+            instances: vec![],
+            expressions: Default::default(),
+        }
+    }));
+    sk
+}
+
+/// Reading a design checks each sketch pattern's centre or direction lines, and that each pattern
+/// copy names curves, points and pattern relations its sketch has. Each was once found by a
+/// linear search over the sketch's ids, so a hostile file within the size limits took many
+/// minutes per sketch to read. One such file has a copy naming the last of 200 000 curves,
+/// 200 000 points and 400 000 constraints at every reference. Another has 400 000 patterns that
+/// need no copies, each naming the last curve. The checks must not search per reference or per
+/// pattern, and they accept and refuse exactly what they did.
+#[test]
+fn pattern_checks_do_not_search_ids_per_reference() {
+    fn changed(sk: &Sketch, change: impl FnOnce(&mut Sketch)) -> Sketch {
+        let mut sk = sk.clone();
+        change(&mut sk);
+        sk
+    }
+    // The centre of the last circular pattern and the second direction of the last rectangular one.
+    fn centre(sk: &mut Sketch) -> &mut String {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Circular { center, .. } = &mut p.kind { Some(center) } else { None })
+            .unwrap()
+    }
+    fn direction(sk: &mut Sketch) -> &mut Option<String> {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Rectangular { direction2, .. } = &mut p.kind { Some(direction2) } else { None })
+            .unwrap()
+    }
+    let n = 20_000;
+    let sk = sketch_naming_its_last_ids(n, n);
+    let last = format!("c{}", n - 1);
+    let refused = || Err("invalid value: invalid sketch pattern instance".to_string());
+    let unset = || Err("invalid value: invalid sketch pattern settings".to_string());
+    let circle = |sk: &mut Sketch| sk.curves[0].kind = CurveKind::Circle { c: 0, r: 1.0 };
+    let cases = [
+        ("every reference found", sk.clone(), Ok(())),
+        ("an unknown curve", changed(&sk, |sk| sk.patterns[0].instances[0].curves[n / 2] = "c-1".into()), refused()),
+        ("an unknown point", changed(&sk, |sk| sk.patterns[0].instances[0].points[n / 2].1 = "q-1".into()), refused()),
+        ("a constraint that is no pattern relation", changed(&sk, |sk| sk.patterns[0].instances[0].constraints[n] = "k0".into()), refused()),
+        // An id two constraints share counts when either of them is a pattern relation.
+        ("an id a fix shares with the relation", changed(&sk, |sk| sk.constraints[0].id = "kz".into()), Ok(())),
+        // The relations themselves are checked after the copies. The hostile file's pattern
+        // radius between a line and itself is refused there.
+        (
+            "a pattern radius between a line and itself",
+            changed(&sk, |sk| sk.constraints[2 * n - 1].kind = ConstraintKind::PatternRadius { a: 0, b: 0 }),
+            Err("invalid value: pattern radius needs two circles or ellipses".to_string()),
+        ),
+        ("a centre on an unknown curve", changed(&sk, |sk| *centre(sk) = "c-1.start".into()), unset()),
+        ("a centre a line does not have", changed(&sk, |sk| *centre(sk) = format!("{last}.center")), unset()),
+        // A point id comes first, even one named like a curve's point.
+        (
+            "a point named like a centre a line does not have",
+            changed(&sk, |sk| {
+                sk.points[1].id = format!("{last}.center");
+                *centre(sk) = format!("{last}.center");
+            }),
+            Ok(()),
+        ),
+        ("the origin as a centre", changed(&sk, |sk| *centre(sk) = "origin".into()), Ok(())),
+        // Of two curves with one id, the first decides, as `curve_index` finds it. A circle has
+        // no start point.
+        (
+            "a circle before the last curve with its id",
+            changed(&sk, |sk| {
+                circle(sk);
+                sk.curves[0].id.clone_from(&last);
+            }),
+            unset(),
+        ),
+        ("a direction on an unknown curve", changed(&sk, |sk| *direction(sk) = Some("c-1".into())), unset()),
+        (
+            "a direction that is no line",
+            changed(&sk, |sk| {
+                circle(sk);
+                let id = sk.curves[0].id.clone();
+                *direction(sk) = Some(id);
+            }),
+            unset(),
+        ),
+    ];
+    let mut searches = Vec::new();
+    for (what, sk, expected) in cases {
+        ID_SEARCHES.with(|c| c.set(0));
+        assert_eq!(sk.validate_patterns().map_err(|e| e.to_string()), expected, "{what}");
+        searches.push((what, ID_SEARCHES.with(std::cell::Cell::get)));
+    }
+    // One walk of the constraints builds the set of pattern relations. Nothing else searches,
+    // neither per reference nor per pattern.
+    assert!(searches.iter().all(|(_, count)| *count <= 1), "id searches in one check of the patterns {searches:?}");
+}
+
+/// Pruning drops each pattern that names a curve the sketch no longer has, with the relations
+/// its copies made, and keeps every other pattern and constraint. It once looked each pattern up
+/// in a list of the dropped ones, so a design with many patterns to drop took minutes at its
+/// first solve.
+#[test]
+fn pruning_drops_exactly_the_patterns_that_lost_a_curve() {
+    let m = 20_000;
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let c = sk.curves[line].id.clone();
+    let before = sk.constraints.len();
+    sk.constraints.extend((0..m).map(|i| Constraint {
+        id: format!("f{i}"),
+        kind: ConstraintKind::Fix { p: a },
+        param: None,
+        driven: false,
+        text: None,
+    }));
+    sk.patterns.extend((0..m).map(|i| SketchPattern {
+        id: format!("pat{i}"),
+        // Every other pattern copies a curve that is gone.
+        entities: vec![if i % 2 == 0 { c.clone() } else { "gone".into() }],
+        kind: SketchPatternKind::Rectangular {
+            dir: v(1.0, 0.0),
+            dir2: None,
+            direction: Some(c.clone()),
+            direction2: None,
+            count: 2,
+            spacing: 1.0,
+            count2: 1,
+            spacing2: 1.0,
+            alignment: PatternAlignment::Right,
+            alignment2: PatternAlignment::Right,
+            reversed: false,
+            reversed2: false,
+        },
+        count_expression: None,
+        instances: vec![PatternInstance { index: [1, 0], curves: vec![], points: vec![], constraints: vec![format!("f{i}")] }],
+        expressions: Default::default(),
+    }));
+    sk.prune_patterns();
+    let kept: Vec<_> = sk.patterns.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(kept, (0..m).step_by(2).map(|i| format!("pat{i}")).collect::<Vec<_>>());
+    let fixes: Vec<_> = sk.constraints[before..].iter().map(|k| k.id.clone()).collect();
+    assert_eq!(fixes, (0..m).step_by(2).map(|i| format!("f{i}")).collect::<Vec<_>>());
 }
 
 /// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
@@ -2983,6 +3332,32 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
         assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
     }
 }
+
+/// A circle crossing a hexagon's sides a hair from their corners (#20992): a hexagon of apothem
+/// 1 mm and a concentric circle just short of its corners. The sketch has thirteen regions (the
+/// centre, a sliver at each corner and a segment outside each side), and the centre one is found,
+/// as for a circle well inside the corners.
+#[test]
+fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
+    // The corners of a regular hexagon of apothem 1, at radius 2/sqrt(3) = 1.1547005383792515.
+    let (big, half) = (1.154_700_538_379_251_5, 0.577_350_269_189_625_8);
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
+    for radius in [1.1, 1.1545, 1.15469] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), radius, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 13, "radius {radius}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "radius {radius}: no profile at the centre");
+        let biggest = ps.iter().map(|p| p.area).fold(0.0, f64::max);
+        let centre = profile_at_point(&ps, v(0.0, 0.0)).and_then(|i| ps.get(i)).map(|p| p.area).unwrap_or(0.0);
+        assert!((centre - biggest).abs() < 1e-12, "radius {radius}: the centre region ({centre}) is not the largest ({biggest})");
+    }
+}
+
 /// `bezier_distance` measures a point off a straight Bézier piece exactly (#20048): the piece
 /// whose controls all lie on a line is that line, so the distance is the perpendicular one.
 #[test]

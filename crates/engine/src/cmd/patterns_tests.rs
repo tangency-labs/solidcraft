@@ -513,6 +513,186 @@ fn patterns_of_bodies() {
     assert!(s.execute("solid.pattern.rectangular", &json!({"bodies": ["Nope"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 5})).is_err());
 }
 
+/// The copies' offsets along x and y of the last rectangular pattern `p` adds to a 10 mm cube,
+/// sorted, and the stored pattern.
+fn rectangular_offsets(p: Value) -> (Vec<[f64; 2]>, Session) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    let mut p = p;
+    p["bodies"] = json!(["Cube"]);
+    run(&mut s, "solid.pattern.rectangular", p);
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern, .. }) = s.doc.features.last().map(|f| &f.kind) else {
+        panic!("no pattern");
+    };
+    let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), pattern).unwrap();
+    let mut offsets: Vec<[f64; 2]> = mats.iter().map(|m| [m[3][0], m[3][1]]).collect();
+    offsets.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (offsets, s)
+}
+
+fn assert_offsets(got: &[[f64; 2]], want: &[[f64; 2]]) {
+    assert_eq!(got.len(), want.len(), "{got:?} != {want:?}");
+    for (g, w) in got.iter().zip(want) {
+        assert!((g[0] - w[0]).abs() < 1e-9 && (g[1] - w[1]).abs() < 1e-9, "{got:?} != {want:?}");
+    }
+}
+
+/// Each direction of a Rectangular Pattern is set by count and spacing, count and extent, or
+/// spacing and extent (#8523): 80 mm at 15 mm fits 6 copies, the last at 75 mm, and Copy at the
+/// end adds a 7th at 80 mm; a spacing that divides the extent adds none.
+#[test]
+fn rectangular_pattern_distance_types_place_the_copies() {
+    let x = |v: &[f64]| v.iter().map(|x| [*x, 0.0]).collect::<Vec<_>>();
+    let (got, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "count_extent", "count1": 5, "extent1": 80}));
+    assert_offsets(&got, &x(&[20.0, 40.0, 60.0, 80.0]));
+    // The worked-out spacing is kept, so switching back to count and spacing finds it.
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, .. }, .. }) =
+        s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(spacing1.as_str(), "20 mm");
+    let (got, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": 80}));
+    assert_offsets(&got, &x(&[15.0, 30.0, 45.0, 60.0, 75.0]));
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { count1, .. }, .. }) =
+        s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(count1.as_str(), "6");
+    let (got, _) =
+        rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": 80, "copy_at_end1": true}));
+    assert_offsets(&got, &x(&[15.0, 30.0, 45.0, 60.0, 75.0, 80.0]));
+    let (got, _) =
+        rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 20, "extent1": 80, "copy_at_end1": true}));
+    assert_offsets(&got, &x(&[20.0, 40.0, 60.0, 80.0]));
+    // Float noise must not drop or double the copy at the end: 0.3 / 0.1 is 2.9999…
+    let (got, _) =
+        rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 0.1, "extent1": 0.3, "copy_at_end1": true}));
+    assert_eq!(got.len(), 3, "{got:?}");
+    // Flip runs the row the other way. Centred, the copies reach half the extent each way, as
+    // many on each side: 40 mm at 15 mm fits two, and Copy at the end adds one at each end.
+    let (got, _) = rectangular_offsets(
+        json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": 80, "copy_at_end1": true, "reversed": true}),
+    );
+    assert_offsets(&got, &x(&[-80.0, -75.0, -60.0, -45.0, -30.0, -15.0]));
+    let (got, _) = rectangular_offsets(
+        json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": 80, "copy_at_end1": true, "alignment": "center"}),
+    );
+    assert_offsets(&got, &x(&[-40.0, -30.0, -15.0, 15.0, 30.0, 40.0]));
+    let (got, _) =
+        rectangular_offsets(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": 80, "alignment": "center"}));
+    assert_offsets(&got, &x(&[-30.0, -15.0, 15.0, 30.0]));
+    // Each direction chooses on its own.
+    let (got, _) = rectangular_offsets(json!({
+        "dir1": [1, 0, 0], "count1": 2, "spacing1": 30,
+        "dir2": [0, 1, 0], "distance2": "count_extent", "count2": 3, "extent2": 50
+    }));
+    assert_offsets(&got, &[[0.0, 25.0], [0.0, 50.0], [30.0, 0.0], [30.0, 25.0], [30.0, 50.0]]);
+}
+
+/// The command works a row out with the values the pattern is built with, so an expression's
+/// bare number is read in the design's unit there too (#8523): in an inch design `2 + 0` is a
+/// 2 in extent, not 2 mm that a 1 in spacing would not fit in.
+#[test]
+fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
+    let pattern = |p: Value| {
+        let mut s = Session::default();
+        run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "body_name": "Cube"}));
+        let mut p = p;
+        p["bodies"] = json!(["Cube"]);
+        run(&mut s, "solid.pattern.rectangular", p);
+        let Some(solidcraft_doc::FeatureKind::Pattern { pattern, .. }) = s.doc.features.last().map(|f| f.kind.clone()) else {
+            panic!("no pattern");
+        };
+        let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern).unwrap();
+        let mut xs: Vec<f64> = mats.iter().map(|m| m[3][0]).collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (xs, pattern)
+    };
+    let (xs, p) = pattern(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": "1 in", "extent1": "2 + 0"}));
+    assert_eq!(xs.len(), 2, "{xs:?}");
+    assert!((xs[0] - 25.4).abs() < 1e-9 && (xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
+    let solidcraft_doc::PatternKind::Rectangular { count1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(count1.as_str(), "3");
+    let (xs, p) = pattern(json!({"dir1": [1, 0, 0], "distance1": "count_extent", "count1": 3, "extent1": "2 + 0"}));
+    assert_eq!(xs.len(), 2, "{xs:?}");
+    assert!((xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
+    let solidcraft_doc::PatternKind::Rectangular { spacing1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(spacing1.as_str(), "25.4 mm");
+}
+
+/// The distance type, the extent and Copy at the end are saved, undone and reopened with the
+/// design, and the extent follows a parameter; a pattern set by count and spacing saves none of
+/// them, so older designs are unchanged.
+#[test]
+fn rectangular_pattern_extent_saves_reopens_and_follows_parameters() {
+    let (_, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+    let plain = s.doc.to_json();
+    for key in ["distance1", "extent1", "copy_at_end1"] {
+        assert!(!plain.contains(key), "{key} in {plain}");
+    }
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "80 mm"}));
+    // Small enough that the copy 5 mm past the last stays a body of its own.
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let before = s.doc.to_json();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": 15, "extent1": "span", "copy_at_end1": true}),
+    );
+    assert_eq!(s.model.state().bodies.len(), 7);
+    let saved = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.model.state().bodies.len(), 7);
+    run(&mut reopened, "parameters.change", json!({"name": "span", "expression": "45 mm"}));
+    // 45 mm at 15 mm: copies at 0, 15, 30 and 45, which the spacing divides, so none more.
+    assert_eq!(reopened.model.state().bodies.len(), 4);
+}
+
+/// A distance type, extent or Copy at the end the pattern can't use is refused with its own
+/// message and leaves the design as it was: no extent, a zero or negative extent or spacing, a
+/// spacing longer than the extent, more copies than a pattern makes.
+#[test]
+fn rectangular_pattern_refuses_unusable_extents_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let cases = [
+        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent or spacing_extent"),
+        (json!({"distance1": 2, "count1": 3, "spacing1": 10}), "`distance1` must be"),
+        (json!({"distance1": "spacing_extent", "spacing1": 10, "extent1": 80, "copy_at_end1": "yes"}), "`copy_at_end1` must be true or false"),
+        (json!({"distance1": "count_extent", "count1": 3}), "`extent1`"),
+        (json!({"distance1": "spacing_extent", "extent1": 80}), "`spacing1`"),
+        (json!({"distance1": "count_extent", "count1": 3, "extent1": 0}), "extent must be greater than zero"),
+        (json!({"distance1": "count_extent", "count1": 3, "extent1": -20}), "extent must be greater than zero"),
+        (json!({"distance1": "count_extent", "count1": 0, "extent1": 20}), "count"),
+        (json!({"distance1": "spacing_extent", "spacing1": 0, "extent1": 80}), "spacing must be greater than zero"),
+        (json!({"distance1": "spacing_extent", "spacing1": -15, "extent1": 80}), "spacing must be greater than zero"),
+        (json!({"distance1": "spacing_extent", "spacing1": 90, "extent1": 80}), "is longer than its extent"),
+        (json!({"distance1": "spacing_extent", "spacing1": 50, "extent1": 80, "alignment": "center"}), "is longer than half its extent"),
+        (json!({"distance1": "spacing_extent", "spacing1": 0.001, "extent1": 100000}), "pattern count must be"),
+        (json!({"distance1": "spacing_extent", "spacing1": 1e-300, "extent1": 1e8}), "pattern count must be"),
+        (json!({"distance1": "count_extent", "count1": 3, "extent1": "5 deg"}), "extent1"),
+        (json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 30, "extent2": 20}), "direction 2"),
+    ];
+    for (mut p, message) in cases {
+        p["bodies"] = json!(["Cube"]);
+        p["dir1"] = json!([1, 0, 0]);
+        let error = s.execute("solid.pattern.rectangular", &p).err().map(|e| e.to_string());
+        assert!(error.as_deref().is_some_and(|e| e.contains(message)), "{p}: {error:?}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+        assert_eq!(s.undo.len(), undo, "{p}");
+    }
+}
+
 /// A construction axis picked in the dialog comes as its name (#2885): the copies turn about it,
 /// and follow it when it is edited.
 #[test]
@@ -602,6 +782,155 @@ fn component_pattern_follows_its_count_parameter() {
     run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
     assert_eq!(names(&s).len(), 4, "{:?}", names(&s));
     assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
+}
+
+#[test]
+fn inactive_component_patterns_keep_their_occurrences_and_joints() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "name": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern_params = json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30});
+    let pattern = run(&mut s, "solid.pattern.rectangular", pattern_params.clone());
+    let feature = pattern["feature"].as_u64().expect("pattern feature");
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let made_joint = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": copy}));
+    let joint_id = made_joint["joint"].as_u64().expect("joint");
+    let joints = s.doc.assembly.joints.clone();
+    let marker = s.doc.feature_index(feature).expect("pattern position");
+    let shown = |s: &mut Session, expected| {
+        assert_eq!(s.occurrence_placement(&[copy]).is_ok(), expected);
+        let children = s.occurrence_children(&[]).expect("active root children");
+        assert_eq!(children.len(), if expected { 2 } else { 1 });
+        assert_eq!(children.iter().any(|child| child.occurrence == copy), expected);
+        let measured = run(s, "inspect.measure", json!({}));
+        assert_eq!(measured["body_count"], if expected { 3 } else { 2 });
+        let mass = s.mass_properties().expect("active assembly mass");
+        assert_eq!(mass.occurrences.iter().any(|row| row.occurrence == copy), expected);
+        let solved = run(s, "joint.solve", json!({}));
+        assert_eq!(solved["errors"], json!([]));
+        let dof = solved["dof"].as_array().expect("degrees of freedom");
+        assert_eq!(dof.iter().any(|entry| entry["occurrence"] == copy), expected);
+    };
+
+    // A saved rollback still contains, but does not place or solve, the Pattern's copies.
+    s.visibility.shown_component_origins.push(vec![copy]);
+    run(&mut s, "timeline.roll_to", json!({"position": marker}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(s.visibility.shown_component_origins, vec![vec![copy]]);
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).expect("rolled-back design"));
+    shown(&mut s, false);
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    // Edit Feature rolls the scratch design behind the later pattern while building the edit.
+    run(&mut s, "timeline.redefine", json!({"feature": "Base", "command": "solid.box", "params": {"length":9, "width":8, "height":8}}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    let mut larger = pattern_params.clone();
+    larger["count1"] = json!(3);
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": larger}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 4);
+
+    let extra_copy = s.doc.active_occurrences().last().expect("new copy").id;
+    assert_ne!(extra_copy, copy);
+    let extra = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": extra_copy}));
+    assert!(extra["joint"].is_number());
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": pattern_params}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == extra_copy));
+    assert_eq!(s.doc.assembly.joints, joints);
+    shown(&mut s, true);
+
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": false}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+
+    // Deleting the inactive feature really removes its placements and their references.
+    run(&mut s, "timeline.delete", json!({"feature": feature}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == copy));
+    assert!(!s.doc.assembly.joints.iter().any(|joint| joint.id == joint_id));
+    shown(&mut s, false);
+}
+
+#[test]
+fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Unit", "grounded": false}));
+    let seed = s.doc.occurrences.first().expect("seed occurrence").id;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let driver = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": copy}))["joint"].as_u64().expect("driver");
+    let follower = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": seed}))["joint"].as_u64().expect("follower");
+    run(&mut s, "joint.motion_link", json!({"a": driver, "b": follower, "ratio": 1, "offset": 7}));
+    let check = |s: &mut Session, expected: f64| {
+        let listed = run(s, "joint.list", json!({}));
+        let row = listed["joints"].as_array().unwrap().iter().find(|row| row["id"] == follower).expect("listed follower");
+        assert_eq!(row["values"][0]["value"], expected);
+        let inspected = run(s, "joint.inspect", json!({"joint": follower}));
+        assert_eq!(inspected["joints"][0]["values"][0]["value"], expected);
+    };
+    check(&mut s, 7.0);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    check(&mut s, 0.0);
+    let target = solidcraft_doc::joints::Reach {
+        occurrence: seed,
+        point: solidcore_record::Vec3::ZERO,
+        to: solidcore_record::Vec3::new(0.0, 0.0, 3.0),
+        axis: None,
+        joints: None,
+    };
+    let reached = solidcraft_doc::joints::reach(&s.doc, &s.model.state(), &target).unwrap();
+    assert_eq!(reached.values.keys().copied().collect::<Vec<_>>(), [follower]);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": false}));
+    check(&mut s, 7.0);
+
+    // Replacing the dormant link preserves the active slider's solved position, even though
+    // the old link would have driven it to 7 mm if its pattern were active.
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    run(&mut s, "component.create", json!({"name": "Rotor", "activate": false, "grounded": false}));
+    let spin = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Rotor"}))["joint"].as_u64().expect("revolute driver");
+    let before = s.occurrence_placement(&[seed]).unwrap().world;
+    run(&mut s, "joint.screw", json!({"a": spin, "b": follower, "link": 0, "pitch": 2}));
+    check(&mut s, 0.0);
+    assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
+}
+
+/// A component pattern's copies placed again on a rebuild read the spacing as the first copies
+/// were placed (#8523): in an inch design `1 + 0` is 1 in, before and after the count changes.
+#[test]
+fn component_pattern_copies_keep_the_design_unit_when_the_count_changes() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2", "unit": ""}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "operation": "new", "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": "n", "spacing1": "1 + 0"}));
+    let xs = |s: &Session| -> Vec<f64> {
+        let mut xs: Vec<f64> = s.doc.occurrences.iter().filter(|o| o.component != 0).map(|o| o.transform[3][0]).collect();
+        xs.sort_by(f64::total_cmp);
+        xs
+    };
+    let placed = xs(&s);
+    assert!(placed.len() == 2 && (placed[1] - placed[0] - 25.4).abs() < 1e-9, "{placed:?}");
+    run(&mut s, "parameters.change", json!({"name": "n", "expression": "3"}));
+    let placed = xs(&s);
+    assert_eq!(placed.len(), 3, "{placed:?}");
+    for (i, x) in placed.iter().enumerate() {
+        assert!((x - placed[0] - 25.4 * i as f64).abs() < 1e-9, "{placed:?}");
+    }
 }
 
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
@@ -1626,6 +1955,561 @@ fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
     }
 }
 
+const BOTH: [&str; 2] = ["BoxA", "BoxB"];
+
+/// Two 40 × 40 × 10 parts: BoxA in A at x −20..20, y −20..20, z 0..10, not placed, and BoxB in B
+/// at x −10..30, y −20..20, z 0..10 in its own frame, B turned `angle` degrees about Z and lifted
+/// `lift`.
+fn placed_parts(angle: f64, lift: f64) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "center": [0, 0, 5], "body_name": "BoxA"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "operation": "new", "body_name": "BoxB"}));
+    for (part, body) in [("A", "BoxA"), ("B", "BoxB")] {
+        run(&mut s, "component.create", json!({"name": part, "parent": "root", "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": [body], "component": part}));
+    }
+    let turn = json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": format!("{angle} deg"), "origin": [0, 0, 0], "translate": [0, 0, lift]});
+    run(&mut s, "occurrence.move", turn);
+    run(&mut s, "component.capture_position", json!({}));
+    s
+}
+
+/// [`placed_parts`] and a root cut of x 1..7, y 5..10, sketched 5 mm above B's floor, down through
+/// `targets`.
+fn root_cut_into_a_placed_part(angle: f64, lift: f64, targets: &[&str]) -> Session {
+    let mut s = placed_parts(angle, lift);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": lift + 5.0, "name": "CutSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [1, 5], "p1": [7, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"through_all": true, "direction": "negative", "operation": "cut", "targets": targets, "name": "Cut"}));
+    s
+}
+
+/// BoxA and BoxB after a mirror of the cut across x = 5: one 8 × 5 pocket at x 1..9, y 5..10 in
+/// each where it is shown, 5 mm deep in B (z lift..lift + 5) and as deep in A as the cut reaches.
+fn assert_mirrored_into_both(s: &mut Session, angle: f64, lift: f64) {
+    let (a, _, a_ends) = pockets(s, "BoxA");
+    let (b, b_faces, b_ends) = pockets(s, "BoxB");
+    let a_depth = if lift > 0.0 { 10.0 } else { 5.0 };
+    let case = format!("turned {angle}, lifted {lift}: BoxA {a} {a_ends:?}, BoxB {b} {b_faces} faces {b_ends:?}");
+    assert!(rel(a, 16000.0 - 40.0 * a_depth) < 1e-9, "{case}");
+    assert!(rel(b, 15800.0) < 1e-9, "{case}");
+    assert_eq!((b_faces, b_ends.len(), a_ends.len()), (11, 1, usize::from(lift == 0.0)), "{case}");
+    let (area, at) = b_ends[0];
+    assert!(rel(area, 40.0) < 1e-9 && near(at, [5.0, 7.5, lift + 5.0]), "{case}");
+}
+
+fn near(p: [f64; 3], q: [f64; 3]) -> bool {
+    p.iter().zip(q).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt() < 1e-6
+}
+
+fn mirror_the_cut(s: &mut Session) {
+    run(s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(s, "solid.mirror", json!({"features": ["Cut"], "plane": "MirrorPlane", "name": "Mirror"}));
+    assert!(r["warning"].is_null(), "{r}");
+}
+
+/// #19451: a root mirror of a root cut into a part placed turned and lifted cuts the world mirror
+/// image of the cut. It cut where the image would be in the part's own frame, turned with the part,
+/// and through the whole part, from where the cut started with the part not placed.
+#[test]
+fn a_mirrored_cut_into_a_turned_and_lifted_part_lands_at_its_world_image() {
+    for angle in [180.0, 90.0] {
+        let mut s = root_cut_into_a_placed_part(angle, 20.0, &BOTH);
+        mirror_the_cut(&mut s);
+        assert_mirrored_into_both(&mut s, angle, 20.0);
+    }
+}
+
+#[test]
+fn a_mirrored_cut_into_a_turned_part_lands_at_its_world_image() {
+    let mut s = root_cut_into_a_placed_part(180.0, 0.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 180.0, 0.0);
+}
+
+#[test]
+fn a_mirrored_cut_into_a_lifted_part_starts_where_the_cut_does() {
+    let mut s = root_cut_into_a_placed_part(0.0, 20.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 0.0, 20.0);
+}
+
+#[test]
+fn a_mirrored_cut_into_parts_not_placed_lands_at_its_image() {
+    let mut s = root_cut_into_a_placed_part(0.0, 0.0, &BOTH);
+    mirror_the_cut(&mut s);
+    assert_mirrored_into_both(&mut s, 0.0, 0.0);
+}
+
+/// Turning the part after the mirror moves the mirrored cut with the original.
+#[test]
+fn a_mirrored_cut_follows_its_part_turned_later() {
+    let mut s = root_cut_into_a_placed_part(0.0, 20.0, &BOTH);
+    mirror_the_cut(&mut s);
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert_mirrored_into_both(&mut s, 180.0, 20.0);
+}
+
+/// A copy cutting only the part placed turned and lifted is checked against it where it is shown:
+/// it removes material there, so the mirror says nothing of copies that remove none.
+#[test]
+fn a_mirrored_cut_into_a_turned_and_lifted_part_alone_removes_material_there() {
+    let mut s = root_cut_into_a_placed_part(180.0, 20.0, &["BoxB"]);
+    mirror_the_cut(&mut s);
+    let (b, b_faces, b_ends) = pockets(&mut s, "BoxB");
+    assert!(rel(b, 15800.0) < 1e-9 && b_faces == 11 && b_ends.len() == 1 && near(b_ends[0].1, [5.0, 7.5, 25.0]), "{b} {b_faces} {b_ends:?}");
+    assert!(rel(pockets(&mut s, "BoxA").0, 16000.0) < 1e-9);
+}
+
+/// #19451: a rectangular pattern of the cut 10 mm along −x copies it to x −9..−3 in the world, in
+/// a part turned and lifted too: two 6 × 5 pockets, through BoxA and 5 mm deep in BoxB.
+#[test]
+fn a_patterned_cut_into_a_turned_and_lifted_part_lands_at_its_world_copy() {
+    let mut s = root_cut_into_a_placed_part(180.0, 20.0, &BOTH);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Cut"], "dir1": [-1, 0, 0], "count1": 2, "spacing1": 10}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (a, _, a_ends) = pockets(&mut s, "BoxA");
+    let (b, b_faces, b_ends) = pockets(&mut s, "BoxB");
+    let case = format!("BoxA {a} {a_ends:?}, BoxB {b} {b_faces} faces {b_ends:?}");
+    assert!(rel(a, 16000.0 - 2.0 * 300.0) < 1e-9 && a_ends.is_empty(), "{case}");
+    assert!(rel(b, 16000.0 - 2.0 * 150.0) < 1e-9 && b_faces == 16, "{case}");
+    let want = [[-6.0, 7.5, 25.0], [4.0, 7.5, 25.0]];
+    assert!(b_ends.len() == 2 && b_ends.iter().zip(want).all(|((area, at), w)| rel(*area, 30.0) < 1e-9 && near(*at, w)), "{case}");
+}
+
+/// #19451: a root mirror of a hole at a root sketch's point, 5 mm into B's top where it is shown,
+/// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25.
+#[test]
+fn a_mirrored_sketch_point_hole_into_a_turned_and_lifted_part_lands_at_its_world_image() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "name": "HoleSketch"}));
+    run(&mut s, "sketch.point", json!({"point": [2, 7.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "HoleSketch", "points": ["p1"], "diameter": 2, "depth": 5, "targets": ["BoxB"], "name": "Hole"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Hole"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (b, _, ends) = pockets(&mut s, "BoxB");
+    let want = [[2.0, 7.5, 25.0], [8.0, 7.5, 25.0]];
+    assert!(rel(b, 16000.0 - 10.0 * PI) < 1e-6 && ends.len() == 2 && ends.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{b} {ends:?}");
+}
+
+/// #19451: a root mirror of a root rib standing on B's top where it is shown stands there too:
+/// two walls 3 long, 2 thick and 5 tall, down from the line at z 35 to the top at z 30.
+#[test]
+fn a_mirrored_rib_on_a_turned_and_lifted_part_stands_on_it_where_it_is_shown() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[1, 35], [4, 35]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 2, "participants": ["BoxB"], "name": "Rib"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    run(&mut s, "solid.mirror", json!({"features": ["Rib"], "plane": "MirrorPlane"}));
+    let b = pockets(&mut s, "BoxB").0;
+    assert!(rel(b, 16000.0 + 2.0 * 30.0) < 1e-9, "{b}");
+}
+
+/// [`part_with_a_boss_and_a_round`] and MirrorPlane at x = −10, made in the root: where it is
+/// shown, Base is its own image across it, Boss at x −26..−20, y −10..−5.
+fn part_and_mirror_plane() -> Session {
+    let mut s = part_with_a_boss_and_a_round();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": -10, "name": "MirrorPlane"}));
+    s
+}
+
+/// [`part_with_a_boss_and_a_round`] with Boss joined into `targets` (none: the part's bodies),
+/// before Part is placed, Part active.
+fn part_with_a_boss(targets: &[&str]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 5], "p1": [26, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join", "targets": targets, "name": "Boss"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[30, 20, 5]], "radius": 2, "name": "Round"}));
+    s
+}
+
+/// Part turned 180° about Z and lifted 20, and MirrorPlane at x = −10, both made in the root.
+fn place_the_part(s: &mut Session) {
+    run(s, "component.activate", json!({"component": "root"}));
+    let turn = json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
+    run(s, "occurrence.move", turn);
+    run(s, "component.capture_position", json!({}));
+    run(s, "construct.plane.offset", json!({"base": "YZ", "offset": -10, "name": "MirrorPlane"}));
+}
+
+/// #19451: a root mirror or pattern of a join drawn in a part placed turned and lifted adds the
+/// world copy of the boss: its top at x 0..6 across x = −10, at x −6..0 20 along x. The copy was
+/// made as if the part had no placement, turned with it, off Base.
+#[test]
+fn a_copied_join_in_a_turned_and_lifted_part_lands_at_its_world_copy() {
+    for (command, params, x) in [
+        ("solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}), 3.0),
+        ("solid.pattern.rectangular", json!({"features": ["Boss"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}), -3.0),
+    ] {
+        let mut s = part_and_mirror_plane();
+        let r = run(&mut s, command, params);
+        assert!(r["warning"].is_null(), "{command}: {r}");
+        let (v, _, tops) = pockets(&mut s, "Base");
+        let case = format!("{command}: {v} {tops:?}");
+        assert!(rel(v, 16000.0 + 2.0 * 150.0 - ROUND) < 1e-9, "{case}");
+        let want = [[-23.0, -7.5, 35.0], [x, -7.5, 35.0]];
+        assert!(tops.len() == 2 && tops.iter().zip(want).all(|((area, at), w)| rel(*area, 30.0) < 1e-9 && near(*at, w)), "{case}");
+    }
+}
+
+/// #19451: moving the part after the mirror moves the copied boss to the new world image: with
+/// Part 4 further along x, Boss's top is at x −19 and its image across x = −10 at x −1.
+#[test]
+fn a_mirrored_join_follows_its_part_moved_later() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [4, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    let (_, _, tops) = pockets(&mut s, "Base");
+    let want = [[-19.0, -7.5, 35.0], [-1.0, -7.5, 35.0]];
+    assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{tops:?}");
+}
+
+/// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
+/// edge where the part is shown, the upright edge at x 10, y −20, taking off what the round does.
+/// The copy looked for the edge where the image would be in the part's own frame, off Base.
+#[test]
+fn a_mirrored_round_in_a_turned_and_lifted_part_rounds_the_image_of_its_edge() {
+    let mut s = part_and_mirror_plane();
+    let before = pockets(&mut s, "Base").0;
+    assert!(rel(before, 16150.0 - ROUND) < 1e-9, "{before}");
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(before - v, ROUND) < 1e-9, "{before} -> {v}");
+    assert!(axes.len() == 2 && near2(axes[0], [-28.0, -18.0]) && near2(axes[1], [8.0, -18.0]), "{axes:?}");
+}
+
+/// #19451: a root mirror across XZ of that mirror rounds the image of its copy, the edge at x 10,
+/// y 20. It looked for the edge where the image would be in the part's own frame.
+#[test]
+fn a_mirror_of_a_mirrored_round_in_a_turned_part_rounds_the_image_of_its_copy() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": "MirrorPlane", "name": "Mirror"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Mirror"], "plane": "XZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16150.0 - 3.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-28.0, -18.0], [8.0, -18.0], [8.0, 18.0]];
+    assert!(axes.len() == 3 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #19451: a root mirror or pattern of a join that names no body, drawn in a part placed turned
+/// and lifted, joins the part at the world copy of the boss, as the join did: Base takes the
+/// 150 mm³ boss again and no body is made. The copy was a new body at the part's own coordinates.
+#[test]
+fn a_copied_untargeted_join_in_a_turned_and_lifted_part_joins_the_part() {
+    for (command, params, x) in [
+        ("solid.mirror", json!({"features": ["Boss"], "plane": "MirrorPlane"}), 3.0),
+        ("solid.pattern.rectangular", json!({"features": ["Boss"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}), -3.0),
+    ] {
+        let mut s = part_with_a_boss(&[]);
+        place_the_part(&mut s);
+        let before = pockets(&mut s, "Base").0;
+        let r = run(&mut s, command, params);
+        assert!(r["warning"].is_null(), "{command}: {r}");
+        let (v, _, tops) = pockets(&mut s, "Base");
+        let bodies: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let case = format!("{command}: {bodies:?} {before} -> {v} {tops:?}");
+        assert!(bodies == ["Base"] && rel(v - before, 150.0) < 1e-9, "{case}");
+        let want = [[-23.0, -7.5, 35.0], [x, -7.5, 35.0]];
+        assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{case}");
+    }
+}
+
+/// What a 1 mm round takes off an upright 5 mm edge of the boss.
+const BOSS_ROUND: f64 = (4.0 - PI) / 4.0 * 5.0;
+
+/// [`part_and_mirror_plane`] with an untargeted Boss and BossRound, 1 mm rounds of its two
+/// upright edges at x 26 (x −26 where it is shown), mirrored by Mirror across x = −10 with Boss,
+/// the two picked in the order of `features`.
+fn mirrored_untargeted_boss_and_its_rounds(features: [&str; 2]) -> Session {
+    let mut s = part_with_a_boss(&[]);
+    run(&mut s, "solid.fillet", json!({"edges": [[26, 10, 12.5], [26, 5, 12.5]], "radius": 1, "name": "BossRound"}));
+    place_the_part(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"features": features, "plane": "MirrorPlane", "name": "Mirror"}));
+    assert!(r["warning"].is_null(), "{r}");
+    s
+}
+
+/// #19451: a root mirror of an untargeted join in a part placed turned and lifted and of the
+/// rounds of the edges it made rounds the copy's edges: the boss's image at x 0..6 has rounds
+/// about x 5, y −9 and y −6, as the boss has about x −25.
+#[test]
+fn a_mirrored_untargeted_join_and_its_rounds_in_a_turned_part_land_together() {
+    let mut s = mirrored_untargeted_boss_and_its_rounds(["Boss", "BossRound"]);
+    let v = pockets(&mut s, "Base").0;
+    let axes = round_axes(&mut s, "Base", 1.0);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(rel(v, 16000.0 + 2.0 * 150.0 - ROUND - 4.0 * BOSS_ROUND) < 1e-9, "{v}");
+    let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0]];
+    assert!(axes.len() == 4 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #19451: a root mirror across XZ of that mirror makes every copy of its copies: a third boss at
+/// x 0..6, y 5..10, its rounds about x 5, y 6 and y 9. It copies them in timeline order, whatever
+/// order they were picked in: picked first, the round's copy found no edge of the boss's copy.
+#[test]
+fn a_mirror_of_a_mirrored_untargeted_join_and_its_rounds_lands_every_copy() {
+    for features in [["Boss", "BossRound"], ["BossRound", "Boss"]] {
+        let mut s = mirrored_untargeted_boss_and_its_rounds(features);
+        let r = s.execute("solid.mirror", &json!({"features": ["Mirror"], "plane": "XZ"}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{features:?}: {r:?}");
+        let v = pockets(&mut s, "Base").0;
+        let axes = round_axes(&mut s, "Base", 1.0);
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!(rel(v, 16000.0 + 3.0 * 150.0 - ROUND - 6.0 * BOSS_ROUND) < 1e-9, "{features:?}: {v}");
+        let want = [[-25.0, -9.0], [-25.0, -6.0], [5.0, -9.0], [5.0, -6.0], [5.0, 6.0], [5.0, 9.0]];
+        assert!(axes.len() == 6 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{features:?}: {axes:?}");
+    }
+}
+
+/// The same mirror made in the part, across x = −10 where it is shown (its own x = 10), copies
+/// the boss and the round in the part's frame, as before: the same copies.
+#[test]
+fn a_mirror_in_a_turned_part_of_its_own_features_copies_them_in_its_frame() {
+    let mut s = part_and_mirror_plane();
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Boss", "Round"], "plane": {"origin": [-10, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (v, _, tops) = pockets(&mut s, "Base");
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16000.0 + 2.0 * 150.0 - 2.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-23.0, -7.5, 35.0], [3.0, -7.5, 35.0]];
+    assert!(tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{tops:?}");
+    assert!(axes.len() == 2 && near2(axes[0], [-28.0, -18.0]) && near2(axes[1], [8.0, -18.0]), "{axes:?}");
+}
+
+/// Base, a root body moved into Part by a transfer, with Pocket, an untargeted cut of x 0..6,
+/// y −15..−10 5 deep into its top, Boss, an untargeted join of x 20..26, y 5..10 on its top, 5
+/// high, and BossBlend, a 1 mm `blend` (`solid.fillet` or `solid.chamfer`) of the boss's upright
+/// edges at x 26, naming Base; then Part placed turned 180° about Z and lifted 20. Where it is
+/// shown, Base is at x −30..10, y −20..20, z 20..30, the pocket at x −6..0, y 10..15 and the
+/// boss at x −26..−20, y −10..−5.
+fn transferred_part_with_a_blended_boss(blend: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "grounded": false, "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": "Part"}));
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    for (name, p0, p1) in [("Pocket", [0, -15], [6, -10]), ("Boss", [20, 5], [26, 10])] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance": 5, "operation": "join", "name": name});
+        if name == "Pocket" {
+            p["operation"] = json!("cut");
+            p["direction"] = json!("negative");
+        }
+        run(&mut s, "solid.extrude", p);
+    }
+    let mut p = json!({"edges": [[26, 10, 12.5], [26, 5, 12.5]], "body": "Base", "name": "BossBlend"});
+    p[if blend == "solid.fillet" { "radius" } else { "distance" }] = json!(1);
+    run(&mut s, blend, p);
+    place_the_part(&mut s);
+    s
+}
+
+/// What a 1 mm `blend` takes off one upright 5 mm edge of the boss.
+fn boss_blend(blend: &str) -> f64 {
+    if blend == "solid.fillet" { BOSS_ROUND } else { 2.5 }
+}
+
+/// The x − y = −8 plane where it is shown, square to Z: not one the part's turn leaves in place.
+fn diagonal_plane() -> Value {
+    json!({"origin": [-8, 0, 0], "normal": [1, -1, 0]})
+}
+
+/// Base's volume, pocket floors, boss tops (each within 0.3 mm: the blend takes their corners
+/// off) and rounds after `copies` mirrored copies of Pocket, Boss and BossBlend.
+fn assert_blended_copies(s: &mut Session, blend: &str, copies: usize, floors: &[[f64; 2]], tops: &[[f64; 2]], rounds: &[[f64; 2]]) {
+    let v = pockets(s, "Base").0;
+    let (got_floors, got_tops) = (pocket_ends_at(s, "Base", 25.0), pocket_ends_at(s, "Base", 35.0));
+    let case = format!("{blend}: {v}, floors {got_floors:?}, tops {got_tops:?}");
+    assert!(rel(v, 16000.0 - 2.0 * (copies + 1) as f64 * boss_blend(blend)) < 1e-9, "{case}");
+    assert!(got_floors.len() == floors.len() && got_floors.iter().zip(floors).all(|(a, w)| near2(*a, *w)), "{case}");
+    let close = |a: &[f64; 2], w: &[f64; 2]| (a[0] - w[0]).hypot(a[1] - w[1]) < 0.3;
+    assert!(got_tops.len() == tops.len() && got_tops.iter().zip(tops).all(|(a, w)| close(a, w)), "{case}");
+    if blend == "solid.fillet" {
+        let axes = round_axes(s, "Base", 1.0);
+        assert!(axes.len() == rounds.len() && axes.iter().zip(rounds).all(|(a, w)| near2(*a, *w)), "{blend}: {axes:?}");
+    }
+}
+
+/// #19451: a root mirror across a diagonal plane of a pocket, a boss and a blend of the boss's
+/// edges in a part placed turned, its body moved there by a transfer, makes each copy at its
+/// world image, the blend by its edges' names and by its picks: the pocket's image at x 2..7,
+/// y 2..8, the boss's at x −18..−13, y −18..−12, its rounds about y −17. Once the pocket's copy
+/// had changed Base, the copies took Base for a root body: the boss's copy was made through the
+/// part's placement twice and the blend's looked for its edges at their image in the part's own
+/// frame, off Base, and blended the nearest body there.
+#[test]
+fn a_mirrored_blend_in_a_transferred_turned_part_lands_at_its_world_image() {
+    for (blend, by_name) in [("solid.fillet", true), ("solid.fillet", false), ("solid.chamfer", true)] {
+        let mut s = transferred_part_with_a_blended_boss(blend);
+        if !by_name {
+            let f = s.doc_mut().features.iter_mut().find(|f| f.name == "BossBlend").unwrap();
+            f.edge_names.clear();
+            f.edge_refs.clear();
+        }
+        let r = s.execute("solid.mirror", &json!({"features": ["Pocket", "Boss", "BossBlend"], "plane": diagonal_plane()}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{blend} by name {by_name}: {r:?}");
+        let rounds = [[-25.0, -9.0], [-25.0, -6.0], [-17.0, -17.0], [-14.0, -17.0]];
+        assert_blended_copies(&mut s, blend, 1, &[[-3.0, 12.5], [4.5, 5.0]], &[[-23.0, -7.5], [-15.5, -15.0]], &rounds);
+    }
+}
+
+/// #19451: a root mirror across XZ of that mirror makes every copy of its copies there too: a
+/// third pocket at x 2..7, y −8..−2, a third boss at x −18..−13, y 12..18 and its rounds about
+/// y 17. It looked for the blend's edges in the part's own frame, and refused the smooth edge it
+/// found there.
+#[test]
+fn a_mirror_of_a_mirrored_blend_in_a_transferred_turned_part_lands_every_copy() {
+    for blend in ["solid.fillet", "solid.chamfer"] {
+        let mut s = transferred_part_with_a_blended_boss(blend);
+        run(&mut s, "solid.mirror", json!({"features": ["Pocket", "Boss", "BossBlend"], "plane": diagonal_plane(), "name": "Mirror"}));
+        let r = s.execute("solid.mirror", &json!({"features": ["Mirror"], "plane": "XZ"}));
+        assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{blend}: {r:?}");
+        let floors = [[-3.0, 12.5], [4.5, -5.0], [4.5, 5.0]];
+        let tops = [[-23.0, -7.5], [-15.5, -15.0], [-15.5, 15.0]];
+        let rounds = [[-25.0, -9.0], [-25.0, -6.0], [-17.0, -17.0], [-17.0, 17.0], [-14.0, -17.0], [-14.0, 17.0]];
+        assert_blended_copies(&mut s, blend, 2, &floors, &tops, &rounds);
+    }
+}
+
+/// #19451: a root mirror whose first copy makes a body (Spare's copy) joins a later untargeted
+/// join's copy to the part, as the join did: the bodies the mirror makes are not the root's to
+/// join. The boss's copy went into Spare's copy as a separate piece, off Base.
+#[test]
+fn a_copied_untargeted_join_after_a_copied_body_joins_the_part() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Base"], "translate": [0, 0, 50], "copy": true, "name": "Spare"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 5], "p1": [26, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join", "name": "Boss"}));
+    place_the_part(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Spare", "Boss"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (v, _, tops) = pockets(&mut s, "Base");
+    let want = [[-23.0, -7.5, 35.0], [3.0, -7.5, 35.0]];
+    assert!(rel(v, 16000.0 + 2.0 * 150.0) < 1e-9 && tops.len() == 2 && tops.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{v} {tops:?}");
+}
+
+/// #19451: a root mirror of a round in a part placed turned and lifted rounds the image of its
+/// edge on the body there, a root body: Twin, at x 20..60 where Base's image across x = 15 is,
+/// is rounded at its upright edge at x 60, y −20.
+#[test]
+fn a_mirrored_round_in_a_turned_part_rounds_a_root_body_at_its_image() {
+    let mut s = part_with_a_boss_and_a_round();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [20, -20, 20], "operation": "new", "body_name": "Twin"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Round"], "plane": {"origin": [15, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Twin").0;
+    let axes = round_axes(&mut s, "Twin", 2.0);
+    assert!(rel(v, 16000.0 - ROUND) < 1e-9 && axes.len() == 1 && near2(axes[0], [58.0, -18.0]), "{v} {axes:?}");
+}
+
+/// #19451: a root mirror of a hole placed at a point picked on B's top, kept in BoxB's frame,
+/// drills the world image of the hole: bores ending at x 2 and x 8, y 7.5, z 25. The copy was
+/// drilled at the image in BoxB's own frame, x −12 where it is shown.
+#[test]
+fn a_mirrored_picked_hole_in_a_turned_and_lifted_part_lands_at_its_world_image() {
+    let mut s = placed_parts(180.0, 20.0);
+    run(&mut s, "solid.hole", json!({"position": [-2, -7.5, 10], "diameter": 2, "depth": 5, "targets": ["BoxB"], "name": "Hole"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 5, "name": "MirrorPlane"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["Hole"], "plane": "MirrorPlane"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let (b, _, ends) = pockets(&mut s, "BoxB");
+    let want = [[2.0, 7.5, 25.0], [8.0, 7.5, 25.0]];
+    assert!(rel(b, 16000.0 - 10.0 * PI) < 1e-6 && ends.len() == 2 && ends.iter().zip(want).all(|((_, at), w)| near(*at, w)), "{b} {ends:?}");
+}
+
+/// #20208 review: a root pattern of a root Move copy of Left and Right, whose copy of Right a
+/// transfer moved into Part, placed lifted 20, copies each copy where it is shown, and moving
+/// Part after the pattern gives what moving it first gives. The pattern read where the first
+/// copy, Left's, is kept, the root, and so kept the copy of Right's copy where Part had been.
+#[test]
+fn a_pattern_of_a_moved_copy_follows_the_part_its_second_copy_was_moved_into() {
+    let setup = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Left"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Right"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Left", "Right"], "translate": [0, 30, 0], "copy": true, "name": "Copy"}));
+        let copy = s.doc.features.iter().find(|f| f.name == "Copy").unwrap().id;
+        let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == copy).map(|b| b.name.clone()).collect();
+        assert_eq!(made.len(), 2, "{made:?}");
+        run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "grounded": false, "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": [made[1]], "component": "Part"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 20]}));
+        s
+    };
+    let pattern = json!({"features": ["Copy"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 100, "name": "Pat"});
+    let copies = |s: &Session| {
+        let pat = s.doc.features.iter().find(|f| f.name == "Pat").unwrap().id;
+        let st = s.model.state();
+        let centroid = |b: &solidcraft_doc::ModelBody| b.measure().map(|m| [m.centroid.x, m.centroid.y, m.centroid.z]).unwrap();
+        let mut at: Vec<[f64; 3]> = st.bodies.iter().filter(|b| b.feature == pat).map(centroid).collect();
+        at.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        at
+    };
+    let later_move = json!({"occurrence": "Part:1", "translate": [0, 0, 40]});
+    let mut s = setup();
+    run(&mut s, "solid.pattern.rectangular", pattern.clone());
+    let before = copies(&s);
+    assert!(before.len() == 2 && near(before[0], [105.0, 35.0, 5.0]) && near(before[1], [125.0, 35.0, 25.0]), "{before:?}");
+    run(&mut s, "occurrence.move", later_move.clone());
+    let later = copies(&s);
+    let mut first = setup();
+    run(&mut first, "occurrence.move", later_move);
+    run(&mut first, "solid.pattern.rectangular", pattern);
+    let moved_first = copies(&first);
+    assert!(near(moved_first[1], [125.0, 35.0, 65.0]), "{moved_first:?}");
+    assert!(later.len() == 2 && later.iter().zip(&moved_first).all(|(a, b)| near(*a, *b)), "moved after {later:?}, before {moved_first:?}");
+}
+
+/// #20208 review: a mirror of a Thread of two holes on two plates threads each copy on its own
+/// plate, though the second plate's geometry is kept in another frame. PlateA at x 0..40, y 0..30
+/// and PlateB, made at x −40..0, y 50..80 and offset 40 along x, each have holes at x 10 and
+/// x 30 where they are shown; the Thread is on the holes at x 10, the mirror across x = 20. The
+/// second face's copy was moved by the mirror in PlateB's own frame, to x 66.6 there, off it.
+#[test]
+fn a_mirror_of_a_thread_on_two_bodies_threads_each_where_its_body_is_kept() {
+    let mut s = Session::default();
+    for (name, x, y) in [("PlateA", 0, 0), ("PlateB", -40, 50)] {
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [x, y, 0], "operation": "new", "body_name": name}));
+        for hx in [x + 10, x + 30] {
+            run(&mut s, "solid.hole", json!({"position": [hx, y + 15, 10], "diameter": 6.8, "depth": 10, "targets": [name]}));
+        }
+    }
+    let faces = json!([{"body": "PlateA", "point": [13.4, 15, 5]}, {"body": "PlateB", "point": [-26.6, 65, 5]}]);
+    run(&mut s, "solid.thread", json!({"faces": faces, "designation": "M8", "name": "Thread"}));
+    let mut offset = solidcraft_doc::IDENTITY;
+    offset[3][0] = 40.0;
+    s.doc_mut().body_offsets.insert("PlateB".into(), offset);
+    let r = s.execute("solid.mirror", &json!({"features": ["Thread"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{r:?}");
+    let st = s.model.state();
+    let mut axes: Vec<(&str, f64)> = st.threads.iter().map(|t| (t.body.as_str(), t.axis_point.x)).collect();
+    axes.sort_by(|a, b| a.0.cmp(b.0).then(a.1.total_cmp(&b.1)));
+    let want = [("PlateA", 10.0), ("PlateA", 30.0), ("PlateB", -30.0), ("PlateB", -10.0)];
+    assert!(axes.len() == 4 && axes.iter().zip(want).all(|(a, w)| a.0 == w.0 && (a.1 - w.1).abs() < 1e-6), "{axes:?}");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
@@ -2074,6 +2958,60 @@ fn mirror_of_a_thread_threads_the_mirrored_hole() {
             assert_eq!(state.threads.len(), 2, "together {together}: the source and its mirror");
         }
     }
+}
+
+/// #21031: a mirror or pattern of a tapped Hole repeats its own thread on each copy: a modelled
+/// thread removes as much from the copy as from the original, and a cosmetic one is listed again.
+#[test]
+fn copies_of_a_tapped_hole_are_threaded() {
+    let copies = [
+        ("solid.mirror", json!({"features": ["Hole1"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}})),
+        ("solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20})),
+    ];
+    for modeled in [true, false] {
+        for (copy, params) in &copies {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+            let block = volume(&mut s);
+            run(&mut s, "solid.hole", json!({"position": [10, 15, 12], "thread": "M4", "depth": 8, "modeled": modeled, "name": "Hole1"}));
+            let one = block - volume(&mut s);
+            let r = run(&mut s, copy, params.clone());
+            assert!(r["error"].is_null(), "{copy}: {r}");
+            if modeled {
+                let both = block - volume(&mut s);
+                assert!(rel(both, 2.0 * one) < 1e-6, "{copy}: the original removes {one} mm³, both {both} mm³");
+            } else {
+                assert_eq!(s.world_state().unwrap().threads.len(), 2, "{copy}: the hole's thread and its copy's");
+            }
+        }
+        // A copy off the part removes no material: it warns, and only the copies that cut are threaded.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+        let block = volume(&mut s);
+        run(&mut s, "solid.hole", json!({"position": [10, 15, 12], "thread": "M4", "depth": 8, "modeled": modeled, "name": "Hole1"}));
+        let one = block - volume(&mut s);
+        let params = json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20});
+        let r = run(&mut s, "solid.pattern.rectangular", params);
+        assert!(r["error"].is_null(), "{r}");
+        assert!(r.to_string().contains("1 of 2 cut copies remove no material"), "{r}");
+        if modeled {
+            let all = block - volume(&mut s);
+            assert!(rel(all, 2.0 * one) < 1e-6, "the original removes {one} mm³, all {all} mm³");
+        } else {
+            assert_eq!(s.world_state().unwrap().threads.len(), 2, "the hole's thread and its one cutting copy's");
+        }
+    }
+    // A copy over a 3 mm thick step has a wall shorter than the thread depth: it is drilled, left
+    // unthreaded with a warning, and the pattern still evaluates.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 9, "corner": [20, 0, 3], "operation": "cut"}));
+    let hole = json!({"position": [10, 15, 12], "thread": "M4", "depth": 10, "thread_depth": 6, "modeled": false, "name": "Hole1"});
+    run(&mut s, "solid.hole", hole);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20}));
+    assert!(r["error"].is_null(), "{r}");
+    assert!(r.to_string().contains("1 hole copies are not threaded"), "{r}");
+    assert_eq!(s.world_state().unwrap().threads.len(), 1, "only the original hole's thread");
 }
 
 /// #16799: two holes placed from edges, mirrored together. The second hole's edge names mean the

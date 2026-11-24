@@ -114,6 +114,11 @@ pub struct SPoint {
     /// come to (`Document::apply_point_values` works them out before each solve).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exprs: Option<Box<PointExprs>>,
+    /// A point that only helps place or dimension other geometry, as a construction line does:
+    /// features that read a sketch's points (a Hole from the whole sketch) leave it out (#18448).
+    /// Not saved when false, so a design without one is written as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 /// The expressions of a point placed by parameters, over the design's parameters; a coordinate
@@ -273,9 +278,32 @@ pub struct Curve {
     /// a profile (it is construction too).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub infinite: bool,
-    /// The spline owning a tangent guide or a segment of its control polygon.
+    /// The fit spline owning this tangent guide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spline_handle_of: Option<String>,
+    /// The control spline owning this polygon side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spline_control_polygon_of: Option<String>,
+}
+
+impl Curve {
+    /// The spline that owns this tangent guide or control polygon side.
+    pub fn spline_guide_owner(&self) -> Option<&str> {
+        self.spline_handle_of.as_deref().or(self.spline_control_polygon_of.as_deref())
+    }
+}
+
+fn deserialize_sketch_curves<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Vec<Curve>, D::Error> {
+    let mut curves = Vec::<Curve>::deserialize(deserializer)?;
+    // Early builds of the control polygon used the tangent guide field for both kinds of guide.
+    let control_splines: std::collections::BTreeSet<String> =
+        curves.iter().filter(|curve| matches!(curve.kind, CurveKind::Spline { control: true, .. })).map(|curve| curve.id.clone()).collect();
+    for curve in &mut curves {
+        if curve.spline_control_polygon_of.is_none() && curve.spline_handle_of.as_ref().is_some_and(|parent| control_splines.contains(parent)) {
+            curve.spline_control_polygon_of = curve.spline_handle_of.take();
+        }
+    }
+    Ok(curves)
 }
 
 fn control_polygon_sides(points: &[usize], periodic: bool) -> impl Iterator<Item = (usize, usize)> + '_ {
@@ -830,6 +858,7 @@ pub struct SketchView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
     pub points: Vec<SPoint>,
+    #[serde(deserialize_with = "deserialize_sketch_curves")]
     pub curves: Vec<Curve>,
     pub constraints: Vec<Constraint>,
     /// Editable sketch patterns; their relations are ordinary solver constraints.
@@ -869,6 +898,34 @@ pub struct Sketch {
     pub view: SketchView,
 }
 
+impl Sketch {
+    /// Everything of the sketch a numerical solve's residuals can read besides its constraints
+    /// (which a solve reads through its residual blocks, with the values it is solving for), as
+    /// text that tells any two such states apart: for remembering the solver's runs
+    /// (`solver::lm_memo`). Every field is named, so a new one has to be decided on here.
+    pub(crate) fn solve_fingerprint(&self) -> String {
+        let Sketch {
+            points,
+            curves,
+            constraints: _,
+            patterns,
+            links,
+            offsets,
+            freeform_offsets,
+            freeform_chain_offsets,
+            wires,
+            wire_constraints,
+            wires_joined,
+            equations,
+            counters: _,
+            view: _,
+        } = self;
+        format!(
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}"
+        )
+    }
+}
+
 fn is_default_view(v: &SketchView) -> bool {
     *v == SketchView::default()
 }
@@ -882,7 +939,7 @@ impl Default for Sketch {
 impl Sketch {
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
@@ -1027,7 +1084,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
+        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None, construction: false });
         Ok(self.points.len() - 1)
     }
 
@@ -1071,6 +1128,7 @@ impl Sketch {
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -1110,6 +1168,7 @@ impl Sketch {
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -1146,6 +1205,7 @@ impl Sketch {
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -1251,10 +1311,13 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
+            // The middle of a line is its ends' mean; the middle of an arc is halfway along it.
+            Midpoint { l, .. } if !matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(l), "needs a line or an arc".into()));
+            }
             ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
@@ -1342,12 +1405,12 @@ impl Sketch {
             _ => {}
         }
         if let Some(v) = k.value()
-            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
+            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle() && !matches!(k, OffsetDistance { .. })))
         {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k
-            && (*value <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
+            && (value.abs() <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
         {
             return Err(SketchError::Invalid("offset dimension needs a nonzero distance and an existing association".into()));
         }
@@ -1473,6 +1536,21 @@ impl Sketch {
                 } else {
                     false
                 }
+            }
+            ConstraintKind::OffsetDistance { ref output, .. } => {
+                if !mag.is_finite() || mag <= 1e-9 || mag > MAX_COORD {
+                    return false;
+                }
+                let Some(constraint) =
+                    self.constraints.iter_mut().find(|c| matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output))
+                else {
+                    return false;
+                };
+                if let ConstraintKind::OffsetDistance { value, reverse, .. } = &mut constraint.kind {
+                    *reverse = !*reverse;
+                    *value = mag;
+                }
+                true
             }
             _ => false,
         }
@@ -2209,6 +2287,7 @@ impl Sketch {
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         Ok(self.curves.len() - 1)
     }
@@ -2225,12 +2304,7 @@ impl Sketch {
 
     /// Whether this curve is an owned side of a control spline.
     pub fn is_control_polygon_segment(&self, index: usize) -> bool {
-        self.curves
-            .get(index)
-            .and_then(|guide| guide.spline_handle_of.as_deref())
-            .and_then(|parent| self.curve_index(parent))
-            .and_then(|parent| self.curves.get(parent))
-            .is_some_and(|owner| matches!(owner.kind, CurveKind::Spline { control: true, .. }))
+        self.curves.get(index).is_some_and(|curve| curve.spline_control_polygon_of.is_some())
     }
 
     /// Add selectable construction segments that share the spline's actual control points.
@@ -2241,7 +2315,7 @@ impl Sketch {
         let sides: Vec<_> = control_polygon_sides(pts, *periodic).collect();
         let id = id.clone();
         self.spline_handles_allowed(&id)?;
-        if self.curves.iter().any(|c| c.spline_handle_of.as_deref() == Some(id.as_str())) {
+        if self.curves.iter().any(|c| c.spline_control_polygon_of.as_deref() == Some(id.as_str())) {
             return Err(SketchError::Invalid("the spline already has a control polygon".into()));
         }
         if self.curves.len().saturating_add(sides.len()) > crate::limits::max_curves() {
@@ -2254,7 +2328,7 @@ impl Sketch {
             let line = candidate.add_line_pts(a, b, Some(&name))?;
             if let Some(segment) = candidate.curves.get_mut(line) {
                 segment.construction = true;
-                segment.spline_handle_of = Some(id.clone());
+                segment.spline_control_polygon_of = Some(id.clone());
             }
             created.push(line);
         }
@@ -2417,13 +2491,13 @@ impl Sketch {
     pub fn validate_spline_handles(&self) -> Result<()> {
         let mut work = 0usize;
         let mut helper_lines_by_parent = std::collections::BTreeMap::<&str, Vec<&Curve>>::new();
-        let mut spline_ids = std::collections::BTreeSet::<&str>::new();
+        let mut spline_types = std::collections::BTreeMap::<&str, bool>::new();
         for curve in &self.curves {
-            if let Some(parent) = curve.spline_handle_of.as_deref() {
+            if let Some(parent) = curve.spline_guide_owner() {
                 helper_lines_by_parent.entry(parent).or_default().push(curve);
             }
-            if matches!(curve.kind, CurveKind::Spline { .. }) {
-                spline_ids.insert(curve.id.as_str());
+            if let CurveKind::Spline { control, .. } = curve.kind {
+                spline_types.insert(curve.id.as_str(), control);
             }
         }
         for spline in &self.curves {
@@ -2489,10 +2563,13 @@ impl Sketch {
             }
         }
         for curve in &self.curves {
-            if let Some(parent) = &curve.spline_handle_of
-                && (!spline_ids.contains(parent.as_str()) || !matches!(curve.kind, CurveKind::Line { .. }) || !curve.construction)
+            if let Some(parent) = curve.spline_guide_owner()
+                && (spline_types.get(parent) != Some(&curve.spline_control_polygon_of.is_some())
+                    || (curve.spline_handle_of.is_some() && curve.spline_control_polygon_of.is_some())
+                    || !matches!(curve.kind, CurveKind::Line { .. })
+                    || !curve.construction)
             {
-                return Err(SketchError::Invalid("invalid spline tangent construction line".into()));
+                return Err(SketchError::Invalid("invalid spline construction guide".into()));
             }
         }
         Ok(())
@@ -2510,12 +2587,12 @@ impl Sketch {
             .map(|curve| curve.id.clone())
             .collect();
         for (index, curve) in self.curves.iter().enumerate() {
-            if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_ids.contains(parent)) {
+            if curve.spline_guide_owner().is_some_and(|parent| removed_ids.contains(parent)) {
                 which.push(index);
             }
         }
         let removed_handles: std::collections::BTreeSet<String> =
-            which.iter().filter_map(|index| self.curves.get(*index)).filter_map(|curve| curve.spline_handle_of.clone()).collect();
+            which.iter().filter_map(|index| self.curves.get(*index)).filter_map(|curve| curve.spline_guide_owner().map(str::to_owned)).collect();
         if !removed_handles.is_empty() {
             for curve in &mut self.curves {
                 if removed_handles.contains(&curve.id)
@@ -2525,7 +2602,7 @@ impl Sketch {
                 }
             }
             for (index, curve) in self.curves.iter().enumerate() {
-                if curve.spline_handle_of.as_ref().is_some_and(|parent| removed_handles.contains(parent)) {
+                if curve.spline_guide_owner().is_some_and(|parent| removed_handles.contains(parent)) {
                     which.push(index);
                 }
             }
@@ -2678,7 +2755,7 @@ impl Sketch {
             .map(|c| c.id.clone())
             .collect();
         for (i, c) in self.curves.iter().enumerate() {
-            if c.spline_handle_of.as_ref().is_some_and(|parent| dead_splines.contains(parent)) && !dead_curves.contains(&i) {
+            if c.spline_guide_owner().is_some_and(|parent| dead_splines.contains(parent)) && !dead_curves.contains(&i) {
                 dead_curves.push(i);
             }
         }
@@ -2746,7 +2823,12 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curves.get(self.curve_index(cid)?)?;
+        Self::curve_point(self.curves.get(self.curve_index(cid)?)?, role)
+    }
+
+    /// The point a role (`start`, `end`, `center`, `major` or `apex`) names on a curve. A reversed
+    /// curve swaps its start and end, so they keep their as-drawn meaning.
+    pub(crate) fn curve_point(c: &Curve, role: &str) -> Option<usize> {
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",
