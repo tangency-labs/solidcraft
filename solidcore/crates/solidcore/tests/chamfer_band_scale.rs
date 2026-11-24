@@ -656,3 +656,145 @@ fn chamfering_two_edges_of_a_plate_past_its_width_is_refused() {
     let (_, result) = chamfer_top(&plate, 10.0, 3.0, Some(&[0, 2]));
     assert!(result.is_err(), "built");
 }
+
+/// #21417: opposing straight chamfers on a slightly skewed or tapered planar face meet along
+/// their weighted bisector continuously down to arbitrarily small angles, naming both equal
+/// radii (`FitKind::Radius`) and unequal setback scales (`FitKind::Scale`), including when a
+/// selected end chamfer trims the narrow end of the top face.
+#[test]
+fn opposing_chamfers_on_a_skewed_or_tapered_face_name_their_fit() {
+    for skew in [1e-14_f64, 1e-6, 1e-3, 0.5] {
+        let corners = [(0.0, 0.0), (30.0, 0.0), (30.0, 2.0 + skew), (0.0, 2.0)];
+        let cos_theta = 30.0 / (900.0 + skew * skew).sqrt();
+        // Equal setbacks [1.5, 1.5] meet on the x = 0 cap at d = 2 cos(theta) / (1 + cos(theta)).
+        let want_radius = 2.0 * cos_theta / (1.0 + cos_theta);
+        let run_pair = |size: ChamferSize| {
+            let mut k = kernel();
+            let (mut b, mids) = prism(&mut k, &corners, 10.0);
+            let edges = [pick(&k, &b, mids[0]), pick(&k, &b, mids[2])];
+            let top = edge::faces(&b, edges[0], None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+                .unwrap();
+            let tol = edge::tolerance(&b, edges[0])
+                .unwrap()
+                .max(edge::tolerance(&b, edges[1]).unwrap());
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_chamfers_along(&k, &edges, &[size, size], &[top, top])
+                .unwrap();
+            s.create_corners(&k, None).unwrap();
+            for corner in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(corner, true).unwrap();
+            }
+            let result = s.do_filleting(&mut k, None);
+            (result, s.fit_size(), tol)
+        };
+        let (result, fit, _) = run_pair(ChamferSize::Distances([1.5, 1.5]));
+        assert!(result.is_err(), "skew {skew:e}: equal 1.5 built");
+        let fit = fit.expect("equal skewed refusal names a fit");
+        assert_eq!(fit.kind, FitKind::Radius, "skew {skew:e}");
+        assert!(
+            (fit.size - want_radius).abs() <= 1e-9,
+            "skew {skew:e}: {} vs {want_radius}",
+            fit.size
+        );
+        // Slightly below the closed bound builds cleanly.
+        assert!(
+            run_pair(ChamferSize::Distances([
+                want_radius - 0.01,
+                want_radius - 0.01,
+            ]))
+            .0
+            .is_ok(),
+            "skew {skew:e}: control below fit failed"
+        );
+
+        // Distance-angle (80 deg) chamfers name an open common scale that builds cleanly.
+        let angle = 80.0_f64.to_radians();
+        let (result, fit, tol) = run_pair(ChamferSize::DistanceAngle {
+            distance: 1.5,
+            angle,
+        });
+        assert!(result.is_err(), "skew {skew:e}: 80 deg 1.5 built");
+        let fit = fit.expect("distance-angle skewed refusal names a fit");
+        assert_eq!(fit.kind, FitKind::Scale, "skew {skew:e}");
+        let want_scale = (2.0 * want_radius - 1000.0 * tol) / 3.0;
+        assert!(
+            (fit.size - want_scale).abs() <= 1e-8,
+            "skew {skew:e}: scale {} vs {want_scale}",
+            fit.size
+        );
+        assert!(
+            run_pair(ChamferSize::DistanceAngle {
+                distance: 1.5 * fit.size,
+                angle,
+            })
+            .0
+            .is_ok(),
+            "skew {skew:e}: named distance-angle fit failed to build"
+        );
+    }
+
+    // Selected end strip covering x in [0, 16] on a slightly skewed 30 x 2 top leaves (16, 30),
+    // naming the open scale past the corner strip, which builds cleanly.
+    let corners = [(0.0, 0.0), (30.0, 0.0), (30.0, 2.0 + 1e-6), (0.0, 2.0)];
+    let run_three = |scale: f64| {
+        let mut k = kernel();
+        let (mut b, mids) = prism(&mut k, &corners, 100.0);
+        let edges = [
+            pick(&k, &b, mids[0]),
+            pick(&k, &b, mids[2]),
+            pick(&k, &b, mids[3]),
+        ];
+        let top = edge::faces(&b, edges[0], None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| edge::faces(&b, edges[1], None).unwrap().contains(&f))
+            .unwrap();
+        let tol = edges
+            .iter()
+            .map(|&e| edge::tolerance(&b, e).unwrap())
+            .fold(0.0_f64, f64::max);
+        let sizes = [
+            ChamferSize::Distances([1.5 * scale, 3.0 * scale]),
+            ChamferSize::Distances([1.5 * scale, 3.0 * scale]),
+            ChamferSize::Distances([24.0 * scale, 48.0 * scale]),
+        ];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(&k, &edges, &sizes, &[top; 3])
+            .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        let result = s.do_filleting(&mut k, None);
+        (result, s.fit_size(), tol)
+    };
+    let (result, fit, tol) = run_three(1.0);
+    assert!(result.is_err(), "skewed three-edge built");
+    let fit = fit.expect("skewed three-edge refusal names a fit");
+    assert_eq!(fit.kind, FitKind::Scale);
+    let want = (2.0 + (16.0 / 30.0) * 1e-6 - 1000.0 * tol) / 3.0;
+    assert!((fit.size - want).abs() <= 1e-7, "{} vs {want}", fit.size);
+    run_three(fit.size).0.unwrap();
+
+    // #20450 rounding gate holds for a 9e-16-skewed 2 mm face too: two 1 mm chamfers still build.
+    let almost_two = [
+        (0.0, 0.0),
+        (30.0, 0.0),
+        (30.0, 1.999_999_999_999_999_1),
+        (0.0, 2.0),
+    ];
+    let (mut b, result) = chamfer_top(&almost_two, 10.0, 1.0, Some(&[0, 2]));
+    assert!(result.is_ok(), "almost-2 skewed face refused: {result:?}");
+    let k = kernel();
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let volume = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+    assert!((volume - 570.0).abs() <= 1e-9 * 570.0, "volume {volume}");
+}
