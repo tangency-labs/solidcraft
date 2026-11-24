@@ -2920,6 +2920,55 @@ mod importers {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// A design's file bytes with a box of the given size: what the fixture hands back.
+    fn sized_design(length: f64) -> Vec<u8> {
+        let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+        made.execute("solid.box", &json!({"length": length, "width": 20, "height": 5})).unwrap();
+        solidcraft_io::write_design(&made.doc).unwrap()
+    }
+    fn total_volume(s: &mut Session) -> f64 {
+        s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
+    }
+
+    /// Update Links asks the importer that read the file to read it again: the bodies change, and
+    /// the component keeps its placement and its bodies' names, as one undo step.
+    #[test]
+    fn update_links_reads_a_changed_importer_file_again_through_the_importer() {
+        let (mut s, root) = installed("update-linked", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &sized_design(10.0));
+        let inserted = s.execute("component.insert_design", &json!({"path": file, "translate": [100, 0, 0]})).unwrap();
+        let (comp, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+        let placed = s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+        let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let before = names(&s);
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        let unchanged = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!(
+            (unchanged["updated"].as_array().map(Vec::len), unchanged["unchanged"].as_array().map(Vec::len)),
+            (Some(0), Some(1)),
+            "{unchanged}"
+        );
+        std::fs::write(&file, sized_design(30.0)).unwrap();
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        let undo = s.undo.len();
+        let updated = s.execute("component.update_links", &json!({})).unwrap();
+        assert_eq!(updated["updated"].as_array().map(Vec::len), Some(1), "{updated}");
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        assert!((total_volume(&mut s) - 3000.0).abs() < 1e-6, "{}", total_volume(&mut s));
+        assert_eq!(names(&s), before);
+        assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform, placed);
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], false);
+        assert!(s.doc.links[&comp].importer.is_some());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        // A file the importer refuses keeps the bodies the link has.
+        std::fs::write(&file, b"T").unwrap();
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("Sample Importer"), "{refused}");
+        assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn imported_documents_do_not_share_the_converter_templates_identity() {
         let (mut s, root) = installed("distinct-identities", &[("smp", &["smp"], false)]);

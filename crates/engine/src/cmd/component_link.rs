@@ -343,6 +343,32 @@ fn source_bodies(file: &Path, bytes: &[u8], link: &DesignLink, validation: solid
     Ok(((feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()), (Vec::new(), Vec::new())))
 }
 
+/// Read a link's source again by what read it: the importer plugin it names (which writes the design
+/// the bodies come from), else the built-in reader. The link keeps the version of the plugin that
+/// read it last. `bytes` are the source file's own, whose digest decides when it was read last.
+fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &DesignLink) -> Result<(Linked, LinkedImages)> {
+    let Some(importer) = &link.importer else { return source_bodies(file, bytes, link, s.validation()) };
+    let slot = linked_importer(s, importer)?;
+    let options = if importer.options.is_null() { json!({}) } else { importer.options.clone() };
+    let made = crate::plugin::import_design_bytes(s, &slot, &file.to_string_lossy(), &options)?;
+    let (mut read, images) = design_bodies(file, &made.design, None, s.validation())?;
+    // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
+    remember_read(file, None, digest(bytes), &read.1, &read.2, &read.4, &read.3, &read.5);
+    read.1.warnings.extend(made.notes);
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp).and_then(|l| l.importer.as_mut()) {
+        kept.version = Some(made.version);
+    }
+    Ok((read, images))
+}
+
+/// The installed, enabled importer a link names, to read its file again.
+fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Result<crate::plugin::Importer> {
+    crate::plugin::importers(s)
+        .into_iter()
+        .find(|i| i.id == importer.format)
+        .ok_or_else(|| EngineError::Other(format!("the importer `{}` is not installed or is turned off", importer.format)))
+}
+
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature, and its canvases and
 /// decals ([`design_images`]). The model the file keeps is its evaluation when this build saved it
 /// for exactly that design, as when it is opened.
@@ -1113,7 +1139,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match source_bodies(&file, &bytes, &link, s.validation()) {
+        let (_, sf, faces, metadata, properties, meshes) = match linked_bodies(s, comp, &file, &bytes, &link) {
             Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
