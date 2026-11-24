@@ -2275,8 +2275,8 @@ fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_pre
     h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
 
     // The old stored shape, a plain option map, loads with remembering off: the dialog shows defaults.
-    let old = json!({"plugin_importer_options":{"gears":{"open":{"teeth":42}}}});
-    let loaded = crate::prefs::lenient(&old);
+    let old = json!({"preferences":{"plugin_importer_options":{"gears":{"open":{"teeth":42}}}}});
+    let loaded = crate::prefs::lenient(&old["preferences"]);
     let memory = &loaded.plugin_importer_options["gears"]["open"];
     assert_eq!((memory.remember, &memory.values), (false, &json!({"teeth":42})));
     h.app.load_prefs(&old.to_string());
@@ -2289,8 +2289,8 @@ fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_pre
     // The new shape round-trips, and it is what gets saved.
     h.app.preferences.plugin_importer_options.get_mut("gears").unwrap().get_mut("open").unwrap().remember = true;
     let saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
-    assert_eq!(saved["plugin_importer_options"]["gears"]["open"], json!({"remember":true,"values":{"teeth":42}}));
-    let again = crate::prefs::lenient(&saved);
+    assert_eq!(saved["preferences"]["plugin_importer_options"]["gears"]["open"], json!({"remember":true,"values":{"teeth":42}}));
+    let again = crate::prefs::lenient(&saved["preferences"]);
     assert_eq!(again.plugin_importer_options, h.app.preferences.plugin_importer_options);
     open_entry(&mut h.app, 0, 0);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 42);
