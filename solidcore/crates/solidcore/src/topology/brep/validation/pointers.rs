@@ -2216,9 +2216,9 @@ fn edge_geometry(
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::topology_failed(
+        return Err(crate::SolidError::topology(
             super::OP,
-            "the edge's curve is not owned by the edge",
+            crate::error::topology::TopologyFailure::CurveNotOwnedByEdge,
         ));
     }
     let ivl = b.edge(e)?.interval;
@@ -2232,9 +2232,12 @@ fn edge_geometry(
                 let zone = tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::topology_failed(
+                return Err(crate::SolidError::topology(
                     super::OP,
-                    "the edge's end is farther from its vertex than their tolerances",
+                    crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                        distance: dist,
+                        tolerance: v_tol + b.edge(e)?.tolerance,
+                    },
                 ));
             }
         }
@@ -2397,6 +2400,40 @@ mod issue_891_tests {
             ..Kernel::default()
         };
         assert!(reversed_needs_fix(&off, &trim(), Some(&plane)).unwrap());
+    }
+
+    /// A curve end off its vertex by more than the vertex's and the edge's tolerance fails
+    /// as `EdgeEndOffVertex` with that gap and that tolerance, and `fix_tolerances` does
+    /// not grow a vertex 100 tolerances or more away (review of #21132).
+    #[test]
+    fn an_edge_end_off_its_vertex_reports_the_gap_and_the_tolerance() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0)
+            .unwrap();
+        let e = b.edge_list()[0];
+        let owner = b.owner_identity(EntityRef::Edge(e));
+        let keys = move |_: EntityRef| owner;
+        validate_geometry(&k, &mut b, e, false, &keys).unwrap();
+        let v = b.edge(e).unwrap().vertices[0];
+        let tolerance = b.vertex(v).unwrap().tolerance + b.edge(e).unwrap().tolerance;
+        let gap = 0.25;
+        let moved = b.vertex(v).unwrap().point + Vec3::new(0.0, 0.0, gap);
+        b.vertex_mut(v).unwrap().point = moved;
+        for fix in [false, true] {
+            let e = validate_geometry(&k, &mut b, e, fix, &keys).unwrap_err();
+            let Some(&crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                distance,
+                tolerance: exceeded,
+            }) = e.topology_failure()
+            else {
+                panic!("{e:?}");
+            };
+            assert!((distance - gap).abs() < 1e-9, "{distance}");
+            assert_eq!(exceeded, tolerance);
+            assert!(distance > exceeded);
+            assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        }
     }
 
     #[test]

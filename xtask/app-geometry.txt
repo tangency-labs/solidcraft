@@ -57,7 +57,7 @@ crates/doc/src/drawing/dimension.rs:OnPlane::ends cross,dot
 crates/doc/src/drawing/dimension.rs:check_direction normalized
 crates/doc/src/drawing/dimension.rs:face_corners triangles
 crates/doc/src/drawing/dimension.rs:one_circle dot
-crates/doc/src/drawing/dimension.rs:ray_on dot
+crates/doc/src/drawing/dimension.rs:ray_on cross,normalized
 crates/doc/src/drawing/dimension.rs:same_cylinder dot
 crates/doc/src/drawing/fold.rs:auxiliary_side dot
 crates/doc/src/drawing/fold.rs:axes cross
@@ -83,7 +83,6 @@ crates/doc/src/eval.rs:centered_extrude dot
 crates/doc/src/eval.rs:curved_face cross
 crates/doc/src/eval.rs:edge_dir normalized
 crates/doc/src/eval.rs:entry_face_rise dot
-crates/doc/src/eval.rs:eval_feature_kind dot
 crates/doc/src/eval.rs:face_plane closest_on_triangle,dot,triangles
 crates/doc/src/eval.rs:face_samples triangles
 crates/doc/src/eval.rs:face_through dot,normalized
@@ -99,6 +98,7 @@ crates/doc/src/eval.rs:hole_reaches raycast
 crates/doc/src/eval.rs:hole_run_on cross,dot
 crates/doc/src/eval.rs:hole_spots normalized
 crates/doc/src/eval.rs:hole_spots_raw normalized
+crates/doc/src/eval.rs:hole_threads dot
 crates/doc/src/eval.rs:hole_tools_reaching dot
 crates/doc/src/eval.rs:least_turn atan2,cross,dot
 crates/doc/src/eval.rs:level_along dot
@@ -137,6 +137,7 @@ crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
 crates/doc/src/eval.rs:trim_to_plane dot
 crates/doc/src/eval.rs:with_named_face_points normalized
+crates/doc/src/eval_frame.rs:SectionView::section_point dot
 crates/doc/src/eval_frame.rs:add_corner dot,normalized
 crates/doc/src/eval_frame.rs:along dot
 crates/doc/src/eval_frame.rs:built dot
@@ -144,6 +145,7 @@ crates/doc/src/eval_frame.rs:cut_members dot
 crates/doc/src/eval_frame.rs:member_section dot,normalized
 crates/doc/src/eval_frame.rs:ordered dot
 crates/doc/src/eval_frame.rs:plane_up cross,dot,normalized
+crates/doc/src/eval_frame.rs:section_view normalized
 crates/doc/src/eval_frame.rs:straight dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
 crates/doc/src/eval_more.rs:chain_loops cross
@@ -639,7 +641,6 @@ crates/engine/src/mesh_lines/coincide.rs:disk dot
 crates/engine/src/mesh_lines/coincide.rs:within dot
 crates/engine/src/mesh_lines/meshes.rs:Scene::triangle_count triangles
 crates/engine/src/mesh_lines/meshes.rs:buffer_bytes triangles
-crates/engine/src/mesh_lines/meshes.rs:prepare triangles
 crates/engine/src/mesh_lines/meshes.rs:rigid cross,dot
 crates/engine/src/mesh_lines/projection.rs:View::project dot
 crates/engine/src/mesh_lines/projection.rs:merge_lines dot
@@ -720,7 +721,6 @@ crates/geom/src/drawing_measure.rs:between atan2,cross,dot
 crates/geom/src/drawing_measure.rs:between_faces cross,dot,normalized
 crates/geom/src/drawing_measure.rs:between_silhouettes cross,dot
 crates/geom/src/drawing_measure.rs:chain dot,normalized
-crates/geom/src/drawing_measure.rs:contour_crossings atan2,dot,hypot,normalized
 crates/geom/src/drawing_measure.rs:crossing dot,normalized
 crates/geom/src/drawing_measure.rs:linear dot,normalized
 crates/geom/src/drawing_measure.rs:on_view dot
@@ -1223,6 +1223,8 @@ crates/ui-egui/src/canvas.rs:poly_mid normalized
 crates/ui-egui/src/canvas.rs:radius_spline_handles distance,dot
 crates/ui-egui/src/canvas.rs:revolve_axis normalized
 crates/ui-egui/src/canvas.rs:rotation_handle atan2,dot
+crates/ui-egui/src/canvas.rs:sketch_move_drag dot
+crates/ui-egui/src/canvas.rs:sketch_move_triad dot
 crates/ui-egui/src/canvas.rs:stored_plane cross,normalized
 crates/ui-egui/src/canvas.rs:taper_handle atan2
 crates/ui-egui/src/canvas.rs:to_segment distance,dot
@@ -1318,6 +1320,7 @@ crates/ui-egui/src/gizmo.rs:hit distance
 crates/ui-egui/src/gizmo.rs:mm_per_px distance,normalized
 crates/ui-egui/src/gizmo.rs:on_plane dot
 crates/ui-egui/src/gizmo.rs:seg_dist distance,dot
+crates/ui-egui/src/gizmo.rs:shapes distance
 crates/ui-egui/src/gizmo.rs:show atan2,dot
 crates/ui-egui/src/hole_place.rs:find_snaps cross,dot,normalized,triangles
 crates/ui-egui/src/hole_place.rs:nearest distance
@@ -1419,6 +1422,7 @@ crates/ui-egui/src/selection.rs:BoxSel::extend distance
 crates/ui-egui/src/selection.rs:ray_quad cross,dot
 crates/ui-egui/src/sketch3d.rs:click distance
 crates/ui-egui/src/sketch3d.rs:drag_start distance
+crates/ui-egui/src/sketch3d.rs:drawn_at distance
 crates/ui-egui/src/sketch3d.rs:point_at cross,distance
 crates/ui-egui/src/sketch3d.rs:seg_ray_closest dot
 crates/ui-egui/src/sketch3d.rs:target dot
@@ -1462,7 +1466,8 @@ crates/ui-egui/src/stand_up.rs:flat_areas cross,dot,triangles
 crates/ui-egui/src/test_boat.rs:parse cross,normalized
 crates/ui-egui/src/test_boat.rs:project dot,normalized,triangles
 crates/ui-egui/src/tools.rs:edge_center_outline dot,normalized
-crates/ui-egui/src/tools.rs:midpoint_at distance
+# UI picking only: the distance from the pointer to the line's middle; it picks a point in the view, it builds no geometry.
+crates/ui-egui/src/tools.rs:midpoint_of distance
 crates/ui-egui/src/tools.rs:polygon_outline normalized
 crates/ui-egui/src/tools.rs:preview_circumcentre cross
 crates/ui-egui/src/tools.rs:preview_curve cross,dot,normalized

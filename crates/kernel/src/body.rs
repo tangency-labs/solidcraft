@@ -1908,12 +1908,17 @@ impl Body {
 
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
-        if self.is_mesh() {
-            return Ok(m);
-        }
-        m.seams = crate::topo::seam_flags(self, &m);
-        (m.smooth_edges, m.sharp_edges) = crate::smooth_edges::flags(self, &m);
+        self.flag_mesh_edges(&mut m);
         Ok(m)
+    }
+
+    /// Classify display edges from polylines and face adjacency in this body's coordinates and
+    /// record order. This does not require a triangle mesh.
+    pub fn flag_mesh_edges(&self, mesh: &mut Mesh) {
+        if !self.is_mesh() {
+            mesh.seams = crate::topo::seam_flags(self, mesh);
+            (mesh.smooth_edges, mesh.sharp_edges) = crate::smooth_edges::flags(self, mesh);
+        }
     }
 
     /// Edges with polylines (index = the record's edge index).

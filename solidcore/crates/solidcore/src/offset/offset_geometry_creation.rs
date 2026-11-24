@@ -70,6 +70,13 @@
 //!   of that drop's own passages the one farthest from the curve's ends, `middle_passage`),
 //!   not whichever rounding leaves nearest the base vertex. Solidcore-native, no fork
 //!   commit.
+//! - **An edge between coplanar planes, at its vertex's image.** `trim_extended_edge` takes
+//!   the vertex's image as an end candidate, as for a lamina edge, for an edge between two
+//!   planar faces on one plane whose tangent neighbours at the vertex run between the same
+//!   two faces, not the crossings of their extended UV curves: those continue one another,
+//!   and on one circle (a capped footprint split where it touches its face's rim) they
+//!   coincide and crossed at thousands of points within the tolerance. Solidcore-native, no
+//!   fork commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
@@ -4821,7 +4828,26 @@ impl OffsetGeometryCreation {
             // the turn its middle drops onto, the same for both ends
             // ([`passages_on_one_turn`]). A closed edge's one vertex is both its ends, and
             // its passages all stay candidates for the search below.
-            let vertex_image = !tan_eus.is_empty() && brep.edge_is_lamina(base_edge)?;
+            // Not upstream: the same end candidate, for the same reason, where the base edge
+            // runs between two planar faces on one plane (a face capped on another's plane)
+            // and each tangent neighbour runs on between the same two faces. Both faces
+            // offset onto one plane, which carries the vertex's image, and the edges' offsets
+            // meet there; a neighbouring face's offset that cuts the curve still gives its
+            // cuts below, and the nearest candidate is taken as ever. The crossing of the
+            // extended UV curves has no point to give: the curves continue one another, and
+            // where they lie on one circle (a capped footprint's circle, split where it
+            // touches its face's rim) their extensions, each wound round the circle many
+            // times, coincide and cross within the tolerance at thousands of points, each
+            // then weighed for moving to a curve end.
+            let vertex_image = !tan_eus.is_empty()
+                && (brep.edge_is_lamina(base_edge)?
+                    || Self::runs_on_between_planes(
+                        brep,
+                        base_edge,
+                        base_edgeuse,
+                        other_base_edgeuse,
+                        &tan_eus,
+                    )?);
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -5595,6 +5621,51 @@ impl OffsetGeometryCreation {
         .map(|drop| drop.start.param(0))
         .collect::<Result<Vec<f64>>>()?;
         middle_passage(k, curve_of(brep, curve_3d)?, &drops, mid, same_tol)
+    }
+
+    /// Not upstream: whether `edge` (its edge use `edgeuse`, and `other` on its other face)
+    /// runs between two faces that both lie on planes, and each of the edge uses `next`
+    /// (its tangent neighbours at a vertex) lies on an edge between the same two faces.
+    /// `false` without `other` (a lamina edge) or without neighbours.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for dangling topology.
+    fn runs_on_between_planes<O: ClassObject + SolutionObject>(
+        brep: &impl OffsetBrep<O>,
+        edge: O,
+        edgeuse: O,
+        other: Option<O>,
+        next: &[O],
+    ) -> Result<bool> {
+        let Some(other) = other else {
+            return Ok(false);
+        };
+        let faces = brep.edge_faces(edge)?;
+        if next.is_empty() || faces.len() != 2 {
+            return Ok(false);
+        }
+        for &eu in next {
+            let next_edge = brep
+                .edgeuse_edge(eu)?
+                .ok_or(dangling("edge use without edge"))?;
+            let next_faces = brep.edge_faces(next_edge)?;
+            if next_faces.len() != 2 || !next_faces.iter().all(|f| faces.contains(f)) {
+                return Ok(false);
+            }
+        }
+        for eu in [edgeuse, other] {
+            let face = brep
+                .edgeuse_face(eu)?
+                .ok_or(dangling("edge use without face"))?;
+            let sur = brep
+                .face_surface(face)?
+                .ok_or(dangling("face without surface"))?;
+            if !matches!(surface_of(brep, sur)?.kind(), SurfaceKind::Plane(_)) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Not upstream (WR-736, #2611, #2769): the

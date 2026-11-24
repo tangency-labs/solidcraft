@@ -57,7 +57,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_trace_reaches_rails",
-    "fillet_variable_span_follows_fillet",
     "join_touching_loops",
     "linear_sweep_arc_is_cylinder",
     "local_surface_intersect_guards_max_boundary_retry",

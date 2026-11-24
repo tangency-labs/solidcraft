@@ -773,20 +773,7 @@ impl Document {
 
     /// Is `a` inside `b` (or `b` itself)?
     pub fn component_within(&self, a: u64, b: u64) -> bool {
-        let mut c = a;
-        for _ in 0..1000 {
-            if c == b {
-                return true;
-            }
-            if c == 0 {
-                return false;
-            }
-            match self.components.iter().find(|x| x.id == c) {
-                Some(x) => c = x.parent,
-                None => return false,
-            }
-        }
-        false
+        created_within(a, b, |c| self.components.iter().find(|x| x.id == c).map(|x| x.parent))
     }
 
     /// The virtual components that hold something, by id: a feature (a sketch, a body's, a moved
@@ -825,21 +812,14 @@ impl Document {
         if self.component_within(parent, component) {
             return true;
         }
-        let tree = crate::occurrence_tree::OccurrenceTree::new(self);
-        let mut stack = vec![component];
-        let mut seen = std::collections::BTreeSet::new();
-        while let Some(c) = stack.pop() {
-            if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
-                continue;
-            }
-            for o in tree.children(c) {
-                if o.component == parent {
-                    return true;
-                }
-                stack.push(o.component);
-            }
+        // Only a component that has an occurrence can be placed in another (the root has none in
+        // a sound design).
+        if self.occurrences.iter().all(|o| o.component != parent) {
+            return false;
         }
-        false
+        let tree = crate::occurrence_tree::OccurrenceTree::new(self);
+        let tree = &tree;
+        placed_within(parent, component, move |c| tree.children(c).iter().map(|o| o.component))
     }
 
     /// The occurrences whose expressed moves ([`ExpressedMove`]) work out to something else than
@@ -904,7 +884,7 @@ impl Document {
         if self.inside_component(parent, component) {
             return Err(DocError::Invalid("a component can't contain itself".into()));
         }
-        if self.occurrences.len() >= 100_000 {
+        if self.occurrences.len() >= MAX_OCCURRENCES {
             return Err(DocError::Invalid("too many occurrences".into()));
         }
         if !is_placement(&transform) {
@@ -913,14 +893,17 @@ impl Document {
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let cname = self.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-        // The next number, or, when an occurrence already has that name (one before it was
-        // deleted, or of another component of that name), the first number none has (#9738).
         let next = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
-        let free = |k: &usize| {
-            let name = format!("{cname}:{k}");
-            !self.occurrences.iter().any(|o| o.name == name)
-        };
-        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
+        // The numbers the names `{cname}:{k}` take, from one look through the names. No number
+        // asked is more than one past the count of occurrences, as there are no more names.
+        let mut taken = vec![false; self.occurrences.len() + 2];
+        for o in &self.occurrences {
+            let k = o.name.strip_prefix(cname.as_str()).and_then(|rest| rest.strip_prefix(':')).and_then(decimal);
+            if let Some(slot) = k.and_then(|k| taken.get_mut(k)) {
+                *slot = true;
+            }
+        }
+        let k = occurrence_number(next, 1, |k| taken.get(k).is_some_and(|t| *t));
         self.occurrences.push(crate::Occurrence {
             id,
             component,
@@ -933,6 +916,141 @@ impl Document {
         });
         Ok(id)
     }
+
+    /// Give each component that has no occurrence one, in the component it was created in, at
+    /// the identity. Older designs may lack them. This is what calling [`Self::add_occurrence`]
+    /// for each in turn does, with the same names, ids and errors, but what each call would look
+    /// for in the whole design (the component, what is placed in each component, the names taken
+    /// and how many occurrences the component has) is gathered once and kept up to date. Looking
+    /// through the whole design for each component, and through the names for each number
+    /// tried until it met that name, took hours on a design of 10 000 components and 90 000 occurrences.
+    pub(crate) fn place_unplaced_components(&mut self) -> Result<()> {
+        use std::collections::{HashMap, HashSet};
+        let mut counts: HashMap<u64, usize> = HashMap::new();
+        for o in &self.occurrences {
+            *counts.entry(o.component).or_default() += 1;
+        }
+        let unplaced: Vec<(u64, u64)> = self.components.iter().filter(|c| !counts.contains_key(&c.id)).map(|c| (c.id, c.parent)).collect();
+        if unplaced.is_empty() {
+            return Ok(());
+        }
+        let (components, occurrences, next_id) = (&self.components, &mut self.occurrences, &mut self.next_id);
+        // The first component with each id, which a search of them finds.
+        let mut by_id: HashMap<u64, &crate::Component> = HashMap::new();
+        for c in components {
+            by_id.entry(c.id).or_insert(c);
+        }
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut names: HashSet<String> = HashSet::new();
+        for o in occurrences.iter() {
+            children.entry(o.parent).or_default().push(o.component);
+            names.insert(o.name.clone());
+        }
+        // Per component name, a number below which every `{name}:{k}` is taken. Names are only
+        // added here, so it only grows, and each search for a free number starts there.
+        let mut free_from: HashMap<String, usize> = HashMap::new();
+        for (component, parent) in unplaced {
+            let Some(c) = by_id.get(&component).filter(|_| component != 0) else {
+                return Err(DocError::Unknown(format!("component {component}")));
+            };
+            // As in `inside_component`, only a component that has an occurrence can be placed in
+            // another.
+            let placed = &children;
+            if created_within(parent, component, |x| by_id.get(&x).map(|x| x.parent))
+                || (counts.contains_key(&parent) && placed_within(parent, component, move |x| placed.get(&x).into_iter().flatten().copied()))
+            {
+                return Err(DocError::Invalid("a component can't contain itself".into()));
+            }
+            if occurrences.len() >= MAX_OCCURRENCES {
+                return Err(DocError::Invalid("too many occurrences".into()));
+            }
+            // The identity is a rigid motion, so the placement needs no check.
+            let id = (*next_id).max(1);
+            *next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
+            let count = counts.entry(component).or_default();
+            let next = *count + 1;
+            *count = next;
+            let from = free_from.get(c.name.as_str()).copied().unwrap_or(1);
+            let k = occurrence_number(next, from, |k| names.contains(&format!("{}:{k}", c.name)));
+            if k != next {
+                free_from.insert(c.name.clone(), k + 1);
+            }
+            let name = format!("{}:{k}", c.name);
+            names.insert(name.clone());
+            children.entry(parent).or_default().push(component);
+            occurrences.push(crate::Occurrence {
+                id,
+                component,
+                parent,
+                name,
+                transform: IDENTITY,
+                grounded: false,
+                expressed_moves: Vec::new(),
+                bom_type: None,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The most occurrences a design holds.
+const MAX_OCCURRENCES: usize = 100_000;
+
+/// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
+/// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000
+/// steps.
+fn created_within(a: u64, b: u64, parent_of: impl Fn(u64) -> Option<u64>) -> bool {
+    let mut c = a;
+    for _ in 0..1000 {
+        if c == b {
+            return true;
+        }
+        if c == 0 {
+            return false;
+        }
+        match parent_of(c) {
+            Some(parent) => c = parent,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Is `parent` placed in `component` at any depth? `children` gives the components of the
+/// occurrences placed in a component, in document order. The walk looks inside at most
+/// [`MAX_PLACEMENTS`] components.
+fn placed_within<I: IntoIterator<Item = u64>>(parent: u64, component: u64, children: impl Fn(u64) -> I) -> bool {
+    let mut stack = vec![component];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(c) = stack.pop() {
+        if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
+            continue;
+        }
+        for child in children(c) {
+            if child == parent {
+                return true;
+            }
+            stack.push(child);
+        }
+    }
+    false
+}
+
+/// The number `k` in the name `{component name}:{k}` of a new occurrence of a component that has
+/// `next - 1` occurrences. It is `next`, or, when an occurrence already has that name (one before
+/// it was deleted, or of another component of that name), the first number none has (#9738).
+/// `taken` tells whether an occurrence has the name with a number, and every number below `from`
+/// must be taken.
+fn occurrence_number(next: usize, from: usize, taken: impl Fn(usize) -> bool) -> usize {
+    std::iter::once(next).chain(from..).find(|&k| !taken(k)).unwrap_or(next)
+}
+
+/// The number `s` spells as `format!` writes one (digits without a leading zero), if it does.
+fn decimal(s: &str) -> Option<usize> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) || (s.len() > 1 && s.starts_with('0')) {
+        return None;
+    }
+    s.parse().ok()
 }
 
 /// The names of a design's placed bodies ([`Document::world_body_name`]), with what naming one
