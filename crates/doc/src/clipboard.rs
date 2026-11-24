@@ -504,13 +504,13 @@ impl crate::Feature {
             K::FrameTrim { to, .. } => {
                 for target in to {
                     if let crate::frame::TrimTarget::Plane { plane } = target {
-                        remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
+                        remap_plane(plane, ids, bodies, 0, placements)?;
                     }
                 }
             }
             K::FrameGusset { supports, .. } => {
                 for support in supports {
-                    remap_plane(&mut support.plane, ids, bodies, 0, occurrences, doc)?;
+                    remap_plane(&mut support.plane, ids, bodies, 0, placements)?;
                 }
             }
             K::FramePlate { plane, .. }
