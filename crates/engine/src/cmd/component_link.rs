@@ -164,10 +164,34 @@ fn left_out(doc: &Document, comp: u64, link: &DesignLink) -> bool {
         .is_some_and(|f| matches!(&f.kind, FeatureKind::Import { step, records: None, .. } if step.is_empty()))
 }
 
-/// The Mesh Import feature of the linked component `comp` in `doc` that holds its design's mesh
-/// bodies, beside the link's Import feature `link` ([`link_mesh_feature`] of a session).
-fn mesh_feature_of(doc: &Document, comp: u64, link: u64) -> Option<u64> {
-    doc.features.iter().find(|f| f.component == comp && f.id != link && matches!(f.kind, FeatureKind::MeshImport { .. })).map(|f| f.id)
+/// The Mesh Import feature of the linked component `comp` in `doc` that holds the mesh bodies of
+/// the design `link` names, beside its Import feature ([`set_link_meshes`] makes it). Only a
+/// feature that names a design file of the link's file name counts: a mesh someone inserted in
+/// the component (an STL, a 3MF) names its own file, and the design would not give it back, so
+/// a save without linked bodies keeps it. Update Links leaves the feature's file name as it is
+/// when the meshes it reads are the same, so after a relink to a file of another name the
+/// meshes stay in the file too, which is the safe way to be wrong.
+fn mesh_feature_of(doc: &Document, comp: u64, link: &DesignLink) -> Option<u64> {
+    let name = Path::new(&link.path).file_name()?;
+    doc.features
+        .iter()
+        .find(|f| {
+            f.component == comp
+                && f.id != link.feature
+                && matches!(&f.kind, FeatureKind::MeshImport { file, .. }
+                    if solidcraft_io::is_design_path(file) && Path::new(file).file_name() == Some(name))
+        })
+        .map(|f| f.id)
+}
+
+/// Whether the linked STEP import of `link` skips no placement, as a flattened import
+/// (`flatten: true`) never does: it builds every body where the file places it, with no
+/// components below it to show a later placement of a part. The stored skip list says so, and
+/// a save without linked bodies keeps it (only the STEP text is left out). A nested import whose
+/// file placed no part twice skips nothing either, and is read the same way: should its file now
+/// place a part twice, each placement is built where the file puts it, as no component shows it.
+fn step_import_flat(doc: &Document, link: &DesignLink) -> bool {
+    doc.feature(link.feature).is_some_and(|f| matches!(&f.kind, FeatureKind::Import { skip, .. } if skip.is_empty()))
 }
 
 /// `design`, the copy of `doc` a save writes, without the bodies of its linked designs and
@@ -184,7 +208,7 @@ pub(super) fn leave_out_linked_bodies(design: &mut std::borrow::Cow<'_, Document
         .iter()
         .filter(|(comp, link)| link_file_problem(doc, **comp, link, from).is_none())
         .flat_map(|(comp, l)| {
-            let meshes = if l.step_names.is_none() { mesh_feature_of(doc, *comp, l.feature) } else { None };
+            let meshes = if l.step_names.is_none() { mesh_feature_of(doc, *comp, l) } else { None };
             std::iter::once(l.feature).chain(meshes)
         })
         .collect();
@@ -416,7 +440,7 @@ pub(super) fn read_left_out_bodies(
             warnings.push(format!("{name} has no bodies yet: its linked {what} is in another folder, and Update Links reads it"));
             continue;
         }
-        let (feature, faces, changed, meshes) = match left_out_bodies(&link, from, validation) {
+        let (feature, faces, changed, meshes) = match left_out_bodies(&link, from, step_import_flat(doc, &link), validation) {
             Ok(read) => read,
             Err(e) => {
                 warnings.push(format!("{name} has no bodies: {e}"));
@@ -428,7 +452,7 @@ pub(super) fn read_left_out_bodies(
             // What an unchanged file's read warns of was said when the link took it in.
             warnings.extend(feature.warnings.iter().cloned());
             warnings.push(if step_file {
-                format!("{name}: its linked STEP file changed since this design was saved; its bodies are the new ones, and Update Links takes in the rest")
+                format!("{name}: its linked STEP file changed since this design was saved; its bodies are the new ones, and Update Links records that this design read it")
             } else {
                 format!(
                     "{name}: its linked design changed since this design was saved; its bodies are the new ones, and Update Links takes in its materials and properties"
@@ -452,26 +476,32 @@ pub(super) fn read_left_out_bodies(
         }
         // The mesh bodies a linked design brings, left out with its solids. A design that has
         // mesh bodies only since this one was saved has no Mesh Import feature here: the link
-        // is reported as changed, and Update Links brings them in.
-        if !step_file
-            && let Some(id) = mesh_feature_of(doc, comp, link.feature)
-            && let Some(FeatureKind::MeshImport { meshes: held, .. }) = doc.feature_mut(id).map(|f| &mut f.kind)
-            && held.is_empty()
-        {
-            *held = meshes;
+        // is reported as changed, and Update Links brings them in. One that has none left loses
+        // the feature, as Update Links deletes it ([`set_link_meshes`]): left empty, Update Links
+        // would find nothing changed and keep it.
+        if !step_file && let Some(id) = mesh_feature_of(doc, comp, &link) {
+            match doc.feature_mut(id).map(|f| &mut f.kind) {
+                Some(FeatureKind::MeshImport { meshes: held, .. }) if held.is_empty() && !meshes.is_empty() => *held = meshes,
+                Some(FeatureKind::MeshImport { meshes: held, .. }) if held.is_empty() => {
+                    if let Err(e) = doc.delete_feature(id) {
+                        warnings.push(format!("{name}: its design has no mesh bodies now, and its empty Mesh Import feature stays: {e}"));
+                    }
+                }
+                _ => {}
+            }
         }
     }
     warnings
 }
 
 /// The Import feature and face names the file of `link` gives now, and whether that file
-/// changed since the link last read it, for a design opened from `from`.
-fn left_out_bodies(link: &DesignLink, from: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
+/// changed since the link last read it, for a design opened from `from`; `flat` as in [`source_bodies`].
+fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
     link_refused(from, &link.path)?;
     let file = resolve(from, &link.path);
     if link.step_names.is_some() {
         // A STEP file links nothing, so it needs none of the guards against loops below.
-        return left_out_step(link, &file, from, validation);
+        return left_out_step(link, &file, from, flat, validation);
     }
     let target = absolute(&file);
     let (depth, again) = READING.with(|reading| {
@@ -528,10 +558,10 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, validation: solidcraft
 }
 
 /// [`left_out_bodies`] for a linked STEP file at `file`: read again as Update Links reads it
-/// ([`source_bodies`]), with the link's naming rule.
-fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
+/// ([`source_bodies`]), with the link's naming rule; `flat` as there.
+fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
     let bytes = read_link(file, from)?;
-    let ((_, feature, ..), _) = source_bodies(file, &bytes, link, validation)?;
+    let ((_, feature, ..), _) = source_bodies(file, &bytes, link, flat, validation)?;
     let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != DesignLink::file_digest(&bytes));
     Ok((feature, Vec::new(), changed, Vec::new()))
 }
@@ -723,7 +753,14 @@ pub(super) fn is_step_source(path: &str) -> bool {
 }
 
 /// Read either kind of linked source into the same replacement and reference-matching path.
-fn source_bodies(file: &Path, bytes: &[u8], link: &DesignLink, validation: solidcraft_kernel::Validation) -> Result<(Linked, LinkedImages)> {
+/// `flat`: the link's STEP import was flattened ([`step_import_flat`]), so it skips no placement.
+fn source_bodies(
+    file: &Path,
+    bytes: &[u8],
+    link: &DesignLink,
+    flat: bool,
+    validation: solidcraft_kernel::Validation,
+) -> Result<(Linked, LinkedImages)> {
     let Some(names) = &link.step_names else {
         return design_bodies(&Source::File(file.to_path_buf()), bytes, selected_configuration(link), validation);
     };
@@ -731,9 +768,10 @@ fn source_bodies(file: &Path, bytes: &[u8], link: &DesignLink, validation: solid
     let shown = file.to_string_lossy();
     let mut feature = solidcraft_io::step_import_feature_named(bytes, &shown, names).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     // Assembly body slots and offsets are retained by the Import feature, like body names.
-    // Repeated placements must remain skipped rather than being imported a second time.
+    // Repeated placements must remain skipped rather than being imported a second time, where
+    // components below the link's show them; a flattened import has none, and builds them all.
     if let FeatureKind::Import { skip, .. } = &mut feature.kind {
-        *skip = super::file::import::step_skip(&feature.import);
+        *skip = if flat { Vec::new() } else { super::file::import::step_skip(&feature.import) };
     }
     remember_read(file, None, digest(bytes), &feature, &[], &[], &Default::default(), &[]);
     Ok(((feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()), (Vec::new(), Vec::new())))
@@ -1601,7 +1639,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match source_bodies(&file, &bytes, &link, s.validation()) {
+        let (_, sf, faces, metadata, properties, meshes) = match source_bodies(&file, &bytes, &link, step_import_flat(&s.doc, &link), s.validation())
+        {
             Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.

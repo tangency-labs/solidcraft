@@ -2235,6 +2235,145 @@ fn a_save_without_linked_bodies_leaves_out_a_linked_designs_mesh_bodies() {
     let bytes = std::fs::read(&file).unwrap();
     run(&mut opened, "file.save", json!({}));
     assert_eq!(std::fs::read(&file).unwrap(), bytes, "opening is no change");
+
+    // The board loses its chip while the assembly is closed: opened, the assembly has no mesh
+    // bodies and no empty Mesh Import feature left, as Update Links would leave it.
+    let mut bare = Session::default();
+    run(&mut bare, "solid.box", json!({"length": 10, "width": 20, "height": 2, "body_name": "Board"}));
+    run(&mut bare, "file.save", json!({"path": board}));
+    let mut lost = Session::default();
+    assert_eq!(run(&mut lost, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!(meshes(&lost).is_empty(), "{:?}", meshes(&lost));
+    assert!(!lost.doc.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::MeshImport { .. })));
+    assert!((volume(&mut lost) - 400.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The folder rule of a design saved without linked bodies holds for a linked STEP file: opened
+/// with `linked_bodies: "folder"`, a STEP file outside the design's folder is not read, and is
+/// listed as changed until Update Links reads it.
+#[test]
+fn a_linked_step_file_in_another_folder_is_read_only_when_allowed() {
+    let dir = folder("left-out-step-folder");
+    let (parts, assembly) = (dir.join("parts"), dir.join("assembly"));
+    std::fs::create_dir_all(&parts).unwrap();
+    std::fs::create_dir_all(&assembly).unwrap();
+    let step = parts.join("block.step");
+    step_block(&step, 10);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": step}));
+    let file = assembly.join("assembly.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert_eq!(bodies_in_file(&file), [(true, false)]);
+
+    let mut held = Session::default();
+    let reply = run(&mut held, "doc.open", json!({"path": file, "linked_bodies": "folder"}));
+    assert_eq!(reply["errors"], 1, "{reply}");
+    assert!(reply["warnings"].to_string().contains("its linked STEP file is in another folder"), "{reply}");
+    let listed = run(&mut held, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], true, "{listed}");
+    run(&mut held, "component.update_links", json!({}));
+    assert!((volume(&mut held) - 1000.0).abs() < 1e-5);
+
+    let mut all = Session::default();
+    assert_eq!(run(&mut all, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut all) - 1000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A STEP file read into B-rep records (`reader: "cadmpeg"`) keeps its records in the file of a
+/// design saved without linked bodies: reading the file again gives STEP text, not those records.
+#[test]
+fn a_save_without_linked_bodies_keeps_a_step_file_read_into_records() {
+    let dir = folder("left-out-step-records");
+    let step = dir.join("block.step");
+    step_block(&step, 10);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": step, "reader": "cadmpeg"}));
+    let file = dir.join("assembly.json");
+    let saved = run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert!(saved["warnings"].to_string().contains("B-rep records"), "{saved}");
+    assert_eq!(bodies_in_file(&file), [(true, true)]);
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    assert!((volume(&mut opened) - 1000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A mesh someone inserted in a linked component (an STL, not the linked design's own meshes)
+/// stays in the file of a design saved without linked bodies: the design would not give it back.
+#[test]
+fn a_save_without_linked_bodies_keeps_a_mesh_inserted_in_a_linked_component() {
+    let dir = folder("left-out-own-mesh");
+    let (source, stl) = (dir.join("part.json"), dir.join("Chip.stl"));
+    part(&source, 30);
+    std::fs::write(&stl, super::tests::tetra_stl()).unwrap();
+    let mut s = Session::default();
+    let comp = run(&mut s, "component.insert_design", json!({"path": source}))["component"].as_u64().unwrap();
+    let mesh = run(&mut s, "file.insert_mesh", json!({"path": stl}))["feature"].as_u64().unwrap();
+    s.doc_mut().feature_mut(mesh).unwrap().component = comp;
+    s.refresh();
+    let file = dir.join("assembly.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert_eq!(bodies_in_file(&file), [(false, false)], "the linked design's solids are left out");
+    let doc = solidcraft_io::read_design(&std::fs::read(&file).unwrap()).unwrap();
+    assert!(
+        doc.features
+            .iter()
+            .any(|f| f.component == comp && matches!(&f.kind, solidcraft_doc::FeatureKind::MeshImport { meshes, .. } if meshes.len() == 1)),
+        "the inserted mesh keeps its triangles"
+    );
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": file}))["errors"], 0);
+    // The 10 x 20 x 30 part and the tetrahedron with 10 mm legs: 6000 + 1000 / 6 mm³.
+    assert!((volume(&mut opened) - (6000.0 + 1000.0 / 6.0)).abs() < 1e-5, "{}", volume(&mut opened));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A board with one 2 x 2 x 10 pin part placed twice, at x = 0 and x = `second`, as a STEP file.
+fn step_board(path: &Path, second: f64) {
+    use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
+    let at = |x: f64| [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [x, 0.0, 0.0, 1.0]];
+    let pin = box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 10.0)).unwrap();
+    let products = vec![
+        ExportProduct { name: "Board".into(), bodies: Vec::new(), children: vec![(1, at(0.0), "U1".into()), (1, at(second), "U2".into())] },
+        ExportProduct { name: "Pin".into(), bodies: vec![ExportBody { name: "Pin".into(), body: &pin, color: None }], children: Vec::new() },
+    ];
+    std::fs::write(path, step_export_products(&products, 0, &StepHeader::default()).unwrap()).unwrap();
+}
+
+/// A flattened STEP import (`flatten: true`) builds every placement of a part placed twice in
+/// the import's own component. Read again after the file changed, as an assembly saved without
+/// linked bodies opens or as Update Links reads it, it still builds both: it has no components
+/// below it to show a skipped placement.
+#[test]
+fn a_changed_flattened_step_file_keeps_every_placement_when_read_again() {
+    let dir = folder("left-out-step-flat");
+    let step = dir.join("board.step");
+    step_board(&step, 5.0);
+    let pins = |s: &Session| s.model.state().bodies.iter().filter(|b| !b.body.is_mesh()).count();
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": step, "flatten": true}));
+    assert_eq!(pins(&s), 2);
+    let file = dir.join("assembly.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+    assert_eq!(bodies_in_file(&file), [(true, false)]);
+
+    // The second pin moves to x = 8: the file changed while the design was closed.
+    step_board(&step, 8.0);
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file}));
+    assert_eq!(reply["errors"], 0, "{reply}");
+    assert_eq!(pins(&opened), 2, "{reply}");
+    // Two 2 x 2 x 10 pins.
+    assert!((volume(&mut opened) - 80.0).abs() < 1e-5);
+
+    // Update Links reads the changed file the same way.
+    step_board(&step, 11.0);
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"].as_array().map(Vec::len), Some(1), "{updated}");
+    assert_eq!(pins(&s), 2);
+    assert!((volume(&mut s) - 80.0).abs() < 1e-5);
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -542,11 +542,11 @@ them), so later opens read an unchanged part without building it again. A linked
 (**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
 opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
 changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
-reading it again gives STEP text, not the records it was read into. The mesh bodies a linked
-part brings (an STL or 3MF inserted in the part) are left out with its solids and read back with
-them. An STL, 3MF or OBJ inserted straight into the assembly is not linked, so it stays in the
-file. There is no button for this yet: run
-the command from a script, the command line or an agent.
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
