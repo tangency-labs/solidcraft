@@ -6339,6 +6339,7 @@ dependencies = [
  "quick-xml",
  "rand 0.8.8",
  "rustix 1.1.6",
+ "ruzstd",
  "same-file",
  "serde",
  "serde_bytes",

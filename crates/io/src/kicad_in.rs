@@ -26,6 +26,15 @@ const MAX_TOKENS: usize = 2_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_FOOTPRINTS: usize = 100_000;
 const MAX_MODELS: usize = 500_000;
+/// Files listed in a board's `embedded_files` blocks, over the board and its footprints.
+const MAX_EMBEDDED_ENTRIES: usize = 50_000;
+/// The largest embedded file, unpacked. A real STEP model is a few hundred kilobytes; the limit
+/// stops a small compressed file from growing into memory.
+const MAX_EMBEDDED_FILE_BYTES: usize = 64 << 20;
+/// All embedded files together, unpacked.
+const MAX_EMBEDDED_TOTAL_BYTES: usize = 256 << 20;
+/// The prefix of a footprint model path that names a file stored inside the board.
+const EMBED_SCHEME: &str = "kicad-embed://";
 const MAX_OUTLINE_SEGMENTS: usize = 500_000;
 const MAX_OUTLINE_POINTS: usize = 500_000;
 const MAX_MODEL_VERTICES: usize = 5_000_000;
@@ -172,8 +181,25 @@ pub struct KicadBoard {
     pub texts: Vec<KicadText>,
     /// Drilled holes (pads and vias) in the board frame.
     pub drills: Vec<KicadDrill>,
+    /// The files stored inside the board (KiCad 8 and later), by name: what a footprint's
+    /// `kicad-embed://<name>` model path refers to.
+    pub embedded_files: Vec<KicadEmbeddedFile>,
     pub color: [f32; 3],
     pub warnings: Vec<String>,
+}
+
+/// A file stored in the board's `embedded_files` block (board level or inside a footprint).
+/// A footprint lists the files it uses with their checksums; the board-level block also carries
+/// the data. One name can therefore appear several times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KicadEmbeddedFile {
+    pub name: String,
+    /// KiCad's file type: `model`, `font`, `datasheet` or `worksheet`.
+    pub kind: String,
+    /// The compressed file as base64 text, when this entry carries it.
+    pub data: Option<String>,
+    /// The checksum KiCad recorded for the file, when this entry has one.
+    pub checksum: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -417,6 +443,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         graphics: Vec::new(),
         texts: Vec::new(),
         drills: Vec::new(),
+        embedded_files: Vec::new(),
         color,
         warnings: Vec::new(),
     };
@@ -533,6 +560,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
     }
+    collect_embedded_files(&root, &mut board.embedded_files, &mut board.warnings);
     Ok(board)
 }
 
@@ -1054,6 +1082,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     // beside it: a footprint that names both forms of one model has one model, built once.
     let mut files = std::collections::HashMap::<(std::path::PathBuf, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
+    let mut embedded_cache = EmbeddedCache::default();
     if options.components {
         for footprint in &board.footprints {
             let back = footprint.layer.starts_with("B.");
@@ -1078,7 +1107,11 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
                     continue;
                 }
-                let file = match load(&model.path) {
+                let loaded = match model.path.strip_prefix(EMBED_SCHEME) {
+                    Some(name) => embedded_model(&board, name, &mut embedded_cache),
+                    None => load(&model.path),
+                };
+                let file = match loaded {
                     Ok(file) => file,
                     Err(reason) => {
                         warnings.push(format!("{}: {}", model_label(&model.path), short_reason(&reason)));
@@ -1250,6 +1283,122 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         return Err("the model file is too large".into());
     }
     Ok(out)
+}
+
+/// Collect the `embedded_files` blocks of a board: the board's own and each footprint's.
+fn collect_embedded_files(root: &Expr<'_>, out: &mut Vec<KicadEmbeddedFile>, warnings: &mut Vec<String>) {
+    let mut blocks: Vec<&Expr<'_>> = Vec::new();
+    for item in children(root) {
+        match head(item) {
+            Some("embedded_files") => blocks.push(item),
+            Some("footprint" | "module") => blocks.extend(children(item).iter().filter(|e| head(e) == Some("embedded_files"))),
+            _ => {}
+        }
+    }
+    for block in blocks {
+        for file in children(block).iter().filter(|e| head(e) == Some("file")) {
+            if out.len() >= MAX_EMBEDDED_ENTRIES {
+                warnings.push("additional embedded files were skipped".into());
+                return;
+            }
+            let text = |name: &str| field(file, name).and_then(|e| children(e).get(1)).and_then(atom).map(str::to_string);
+            let Some(name) = text("name").filter(|n| !n.is_empty()) else { continue };
+            let data = text("data").map(|d| d.chars().filter(|c| !c.is_whitespace()).collect::<String>());
+            out.push(KicadEmbeddedFile { name, kind: text("type").unwrap_or_default(), data, checksum: text("checksum") });
+        }
+    }
+}
+
+/// Embedded files already unpacked (or already found unusable), by name, and the bytes unpacked
+/// so far: one file used by many footprints is unpacked once, and the total is bounded.
+#[derive(Default)]
+struct EmbeddedCache {
+    files: HashMap<String, std::result::Result<Vec<u8>, String>>,
+    total: usize,
+}
+
+/// The model file a `kicad-embed://<name>` path stands for. `Err` says in a few words why the
+/// board's own copy cannot be used: missing, not a model, not stored with data, disagreeing
+/// checksums, or damaged data.
+fn embedded_model(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<KicadModelFile, String> {
+    let path = format!("{EMBED_SCHEME}{name}");
+    if let Some(done) = cache.files.get(name) {
+        return done.clone().map(|bytes| KicadModelFile { path, bytes });
+    }
+    let result = unpack_embedded(board, name, cache);
+    cache.files.insert(name.to_string(), result.clone());
+    result.map(|bytes| KicadModelFile { path, bytes })
+}
+
+fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<Vec<u8>, String> {
+    let entries: Vec<&KicadEmbeddedFile> = board.embedded_files.iter().filter(|f| f.name == name).collect();
+    if entries.is_empty() {
+        return Err("the embedded file is not in the board file".into());
+    }
+    if entries.iter().any(|f| !f.kind.is_empty() && f.kind != "model") {
+        return Err("the embedded file is not a 3D model".into());
+    }
+    let Some(data) = entries.iter().find_map(|f| f.data.as_deref()) else {
+        return Err("the board file lists the embedded file but does not hold its data".into());
+    };
+    // KiCad's checksum algorithm is not part of its published file format, so it cannot be
+    // recomputed here; the checksums the board records for one file (each footprint's and the
+    // data's own) must at least agree.
+    let mut sums = entries.iter().filter_map(|f| f.checksum.as_deref());
+    if let Some(first) = sums.next()
+        && sums.any(|other| !other.eq_ignore_ascii_case(first))
+    {
+        return Err("the embedded file's checksums disagree, so it changed after it was embedded".into());
+    }
+    let packed = decode_base64(data).ok_or_else(|| "the embedded file is corrupt (its data is not base64)".to_string())?;
+    let room = MAX_EMBEDDED_FILE_BYTES.min(MAX_EMBEDDED_TOTAL_BYTES.saturating_sub(cache.total));
+    let bytes = unpack_zstd(&packed, room)?;
+    cache.total = cache.total.saturating_add(bytes.len());
+    Ok(bytes)
+}
+
+/// Unpack one zstd frame into at most `limit` bytes.
+fn unpack_zstd(packed: &[u8], limit: usize) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Read;
+    let decoder = ruzstd::decoding::StreamingDecoder::new(packed).map_err(|_| "the embedded file is corrupt (not compressed data)".to_string())?;
+    let mut out = Vec::new();
+    decoder.take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| "the embedded file is corrupt (its compressed data is damaged)".to_string())?;
+    if out.len() > limit {
+        return Err(format!("the embedded file is too large (limit {} MB unpacked)", MAX_EMBEDDED_FILE_BYTES >> 20));
+    }
+    if out.is_empty() {
+        return Err("the embedded file is empty".into());
+    }
+    Ok(out)
+}
+
+/// Standard base64 (RFC 4648) with or without padding; `None` for any other character or a
+/// length no base64 text has.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let body = text.trim_end_matches('=');
+    if text.len() - body.len() > 2 || body.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for byte in body.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// A model's name as a warning shows it: its file name, not the whole resolved path.
@@ -3451,6 +3600,15 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                 let (value, next) = quoted(source, index + 1)?;
                 tokens.push(Token::String(value));
                 index = next;
+            }
+            b'|' => {
+                // `|…|`: the text between the bars is one atom, whitespace and all. KiCad stores an
+                // embedded file's base64 data this way, wrapped over many lines.
+                let start = index + 1;
+                let end = source.get(start..).and_then(|rest| rest.find('|')).map(|n| start + n).ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
+                let text = source.get(start..end).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
+                tokens.push(Token::Atom(text));
+                index = end + 1;
             }
             b';' => {
                 while index < source.len() && source.as_bytes().get(index) != Some(&b'\n') {
