@@ -32,7 +32,7 @@ profile" tag. Source today: Design page (`prefs/design.rs`).
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Origin plane names | Segmented: "XY . XZ . YZ" / "Top . Front . Right" | `Prefs.origin_plane_names` (`OriginPlaneNames`: Xyz, TopFrontRight) | Xyz | none | none | Moves from Interface. |
-| Hide the Origin folder in new designs | Checkbox | `Prefs.hide_origin` | `false` | none | none | |
+| Origin visibility | Segmented: Shown / Automatic / Hidden | `Prefs.hide_origin` (`OriginDisplay`: Shown, Automatic, Hidden) | Shown | "Automatic shows the Origin until the design has a body. Once you show or hide the Origin in a design, that design keeps your choice. Tools that pick a plane still show it." | none | For designs that don't keep the Origin's eye themselves. Saved as `false`, `"automatic"` and `true`. |
 | Origin axes across the whole view | Checkbox | `Prefs.origin_axes_across_view` | `false` | "Draw the X, Y and Z origin axes through the origin to the edges of the view, in both directions. Off: short axes at the origin." | none | Off by default: short solid-then-dashed axes. Also available in the bottom bar's Display menu. |
 
 ## Linked designs
