@@ -8470,7 +8470,8 @@ mod glass_tests {
         assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
         // The window's OpenGL device, as egui-wgpu asks for it.
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_limits: wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
+            required_limits:
+                wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
             ..Default::default()
         }))
         .expect("the OpenGL adapter opens a device");
