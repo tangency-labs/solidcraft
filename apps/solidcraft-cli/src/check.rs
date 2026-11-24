@@ -7,7 +7,7 @@ use solidcraft_engine::Session;
 
 /// The command's usage, from the same lines the top-level usage lists.
 fn usage() -> String {
-    crate::command_usage("check")
+    crate::command_usage("check", &[])
 }
 
 pub fn run(args: &[String]) -> Result<(), String> {

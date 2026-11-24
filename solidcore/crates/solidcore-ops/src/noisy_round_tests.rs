@@ -22,11 +22,7 @@ use crate::boolean::boolean;
 use crate::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel};
 
 fn fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_fixes(crate::test_corpus::solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The faces of `b` that are no plane, as (with a definition, without one).

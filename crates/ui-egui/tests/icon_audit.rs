@@ -427,7 +427,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -440,7 +440,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
@@ -534,8 +538,10 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
     menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
     h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
@@ -824,7 +830,17 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 #[test]
 fn offset_mode_artwork_review() {
     use solidcraft_theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);

@@ -17,7 +17,8 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::Serialize;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::{DesignLink, Document};
+use solidcraft_doc::{DesignLink, Document, FeatureKind};
+use solidcraft_sketch::LinkSource;
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
 fn base_dir(path: Option<&str>) -> Option<PathBuf> {
@@ -125,12 +126,82 @@ pub(super) fn rebase(link: &str, from: Option<&str>, to: &str) -> String {
 pub(super) fn located(doc: &mut Document, from: Option<&str>) {
     let whole = mapped(doc, &|path: &str| absolute(&resolve(from, path)).to_string_lossy().into_owned());
     put(doc, whole);
+    // A sketch text's font file is read against the design's folder too (#20502).
+    let fonts = {
+        let mut seen = Cow::Borrowed(&*doc);
+        font_paths_through(&mut seen, |font| whole_font(from, font));
+        match seen {
+            Cow::Owned(changed) => Some(changed),
+            Cow::Borrowed(_) => None,
+        }
+    };
+    if let Some(changed) = fonts {
+        *doc = changed;
+    }
 }
 
 /// `design`'s link paths as its file at `to` keeps them, its paths taken against `from`
 /// ([`map_paths`]).
 pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str) {
     map_paths(design, |path| rebase(path, from, to));
+    let base = base_dir(Some(to));
+    font_paths_through(design, |font| kept_font(base.as_deref(), font));
+}
+
+/// A font file path of a sketch text as the design keeps it in memory: relative to the design's
+/// folder, a path is made whole against it. `None`: a family name, a path that is already whole
+/// or spelled with `~` or `%VAR%`, or a design with no folder yet (the path then stays as typed).
+pub(super) fn whole_font(design: Option<&str>, font: &str) -> Option<String> {
+    let name = font.trim();
+    // A `~` or `%VAR%` spelling stays as typed, even where it does not expand (an unset variable).
+    if name.starts_with('~') || name.contains('%') {
+        return None;
+    }
+    let file = solidcraft_sketch::font_file_path(name)?;
+    if file != Path::new(name) || !file.is_relative() {
+        return None;
+    }
+    Some(absolute(&base_dir(design)?.join(&file)).to_string_lossy().into_owned())
+}
+
+/// A whole font file path as the design's file keeps it: relative to the design's folder `base`
+/// when the font lies inside it, so the folder with its fonts moves as one. A font elsewhere
+/// stays as written.
+fn kept_font(base: Option<&Path>, font: &str) -> Option<String> {
+    let file = Path::new(font.trim());
+    if !file.is_absolute() {
+        return None;
+    }
+    let base = base?;
+    // The path as typed, else where it leads through folder aliases, as `base` is resolved
+    // ([`link_target`]): a font typed through a linked folder is still inside the design's.
+    let target = link_target(file);
+    let inside = file.strip_prefix(base).or_else(|_| target.strip_prefix(base)).ok()?;
+    Some(inside.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
+}
+
+/// Every sketch text's font put through `map` (`None`: kept as it is). The design is copied only
+/// when a font changes.
+fn font_paths_through(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> Option<String>) {
+    let changes = design.features.iter().any(|f| match &f.kind {
+        FeatureKind::Sketch { sketch, .. } => {
+            sketch.links.iter().any(|l| matches!(&l.source, LinkSource::Text { font: Some(font), .. } if map(font).is_some()))
+        }
+        _ => false,
+    });
+    if !changes {
+        return;
+    }
+    for feature in &mut design.to_mut().features {
+        let FeatureKind::Sketch { sketch, .. } = &mut feature.kind else { continue };
+        for link in &mut sketch.links {
+            if let LinkSource::Text { font: Some(font), .. } = &mut link.source
+                && let Some(new) = map(font)
+            {
+                *font = new;
+            }
+        }
+    }
 }
 
 /// Every link path of `design` put through `map`, whatever its kind: its component links and its
@@ -148,7 +219,8 @@ pub(crate) fn map_paths(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> St
 /// named: its component links', then its drawings' sources'. The read-only side of [`map_paths`].
 #[cfg_attr(not(test), expect(dead_code, reason = "a design pack (#9857) lists the files it packs here"))]
 pub(crate) fn linked_files(doc: &Document, from: Option<&str>) -> Vec<PathBuf> {
-    let links = doc.links.values().map(|link| link.path.as_str());
+    // A link to a design that came from the session names no file: it is not a file to pack.
+    let links = doc.links.values().map(|link| link.path.as_str()).filter(|path| !path.is_empty());
     let sources = doc.drawings.iter().flat_map(|d| d.sources.iter().filter_map(|source| source.path.as_deref()));
     let mut seen = BTreeSet::new();
     links.chain(sources).map(|path| absolute(&resolve(from, path))).filter(|file| seen.insert(file.clone())).collect()
@@ -160,7 +232,9 @@ type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
-    let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
+    // A link to a design that came from the session names no file: it stays as it is.
+    let links: BTreeMap<u64, DesignLink> =
+        doc.links.iter().map(|(c, l)| (*c, DesignLink { path: if l.path.is_empty() { String::new() } else { map(&l.path) }, ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
     ((links != doc.links).then_some(links), sources.then_some(drawings))
@@ -283,20 +357,25 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 
 /// The bytes of the linked design at `file`, linked from the design saved at `design`, read
 /// through the folders the caller may use, or why they can't be: a network location not allowed
-/// or a device (judged from the path's text before anything is read), not a design file name,
-/// missing, larger than the design size limit, or outside an agent's folders. Each with the
+/// or a device (judged from the path's text before anything is read), not a design or STEP file
+/// name, missing, larger than the design (or STEP) size limit, or outside an agent's folders. Each with the
 /// reason to show. Every kind of link reads its file here.
 pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<u8>, LinkProblem> {
     let shown = file.display().to_string();
     if let Some(why) = refusal(&shown, design) {
         return Err(why);
     }
-    if !solidcraft_io::is_design_path(&shown) {
+    // A linked STEP file is read under the STEP size limit; every other link is a design.
+    let step = super::component_link::is_step_source(&shown);
+    if !step && !solidcraft_io::is_design_path(&shown) {
         return Err(problem(LinkState::Unreadable, format!("{shown}: not a .{} design", solidcraft_io::DESIGN_EXT)));
     }
-    let limit = solidcraft_io::limits::max_design_bytes();
-    solidcraft_io::vfs::read_design_path(&shown, design, limit)
-        .map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(solidcraft_io::limits::Kind::Design, e)))
+    let (kind, limit) = if step {
+        (solidcraft_io::limits::Kind::Step, solidcraft_io::limits::max_step_bytes())
+    } else {
+        (solidcraft_io::limits::Kind::Design, solidcraft_io::limits::max_design_bytes())
+    };
+    solidcraft_io::vfs::read_design_path(&shown, design, limit).map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(kind, e)))
 }
 
 #[cfg(test)]
@@ -474,7 +553,7 @@ mod tests {
     fn reading_a_linked_design_reports_its_state_and_reason() {
         let dir = folder("read");
         let good = dir.join("plate.sc");
-        std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate"))).unwrap();
+        std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate")).unwrap()).unwrap();
         let read = read_linked_file(&good, None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
         assert_eq!(read, Ok(Some("plate".to_string())));
         assert_eq!(link_presence(&good, None), None);
@@ -483,13 +562,16 @@ mod tests {
         let missing = dir.join("gone.sc");
         assert!(matches!(state(&missing), Some((LinkState::Missing, r)) if r.contains("gone.sc")));
         assert_eq!(link_presence(&missing, None).map(|p| p.state), Some(LinkState::Missing));
-        // Unreadable: not a design file name, or a folder.
+        // Unreadable: neither a design nor a STEP file name, or a folder.
+        std::fs::write(dir.join("part.txt"), b"ISO-10303-21;").unwrap();
+        assert!(matches!(state(&dir.join("part.txt")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        // A STEP file is a link source too (Insert STEP keeps its link), read under the STEP limit.
         std::fs::write(dir.join("part.step"), b"ISO-10303-21;").unwrap();
-        assert!(matches!(state(&dir.join("part.step")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
+        assert_eq!(read_linked_file(&dir.join("part.step"), None), Ok(b"ISO-10303-21;".to_vec()));
         std::fs::create_dir_all(dir.join("folder.sc")).unwrap();
         assert!(matches!(state(&dir.join("folder.sc")), Some((LinkState::Unreadable, _))));
         // A design a newer SolidCraft saved is read like any other, and opens saying so (#12166).
-        let mut newer: serde_json::Value = serde_json::from_slice(&solidcraft_io::write_design(&Document::new("next"))).unwrap();
+        let mut newer: serde_json::Value = serde_json::from_slice(&solidcraft_io::write_design(&Document::new("next")).unwrap()).unwrap();
         newer["format"] = serde_json::json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
         std::fs::write(dir.join("next.sc"), newer.to_string()).unwrap();
         let opened =
