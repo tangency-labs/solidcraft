@@ -36,6 +36,7 @@
 //!
 //! Not upstream (solidcore's). No recursion.
 
+use crate::blend::fillet_executive::p1::is_radius_supported;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::weld_bead::face_holds;
 use crate::blend::weld_bead::BeadEnd;
@@ -72,8 +73,10 @@ fn defect(why: &'static str) -> SolidError {
 /// The most Newton steps a foot takes.
 const NEWTON_STEPS: usize = 40;
 
-/// The most halvings the search for a leg that fits takes.
-const FIT_STEPS: usize = 40;
+/// The most halvings the search for a leg that fits takes: they take a leg of 1e6 down to well
+/// under the bracket's stop, `1e-7 (1 + hi)` with `hi` its upper end; past a leg of about
+/// `1e-7 * 2^64` they end first.
+const FIT_STEPS: usize = 64;
 
 /// One support of a foot blend: its surface, the face it is on the part (where the blend was
 /// made from one), and the face's side.
@@ -619,7 +622,8 @@ impl FootBlend {
 
     /// The largest leg on support `i`, up to `z`, whose foot is found at every one of the
     /// parameters `ts` (in order, each from the one before): `z` where it is, else halved down
-    /// from it. 0 where no leg is found at all.
+    /// from it until the bracket is `1e-7 (1 + hi)` wide, `hi` its upper end (`FIT_STEPS`). 0
+    /// where no leg is found at all.
     ///
     /// # Errors
     ///
@@ -656,7 +660,7 @@ impl FootBlend {
         }
         let (mut lo, mut hi) = (0.0_f64, z);
         for _ in 0..FIT_STEPS {
-            if hi - lo <= 1e-7 * (1.0 + z) {
+            if hi - lo <= 1e-7 * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
@@ -785,7 +789,6 @@ impl FootBlend {
         let Some(fit) = failure.fit else {
             return Ok(SolidError::Failed(failure));
         };
-        let ts = self.check_stations(within)?;
         let size = match fit.measure {
             FitMeasure::Leg if no_toe => {
                 let face = failure.site.face;
@@ -793,19 +796,39 @@ impl FootBlend {
                     face.is_some() && s.face.map(crate::error::TargetFace::of_target) == face
                 });
                 match side {
-                    Some(i) if fit.size > 0.0 => self.leg_fit(k, i, &ts, fit.size)?,
+                    Some(i) if fit.size > 0.0 => {
+                        let ts = self.check_stations(within)?;
+                        self.leg_fit(k, i, &ts, fit.size)?
+                    }
                     _ => fit.size,
                 }
             }
-            FitMeasure::Sagitta => {
-                let bound = self.sagitta_fit(k, &ts, legs, sagitta)?;
-                // the bound is open: a sagitta a hair below it builds
-                fit.size.min((bound * (1.0 - 1e-9)).max(0.0))
-            }
+            FitMeasure::Sagitta => fit
+                .size
+                .min(self.sagitta_that_fits(k, legs, sagitta, within)?),
             _ => fit.size,
         };
         failure.fit = Some(Fit::new(size, fit.measure, fit.edge));
         Ok(SolidError::Failed(failure))
+    }
+
+    /// The largest sagitta (a magnitude, on `sagitta`'s side) this joint's bead takes with the
+    /// legs `legs` over [`FootBlend::check_stations`] of `within`: a hair below the least bound
+    /// over them, as the bound is open. Infinite where no station is made.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    pub fn sagitta_that_fits(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        within: &[[f64; 2]],
+    ) -> Result<f64> {
+        let ts = self.check_stations(within)?;
+        let bound = self.sagitta_fit(k, &ts, legs, sagitta)?;
+        Ok((bound * (1.0 - 1e-9)).max(0.0))
     }
 
     /// Checks that each toe lies on its face of `target` at the legs `legs`: at
@@ -817,8 +840,11 @@ impl FootBlend {
     ///
     /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
     /// toe found off its face, naming the face and the edge, with the largest leg on that side
-    /// whose toes stay on the face at those stations (the other side is not looked at once one
-    /// is off: its refusal comes once this size is asked); those of the classification.
+    /// whose toes stay on the face at those stations (halved down from the leg until the bracket
+    /// is `1e-7 (1 + hi)` wide, `hi` its upper end; 0 where that leg is below the smallest the
+    /// body builds, [`is_radius_supported`]: eight times its tolerance, as no leg on that side
+    /// builds then; the other side is not looked at once one is off: its refusal comes once
+    /// this size is asked); those of the classification.
     pub fn toes_on_faces(
         &self,
         k: &Kernel,
@@ -901,9 +927,11 @@ impl FootBlend {
             }
             Ok(true)
         };
+        // of the leg found, not of the leg asked: a face far shorter than the leg asked still
+        // gets its fit
         let (mut lo, mut hi) = (0.0_f64, z);
         for _ in 0..FIT_STEPS {
-            if hi - lo <= 1e-7 * (1.0 + z) {
+            if hi - lo <= 1e-7 * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
@@ -912,6 +940,11 @@ impl FootBlend {
             } else {
                 hi = mid;
             }
+        }
+        // a leg below the body's resolution is refused before the toes are read, so a retry at
+        // it would not build: no leg fits
+        if !is_radius_supported(lo, target.tolerance()) {
+            lo = 0.0;
         }
         let edge = self.edge.map(TargetEdge::of_target);
         Err(Failure::new(

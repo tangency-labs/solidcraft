@@ -44,6 +44,7 @@
 
 use crate::blend::blend_refusal::setback_below_resolution;
 use crate::blend::fillet_exact::ClassInputs;
+use crate::blend::fillet_executive::p1::is_radius_supported;
 use crate::blend::fillet_executive::NoRoomReason;
 use crate::boolean::api_brep::boolean_difference;
 use crate::curve::curve::p2::CurveKind;
@@ -100,8 +101,11 @@ const TOE_PIECES: u32 = 32;
 /// # Errors
 ///
 /// The refusal [`NoRoomReason::LegPastFace`] naming the edge and the face, with the largest
-/// leg on that side whose toes stay on the face at the stations (halved down from the leg);
-/// those of the drop and of the classification.
+/// leg on that side whose toes stay on the face at the stations (halved down from the leg
+/// until the bracket is `1e-7 (1 + hi)` wide, `hi` its upper end, for legs below about
+/// `1e-7 * 2^64`, past which the 64 halvings end first), or 0 where that leg is below the
+/// smallest the body builds ([`is_radius_supported`]: eight times its tolerance), as no leg
+/// on that side builds; those of the drop and of the classification.
 fn toes_on_faces(
     k: &Kernel,
     target: &Brep,
@@ -124,10 +128,12 @@ fn toes_on_faces(
         if holds(d)? {
             continue;
         }
-        // the largest leg that holds, halved down to a ten-millionth of the leg
+        // the largest leg that holds, halved down until the bracket is a ten-millionth of its
+        // upper end: of the leg found, not of the leg asked, so a face far shorter than the leg
+        // asked still gets its fit (64 halvings take 1e6 down to well under 1e-7)
         let (mut lo, mut hi) = (0.0_f64, d);
         for _ in 0..64 {
-            if hi - lo <= 1e-7 * (1.0 + d) {
+            if hi - lo <= 1e-7 * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
@@ -140,12 +146,20 @@ fn toes_on_faces(
         // a toe holds up to the face's tolerance past its edge: the fit named keeps it on the
         // face itself
         let fit = (lo - target.face(face)?.tolerance).max(0.0);
+        // a leg below the body's resolution is refused before the toes are read
+        // (`setback_below_resolution`), so a retry at it would not build: no leg fits
+        let fit = if is_radius_supported(fit, target.tolerance()) {
+            fit
+        } else {
+            0.0
+        };
         let edge = Some(TargetEdge::of_target(edge_id));
         return Err(
             Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::LegPastFace))
                 .or_at(Site {
                     edge,
                     face: Some(TargetFace::of_target(face)),
+                    at: Some(start + u * fit),
                     ..Site::default()
                 })
                 .with_fit(Fit::new(fit, FitMeasure::Leg, edge))
@@ -417,15 +431,16 @@ struct Frame {
 }
 
 /// The bead along the straight edge `edge_id` of `target` between two planes, at `size` and
-/// `sagitta`: the first of `size`'s distances runs along the face in `along` where one of the
-/// edge's faces is there, else along the edge's first face.
+/// `sagitta`: the first of `size`'s distances runs along the face `along` when given (one of the
+/// edge's two faces), else along the edge's first face.
 ///
 /// # Errors
 ///
 /// [`WeldGap::CurvedJoint`] naming the edge for an edge that is not straight or a face on it
 /// that is not a plane; [`WeldGap::ObtuseToe`] naming the edge for legs whose toe is obtuse;
 /// native invalid input for an edge with no curve, not between two faces, or not an inside
-/// corner; [`BlendFailure::SizeBelowResolution`] naming the edge for a leg below the smallest
+/// corner, and for an `along` that is not one of the edge's faces;
+/// [`BlendFailure::SizeBelowResolution`] naming the edge for a leg below the smallest
 /// size a fillet builds on `target`; [`NoRoomReason::BeadCutsFace`] naming the edge, with the
 /// sagitta that builds, for a sagitta past its bound; those of the evaluations.
 fn frame(
@@ -434,7 +449,7 @@ fn frame(
     edge_id: EdgeId,
     size: ChamferSize,
     sagitta: f64,
-    along: &[FaceId],
+    along: Option<FaceId>,
 ) -> Result<Frame> {
     let curve = target
         .edge(edge_id)?
@@ -501,12 +516,17 @@ fn frame(
     }
     let [first, second] = <[_; 2]>::try_from(sides)
         .map_err(|_| SolidError::invalid_input(OP, "an edge between two faces"))?;
-    let [(face1, u1, n1, s1, uv1), (face2, u2, _, s2, uv2)] =
-        if along.contains(&second.0) && !along.contains(&first.0) {
-            [second, first]
-        } else {
-            [first, second]
-        };
+    if along.is_some_and(|f| f != first.0 && f != second.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a bead's first leg runs along one of its edge's two faces",
+        ));
+    }
+    let [(face1, u1, n1, s1, uv1), (face2, u2, _, s2, uv2)] = if along == Some(second.0) {
+        [second, first]
+    } else {
+        [first, second]
+    };
     // an inside corner: the second face rises on the first one's outer side. `n1 . u2` is the
     // sine of the second face's rise off the first one's plane (both unit), an angle: at or
     // below the angle zero the edge is an outside corner (negative) or tangent (zero), where
@@ -600,19 +620,21 @@ fn frame(
     })
 }
 
-/// The refusal of a bead whose sagitta is past `bound` along `edge` (the open bound, so the
-/// fit is a hair below it).
+/// The refusal of a bead whose sagitta is past `bound` along `edge`: the bound is open, so the
+/// fit is the float below it, and a retry at the fit builds.
 fn sagitta_refusal(edge: EdgeId, bound: f64) -> SolidError {
     use crate::blend::fillet_executive::NoRoomReason;
     use crate::error::{Fit, FitMeasure};
     let edge = TargetEdge::of_target(edge);
+    // bits, not next_down, for the 1.85 MSRV
+    let fit = if bound > 0.0 {
+        f64::from_bits(bound.to_bits() - 1)
+    } else {
+        0.0
+    };
     Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::BeadCutsFace))
         .or_at(Site::edge(edge))
-        .with_fit(Fit::new(
-            (bound * (1.0 - 1e-9)).max(0.0),
-            FitMeasure::Sagitta,
-            Some(edge),
-        ))
+        .with_fit(Fit::new(fit, FitMeasure::Sagitta, Some(edge)))
         .into_error()
 }
 
@@ -832,7 +854,8 @@ fn refuse_repeats_and_corners(target: &Brep, edges: &[EdgeId]) -> Result<()> {
 /// refused. Each edge is straight between two planes in an inside corner; `sizes` are one per
 /// edge (the chamfer's setbacks, the bead's toes), `sagitta` is the arc's height over the
 /// chord (`> 0` convex, `< 0` concave, `0` flat, [`BeadDefinition`]), and the first distance of
-/// a size runs along the face in `along` where one of the edge's faces is. A convex bead
+/// edge i's size runs along face `along[i]` when given (one of that edge's two faces; `along`
+/// is one per edge, or empty for none). A convex bead
 /// overhanging its toe is built: no trimming is involved.
 ///
 /// `target` is mutable only for evaluating its edges' faces (a missing trim curve may be
@@ -840,12 +863,14 @@ fn refuse_repeats_and_corners(target: &Brep, edges: &[EdgeId]) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Native invalid input for sizes not one per edge, an edge listed twice and an edge not in
-/// an inside corner (an outside or a tangent edge); [`BlendFailure::SizeBelowResolution`]
+/// Native invalid input for sizes not one per edge, `along` neither empty nor one per edge, an
+/// `along` face not on its edge, an edge listed twice and an edge not in an inside corner (an
+/// outside or a tangent edge); [`BlendFailure::SizeBelowResolution`]
 /// naming the edge for a leg below the smallest size a fillet builds on `target` (eight
 /// times its tolerance), whether given or computed from an angle;
-/// [`NoRoomReason::BeadCutsFace`] with the sagitta that fits for a bead past its bound
-/// ([`BeadDefinition::new`]) and
+/// [`NoRoomReason::BeadCutsFace`] for a bead past its bound ([`BeadDefinition::new`]), with the
+/// smallest sagitta that fits over all of `edges` and naming that edge, so a retry at it
+/// builds on every edge; and
 /// [`NoRoomReason::LegPastFace`] with the leg that fits, naming the face, for a toe past its
 /// face's trims; [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
 /// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
@@ -858,18 +883,40 @@ pub fn beads_apart(
     edges: &[EdgeId],
     sizes: &[ChamferSize],
     sagitta: f64,
-    along: &[FaceId],
+    along: &[Option<FaceId>],
 ) -> Result<Vec<Brep>> {
     if sizes.len() != edges.len() {
         return Err(SolidError::invalid_input(OP, "one size per edge"));
     }
+    if !along.is_empty() && along.len() != edges.len() {
+        return Err(SolidError::invalid_input(OP, "one along per edge, or none"));
+    }
     refuse_repeats_and_corners(target, edges)?;
-    // every frame first, so a refused edge leaves nothing built
-    let frames = edges
-        .iter()
-        .zip(sizes)
-        .map(|(&e, &size)| frame(k, target, e, size, sagitta, along))
-        .collect::<Result<Vec<_>>>()?;
+    // every frame first, so a refused edge leaves nothing built; a sagitta too large is
+    // refused with the smallest fit over all edges, so a retry at it builds on every one
+    let sagitta_fit = |e: &SolidError| {
+        e.fit()
+            .filter(|f| matches!(f.measure, FitMeasure::Sagitta))
+            .map(|f| f.size)
+    };
+    let mut frames = Vec::new();
+    let mut refusal: Option<(f64, SolidError)> = None;
+    for (i, (&e, &size)) in edges.iter().zip(sizes).enumerate() {
+        let along = along.get(i).copied().flatten();
+        match frame(k, target, e, size, sagitta, along) {
+            Ok(f) => frames.push(f),
+            Err(err) => match sagitta_fit(&err) {
+                Some(fit) if refusal.as_ref().is_none_or(|(kept, _)| fit < *kept) => {
+                    refusal = Some((fit, err));
+                }
+                Some(_) => {}
+                None => return Err(err),
+            },
+        }
+    }
+    if let Some((_, err)) = refusal {
+        return Err(err);
+    }
     frames.iter().map(|f| f.sweep(k, 0.0, f.length)).collect()
 }
 
@@ -884,8 +931,9 @@ pub fn beads_apart(
 ///
 /// `sizes` are one per edge, as the two legs ([`ChamferSize::Distances`]: support 1's,
 /// support 2's), `sagitta` is the arc's height over the chord (`> 0` convex, `< 0` concave,
-/// `0` flat), and the first leg runs along the face in `along` where one of the edge's faces
-/// is. A convex bead overhanging its toe is built: nothing is trimmed. `spans` are where the
+/// `0` flat), and edge i's first leg runs along face `along[i]` when given (one of that edge's
+/// two faces; `along` is one per edge, or empty for none). A convex bead overhanging its toe
+/// is built: nothing is trimmed. `spans` are where the
 /// bead runs along each edge, fractions of the edge's length from the start of its curve's
 /// interval ([`BeadSpan`]; none: the whole edge), and `ends` the shape at each span's start
 /// and end: square on any joint; tapered or rounded only straight between two planes with a
@@ -899,12 +947,15 @@ pub fn beads_apart(
 ///
 /// # Errors
 ///
-/// Native invalid input for no edge, sizes not one per edge, an edge listed twice, a size
-/// that is not two legs, or spans out of order, overlapping or too short for their ends;
+/// Native invalid input for no edge, sizes not one per edge, `along` neither empty nor one per
+/// edge, an `along` face not on its edge, an edge listed twice, a size that is not two legs,
+/// or spans out of order, overlapping or too short for their ends;
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
 /// naming the vertex for two of `edges` that meet at one, and for a shaped end the foot blend
 /// does not build; the foot blend's refusals, typed and with the size that builds (a toe off
-/// its face, no toe at the leg, an arc that would cut into a face); those of the closing.
+/// its face, no toe at the leg, an arc that would cut into a face: the smallest sagitta that
+/// fits over all of `edges`, naming that edge, so a retry at it builds on every edge); those
+/// of the closing.
 #[allow(clippy::too_many_arguments)]
 pub fn bead_body(
     k: &mut Kernel,
@@ -912,7 +963,7 @@ pub fn bead_body(
     edges: &[EdgeId],
     sizes: &[ChamferSize],
     sagitta: f64,
-    along: &[FaceId],
+    along: &[Option<FaceId>],
     spans: &[BeadSpan],
     ends: [BeadEnd; 2],
 ) -> Result<Brep> {
@@ -922,6 +973,9 @@ pub fn bead_body(
             OP,
             "a weld bead takes edges and one size per edge",
         ));
+    }
+    if !along.is_empty() && along.len() != edges.len() {
+        return Err(SolidError::invalid_input(OP, "one along per edge, or none"));
     }
     refuse_repeats_and_corners(target, edges)?;
     let spans = if spans.is_empty() {
@@ -935,16 +989,22 @@ pub fn bead_body(
     body.set_editing_enabled(true);
     let mut defined = Vec::new();
     let mut apart: Vec<Brep> = Vec::new();
-    for (&e, size) in edges.iter().zip(sizes) {
+    for (i, (&e, size)) in edges.iter().zip(sizes).enumerate() {
         let ChamferSize::Distances(legs) = *size else {
             return Err(SolidError::invalid_input(
                 OP,
                 "a weld bead's size is its two legs",
             ));
         };
-        let first = edge_faces(target, e)?
-            .into_iter()
-            .find(|f| along.contains(f));
+        let first = along.get(i).copied().flatten();
+        if let Some(f) = first {
+            if !edge_faces(target, e)?.contains(&f) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a bead's first leg runs along one of its edge's two faces",
+                ));
+            }
+        }
         let blend = FootBlend::of_edge(k, target, e, first)?;
         let params = span_parameters(k, &blend, &spans)?;
         blend.toes_on_faces(k, target, legs, &params)?;
@@ -960,7 +1020,14 @@ pub fn bead_body(
             if let Some(gap) = gap {
                 return Err(not_built(gap, Site::edge(TargetEdge::of_target(e))));
             }
-            let f = frame(k, target, e, *size, sagitta, along)?;
+            let f = match frame(k, target, e, *size, sagitta, first) {
+                Ok(f) => f,
+                Err(refused) => {
+                    return Err(smallest_sagitta_fit(
+                        k, target, edges, sizes, along, i, &spans, sagitta, refused,
+                    ))
+                }
+            };
             for s in &spans {
                 apart.push(f.span(k, s.from * f.length, s.to * f.length, ends)?);
             }
@@ -970,8 +1037,15 @@ pub fn bead_body(
         for &p in &params {
             match blend.add_span(k, &mut body, legs, sagitta, tol, p) {
                 Ok(faces) => made.extend(faces),
-                // a refusal's size over all of the joint's spans, not the failed one's alone
-                Err(refused) => return Err(blend.fit_over(k, legs, sagitta, &params, refused)?),
+                // a refusal's size over all of the joint's spans, not the failed one's alone,
+                // and a sagitta's over the joints still to come
+                Err(refused) => {
+                    let refused = blend.fit_over(k, legs, sagitta, &params, refused)?;
+                    let refused = no_leg_below_resolution(target, refused);
+                    return Err(smallest_sagitta_fit(
+                        k, target, edges, sizes, along, i, &spans, sagitta, refused,
+                    ));
+                }
             }
         }
         let weld = BeadWeld {
@@ -1015,6 +1089,80 @@ fn between_planes(target: &Brep, edge_id: EdgeId) -> Result<bool> {
             .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
     }
     Ok(straight && planes)
+}
+
+/// `refused` with a leg that fits below the smallest `target` builds
+/// ([`is_radius_supported`]: eight times its tolerance) made 0: a retry at such a leg is
+/// refused for its size before the toes are read, so no leg on that side builds.
+fn no_leg_below_resolution(target: &Brep, refused: SolidError) -> SolidError {
+    let mut failure = match refused {
+        SolidError::Failed(failure) => failure,
+        other => return other,
+    };
+    if let Some(fit) = failure.fit {
+        if matches!(fit.measure, FitMeasure::Leg)
+            && !is_radius_supported(fit.size, target.tolerance())
+        {
+            failure.fit = Some(Fit::new(0.0, FitMeasure::Leg, fit.edge));
+        }
+    }
+    SolidError::Failed(failure)
+}
+
+/// `refused`, the refusal of joint `at` of `edges` for a sagitta too large, with the smallest
+/// sagitta that fits over the joints after it too, naming the edge whose fit it is, so a retry
+/// at it builds on every joint (those before `at` were built at the sagitta asked). Each of
+/// those joints' fits is its foot blend's over its stations
+/// ([`crate::blend::foot_blend::FootBlend::sagitta_that_fits`]); one refused for another
+/// reason is left to its own refusal at the retry. Any other error is returned as it is.
+#[allow(clippy::too_many_arguments)]
+fn smallest_sagitta_fit(
+    k: &Kernel,
+    target: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[ChamferSize],
+    along: &[Option<FaceId>],
+    at: usize,
+    spans: &[BeadSpan],
+    sagitta: f64,
+    refused: SolidError,
+) -> SolidError {
+    use crate::blend::foot_blend::FootBlend;
+    let mut failure = match refused {
+        SolidError::Failed(failure) => failure,
+        other => return other,
+    };
+    let Some(mut fit) = failure
+        .fit
+        .filter(|f| matches!(f.measure, FitMeasure::Sagitta))
+    else {
+        return SolidError::Failed(failure);
+    };
+    for (j, (&e, size)) in edges.iter().zip(sizes).enumerate().skip(at + 1) {
+        let ChamferSize::Distances(legs) = *size else {
+            continue;
+        };
+        let first = along.get(j).copied().flatten();
+        let Ok(blend) = FootBlend::of_edge(k, target, e, first) else {
+            continue;
+        };
+        let Ok(params) = span_parameters(k, &blend, spans) else {
+            continue;
+        };
+        let Ok(size) = blend.sagitta_that_fits(k, legs, sagitta, &params) else {
+            continue;
+        };
+        if size < fit.size {
+            let edge = Some(TargetEdge::of_target(e));
+            fit = Fit::new(size, FitMeasure::Sagitta, edge);
+            failure.site = Site {
+                edge,
+                ..Site::default()
+            };
+        }
+    }
+    failure.fit = Some(fit);
+    SolidError::Failed(failure)
 }
 
 /// `spans` (fractions of the joint's length from the start of its interval) as the foot

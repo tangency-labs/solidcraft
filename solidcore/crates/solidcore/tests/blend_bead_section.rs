@@ -1143,15 +1143,7 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
         fit.size
     );
     assert!(
-        beads_apart(
-            &mut k,
-            &mut b,
-            &[edge],
-            &[size],
-            fit.size * (1.0 - 1e-6),
-            &[]
-        )
-        .is_ok(),
+        beads_apart(&mut k, &mut b, &[edge], &[size], fit.size, &[]).is_ok(),
         "the sagitta that fits builds"
     );
     assert!(smb(&k, &b) == before, "the corner changed");
@@ -1955,6 +1947,51 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
     }
 }
 
+/// A sagitta too large for several joints of one call is refused with the smallest sagitta
+/// that fits over all of them, whichever joint comes first: two branches of different size on
+/// one main tube, each joint alone naming its own depth, both together no more than the least
+/// of the two (to a twentieth: a joint's own size is that of its own stations), and a tenth
+/// shallower than it both beads build.
+#[test]
+fn a_sagitta_too_large_for_several_joints_is_refused_with_the_smallest_fit() {
+    use solidcore::error::FitMeasure;
+    let mut k = kernel();
+    let [main, _] = branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0));
+    let x = Tube {
+        o: Point3::new(0.0, 0.0, -30.0),
+        d: Vec3::new(1.0, 0.0, 0.0),
+        r: 10.0,
+        len: 60.0,
+    };
+    let y = Tube {
+        o: Point3::new(0.0, 0.0, 25.0),
+        d: Vec3::new(0.0, 1.0, 0.0),
+        r: 8.0,
+        len: 60.0,
+    };
+    let (mut part, joints) = tubes(&mut k, &[main, x, y]);
+    assert_eq!(joints.len(), 2);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let mut bead = |edges: &[EdgeId], h: f64| {
+        let sizes = vec![size; edges.len()];
+        weld_bead_body(&mut k, &mut part, edges, &sizes, h, &[], &[], SQUARE)
+    };
+    let mut depth = |edges: &[EdgeId]| {
+        let fit = bead(edges, -1.3).err()?.fit()?;
+        (fit.measure == FitMeasure::Sagitta).then_some(fit.size)
+    };
+    let alone: Vec<f64> = joints.iter().filter_map(|&e| depth(&[e])).collect();
+    let least = alone.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(least.is_finite(), "no joint alone is refused with a depth");
+    let back = [joints[1], joints[0]];
+    for edges in [&joints[..], &back[..]] {
+        let together = depth(edges).expect("the joints are refused with a depth");
+        println!("joints alone {alone:?}, together {together}");
+        assert!(together <= least * 1.05, "{together} against {alone:?}");
+    }
+    assert!(bead(&joints, -0.9 * least).is_ok(), "{least}");
+}
+
 /// Two spans round the T-joint (a stitch): one body of two lumps, each span its section face,
 /// a strip on each tube and two square end caps (10 faces), sound; each section face keeps
 /// both spans and the square ends in its definition; the tubes are unchanged.
@@ -2542,7 +2579,7 @@ fn unequal_legs_run_their_first_leg_along_the_face_picked() {
             &[edge],
             &[ChamferSize::Distances(legs)],
             h,
-            &[face],
+            &[Some(face)],
         )
         .unwrap()
         .remove(0);
@@ -2606,6 +2643,97 @@ fn beads_apart_that_meet_at_a_vertex_are_refused_naming_it() {
         .map(solidcore::error::TargetVertex::id);
     assert_eq!(named, Some(start), "{err:?}");
     assert!(smb(&k, &b) == before, "the corner changed");
+}
+
+/// A square inside corner whose face along +x is only `w` wide: the corner's upright arm with
+/// a ledge at its foot. The body and a point on the corner's edge.
+fn ledge(k: &mut Kernel, w: f64) -> (Brep, [f64; 3]) {
+    let corners = [
+        (0.0, 40.0),
+        (-ARM, 40.0),
+        (-ARM, -ARM),
+        (w, -ARM),
+        (w, 0.0),
+        (0.0, 0.0),
+    ];
+    let curves: Vec<Curve> = (0..corners.len())
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % corners.len()]);
+            Curve::from(
+                create_line_segment(Vec3::new(a.0, a.1, 0.0), Vec3::new(b.0, b.1, 0.0)).unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap();
+    (b, [0.0, 0.0, LENGTH / 2.0])
+}
+
+/// The leg that fits each side of the corner's edge in turn (`along` each of its two faces)
+/// for the legs `legs`, where the bead is refused with one.
+fn leg_fits(k: &mut Kernel, b: &mut Brep, at: [f64; 3], legs: [f64; 2]) -> Vec<f64> {
+    use solidcore::error::FitMeasure;
+    let joint = pick(k, b, at);
+    let size = ChamferSize::Distances(legs);
+    edge::faces(b, joint, None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| {
+            let fit = weld_bead_body(k, b, &[joint], &[size], 0.0, &[Some(f)], &[], SQUARE)
+                .err()?
+                .fit()?;
+            (fit.measure == FitMeasure::Leg).then_some(fit.size)
+        })
+        .collect()
+}
+
+/// A leg far past a narrow face is refused with the leg that fits: on a face 0.05 wide a leg
+/// of 1e6 is refused with 0.05 (the search stops at a ten-millionth of the leg found, not of
+/// the leg asked, which would leave 0).
+#[test]
+fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
+    let mut k = kernel();
+    let (mut b, at) = ledge(&mut k, 0.05);
+    let fits = leg_fits(&mut k, &mut b, at, [1e6, 5.0]);
+    let least = fits.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!((0.05 - 1e-6..=0.05 + 1e-4).contains(&least), "{fits:?}");
+}
+
+/// A face narrower than the smallest leg the body builds leaves no room: on a face 5e-5 wide
+/// (the body's tolerance is 1e-5, a leg is built from eight times it) no leg fits, whether 1
+/// or 1e6 is asked, so the fit is 0.
+#[test]
+fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
+    let mut k = kernel();
+    let (mut b, at) = ledge(&mut k, 5e-5);
+    assert!(5e-5 < 8.0 * b.tolerance(), "{}", b.tolerance());
+    for leg in [1.0, 1e6] {
+        let fits = leg_fits(&mut k, &mut b, at, [leg, 5.0]);
+        assert!(fits.contains(&0.0), "{leg}: {fits:?}");
+    }
+}
+
+/// An `along` that is not one per edge, or names a face that is not on its edge, is refused
+/// as invalid input.
+#[test]
+fn an_along_not_one_per_edge_or_not_on_its_edge_is_refused() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let joint = pick(&k, &b, at);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let on = edge::faces(&b, joint, None).unwrap();
+    let off = b
+        .face_list()
+        .iter()
+        .copied()
+        .find(|f| !on.contains(f))
+        .unwrap();
+    for along in [&[None, None][..], &[Some(off)][..]] {
+        let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], 0.0, along, &[], SQUARE)
+            .err()
+            .unwrap();
+        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
+    }
 }
 
 /// An edge listed twice is refused as invalid input before anything is built.
