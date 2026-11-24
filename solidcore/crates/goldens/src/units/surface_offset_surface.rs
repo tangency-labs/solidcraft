@@ -2385,15 +2385,15 @@ mod reverse_refusal_tests {
     }
 }
 
-/// #21383: a G1R extension of a rational surface is G1 across the old boundary whatever
-/// its weights. The bases are the 23 golden scripts' rational B-splines whose boundary
-/// weight ratios vary along a side (upstream's ruled row kinked 16 of them, normals
-/// jumping by up to 87 deg). Each is extended by G1R one domain size past every side,
-/// as an offset's extension grows it, and then every weight of the extension is
-/// positive and, at 21 points of each side of the base, the unit normals on its two
-/// sides agree: the sine of the angle between them is at most `1e-12` and they point
-/// the same way (no fold). The derivation is at `ruled_far_row` in
-/// `solidcore::nurbs::srf_adv::p3`.
+/// #21383 regression check (MEASURED, not the proof): upstream's ruled row kinked 16 of
+/// the 23 golden scripts' rational B-spline bases whose boundary weight ratios vary
+/// along a side, normals jumping by up to 87 deg, and this fails on it (gen0157, sine
+/// 0.58). Each base is extended by G1R one domain size past every side, and then every
+/// weight of the extension is positive and, at 21 points of each side, the unit normals
+/// on its two sides agree to a sine of `1e-12` without folding. The `1e-12` is a
+/// regression threshold, not a derived allowance: the proof is the derivation at
+/// `ruled_far_row` in `solidcore::nurbs::srf_adv::p3`, and the certificate is
+/// `crate::g1r_cert` (see `each_moved_row_extends_its_base_by_certified_g1_steps`).
 #[cfg(test)]
 mod g1r_rational_extension_tests {
     use super::*;
@@ -2469,5 +2469,43 @@ mod g1r_rational_extension_tests {
             }
         }
         assert_eq!(seen, ROWS.len());
+    }
+
+    /// The 26 rows the change moved: the base of each is a rational surface, and a G1R
+    /// extension past each side (one domain size, the four steps in turn) is certified by
+    /// `crate::g1r_cert::certify_step`: the ruled span `Q + t I = k B` with one `k`, the
+    /// knots' `t > 0`, positive weights, and the step's input kept bit for bit; at least
+    /// one side of each base has varying weight ratios (the new row). This is a stand-in
+    /// for the offset's own extension (`extend_toward`, steps of at most 0.9 of the domain
+    /// toward a point), which runs the same G1R step on the same base: that the offset's
+    /// values come from certified steps is ARGUED, not replayed.
+    const MOVED: [&str; 26] = [
+        "gen0157", "gen0436", "gen0572", "gen0598", "gen0745", "gen0889", "gen0989", "gen1043",
+        "gen1066", "gen1086", "gen1219", "gen1245", "gen1387", "gen1455", "gen1548", "gen1560",
+        "gen1593", "gen1889", "gen1904", "gen1969", "gen2014", "gen2071", "gen2316", "gen2862",
+        "gen2912", "gen2968",
+    ];
+
+    #[test]
+    fn each_moved_row_extends_its_base_by_certified_g1_steps() {
+        use crate::g1r_cert::certify_surface_sides;
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Ok(Inputs::Script { off, .. }) = c.parse::<Inputs>() else {
+                panic!("{}: not a script", c.name)
+            };
+            let s = rust_off(&k, &off).unwrap().unwrap();
+            let mixed = certify_surface_sides(&k, s.base_surface())
+                .unwrap_or_else(|why| panic!("{}: {why}", c.name))
+                .unwrap_or_else(|| panic!("{}: base not rational", c.name));
+            assert!(mixed > 0, "{}: no side with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }

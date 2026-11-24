@@ -2338,3 +2338,51 @@ mod tests {
     }
 
 }
+
+/// #21383: the 1 rows the G1R change moved. A solver point outside a mate's domain
+/// is computed on the mate's G1R extension; every rational mate of each row is certified
+/// by `crate::g1r_cert::certify_surface_sides` (each of its four sides extended by a
+/// G1R step with the ruled span `Q + t I = k B`, one `k`, the knots' `t > 0`, positive
+/// weights, and the step's input kept bit for bit), and at least one side of one mate has
+/// varying weight ratios (the new row). The solver is unchanged: its new value is the
+/// same computation on a G1 extension of the same mates (ARGUED from the certificate).
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::certify_surface_sides;
+
+    const MOVED: [&str; 1] = ["gen0181"];
+
+    #[test]
+    fn each_moved_row_solves_on_certified_g1_extensions() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let surfaces = match c.parse::<Inputs>().unwrap() {
+                Inputs::Ss { a, b, .. } => vec![surface_of(&a).unwrap(), surface_of(&b).unwrap()],
+                Inputs::CrInit { solver, .. } | Inputs::Guess { solver, .. } | Inputs::Plane { solver, .. } => {
+                    let mut v = vec![surface_of(&solver.a).unwrap()];
+                    if let Some(b) = &solver.b {
+                        v.push(surface_of(b).unwrap());
+                    }
+                    v
+                }
+                Inputs::Recalc(ri) => vec![gp1_surface_of(&ri.a).unwrap(), gp1_surface_of(&ri.b).unwrap()],
+                other => panic!("{}: {other:?}", c.name),
+            };
+            let mut mixed = 0;
+            for s in &surfaces {
+                mixed += certify_surface_sides(&k, s)
+                    .unwrap_or_else(|why| panic!("{}: {why}", c.name))
+                    .unwrap_or(0);
+            }
+            assert!(mixed > 0, "{}: no mate side with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}

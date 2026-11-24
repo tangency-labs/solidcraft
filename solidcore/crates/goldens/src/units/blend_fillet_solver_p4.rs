@@ -1706,3 +1706,46 @@ mod tests {
     }
 
 }
+
+/// #21383: the 16 rows the G1R change moved. A solver point outside a mate's domain
+/// is computed on the mate's G1R extension; every rational mate of each row is certified
+/// by `crate::g1r_cert::certify_surface_sides` (each of its four sides extended by a
+/// G1R step with the ruled span `Q + t I = k B`, one `k`, the knots' `t > 0`, positive
+/// weights, and the step's input kept bit for bit), and at least one side of one mate has
+/// varying weight ratios (the new row). The solver is unchanged: its new value is the
+/// same computation on a G1 extension of the same mates (ARGUED from the certificate).
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::certify_surface_sides;
+
+    const MOVED: [&str; 16] = ["gen0062", "gen0086", "gen0174", "gen0178", "gen0206", "gen0246", "gen0268", "gen0313", "gen0323", "gen0339", "gen0376", "gen0381", "gen0389", "gen0404", "gen0474", "gen0476"];
+
+    #[test]
+    fn each_moved_row_solves_on_certified_g1_extensions() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::PointValues(p) = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not a point case", c.name)
+            };
+            let mut surfaces = vec![rust_surface(&k, &p.a).unwrap().unwrap()];
+            if let Some(b) = &p.b {
+                surfaces.push(rust_surface(&k, b).unwrap().unwrap());
+            }
+            let mut mixed = 0;
+            for s in &surfaces {
+                mixed += certify_surface_sides(&k, s)
+                    .unwrap_or_else(|why| panic!("{}: {why}", c.name))
+                    .unwrap_or(0);
+            }
+            assert!(mixed > 0, "{}: no mate side with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}
