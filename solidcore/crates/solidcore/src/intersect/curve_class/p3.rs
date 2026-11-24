@@ -2327,12 +2327,12 @@ impl<O: ClassObject> CurveClassification<O> {
 
         let mut first_raise = None;
         for edge in candidates {
-            // an edge with no 3D curve proves nothing: no interval runs along it (checked
-            // before any lookup below that needs the curve and would fail without it)
-            if edge_curve(geometry, edge)?.is_none() {
+            // an edge with no 3D curve proves nothing: no interval runs along it (the curve
+            // found here is the one every test below uses)
+            let Some(target) = edge_curve(geometry, edge)? else {
                 continue;
-            }
-            let Some(unclassified) = self.ends_on_edge(k, geometry, edge, &ivl)? else {
+            };
+            let Some(unclassified) = self.ends_on_edge(k, geometry, (edge, target), &ivl)? else {
                 continue;
             };
             let xsect_tol_3d = xsect_tol_3d_from_zones(
@@ -2345,9 +2345,6 @@ impl<O: ClassObject> CurveClassification<O> {
             // when both its ends lie within the intersection tolerance of the edge's line
             // ([`straight_run_on_line`], a certificate, not a sample).
             let curve = cc_curve(self, geometry, OP_EDGE_INTERVAL)?;
-            let target = edge_curve(geometry, edge)?.ok_or_else(|| {
-                SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve")
-            })?;
             let straight = matches!(curve.kind(), CurveKind::Line(_))
                 && matches!(target.kind(), CurveKind::Line(_));
             let on_edge = if straight {
@@ -2442,12 +2439,12 @@ impl<O: ClassObject> CurveClassification<O> {
     /// tolerance of a vertex of `edge` (it would be on that vertex, not inside the edge), or
     /// when with an unclassified end the curve is not tangent to `edge` at both ends of the
     /// interval ([`tangent_to_edge_at_ends`]) or not proved within that tolerance of `edge` as a
-    /// whole ([`piece_within_band`]).
+    /// whole ([`piece_within_band`]). `edge_crv` is the curve of `edge`.
     fn ends_on_edge(
         &self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
-        edge: O,
+        (edge, edge_crv): (O, &Curve),
         ivl: &CurveInterval<O>,
     ) -> Result<Option<[Option<f64>; 2]>> {
         let (eb, e) = edge_of(geometry, edge, "SmEdge::GetStartVertex")?;
@@ -2483,7 +2480,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 return Ok(None);
             }
             let p = curve.evaluate_point(k, t)?;
-            let Some((d, param)) = drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)? else {
+            let Some((d, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+            else {
                 return Ok(None);
             };
             if d.is_nan() || d >= xsect_tol_3d {
@@ -2504,15 +2502,15 @@ impl<O: ClassObject> CurveClassification<O> {
             // the classified end's parameter on the edge, for the proof over the interval
             [Some(s0), None] => {
                 let p = curve.evaluate_point(k, t1)?;
-                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s1)| [s0, s1])
+                drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                    .map(|(_, s1)| [s0, s1])
             }
             [None, Some(s1)] => {
                 let p = curve.evaluate_point(k, t0)?;
-                drop_onto_edge(k, geometry, edge, p, xsect_tol_3d)?.map(|(_, s0)| [s0, s1])
+                drop_onto_edge(k, geometry, (edge, edge_crv), p, xsect_tol_3d)?
+                    .map(|(_, s0)| [s0, s1])
             }
         };
-        let edge_crv = edge_curve(geometry, edge)?
-            .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?;
         let Some(params) = params else {
             return Ok(None);
         };
@@ -3626,26 +3624,24 @@ fn segment_distance_bound(q: Point3, a: Point3, b: Point3) -> f64 {
     ((q - (a + s * ab)).length() + gamma(16) * scale) * (1.0 + gamma(4))
 }
 
-/// The distance from `p` to the curve of edge handle `edge` over the edge's interval and
-/// the edge parameter of the closest point; `None` when the drop fails.
+/// The distance from `p` to `edge_crv`, the curve of edge handle `edge`, over the edge's
+/// interval and the edge parameter of the closest point; `None` when the drop fails.
 fn drop_onto_edge<O: ClassObject>(
     k: &Kernel,
     geometry: &impl ClassGeometry<O>,
-    edge: O,
+    (edge, edge_crv): (O, &Curve),
     p: Point3,
     tol: f64,
 ) -> Result<Option<(f64, f64)>> {
-    let dropped = edge_curve(geometry, edge)?
-        .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?
-        .drop_point(
-            k,
-            &edge_interval(geometry, edge)?,
-            p,
-            None,
-            tol,
-            None,
-            SolverOperation::Minimize,
-        )?;
+    let dropped = edge_crv.drop_point(
+        k,
+        &edge_interval(geometry, edge)?,
+        p,
+        None,
+        tol,
+        None,
+        SolverOperation::Minimize,
+    )?;
     Ok(dropped
         .success
         .then_some((dropped.distance, dropped.parameter)))
@@ -3718,7 +3714,7 @@ fn curve_piece_runs_along_edge<O: ClassObject>(
     }
     let mut params = [0.0; 2];
     for (p, s) in ends.into_iter().zip(params.iter_mut()) {
-        let Some((_, param)) = drop_onto_edge(k, geometry, edge, p, tol)? else {
+        let Some((_, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, tol)? else {
             return Ok(false);
         };
         *s = param;
@@ -3799,7 +3795,7 @@ fn tail_gap_within_vertex_ball<O: ClassObject>(
     }
     let mut params = [0.0; 2];
     for (p, s) in ends.into_iter().zip(params.iter_mut()) {
-        let Some((_, param)) = drop_onto_edge(k, geometry, edge, p, tol)? else {
+        let Some((_, param)) = drop_onto_edge(k, geometry, (edge, edge_crv), p, tol)? else {
             return Ok(None);
         };
         *s = param;
@@ -4453,6 +4449,25 @@ mod tests {
         let ivl = cc.at(0).expect("interval");
         assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
         assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+    }
+
+    #[test]
+    fn an_edge_without_a_curve_is_skipped_not_an_error() {
+        // the start 1e-11 off the edge runs along it (as in
+        // `an_unclassified_end_along_an_edge_is_on_that_edge`), but the caller's edge has no
+        // curve: it proves nothing, the other edge at the corner does not take the interval,
+        // and nothing fails for want of the curve
+        let (k, mut geo, mut cc, edge) = along_top_edge(Point3::new(0.5, 1e-11, 1.0));
+        let Some(&EntityRef::Edge(e)) = geo.entities.get(edge.0) else {
+            panic!("not an edge handle");
+        };
+        geo.brep.edge_mut(e).expect("edge").curve = None;
+        let raise = cc.classify_edge_interval(&k, &geo, 0).expect("classify");
+        assert!(raise.is_none());
+        let ivl = cc.at(0).expect("interval");
+        assert_eq!(ivl.mid.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.start.point_class(), PointClassType::Unknown);
+        assert_eq!(ivl.end.point_class(), PointClassType::Vertex);
     }
 
     #[test]

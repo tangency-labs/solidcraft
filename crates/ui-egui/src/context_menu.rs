@@ -1085,6 +1085,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         rule.one(act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id }))),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
+        act("ui.exportSvg", "Export SVG…", "export").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
@@ -2385,6 +2386,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(id) = id_of(&p, "sketch") {
                 let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
                 app.pick_save_command(&format!("{name}.dxf"), &["dxf"], "sketch.export_dxf", json!({"sketch": id}));
+            }
+        }
+        "ui.exportSvg" => {
+            if let Some(id) = id_of(&p, "sketch") {
+                let name = app.session.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+                app.pick_save_command(&format!("{name}.svg"), &["svg"], "sketch.export_svg", json!({"sketch": id}));
             }
         }
         "ui.extrudeSketch" => {

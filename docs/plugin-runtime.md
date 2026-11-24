@@ -123,7 +123,7 @@ the user grants it, as folders are:
 
 | Group | Commands |
 |---|---|
-| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
+| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
 | `doc` | `doc.*`: opening, recovering or switching designs |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
