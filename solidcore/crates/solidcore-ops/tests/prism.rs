@@ -1823,8 +1823,9 @@ fn a_round_notch_drawn_as_two_arcs_keeps_their_meeting_points_on_its_outline() {
 /// twice its diagonal, the 30° bevel across x by √3 times its own diagonal, the top not at all;
 /// a cylinder's side along its axis not at all and across it by four times its box diagonal; a
 /// wide thin disc's caps by their whole diameter (a cap's only vertex is its seam's, brett19 on
-/// #21614); any finite scale of a direction as the unit one; zero no bound; NaN and a face past
-/// the faces refused.
+/// #21614); a ruled spline net along its rulings not at all, short or long, and across a tilt by
+/// twice its height times the tilt's sine; any finite scale of a direction as the unit one; zero
+/// no bound; NaN and a face past the faces refused.
 #[test]
 fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
     let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
@@ -1919,8 +1920,44 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
         if disc.face_plane_normal(&order, f).unwrap().is_some() {
             flat += 1;
             let got = disc.face_straying(&order, f, d).unwrap().unwrap();
-            assert!(got > 1e-2, "cap {f}: {got}");
+            close(got, 2.0 * 8.0_f64.sqrt() * 1000.0 * 4e-6, "disc cap");
         }
     }
     assert_eq!(flat, 2);
+
+    // a plain ruled spline net (brett19 on #21614): a degree-1 loft between a cubic at z = 0 and
+    // the same cubic at z = h runs straight along its rulings, however short they are against
+    // its width, and strays across a direction tilted θ off them by 2·h·sin θ
+    let ruled = |width: f64, h: f64| {
+        let cubic = |z: f64| solidcore_ops::sweep::Curve::Nurbs {
+            degree: 3,
+            points: vec![
+                [0.0, 0.0, z, 1.0],
+                [0.3 * width, 0.2 * width, z, 1.0],
+                [0.7 * width, -0.2 * width, z, 1.0],
+                [width, 0.0, z, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        };
+        let sheet =
+            solidcore_ops::sweep::loft(&[vec![cubic(0.0)], vec![cubic(h)]], 1, false).unwrap();
+        let (_, order) = sheet.to_record().unwrap();
+        assert_eq!(order.faces.len(), 1);
+        (sheet, order)
+    };
+    for (width, h) in [(10.0, 10.0), (10.0, 1.0), (1000.0, 1.0)] {
+        let (sheet, order) = ruled(width, h);
+        let along = sheet
+            .face_straying(&order, 0, [0.0, 0.0, 1.0])
+            .unwrap()
+            .unwrap();
+        assert!(along <= zone, "ruled {width} x {h}: {along}");
+    }
+    let (sheet, order) = ruled(10.0, 10.0);
+    let tilted = sheet
+        .face_straying(&order, 0, [1e-3, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
+    close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
 }
