@@ -3446,19 +3446,19 @@ fn hostile_sketched_cells_are_refused_and_never_panic() {
         }
     });
     add("bow tie", &|c, _| {
-        c.profile = polygon(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)])
+        c.profile = polygon(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
     });
     add("zero area", &|c, _| {
-        c.profile = polygon(&[(0.0, 0.0), (10.0, 0.0)])
+        c.profile = polygon(&[(0.0, 0.0), (10.0, 0.0)]);
     });
     add("profile NaN", &|c, _| {
-        c.profile = polygon(&[(0.0, 0.0), (nan, 0.0), (10.0, 10.0)])
+        c.profile = polygon(&[(0.0, 0.0), (nan, 0.0), (10.0, 10.0)]);
     });
     add("profile coordinate huge", &|c, _| {
-        c.profile = rect(0.0, 0.0, 1e10, 1e10)
+        c.profile = rect(0.0, 0.0, 1e10, 1e10);
     });
     add("profile reaches too far", &|c, _| {
-        c.profile = rect(0.0, 0.0, 3e6, 3e6)
+        c.profile = rect(0.0, 0.0, 3e6, 3e6);
     });
     add("profile with a spline", &|c, _| {
         c.profile = Loop2 {

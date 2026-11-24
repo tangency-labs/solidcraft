@@ -225,7 +225,7 @@ fn centroid(prims: &[Prim]) -> Vec2 {
             let dist = 4.0 * r * (theta / 2.0).sin().powi(3) / (3.0 * (theta - theta.sin()));
             let mid = a0 + sweep / 2.0;
             area += s;
-            moment = moment + (c + Vec2::new(mid.cos(), mid.sin()) * dist) * s;
+            moment += (c + Vec2::new(mid.cos(), mid.sin()) * dist) * s;
         }
     }
     if area.abs() > 1e-300 {
@@ -360,12 +360,10 @@ fn offsets(a: Vec2, b: Vec2, l: f64) -> Result<Vec<(i64, i64)>, CellGridError> {
         if !(out.len() as f64 + n <= MAX_OFFSETS as f64) {
             return Err(too_many());
         }
-        let mut di = lo as i64;
-        for _ in 0..(n as i64) {
+        for di in (lo as i64..).take(n as usize) {
             if !(di == 0 && dj == 0) {
                 out.push((di, dj));
             }
-            di += 1;
         }
     }
     Ok(out)
@@ -652,14 +650,13 @@ pub fn plan_sketch(
             }
             true
         } else {
-            match free::clip_cell(&region, &FreeCell::General(&cl)) {
-                Some(p) => pieces = p,
-                None => {
-                    out.warnings.push(format!(
-                        "cell ({i}, {j}) could not be trimmed to the field and was left solid"
-                    ));
-                    continue;
-                }
+            if let Some(p) = free::clip_cell(&region, &FreeCell::General(&cl)) {
+                pieces = p;
+            } else {
+                out.warnings.push(format!(
+                    "cell ({i}, {j}) could not be trimmed to the field and was left solid"
+                ));
+                continue;
             }
             pieces.len() == 1
                 && pieces
