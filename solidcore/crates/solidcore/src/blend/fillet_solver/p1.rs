@@ -516,6 +516,18 @@ impl FilletSurfaceGenerator {
             )? {
                 return Ok((s, None));
             }
+            if ball
+                .chamfer
+                .and_then(
+                    crate::surface::procedural_blend::chamfer::ChamferDefinition::constant_setback,
+                )
+                .is_some()
+            {
+                return Err(SolidError::surface(
+                    OP,
+                    crate::error::surface::SurfaceFailure::NetNotCertified,
+                ));
+            }
         }
         let uv = [uv1, uv2];
         let [s1, s2] = surfaces;
@@ -716,6 +728,25 @@ pub struct FilletSolver {
 impl FilletSolver {
     /// `SmFilletSolver_TYPE` (`GetType`).
     pub const TYPE: i64 = FILLET_SOLVER_TYPE;
+
+    /// The common setback when a constant-distance solver traces a chamfer by
+    /// its equal setbacks. Its rolling radius depends on the normals at the feet.
+    pub(crate) fn station_setback(&self) -> Option<f64> {
+        self.chamfer.and_then(
+            crate::surface::procedural_blend::chamfer::ChamferDefinition::constant_setback,
+        )
+    }
+
+    /// Reject a Newton trial outside the equal-setback radius domain.
+    pub(crate) fn check_station_radius(&self, radius: f64, op: &'static str) -> Result<()> {
+        if self.station_setback().is_some() && !(radius.is_finite() && radius >= 0.0) {
+            return Err(SolidError::invalid_input(
+                op,
+                "the equal-setback radius must be finite and nonnegative",
+            ));
+        }
+        Ok(())
+    }
 
     /// `SmFilletSolver(crContext, dThisApproxTol3d, dThisAngTolRad,
     /// dTangencyTolerance)` without its fillet geometry: no edge uses, surfaces or
@@ -3080,6 +3111,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
     }
 
     fn set_offsets(&mut self, radius: f64) -> Result<()> {
+        self.solver.check_station_radius(radius, OP)?;
         let (i, o) = (self.surf_index, 1 - self.surf_index);
         let d = radius * self.orientation;
         let od = radius * self.other_orientation;
@@ -3158,8 +3190,33 @@ impl<'a> FindClippedRadiusEfo<'a> {
         Ok(p.distance(op))
     }
 
-    /// `Evaluate(dRadius, rdFOfT, rdFPrimeOfT, rbFoundAnswer)`: `F` is the rail point
-    /// distance minus the target distance at the boundary crossing for `radius`, `F'`
+    fn constraint(&mut self, k: &Kernel, radius: f64, uv: Point2, other_uv: Point2) -> Result<f64> {
+        if let Some(setback) = self.solver.station_setback() {
+            let mut inward = [Vec3::ZERO; 2];
+            for ((normal, rail), (uv, orientation)) in inward
+                .iter_mut()
+                .zip([self.surf_index, 1 - self.surf_index])
+                .zip([(uv, self.orientation), (other_uv, self.other_orientation)])
+            {
+                let offset = &mut self
+                    .solver
+                    .surface_mut(rail)?
+                    .ok_or_else(|| invalid("no offset surface"))?
+                    .surface
+                    .surface;
+                *normal = orientation
+                    * offset.evaluate_normal_extending(k, uv, Side::Left, Side::Left)?;
+            }
+            let (target, _) =
+                crate::blend::fillet_standard_solver::p1::equal_setback_radius(setback, inward)?;
+            Ok(radius - target)
+        } else {
+            Ok(self.base_points(k, uv, other_uv)? - self.target_distance)
+        }
+    }
+
+    /// `Evaluate(dRadius, rdFOfT, rdFPrimeOfT, rbFoundAnswer)`: `F` is the station's
+    /// chord or setback constraint at the boundary crossing for `radius`, `F'`
     /// its forward difference over `SM_ZONE_TOL_3D`. Returns `(F, F', found)`; the
     /// out-parameters upstream leaves on a failure path are in
     /// [`Self::last_f_of_t`], [`Self::last_f_prime`] and [`Self::last_found`].
@@ -3192,8 +3249,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
             self.uv.x = t_found;
             self.uv.y = self.iso_param;
         }
-        let distance = self.base_points(k, self.uv, self.other_uv)?;
-        let f_of_t = distance - self.target_distance;
+        let f_of_t = self.constraint(k, radius, self.uv, self.other_uv)?;
         self.last_f_of_t = f_of_t;
         if f_of_t.abs() < EFF_ZERO {
             found = true;
@@ -3214,8 +3270,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
         } else {
             Point2::new(t_found, self.iso_param)
         };
-        let distance1 = self.base_points(k, uv_found, other_uv_found)?;
-        let f_prime = (distance1 - self.target_distance - f_of_t) / step_size;
+        let f_prime = (self.constraint(k, radius, uv_found, other_uv_found)? - f_of_t) / step_size;
         self.last_f_prime = f_prime;
         Ok((f_of_t, f_prime, found))
     }

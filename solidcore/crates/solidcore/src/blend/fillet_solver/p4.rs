@@ -5130,7 +5130,9 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
                 None
             };
         // a chamfer's chord and sizes, for the linear generator's definition (#2486)
-        let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist {
+        let chord = if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::ConstDist
+            && self.ops.solver().station_setback().is_none()
+        {
             self.ops.constant_distance().ok()
         } else {
             None

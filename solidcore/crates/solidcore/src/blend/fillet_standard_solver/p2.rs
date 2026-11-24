@@ -3430,8 +3430,9 @@ impl super::p1::LinearCrossSectionFsg {
     /// rail of no length (the offsets meet on an axis: a cylinder's rim chamfered by its
     /// radius is a cone to its apex, whose centre line and rail on the top are one point,
     /// and a section has no length to run along), a
-    /// constant-distance solver on a face that is not a plane (its offsets vary along
-    /// the edge), a solver of another kind, or rails that are not those feet.
+    /// fixed chord on a curved face, a solver of another kind, or rails that are
+    /// not those feet. An equal-setback solver gets its offsets from the wedge
+    /// between the supports at the two feet.
     ///
     /// # Errors
     ///
@@ -3541,6 +3542,17 @@ impl super::p1::LinearCrossSectionFsg {
             // a chord's offsets are constant only where the wedge is: between planes
             (FilletSolverType::ConstDist, _, Some(l)) if planes => {
                 let sizes = ChamferDefinition::new(ChamferSize::Chord(l), wedge)?;
+                (sizes.offsets()?, sizes)
+            }
+            (FilletSolverType::ConstDist, _, None) => {
+                let Some(c) = ball.chamfer else {
+                    return Ok(None);
+                };
+                let sizes = if planes {
+                    ChamferDefinition::new(c.size, wedge)?
+                } else {
+                    c.at_every_station()?
+                };
                 (sizes.offsets()?, sizes)
             }
             _ => return Ok(None),
