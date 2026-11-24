@@ -62,6 +62,14 @@
 //!   tangent is dropped onto the offset evaluated on the side asked for
 //!   ([`OffsetSurface::evaluate_on_sides`]): the offset's own `Evaluate` answers from its
 //!   base's default side whatever side is asked.
+//! - **Pole on the seam.** Not upstream (WR-647): where the surface is closed in a
+//!   pole's free parameter and `FindDegenParamForDirection`'s tangent match is on the
+//!   seam (within the drop's UV tolerance, [`seam_uv_tols`]), `SetProperties`' pole
+//!   adjustment and `GetNextPoint`'s span-end one take the other seam end (the same
+//!   meridian and point) when only that end is in the drop domain, or when both are and
+//!   the point the pole point continues (the drop point, the span's start) is on that
+//!   end: upstream's in-domain image of the natural domain could put the point across
+//!   the seam from its curve, out of a drop domain that ends there ([`keep_seam_side`]).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages (`MSG` at 2000 control points).
 
@@ -88,7 +96,7 @@ use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
 use crate::surface::surface::p2::{drop_vectors, SurfaceKind};
 use crate::surface::surface::p4::NoObject;
-use crate::surface::surface::p7::drop_vectors_at;
+use crate::surface::surface::p7::{approx_derivative_lengths, drop_vectors_at};
 use crate::surface::surface::Surface;
 use crate::topology::ObjectHandle;
 
@@ -440,6 +448,102 @@ fn find_degen_param(
     }
 }
 
+/// The drop's UV tolerances over the natural domain `natural` of `surface` (`dUVTolX`,
+/// `dUVTolY` of `DropCurve`): `approx_tol_3d` over one plus the approximate first
+/// derivative lengths. Within them a drop point is on the domain's ends (the seam of a
+/// closed surface).
+///
+/// # Errors
+///
+/// Those of [`approx_derivative_lengths`].
+pub(crate) fn seam_uv_tols(
+    k: &Kernel,
+    surface: &Surface,
+    natural: &Extent2d,
+    approx_tol_3d: f64,
+) -> Result<(f64, f64)> {
+    let project_size = approx_derivative_lengths(k, surface, natural)?;
+    Ok((
+        approx_tol_3d / (project_size.x + 1.0),
+        approx_tol_3d / (project_size.y + 1.0),
+    ))
+}
+
+/// The pole point `found` (the tangent match of [`find_degen_param`]) on the side of
+/// the seam its curve is on (not upstream, WR-647). Where `surface` is closed in the
+/// pole's free parameter (`singular_dir`, as `FindDegenParamForDirection` reads it) and
+/// `found` is on one end of that interval within the drop's UV tolerance
+/// ([`seam_uv_tols`]), it is on the seam, and the other end is the same meridian (the
+/// same tangent direction and the same 3D point, the pole). The parameter is then the
+/// other end when that end is in the drop domain `uv_domain` (within the tolerance) and
+/// `found`'s end is not, or when both are and `reference` (the point the pole point
+/// continues: the drop point, or the span's start) is on the other end within the
+/// tolerance. Otherwise `found` unchanged.
+///
+/// # Errors
+///
+/// Those of the natural domain, [`seam_uv_tols`] and [`Surface::is_closed`]
+/// ([`SolidError::Unported`] and cancellation; its other failures count as not
+/// closed, as in `FindDegenParamForDirection`).
+fn keep_seam_side(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    reference: Point2,
+    found: Point2,
+    singular_dir: SurfParamType,
+    approx_tol_3d: f64,
+) -> Result<Point2> {
+    let singular_u = singular_dir == SurfParamType::U;
+    // (the free parameter as `FindDegenParamForDirection` takes it: u for a singular
+    // u direction, else v)
+    let free = |e: &Extent2d| {
+        if singular_u {
+            e.u_interval()
+        } else {
+            e.v_interval()
+        }
+    };
+    let (s_ref, s_found) = if singular_u {
+        (reference.x, found.x)
+    } else {
+        (reference.y, found.y)
+    };
+    let natural = surface.natural_uv_domain_with_nurb(k)?;
+    let ivl = free(&natural);
+    let (lo, hi) = (ivl.min(), ivl.max());
+    let closed =
+        ignored(surface.is_closed(k, &natural, singular_dir, None, true))?.is_some_and(|(c, _)| c);
+    if !closed {
+        return Ok(found);
+    }
+    let (tol_u, tol_v) = seam_uv_tols(k, surface, &natural, approx_tol_3d)?;
+    let tol = if singular_u { tol_u } else { tol_v };
+    let near = |s: f64, end: f64| (s - end).abs() <= tol;
+    let (at, other) = if near(s_found, lo) && !near(s_found, hi) {
+        (lo, hi)
+    } else if near(s_found, hi) && !near(s_found, lo) {
+        (hi, lo)
+    } else {
+        return Ok(found);
+    };
+    let drop = free(uv_domain);
+    let inside = |s: f64| drop.min() - tol <= s && s <= drop.max() + tol;
+    let to_other = if inside(other) {
+        !inside(at) || (near(s_ref, other) && !near(s_ref, at))
+    } else {
+        false
+    };
+    if !to_other {
+        return Ok(found);
+    }
+    Ok(if singular_u {
+        Point2::new(other, found.y)
+    } else {
+        Point2::new(found.x, other)
+    })
+}
+
 /// The status upstream would store for a failed callee (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
     if let Some(code) = e.upstream_status() {
@@ -490,13 +594,23 @@ impl DropPt {
         if on_pole && self.degen_curve != Some(true) && adjust_pole_pt {
             // find degenParam value at a singularity that matches the dropCurve UV
             // direction
-            self.uv_pd[0] = find_degen_param(
+            let found = find_degen_param(
                 k,
                 surface,
                 self.uv_pd[0],
                 self.crv_pd[1],
                 true,
                 singular_direction,
+            )?;
+            // not upstream (WR-647): on the seam, on the side the drop point is on
+            self.uv_pd[0] = keep_seam_side(
+                k,
+                surface,
+                uv_domain,
+                self.uv_pd[0],
+                found,
+                singular_direction,
+                approx_tol_3d,
             )?;
         }
 
@@ -983,13 +1097,23 @@ impl DropPt {
                 None => is_singularity(k, surface, end.uv_pd[0], approx_tol_3d)?,
             };
             if singular {
-                end.uv_pd[0] = find_degen_param(
+                let found = find_degen_param(
                     k,
                     surface,
                     end.uv_pd[0],
                     end.crv_pd[1],
                     false,
                     singular_direction,
+                )?;
+                // not upstream (WR-647): on the seam, on the span start's side
+                end.uv_pd[0] = keep_seam_side(
+                    k,
+                    surface,
+                    uv_domain,
+                    start.uv_pd[0],
+                    found,
+                    singular_direction,
+                    approx_tol_3d,
                 )?;
             }
 
@@ -1732,5 +1856,138 @@ mod tests {
             e.cause()
         );
         assert_eq!(p.good_drop, Some(false));
+    }
+
+    /// A sphere of radius 10 about the origin, `degrees` of longitude round its axis
+    /// (u), pole to pole (v); with `swap` its parameters swapped (the poles on u ends).
+    fn sphere(k: &Kernel, degrees: f64, swap: bool) -> Surface {
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        let mut sp = Sphere::new(
+            k,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, -90.0, degrees, 90.0),
+            10.0,
+            SphereOptions::default(),
+        )
+        .unwrap();
+        sp.make_nurb(k).unwrap();
+        let mut s = Surface::from(sp);
+        if swap {
+            s.swap_uv(k).unwrap();
+        }
+        s
+    }
+
+    /// WR-647: at a pole on the seam, the tangent match `found` on a seam end outside
+    /// the drop domain takes the other end when that one is inside; in a domain with
+    /// both ends, it takes the end the point it continues is on. The same at either end
+    /// and with the poles on u ends (free parameter v).
+    #[test]
+    fn a_pole_point_on_the_seam_keeps_its_side() {
+        let k = Kernel::default();
+        let tol = 1e-6;
+        let eps = 1e-9;
+        for swap in [false, true] {
+            let s = sphere(&k, 360.0, swap);
+            let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let dir = if swap {
+                SurfParamType::V
+            } else {
+                SurfParamType::U
+            };
+            let (lo, hi, other) = if swap {
+                (d.v_min(), d.v_max(), d.u_max())
+            } else {
+                (d.u_min(), d.u_max(), d.v_max())
+            };
+            let mid = 0.5 * (lo + hi);
+            // (the free parameter `f` and the other one `o` as a UV point; a drop domain
+            // `a..b` in the free parameter)
+            let at = |f: f64, o: f64| {
+                if swap {
+                    Point2::new(o, f)
+                } else {
+                    Point2::new(f, o)
+                }
+            };
+            let dom = |a: f64, b: f64| {
+                let (p, q) = (
+                    at(a, if swap { d.u_min() } else { d.v_min() }),
+                    at(b, other),
+                );
+                Extent2d::from_bounds(p.x, p.y, q.x, q.y)
+            };
+            for (domain, from, to, want) in [
+                // only one end in the drop domain, whatever the reference
+                (dom(mid, hi), hi, lo + eps, hi),
+                (dom(mid, hi), mid, lo + eps, hi),
+                (dom(lo, mid), lo, hi - eps, lo),
+                (dom(lo, mid), mid, hi - eps, lo),
+                // both ends: the reference's end
+                (dom(lo, hi), hi, lo + eps, hi),
+                (dom(lo, hi), lo, hi - eps, lo),
+            ] {
+                let got = keep_seam_side(&k, &s, &domain, at(from, other), at(to, other), dir, tol)
+                    .unwrap();
+                assert_eq!(got, at(want, other), "swap {swap}: from {from}, found {to}");
+            }
+        }
+    }
+
+    /// WR-647: `found` stays as `FindDegenParamForDirection` gave it unless it is on the
+    /// seam of a closed free parameter and the other end is the drop domain's side:
+    /// in a domain with both ends, a reference off the seam (a span start far from it)
+    /// or on its own end; an answer off the seam; an answer whose end is the only one in
+    /// the domain; and a sphere open round its axis.
+    #[test]
+    fn a_pole_point_off_the_seam_or_on_an_open_surface_is_unchanged() {
+        let k = Kernel::default();
+        let tol = 1e-6;
+        let eps = 1e-9;
+        let s = sphere(&k, 360.0, false);
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (lo, hi, v) = (d.u_min(), d.u_max(), d.v_max());
+        let mid = 0.5 * (lo + hi);
+        let q = 0.25 * (hi - lo);
+        let dom = |a: f64, b: f64| Extent2d::from_bounds(a, d.v_min(), b, v);
+        for (domain, from, to) in [
+            (dom(lo, hi), hi - q, lo + eps),
+            (dom(lo, hi), lo + q, hi - eps),
+            (dom(lo, hi), lo, lo + eps),
+            (dom(lo, hi), hi, hi - eps),
+            (dom(lo, hi), hi, lo + 10.0 * tol),
+            (dom(mid, hi), hi, hi - q),
+            (dom(mid, hi), hi, hi - eps),
+            (dom(lo, mid), hi, lo + eps),
+        ] {
+            let found = Point2::new(to, v);
+            let got = keep_seam_side(
+                &k,
+                &s,
+                &domain,
+                Point2::new(from, v),
+                found,
+                SurfParamType::U,
+                tol,
+            )
+            .unwrap();
+            assert_eq!(got, found, "from {from}, found {to}");
+        }
+        let open = sphere(&k, 180.0, false);
+        let d = open.natural_uv_domain_with_nurb(&k).unwrap();
+        let found = Point2::new(d.u_min() + eps, d.v_max());
+        let got = keep_seam_side(
+            &k,
+            &open,
+            &d,
+            Point2::new(d.u_max(), d.v_max()),
+            found,
+            SurfParamType::U,
+            tol,
+        )
+        .unwrap();
+        assert_eq!(got, found, "open sphere");
     }
 }

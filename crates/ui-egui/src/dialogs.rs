@@ -13,7 +13,9 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel, ThinSide};
+use solidcraft_engine::doc::{
+    AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
+};
 use solidcraft_engine::geom::Aabb3;
 
 use crate::SolveApp;
@@ -246,6 +248,11 @@ crate::dialog_descriptor::dialog_descriptors! {
                 spacing: String,
                 count2: String,
                 spacing2: String,
+                /// Each direction's extent (first copy to last), for the distance types that
+                /// take one (#8523); which type each direction has is `distance1` / `distance2`
+                /// in the dialog's extra parameters.
+                extent: String,
+                extent2: String,
             },
             /// Circular pattern of bodies around an axis.
             PatternCirc {
@@ -268,6 +275,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// An imported mesh body rebuilt as editable faces (#3001).
             MeshConvert {
                 tolerance: String,
+            },
+            /// A separate reduced copy of a mesh.
+            MeshReduce {
+                mode: usize,
+                count: String,
+                percentage: String,
             },
             /// A construction axis, point or plane made from picks alone (#2474): input `i` is the
             /// command's parameter `keys[i]`, and `t` (along a path) when it takes one.
@@ -773,7 +786,7 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
     let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
-    if !d.previews() && !multiple_threads && d.editing.is_none() {
+    if !d.previews() && !multiple_threads && !matches!(d.kind, Kind::MeshReduce { .. }) && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;
@@ -1075,6 +1088,10 @@ impl Dialog {
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
                 vec![SelInput::new("Mesh body", BODIES, false)],
             ),
+            "mesh.reduce" => Dialog::new(
+                Kind::MeshReduce { mode: 0, count: String::new(), percentage: "50".into() },
+                vec![SelInput::new("Mesh body", BODIES, false)],
+            ),
             // Plane, Axis and Point open as the method their picks call for (`dialogs_auto`).
             _ if solidcraft_engine::cmd::is_construct_tool(id) => return auto::start(app, id),
             "construct.plane.midplane" => Dialog::new(
@@ -1135,7 +1152,14 @@ impl Dialog {
                 )],
             ),
             "solid.pattern.rectangular" => Dialog::new(
-                Kind::PatternRect { count: "3".into(), spacing: length_default(s, "20"), count2: "1".into(), spacing2: length_default(s, "20") },
+                Kind::PatternRect {
+                    count: "3".into(),
+                    spacing: length_default(s, "20"),
+                    count2: "1".into(),
+                    spacing2: length_default(s, "20"),
+                    extent: length_default(s, "100"),
+                    extent2: length_default(s, "100"),
+                },
                 vec![
                     SelInput::new("Objects", BODIES, true),
                     SelInput::new("Direction", AXES | EDGES, false),
@@ -1581,6 +1605,8 @@ impl Dialog {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         let move_field = crate::dialogs_move::value_field(self);
         let through_point = offset_through_point(self).is_some();
+        // Quantity and Extent works out the spacing, so the canvas value is the extent (#8523).
+        let pattern_extent = pattern_distance(&self.extra, 0) == PatternDistance::CountExtent;
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1619,6 +1645,7 @@ impl Dialog {
                     _ => ("X", ValueKind::Length, x),
                 },
             },
+            Kind::PatternRect { extent, .. } if pattern_extent => ("ui.pattern_extent", ValueKind::Length, extent),
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
@@ -3053,6 +3080,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Material { .. } => "PHYSICAL MATERIAL",
         Kind::Midplane => "MIDPLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
+        Kind::MeshReduce { .. } => "REDUCE MESH",
         Kind::Construct { title, .. } => title,
         Kind::ConstructAuto { command: "construct.plane", .. } => "cmd.construct.plane",
         Kind::ConstructAuto { command: "construct.axis", .. } => "cmd.construct.axis",
@@ -3347,6 +3375,8 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                         spacing: length_default(session, "20"),
                         count2: "1".into(),
                         spacing2: length_default(session, "20"),
+                        extent: length_default(session, "100"),
+                        extent2: length_default(session, "100"),
                     },
                     vec![
                         SelInput::new("Objects", BODIES, true),
@@ -3860,6 +3890,26 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
 }
 
 /// Feature patterns use the same source-fixed slot ordering and controls as sketch patterns.
+/// A rectangular pattern direction's distance type (`index` 0 or 1), from the dialog's extra
+/// parameters (#8523); count and spacing until one is chosen.
+pub(crate) fn pattern_distance(extra: &serde_json::Map<String, Value>, index: usize) -> PatternDistance {
+    let key = if index == 0 { "distance1" } else { "distance2" };
+    extra.get(key).and_then(Value::as_str).and_then(PatternDistance::from_word).unwrap_or_default()
+}
+
+/// One rectangular pattern direction's values (`k` "1" or "2") as its distance type uses them.
+fn pattern_values(p: &mut Value, k: &str, distance: PatternDistance, count: &str, spacing: &str, extent: &str) {
+    if distance.uses_count() {
+        p[format!("count{k}")] = json!(count);
+    }
+    if distance.uses_spacing() {
+        p[format!("spacing{k}")] = json!(spacing);
+    }
+    if distance.uses_extent() {
+        p[format!("extent{k}")] = json!(extent);
+    }
+}
+
 fn feature_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
     use solidcraft_engine::sketch::PatternAlignment;
     let (label, alignment_key, reversed_key) =
@@ -5078,7 +5128,9 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.shell") => &["direction", "tangent_chain"],
         Some("solid.fillet") => &["type", "fit", "corner", "radius2", "mid", "radii", "swap_ends", "smooth"],
         Some("solid.mirror") => &["combine"],
-        Some("solid.pattern.rectangular") => &["alignment", "reversed", "alignment2", "reversed2"],
+        Some("solid.pattern.rectangular") => {
+            &["alignment", "reversed", "alignment2", "reversed2", "distance1", "distance2", "copy_at_end1", "copy_at_end2"]
+        }
         Some("solid.pattern.circular") => &["alignment", "reversed"],
         Some("solid.hole") => &["all_points", "flip"],
         Some("solid.align") => &["from_snap", "to_snap"],
@@ -5432,11 +5484,14 @@ fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &m
     }
 }
 
-/// The plane an extrude's picked profiles lie in: the first pick's sketch plane, or its planar face.
+/// The plane an extrude's picked profiles lie in: the first pick's sketch plane (a profile's or a
+/// thin extrude's curve's), or its planar face.
 fn profile_plane(s: &Session, first: &Sel) -> Option<solidcore_record::Plane> {
     let st = crate::open_meshing::session_world(s);
     match first {
         Sel::Profile { sketch, .. } => st.sketch(*sketch).map(|ss| ss.plane),
+        // A thin extrude's curve: its sketch's plane (no sketch named: the active one's).
+        Sel::SketchCurve { sketch, .. } => st.sketch(sketch.or(s.active_sketch)?).map(|ss| ss.plane),
         Sel::Face { body, index, .. } => st.body(body)?.body.planar_face(*index),
         _ => None,
     }
@@ -6601,7 +6656,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
+        Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } => {
             need(0, "objects")?;
             let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d1 = match (sels(d, 1).first(), kept) {
@@ -6609,7 +6664,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 (None, Some(k)) => k,
                 (None, None) => return Err("select a direction (an axis, a sketch line or a straight edge) first".into()),
             };
-            let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
+            let mut p = json!({"dir1": pt(d1)});
+            // Each direction sends the values its distance type uses (#8523); the command keeps
+            // a count or spacing it works out, so switching back shows what the copies had.
+            let (distance1, distance2) = (pattern_distance(&d.extra, 0), pattern_distance(&d.extra, 1));
+            pattern_values(&mut p, "1", distance1, count, spacing, extent);
             pattern_objects(s, sels(d, 0), &mut p);
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d2 = match sels(d, 2).first() {
@@ -6618,8 +6677,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             if let Some(d2) = d2 {
                 p["dir2"] = pt(d2);
-                p["count2"] = json!(count2);
-                p["spacing2"] = json!(spacing2);
+                pattern_values(&mut p, "2", distance2, count2, spacing2, extent2);
             }
             ("solid.pattern.rectangular", p)
         }
@@ -6703,10 +6761,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 // Each curve's sketch, resolved one pick at a time: the path may join the curves
                 // of several sketches (#16168), so a pick in another sketch is saved with that
-                // sketch. A pick whose sketch cannot be resolved still refuses the path.
+                // sketch. A pick whose sketch cannot be resolved still refuses the path. A pick
+                // whose sketch no longer holds the curve is stale (the curve was deleted or
+                // renamed there): it is left out, so the path can be picked again (#17550).
+                let st = crate::open_meshing::session_world(s);
                 let mut resolved: Vec<(String, u64)> = Vec::new();
                 for sel in sels(d, 1) {
-                    let Sel::SketchCurve { id, .. } = sel else { continue };
+                    let Sel::SketchCurve { id, sketch: named } = sel else { continue };
+                    if let Some(sk) = named
+                        && !sketch_holds_curve(&st, *sk, id)
+                    {
+                        continue;
+                    }
                     let sk = picks_sketch(app, std::slice::from_ref(sel), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
                     resolved.push((id.clone(), sk));
                 }
@@ -6751,6 +6817,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 _ => return Err("pick the mesh body to convert".into()),
             };
             ("mesh.convert", json!({"body": body, "tolerance": tolerance}))
+        }
+        Kind::MeshReduce { mode, count, percentage } => {
+            need(0, "the mesh body")?;
+            let body = match sels(d, 0).first() {
+                Some(Sel::Body { name }) => name.clone(),
+                _ => return Err("pick the mesh body to reduce".into()),
+            };
+            if *mode == 0 {
+                let value = percentage.trim().parse::<f64>().map_err(|_| "enter a retained percentage between 0 and 100")?;
+                if !value.is_finite() || value <= 0.0 || value >= 100.0 {
+                    return Err("enter a retained percentage between 0 and 100".into());
+                }
+                ("mesh.reduce", json!({"body": body, "percentage": value}))
+            } else {
+                let value = count.trim().parse::<usize>().map_err(|_| "enter a positive triangle count")?;
+                if value == 0 {
+                    return Err("enter a positive triangle count".into());
+                }
+                ("mesh.reduce", json!({"body": body, "triangle_count": value}))
+            }
         }
         Kind::Midplane => {
             need(0, "the first plane")?;
@@ -7585,6 +7671,12 @@ pub(crate) fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) ->
         return Some(a);
     }
     st.sketches.iter().rev().map(|ss| ss.feature).find(|sid| Some(*sid) != not && has(*sid))
+}
+
+/// Whether the sketch `sketch` still holds the curve `id` (a 3D wire counts): a curve deleted
+/// or renamed in that sketch leaves a pick of it naming nothing the app can use (#17550).
+fn sketch_holds_curve(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str) -> bool {
+    st.sketch(sketch).is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some())
 }
 
 /// An axis selection as a line: a point on it and its unit direction (origin axes, or a straight
@@ -8953,17 +9045,42 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let component_sels: Vec<Sel> =
                 components.iter().filter_map(|id| s.doc.occurrence_of(*id).map(|o| Sel::Occurrence { path: vec![o.id] })).collect();
             let mut d = match pattern {
-                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
+                PatternKind::Rectangular {
+                    dir1,
+                    count1,
+                    spacing1,
+                    dir2,
+                    count2,
+                    spacing2,
+                    alignment,
+                    alignment2,
+                    reversed,
+                    reversed2,
+                    distance1,
+                    distance2,
+                    extent1,
+                    extent2,
+                    copy_at_end1,
+                    copy_at_end2,
+                } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.extra.insert("reversed2".into(), json!(reversed2));
+                    // A recalled distance type must not outlive the pattern being edited.
+                    for (key, distance) in [("distance1", distance1), ("distance2", distance2)] {
+                        d.extra.insert(key.into(), json!(distance.as_str()));
+                    }
+                    d.extra.insert("copy_at_end1".into(), json!(copy_at_end1));
+                    d.extra.insert("copy_at_end2".into(), json!(copy_at_end2));
                     d.kind = Kind::PatternRect {
                         count: count1.to_string(),
                         spacing: spacing1.to_string(),
                         count2: count2.as_deref().map(str::to_string).unwrap_or_else(|| "1".into()),
                         spacing2: spacing2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "20")),
+                        extent: extent1.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
+                        extent2: extent2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
                     };
                     // Directions along the origin axes show as those axes; others are kept as is.
                     for (i, (key, dir)) in [("dir1", Some(*dir1)), ("dir2", *dir2)].into_iter().enumerate() {
@@ -9110,9 +9227,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
                     None => path
                         .iter()
-                        .map(|e| {
+                        .filter_map(|e| {
                             let (sketch, curve) = e.split(*path_sketch);
-                            crate::selection::curve_pick(curve, sketch.0, s.active_sketch)
+                            // A curve the sketch no longer holds is left out: the path must be
+                            // picked again (#17550).
+                            if !sketch_holds_curve(&st, sketch.0, curve) {
+                                return None;
+                            }
+                            Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch))
                         })
                         .collect(),
                 };
@@ -9826,6 +9948,38 @@ mod refused_ok_tests {
             "there is no sheet metal body: start one with Flange > Base"
         );
         assert_eq!(super::shown_error("hole depth must be positive"), "hole depth must be positive");
+    }
+
+    /// Create Sketch on a face that can't keep an attachment is refused and makes no sketch: the
+    /// dialog then offers Use fixed plane, and only that click makes an unattached one (#16523).
+    #[test]
+    fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
+        let mut h = Harness::new();
+        let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
+        run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
+        run(&mut h, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
+        run(&mut h, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
+        run(&mut h, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
+        run(&mut h, "sketch.finish", json!({}));
+        run(&mut h, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+        let (index, point) = {
+            let world = h.app.session.world_state().unwrap();
+            let face = world
+                .body("L")
+                .unwrap()
+                .body
+                .faces(0.01)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
+                .unwrap();
+            (face.index, face.centroid)
+        };
+        let before = h.app.session.doc.to_json();
+        let sel = Sel::Face { body: "L".into(), index, point };
+        let error = start_sketch(&mut h.app, &sel).unwrap_err();
+        assert!(error.contains("fixed"), "{error}");
+        assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");
     }
 
     #[test]

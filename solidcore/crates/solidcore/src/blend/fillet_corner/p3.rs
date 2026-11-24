@@ -328,7 +328,7 @@ pub struct FilletCorner {
     /// The fork's Ball's own members (`m_pBallSurface` and its loop; smlib#79 step 4c,
     /// WR-697): set by its topology on a blend corner that is a Ball.
     pub ball: Option<crate::blend::blend_corner::ball::BallCorner>,
-    /// The blend corner's chamfer event (WR-716, #2345, `fixes.fillet_chamfer_corner`): its
+    /// The blend corner's chamfer event (WR-716, #2345): its
     /// corner type, exact points and, until the patch takes it, the facet's face; set
     /// with [`Self::blend`] on a 3x3 chamfer corner that is the event.
     pub chamfer_corner: Option<crate::blend::blend_corner::chamfer::ChamferCorner>,
@@ -362,6 +362,10 @@ pub struct FilletCorner {
     /// two fillet edges, on the end face and on the wall, meeting at the seam, and the cap is
     /// two faces, one on each, split along the seam's line ([`FilletCorner::wide_cap`]).
     pub(crate) seam_cap: Option<SeamCap>,
+    /// Not upstream (#17605): the face of the target an Nx1 End ends on, set by its topology
+    /// (`finish_nx1_end`). The executive's extended surfaces are shared by all its corners, so
+    /// a face having one does not make it this corner's end face.
+    pub(crate) end_face: Option<FaceId>,
 }
 
 /// Not upstream (#10876): an Nx1 End whose rib and cap span the end face and the wall across
@@ -725,6 +729,7 @@ impl FilletCorner {
             turned_back_arcs: [None, None],
             roll_over: false,
             seam_cap: None,
+            end_face: None,
         }
     }
 

@@ -121,6 +121,7 @@ mod i18n_painted_tests;
 mod i18n_ui_tests;
 pub mod icon_svg;
 pub mod icons;
+pub mod import_options;
 pub mod inference;
 pub mod insert_handles;
 pub mod install;
@@ -129,7 +130,6 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
 pub mod keymap;
-pub mod kicad_import_dialog;
 #[cfg(test)]
 mod kit_gallery_tests;
 #[cfg(test)]
@@ -584,10 +584,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
+    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
+    /// Browse button and the text field still accepts a pasted path, the document library cannot
+    /// choose a folder, and Settings › Design hides the folder settings.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -749,8 +750,6 @@ pub struct SolveApp {
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
-    /// The KiCad import options window, when a board is chosen to open.
-    pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -868,6 +867,9 @@ pub struct SolveApp {
     /// The status message is a refused JSON save of a design with binary data in it, and offers
     /// Save as .sc, so that data is never left out.
     pub status_save_sc: bool,
+    /// The status message that came at this time stays until it is dismissed, instead of going
+    /// after a few seconds (an export that left bodies out).
+    pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -896,6 +898,10 @@ pub struct SolveApp {
     pub(crate) quick_measure: quick_measure::QuickMeasure,
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
+    /// A STEP, IGES, FreeCAD, Rhino or glTF file waiting for its import options (`import_options`).
+    pub import_options: Option<import_options::Ask>,
+    /// Files asked while another waits for its options (several dropped at once), asked in turn.
+    pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
@@ -1137,7 +1143,6 @@ impl SolveApp {
             params: None,
             design_properties: None,
             sketch_report: None,
-            kicad_import: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1194,6 +1199,7 @@ impl SolveApp {
             status_is_tool_hint: false,
             status_undo: false,
             status_save_sc: false,
+            status_sticky_at: None,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -1207,6 +1213,8 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            import_options: None,
+            import_options_waiting: Default::default(),
             plugin_menu: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
@@ -1681,7 +1689,7 @@ impl SolveApp {
         }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
-            return Err(self.tr("prefs.plugin_busy").into());
+            return Err(plugins::busy_message(self));
         }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
@@ -1692,8 +1700,20 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
+        // Reading which designs are open is no file operation: it answers while one runs.
+        if id == "document.list" {
+            return documents::command(self, id, &params);
+        }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The window has the design tabs, which the engine does not: it shows the design asked for.
+        if id == "document.activate" {
+            return documents::command(self, id, &params);
+        }
+        // `new_tab`: the design opens in a tab of its own and the active one stays as it was.
+        if matches!(id, "file.new" | "doc.open") && documents::take_new_tab(&mut params) {
+            return documents::run_in_new_tab(self, id, params);
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
@@ -1791,7 +1811,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
+        let selection_changed =
+            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
@@ -1878,6 +1899,22 @@ impl SolveApp {
                         self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
+                "mesh.reduce" => {
+                    if let (Some(original), Some(target), Some(achieved)) = (
+                        v.get("original_triangles").and_then(Value::as_u64),
+                        v.get("target_triangles").and_then(Value::as_u64),
+                        v.get("achieved_triangles").and_then(Value::as_u64),
+                    ) {
+                        let key = if achieved > target { "ui.mesh_reduce_shortfall" } else { "ui.mesh_reduce_result" };
+                        self.set_status(
+                            solidcraft_ui_text::Locale::for_language(&self.preferences.language).format(
+                                key,
+                                &[("original", &original.to_string()), ("target", &target.to_string()), ("achieved", &achieved.to_string())],
+                            ),
+                            false,
+                        );
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -1893,6 +1930,16 @@ impl SolveApp {
                         self.viewport.nav = Some(viewport::NavMode::Zoom);
                     } else if active {
                         self.viewport.nav = None;
+                    }
+                }
+                mode_id if navigation::toggle_mode(mode_id).is_some() => {
+                    let mode = navigation::toggle_mode(mode_id);
+                    let active = self.viewport.nav_toggle == mode;
+                    if v.get("on").and_then(Value::as_bool).unwrap_or(!active) {
+                        self.viewport.nav_toggle = mode;
+                    } else if active {
+                        self.viewport.nav_toggle = None;
+                        self.viewport.nav_toggle_at = None;
                     }
                 }
                 "view.spin" => {
@@ -2247,14 +2294,12 @@ impl SolveApp {
 
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
     /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240), and a KiCad
-    /// board asks for its import settings.
+    /// board asks for its import options and opens as a design of its own (`import_options`).
     pub(crate) fn pick_design_to_insert(&mut self) {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
                 app.insert_design_async(&path, None);
-            } else if solidcraft_engine::io::is_kicad_path(&path) {
-                kicad_import_dialog::open(app, &path);
             } else {
                 app.insert_path_async(&path);
             }
@@ -2605,6 +2650,9 @@ impl SolveApp {
             "view.fit"
                 | "view.home"
                 | "view.tool.zoom"
+                | "view.pan_mode"
+                | "view.orbit_mode"
+                | "view.zoom_mode"
                 | "view.spin"
                 | "view.grid"
                 | "view.ground_shadow"
@@ -2913,12 +2961,19 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
+            let mut press_pull_panel = false;
             if let Some(d) = &mut self.dialog {
                 // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
                 if empty && let Some(input) = d.inputs.first_mut() {
                     input.accept |= selection::FACES | selection::EDGES;
                 }
+                press_pull_panel = true;
+            }
+            // The panel is the Extrude one, but Press Pull is the command that runs: the ribbon
+            // shows Press Pull as the running command, and Repeat repeats it (#14359).
+            if press_pull_panel && let Some(spec) = solidcraft_engine::find_command("solid.press_pull") {
+                self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
             }
             return;
         }
@@ -3260,6 +3315,7 @@ impl SolveApp {
                         FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
                         FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
                         FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::MeshReduce { .. } => language.text("ui.feature_kind.mesh_reduce"),
                         FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
                         FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
@@ -3578,27 +3634,58 @@ impl SolveApp {
         self.status_save_sc = false;
     }
 
+    /// [`Self::set_status`] for a warning that must not be missed: it stays until dismissed.
+    pub fn set_status_sticky(&mut self, s: impl Into<String>) {
+        self.set_status(s, true);
+        self.status_sticky_at = self.status.as_ref().map(|(_, at, _)| *at);
+    }
+
     /// Retain tool guidance while its owner is suspended, without hiding ordinary statuses.
     pub(crate) fn set_tool_hint(&mut self, text: impl Into<String>) {
         self.set_status(text, false);
         self.status_is_tool_hint = true;
     }
 
-    /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
-    /// line, and what this version couldn't read in the messages.
+    /// Tell the user when a newer SolidCraft saved the design or one of its drawings.
+    /// The status line carries the first notice, and the messages name what could not be read.
     pub(crate) fn say_newer_file(&mut self) {
-        let Some(file) = self.session.doc.newer_file.clone() else { return };
-        for what in &file.not_understood {
-            let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
-            self.messages.push(&text, false, now_ms());
-        }
-        let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
-            let change = file.unknown_changes.first().map_or("", String::as_str);
-            solidcraft_ui_text::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
-        } else {
-            solidcraft_ui_text::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+        let notice = |format: u32, reads: u32, changes: &[String], drawing: Option<&str>| {
+            let change = changes.first().filter(|_| format <= reads);
+            let format = format.to_string();
+            match (drawing, change) {
+                (None, Some(change)) => solidcraft_ui_text::format("document.newer_file_change", &[("format", &format), ("change", change)]),
+                (None, None) => solidcraft_ui_text::format("document.newer_file", &[("format", &format), ("reads", &reads.to_string())]),
+                (Some(name), Some(change)) => {
+                    solidcraft_ui_text::format("document.newer_drawing_change", &[("drawing", name), ("format", &format), ("change", change)])
+                }
+                (Some(name), None) => {
+                    solidcraft_ui_text::format("document.newer_drawing", &[("drawing", name), ("format", &format), ("reads", &reads.to_string())])
+                }
+            }
         };
-        self.set_status(text, false);
+        let mut status = self.session.doc.newer_file.as_ref().map(|file| {
+            for what in &file.not_understood {
+                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            notice(file.format, file.reads_up_to, &file.unknown_changes, None)
+        });
+        for drawing in &self.session.doc.drawings {
+            let Some(file) = &drawing.newer_file else { continue };
+            for what in &file.not_understood {
+                let text = solidcraft_ui_text::format("document.newer_drawing_not_read", &[("drawing", &drawing.name), ("what", what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            let text = notice(file.format, file.reads_up_to, &file.unknown_changes, Some(&drawing.name));
+            if status.is_some() {
+                self.messages.push(&text, false, now_ms());
+            } else {
+                status = Some(text);
+            }
+        }
+        if let Some(text) = status {
+            self.set_status(text, false);
+        }
     }
 
     /// Tell the user when the open design keeps data of a plugin that can't change it here: one
@@ -3748,13 +3835,10 @@ impl SolveApp {
         });
     }
 
-    /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
+    /// Open a chosen file; one whose format has import options (a STEP file, a KiCad board) asks
+    /// them first (`import_options`).
     pub fn open_chosen_file(&mut self, path: &str) {
-        if solidcraft_engine::io::is_kicad_path(path) {
-            kicad_import_dialog::open(self, path);
-        } else {
-            self.open_path_async(path);
-        }
+        self.open_path_async(path);
     }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
@@ -3825,8 +3909,6 @@ impl SolveApp {
             || solidcraft_engine::cmd::drawing_import_command(path).is_some();
         if import && (!self.session.doc.features.is_empty() || !self.session.doc.point_clouds.is_empty()) {
             self.insert_path_async(path);
-        } else if solidcraft_engine::io::is_kicad_path(path) {
-            self.open_chosen_file(path);
         } else {
             self.open_path_async(path);
         }
@@ -4607,7 +4689,8 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
-        kicad_import_dialog::show(self, ui.ctx());
+        // A file's import options are asked on Home too, where Open and Import start.
+        import_options::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
@@ -4811,7 +4894,7 @@ impl SolveApp {
                 }
                 continue;
             }
-            if (waits && control_job::changes_the_design(&req.method))
+            if (waits && control_job::changes_the_design(&req.method) && !control_job::lists_designs(&req))
                 || (self.file_picker_busy() && matches!(req.method.as_str(), "ui.file" | "ui.home"))
                 // A screenshot shows the whole design: it waits until an opened one is meshed.
                 || (open_meshing::active(self) && req.method == "ui.screenshot")
