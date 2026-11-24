@@ -235,17 +235,21 @@ struct Reading {
     /// opened below it follows the same rule.
     which: LinkedRead,
     /// How many links were not read because of where they are in `opening`: one that returns to
-    /// a file being opened, one nested too deep, one outside the folders `which` allows. What a
-    /// design gives after such a refusal holds for this chain of links only.
+    /// a file being opened, or one nested too deep. What a design gives after such a refusal
+    /// holds for this chain of links only.
     refused: usize,
-    /// Of `refused`, the links outside the folders `which` allows.
+    /// How many links were not read because they are outside the folders `which` allows. Those
+    /// folders are the same for every chain below one link of the outermost design
+    /// ([`may_read`]), so what a design gives after such a refusal is kept for that link.
     outside: usize,
     /// How many reads were not kept in `read` because of a refusal below them. Each may be made
     /// again by another chain of links, so past [`READ_AGAIN`] no further design is read.
     again: usize,
     /// What each linked design gave, by its file and configuration, so that a design many links
-    /// lead to is read once: without it the reads grow with the number of ways to reach it.
-    read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>), ReadOnce>,
+    /// lead to is read once: without it the reads grow with the number of ways to reach it. With
+    /// [`LinkedRead::Folder`] a design below a link of the outermost design is kept for that link
+    /// (the key's last part), whose folder decides what it may read.
+    read: std::collections::HashMap<(PathBuf, Option<(u64, Option<u64>)>, Option<PathBuf>), ReadOnce>,
 }
 
 thread_local! {
@@ -263,8 +267,9 @@ thread_local! {
 const OPENING_DEPTH: usize = 32;
 
 /// How many reads one open makes that it cannot keep for the next chain of links
-/// ([`Reading::again`]). Designs that link each other in a loop, each by several links, would
-/// otherwise be read once for every way round it.
+/// ([`Reading::again`]): those with a link below them that returns to a design being opened, or
+/// is nested too deep. Designs that link each other in a loop, each by several links, would
+/// otherwise be read once for every way round it. A design without such a link is not counted.
 const READ_AGAIN: usize = 64;
 
 /// One entry of [`Reading::opening`], taken off when it goes out of scope.
@@ -362,11 +367,7 @@ pub(super) fn read_left_out_bodies(
     for (comp, link) in links {
         let name = doc.components.iter().find(|c| c.id == comp).map_or_else(|| comp.to_string(), |c| c.name.clone());
         if !may_read(&resolve(from, &link.path)) {
-            READING.with(|reading| {
-                let mut reading = reading.borrow_mut();
-                reading.refused += 1;
-                reading.outside += 1;
-            });
+            READING.with(|reading| reading.borrow_mut().outside += 1);
             warnings.push(format!("{name} has no bodies yet: its linked design is in another folder, and Update Links reads it"));
             continue;
         }
@@ -421,7 +422,11 @@ fn left_out_bodies(
         return refuse(format!("{}: linked designs saved without bodies are nested more than {OPENING_DEPTH} deep", file.display()));
     }
     let configuration = selected_configuration(link);
-    let key = (target, configuration.map(|c| (c.row, c.identity)));
+    let allowed_by = READING.with(|reading| {
+        let reading = reading.borrow();
+        (reading.which == LinkedRead::Folder).then(|| reading.opening.get(1).cloned().flatten()).flatten()
+    });
+    let key = (target, configuration.map(|c| (c.row, c.identity)), allowed_by);
     let known = READING.with(|reading| reading.borrow().read.get(&key).cloned());
     let read = match known {
         Some(read) => read,

@@ -1873,3 +1873,39 @@ fn designs_linked_in_a_loop_by_two_links_each_open_after_a_bounded_number_of_rea
     assert!(volume(&mut opened) >= 6000.0 - 1e-5);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Linked designs that reach out of the folders allowed are each refused for that alone: however
+/// many there are, a linked design that stays inside is still read.
+#[test]
+fn many_linked_designs_reaching_out_of_the_folder_hold_up_no_design_inside_it() {
+    let dir = folder("left-out-many-outside");
+    let (project, elsewhere) = (dir.join("project"), dir.join("elsewhere"));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let (near, far) = (project.join("near.json"), elsewhere.join("far.json"));
+    part(&near, 30);
+    part(&far, 30);
+    let (_, reaching) = saved_without_linked_bodies(&project, &far, "reaching-0.json");
+    let (_, staying) = saved_without_linked_bodies(&project, &near, "staying.json");
+    let count = super::READ_AGAIN + 2;
+    let mut s = Session::default();
+    for n in 0..count {
+        // The same design under another name beside it: its link to the part outside is kept.
+        let copy = project.join(format!("reaching-{n}.json"));
+        if n > 0 {
+            std::fs::copy(&reaching, &copy).unwrap();
+        }
+        run(&mut s, "component.insert_design", json!({"path": copy}));
+    }
+    run(&mut s, "component.insert_design", json!({"path": staying, "translate": [500, 0, 0]}));
+    let file = project.join("top.json");
+    run(&mut s, "file.save", json!({"path": file, "linked_bodies": false}));
+
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": file, "linked_bodies": "folder"}));
+    assert_eq!(reply["errors"], count, "{reply}");
+    assert!(reply["warnings"].as_array().unwrap().iter().all(|w| w.as_str().is_some_and(|w| w.contains("another folder"))), "{reply}");
+    // The design that stays inside: its own 10 x 10 x 10 box and the 10 x 20 x 30 part.
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
