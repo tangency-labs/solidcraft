@@ -1776,7 +1776,12 @@ mod revolve_analytic_rows {
             // perpendicular to the circle and to the meridian through the domain's minimum
             // corner within the kernel's angular tolerance, the kernel's own criterion for
             // two directions being perpendicular (as the entity tolerances are its
-            // criterion for points being one). At a corner on the axis (a cone
+            // criterion for points being one). No tighter bound is derivable here: the
+            // normal is evaluated through the surface's parameterisation (the sine and
+            // cosine of the corner's parameters, whose accuracy Rust's `f64::sin` and
+            // `f64::cos` do not specify), so any few-ulps allowance would be measured, not
+            // derived; the samples' positions are held to the declared `tol` for the same
+            // reason. At a corner on the axis (a cone
             // apex or a sphere pole) the normal is the limit along the corner's meridian:
             // take that meridian's half-plane from the neighbouring sample on it (the other
             // neighbour is the corner again)

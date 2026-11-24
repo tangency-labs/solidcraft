@@ -945,6 +945,35 @@ mod moved_rows {
         }
     }
 
+    /// The closed-form volume of a capped row's solid, enclosed (`pi` by its neighbouring
+    /// doubles, every operation rounded outward), or `None` for the open profile. Every
+    /// capped profile lies on one side of the axis (`diag_vertex_touch` meets it at one
+    /// vertex only), so by Pappus the volume is `theta M`, with `theta` the sweep in
+    /// radians and `M` the profile's moment about the axis, its area times its centroid's
+    /// distance from the axis:
+    /// - `square_axis_y_outside`: the square `[2, 4] x [0, 2]` about the y axis, `4 * 3`;
+    /// - `square_axis_y_on_edge`: the square `[0, 2] x [0, 2]` about the y axis, `4 * 1`;
+    /// - `square_axis_diag_vertex_touch`: the square `[1, 3] x [0, 2]` about the line
+    ///   `x + y = 1` (through its vertex `(1, 0)`), centroid `(2, 1)` at `2 / sqrt 2`, so
+    ///   `4 sqrt 2`;
+    /// - `half_disc_axis_on_chord`: the unit half disc `x <= 0` about its chord (the y
+    ///   axis), `(pi / 2) (4 / (3 pi)) = 2 / 3`;
+    /// - `half_disc_axis_y_outside`: the unit half disc `x >= 0` about the line `x = -2`,
+    ///   `(pi / 2) (2 + 4 / (3 pi)) = pi + 2 / 3`.
+    fn capped_volume(name: &str, theta: f64) -> Option<Iv> {
+        let pi = Iv { lo: std::f64::consts::PI.next_down(), hi: std::f64::consts::PI.next_up() };
+        let two_thirds = Iv::exact(2.0).div(Iv::exact(3.0));
+        let m = match name.strip_prefix("capped_rot_")?.rsplit_once('_')?.0 {
+            "square_axis_y_outside" => Iv::exact(12.0),
+            "square_axis_y_on_edge" => Iv::exact(4.0),
+            "square_axis_diag_vertex_touch" => Iv::exact(4.0).mul(Iv::exact(2.0).sqrt()),
+            "half_disc_axis_on_chord" => two_thirds,
+            "half_disc_axis_y_outside" => pi.add(two_thirds),
+            other => panic!("{name}: no closed form for {other}"),
+        };
+        Some(Iv::exact(theta).mul(pi).div(Iv::exact(180.0)).mul(m))
+    }
+
     /// A face carrier: a profile piece turned (by index), or the profile plane turned
     /// through 0 (`Cap(0)`) or `theta` (`Cap(1)`).
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -955,7 +984,8 @@ mod moved_rows {
 
     /// Each moved row's record is its body's (the record rebuilt from the body is bitwise
     /// the same), the body is sound (no defect in the soundness check; a manifold solid for
-    /// a capped profile, a sheet for `partial_rotation_line`), every face's boundary (its
+    /// a capped profile, a sheet for `partial_rotation_line`; a capped solid's certified volume enclosure
+    /// overlaps its closed-form volume, [`capped_volume`]), every face's boundary (its
     /// edges' samples and vertices) is in the swept sector (for a profile across the axis,
     /// the sector or its half-turn), and each face
     /// of the body is assigned the one carrier (a profile piece
@@ -1036,6 +1066,15 @@ mod moved_rows {
                 assert!(found.check.lines().is_empty(), "{name}: {:?}", found.check.lines());
                 // a capped profile turns to a solid; `partial_rotation_line` to a sheet
                 assert_eq!(found.manifold, name.starts_with("capped_"), "{name}: a manifold solid");
+                if let Some(want) = capped_volume(name, theta) {
+                    let enc = solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-6 * want.hi).unwrap();
+                    assert!(
+                        enc.lo <= want.hi && want.lo <= enc.hi,
+                        "{name}: volume {want:?} apart from [{}, {}]",
+                        enc.lo,
+                        enc.hi
+                    );
+                }
             }
             let k = Kernel::default();
             let mut again = Vec::new();

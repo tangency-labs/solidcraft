@@ -631,7 +631,7 @@ impl PrimitiveCreation {
             } else {
                 cap = false;
             }
-            // Not upstream (WR-448, #545): analytic side faces (the geometry's only path)
+            // Not upstream (WR-448, #545): analytic side faces (with `make_analytics`, the default)
             let rotation = RotationalSweepGeometry::new(axis_base, axis, angle_deg, tolerance);
             let geometry = SweepGeometry::Rotation(rotation);
             let mut sweep = TopologySweep {
