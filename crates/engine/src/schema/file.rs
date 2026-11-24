@@ -1,6 +1,6 @@
 //! Contracts and result types for the commands in `cmd/file.rs`: so far `file.export` and the
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
-//! `file.export_obj`, `file.export_urdf`, `file.export_sdf`), which take what `file.export` takes for that format,
+//! `file.export_obj`, `file.export_urdf`, `file.export_sdf`, `file.export_mjcf`), which take what `file.export` takes for that format,
 //! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
 //! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
 
@@ -231,11 +231,20 @@ pub struct ExportSdfParams {
     pub quality: Option<MeshQualityParam>,
 }
 
+/// Export the whole assembly as a MuJoCo model (MJCF, docs/mjcf.md), with an STL mesh for each
+/// body written next to it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportMjcfParams {
+    /// The `.xml` file to write; the meshes go in its folder.
+    pub path: String,
+}
+
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; SDF takes `name`,
-/// `static`, `model_uris` and `quality` and writes a model folder; design JSON the complete
-/// document.
+/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; MJCF exports the whole
+/// assembly; SDF takes `name`, `static`, `model_uris` and `quality` and writes a model folder;
+/// design JSON the complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
 pub struct ExportParams {
@@ -244,17 +253,17 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, sdf or json, or a
-    /// file name whose extension names it, or an installed exporter plugin as `plugin_id.entry`
-    /// (`plugin.list`'s `exporters`). Default: from the path's extension; an extension SolidCraft
-    /// does not write goes to the exporter plugin that claims it.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, usd, 3dm, urdf, mjcf, sdf or json,
+    /// or a file name whose extension names it (a `.xml` path alone is not MJCF), or an installed
+    /// exporter plugin as `plugin_id.entry` (`plugin.list`'s `exporters`). Default: from the path's
+    /// extension; an extension SolidCraft does not write goes to the exporter plugin that claims it.
     #[serde(default)]
     pub format: Option<String>,
     /// An exporter plugin's options, as its slot declares them. Refused for SolidCraft's own
     /// formats. Default: the slot's defaults.
     #[serde(default)]
     pub options: Option<serde_json::Map<String, Value>>,
-    /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
+    /// The bodies to export, by name. Default: every body. Design JSON, URDF and MJCF export the
     /// complete design, so they refuse a list.
     #[serde(default)]
     pub bodies: Option<StringList>,
@@ -466,6 +475,10 @@ impl<'de> Deserialize<'de> for ExportParams {
             Some(_) => return Err(refuse("`exact_brep` must be true or false")),
         };
         out.writer = export_writer(m.get("writer"), format).map_err(refuse::<D::Error>)?;
+        if format == Format::Mjcf {
+            // MJCF has no keys of its own; `quality` and `objects` are not read.
+            return Ok(out);
+        }
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;
@@ -572,6 +585,26 @@ pub struct UrdfExportResult {
     pub links: usize,
     /// How many joints the robot has.
     pub joints: usize,
+    /// What the export could not carry over as it is in the design.
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `file.export_mjcf` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MjcfExportResult {
+    /// The `.xml` file written.
+    pub path: String,
+    /// Always Mjcf.
+    pub format: String,
+    /// Every file written, the meshes first and the `.xml` last.
+    pub files: Vec<String>,
+    /// How many bodies (not counting the world), joints and equality constraints the model has.
+    pub bodies: usize,
+    pub joints: usize,
+    pub equalities: usize,
     /// What the export could not carry over as it is in the design.
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -1273,6 +1306,8 @@ pub enum FileExportResult {
     Urdf(UrdfExportResult),
     /// A format an exporter plugin writes.
     Plugin(crate::schema::plugin::ExportedFile),
+    /// MJCF.
+    Mjcf(MjcfExportResult),
     /// A Gazebo model folder (SDF).
     Sdf(SdfExportResult),
 }

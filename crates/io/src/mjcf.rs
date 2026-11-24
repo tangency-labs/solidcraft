@@ -29,6 +29,10 @@ pub struct MjcfPackage {
     pub xml: String,
     pub meshes: Vec<(String, Vec<u8>)>,
     pub model: UrdfModel,
+    /// What the MJCF holds: bodies (not counting the world), joints and equality constraints.
+    pub bodies: usize,
+    pub joints: usize,
+    pub equalities: usize,
     pub warnings: Vec<String>,
 }
 
@@ -36,6 +40,10 @@ pub struct MjcfPackage {
 /// with the bodies in their components' own frames, painted. `stem` names the model and
 /// prefixes the mesh files.
 pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> {
+    // The joints' values and kinds come from the assembly the walk writes: without the copies a
+    // pattern leaves inactive.
+    let active = doc.active_assembly();
+    let doc = &*active;
     let walked = walk(doc, st, stem, &[])?;
     let values = joints::joint_values(&doc.assembly);
     let value = |j: &UrdfJoint| j.source.and_then(|(id, k)| values.get(&id)?.get(k).copied()).unwrap_or(0.0);
@@ -43,6 +51,7 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
     let source: BTreeMap<u64, (JointKind, bool)> = all.iter().map(|j| (j.id, (j.kind, j.limits.iter().any(Option::is_some)))).collect();
     let mut warnings = Vec::new();
     let mut equality = String::new();
+    let mut equalities = 0;
     let model = &walked.model;
     let body_name = |i: usize| if i == 0 { "world".to_string() } else { model.links.get(i).map(|l| l.name.clone()).unwrap_or_default() };
     for note in &walked.notes {
@@ -60,13 +69,18 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
                 let name = attr(&sanitise(joint, false));
                 let at = |z: f64| triple(apply_point(frame, Vec3::new(0.0, 0.0, z)) * 1e-3);
                 match kind {
-                    JointKind::Rigid => equality += &format!("    <weld name=\"{name}\" body1=\"{body1}\" body2=\"{body2}\"/>\n"),
+                    JointKind::Rigid => {
+                        equality += &format!("    <weld name=\"{name}\" body1=\"{body1}\" body2=\"{body2}\"/>\n");
+                        equalities += 1;
+                    }
                     JointKind::Ball => {
-                        equality += &format!("    <connect name=\"{name}\" body1=\"{body1}\" body2=\"{body2}\" anchor=\"{}\"/>\n", at(0.0))
+                        equality += &format!("    <connect name=\"{name}\" body1=\"{body1}\" body2=\"{body2}\" anchor=\"{}\"/>\n", at(0.0));
+                        equalities += 1;
                     }
                     JointKind::Revolute => {
                         for (k, z) in [(1, 0.0), (2, LOOP_HINGE_SPAN_MM)] {
                             equality += &format!("    <connect name=\"{name}_{k}\" body1=\"{body1}\" body2=\"{body2}\" anchor=\"{}\"/>\n", at(z));
+                            equalities += 1;
                         }
                     }
                     _ => warnings
@@ -80,7 +94,17 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
     for j in &model.joints {
         children.entry(j.parent).or_default().push(j);
     }
-    let mut w = Writer { model, frames: &frames, children: &children, value: &value, source: &source, warnings: &mut warnings, xml: String::new() };
+    let mut w = Writer {
+        model,
+        frames: &frames,
+        children: &children,
+        value: &value,
+        source: &source,
+        warnings: &mut warnings,
+        xml: String::new(),
+        bodies: 0,
+        joints: 0,
+    };
     let name = sanitise(stem, false);
     w.xml += "<?xml version=\"1.0\"?>\n<!-- Exported by SolidCraft; units: m, kg, rad -->\n";
     w.xml += &format!("<mujoco model=\"{}\">\n  <compiler angle=\"radian\" autolimits=\"true\"/>\n", attr(&name));
@@ -98,9 +122,9 @@ pub fn mjcf(doc: &Document, st: &ModelState, stem: &str) -> Result<MjcfPackage> 
         w.xml += &format!("  <equality>\n{equality}  </equality>\n");
     }
     w.xml += "</mujoco>\n";
-    let xml = std::mem::take(&mut w.xml);
+    let (xml, bodies, joints) = (std::mem::take(&mut w.xml), w.bodies, w.joints);
     let meshes = walked.meshes.into_iter().filter(|(f, _)| f.ends_with(".stl")).collect();
-    Ok(MjcfPackage { xml, meshes, model: walked.model, warnings })
+    Ok(MjcfPackage { xml, meshes, model: walked.model, bodies, joints, equalities, warnings })
 }
 
 fn mesh_name(file: &str) -> &str {
@@ -152,6 +176,8 @@ struct Writer<'a, V: Fn(&UrdfJoint) -> f64> {
     source: &'a BTreeMap<u64, (JointKind, bool)>,
     warnings: &'a mut Vec<String>,
     xml: String,
+    bodies: usize,
+    joints: usize,
 }
 
 impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
@@ -180,6 +206,7 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
         let Some(rel) = mat_inverse(pf).map(|inv| mat_mul(&inv, cf)) else { return };
         let pad = " ".repeat(indent);
         self.xml += &format!("{pad}<body name=\"{}\" {}>\n", attr(&link.name), pos_quat(&rel));
+        self.bodies += 1;
         if let Some(i) = &link.inertial {
             let t = &i.inertia;
             self.xml += &format!(
@@ -213,6 +240,7 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
                 self.warnings.push(format!("ball joint `{name}`: its limits are not written (an MJCF ball joint limits one cone angle)"));
             }
             self.xml += &format!("{pad}  <joint name=\"{}\" type=\"ball\"/>\n", attr(name));
+            self.joints += 1;
             return;
         }
         for (k, j) in moving.iter().enumerate() {
@@ -233,6 +261,7 @@ impl<V: Fn(&UrdfJoint) -> f64> Writer<'_, V> {
                 triple(axis),
                 num((self.value)(j) * scale)
             );
+            self.joints += 1;
         }
     }
 

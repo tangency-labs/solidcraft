@@ -96,7 +96,7 @@ fn assert_fk(m: &UrdfModel, s: &Session, what: &str) {
     assert_eq!(seen, placements.len() - 1, "{what}: a link per placement");
 }
 
-fn temp(tag: &str) -> PathBuf {
+pub(super) fn temp(tag: &str) -> PathBuf {
     let d = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-urdf-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     let _ = std::fs::create_dir_all(&d);
