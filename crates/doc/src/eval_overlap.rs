@@ -234,10 +234,16 @@ impl std::fmt::Debug for Carried {
 /// The checks an evaluation left running when it returned ([`Checks::running`]), shared by the
 /// model and its copies: whichever settles them first stores the cache entries that waited for
 /// them, and each takes the same outcome.
-pub(super) struct Pending(Mutex<PendingState>);
+pub(super) struct Pending {
+    state: Mutex<PendingState>,
+    /// Woken when the settling ends ([`PendingState::Settling`]).
+    settled: std::sync::Condvar,
+}
 
 enum PendingState {
     Running(Checks),
+    /// A caller is settling them, outside the lock (it waits for checks still running).
+    Settling,
     /// Every check ended: the first refusal, if one refused.
     Ended(Option<Carried>),
 }
@@ -250,24 +256,48 @@ impl std::fmt::Debug for Pending {
 
 impl Pending {
     pub fn new(checks: Checks) -> Arc<Pending> {
-        Arc::new(Pending(Mutex::new(PendingState::Running(checks))))
+        Arc::new(Pending { state: Mutex::new(PendingState::Running(checks)), settled: std::sync::Condvar::new() })
     }
 
     /// Once every check has ended (waiting for them with `wait`): `Some` of the first refusal, if
     /// one refused. `None` while a check runs and `wait` is false. The cache entries held for the
     /// checks go into `cache` as the checks before them pass, as [`Checks::settle`] stores them.
+    ///
+    /// The lock is never held while a check is waited for: the caller that settles takes the
+    /// checks out and settles them outside it. Meanwhile a caller that does not wait is answered
+    /// at once (`None`), and one that waits waits for that settling to end, then takes its
+    /// outcome.
     pub fn outcome(&self, wait: bool, cache: &Mutex<EvalCache>, kept: &KeptSlot) -> Option<Option<Carried>> {
-        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let PendingState::Running(checks) = &mut *state {
-            if !(wait || checks.ended()) {
-                return None;
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            let settling = match &*state {
+                PendingState::Ended(outcome) => return Some(outcome.clone()),
+                PendingState::Settling => {
+                    if !wait {
+                        return None;
+                    }
+                    true
+                }
+                PendingState::Running(checks) => {
+                    if !(wait || checks.ended()) {
+                        return None;
+                    }
+                    false
+                }
+            };
+            if settling {
+                state = self.settled.wait(state).unwrap_or_else(|e| e.into_inner());
+                continue;
             }
-            let refused = checks.settle(true, cache, kept);
-            *state = PendingState::Ended(refused.map(|r| Carried { id: r.id, key: r.key, failure: r.failure }));
-        }
-        match &*state {
-            PendingState::Ended(outcome) => Some(outcome.clone()),
-            PendingState::Running(_) => None,
+            let PendingState::Running(mut checks) = std::mem::replace(&mut *state, PendingState::Settling) else {
+                return None;
+            };
+            drop(state);
+            let refused = checks.settle(true, cache, kept).map(|r| Carried { id: r.id, key: r.key, failure: r.failure });
+            let mut done = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            *done = PendingState::Ended(refused.clone());
+            self.settled.notify_all();
+            return Some(refused);
         }
     }
 }

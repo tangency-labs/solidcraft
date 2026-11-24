@@ -2925,7 +2925,10 @@ impl Session {
                 self.model.settle_feature_checks(true);
             }
             if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
+                // Evaluated for the command to read: its checks end before it reads.
+                let background = std::mem::replace(&mut self.background_checks, false);
                 self.refresh();
+                self.background_checks = background;
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;

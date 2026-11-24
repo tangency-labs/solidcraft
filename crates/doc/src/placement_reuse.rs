@@ -28,7 +28,7 @@ impl Model {
         // Or the checks of the last evaluation still run ([`Model::set_background_checks`]) and
         // `doc` is what it evaluated: evaluating again would keep every result, after waiting
         // for the checks.
-        if reusable || (self.checking_features() && self.is_current(doc)) {
+        if reusable || (!self.no_cache && self.checking_features() && self.is_current(doc)) {
             self.last_recomputed = 0;
             self.last_restored = 0;
             return false;
