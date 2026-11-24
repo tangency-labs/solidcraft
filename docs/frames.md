@@ -7,16 +7,16 @@ Trims, welds and the cut list follow.
 
 ## The workflow
 
-1. **Sketch the frame**: lines in a sketch, or a 3D sketch for a frame that leaves one plane
-   (`sketch.options sketch_3d: true`, then `sketch.line3d`). Drive the sizes with parameters as
+1. **Sketch the frame**: lines and circular arcs in a sketch, or a 3D sketch for a frame that leaves one plane
+   (`sketch.options sketch_3d: true`, then `sketch.line3d` and `sketch.arc3d`). Drive the sizes with parameters as
    usual; members follow.
 2. **Choose a profile**: a standard steel size by name (`{"size": "RSC 203x89"}`, below), a
    built-in one from its dimensions (below), or your own drawn in a sketch
    (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's origin is
    the point that sits on each line, and its x and y are the profile's.
-3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per line,
-   square to it, from its start to its end. Repeat with another profile for the next group of
-   lines.
+3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per selected
+   line or arc. Enable **One Continuous Member** to make a connected tangent line–arc–line run
+   into one tube. Select its segments in path order. Repeat for another physical member.
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -32,8 +32,17 @@ frame member, end cap, mounting plate or gusset is the selected body (or the las
 
 ## The Frame Member dialog
 
-- **Path**: pick the frame sketch's lines in the view (2D or 3D sketch lines). **All Lines**
+- **Path**: pick the frame sketch's lines or circular arcs in the view (2D or 3D). **All Lines**
   makes a member on every line of that sketch instead, including lines drawn later.
+- **One Continuous Member**: turn off **All Lines** and select lines and arcs in connected,
+  tangent path order. Backwards curves are reversed automatically. Sharp joins need an explicit
+  tangent bend arc. A continuous member cannot include point pairs.
+
+Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
+Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
+Curved and continuous members cannot yet be combined with multiple placement groups.
+Separate curved members may share a plain None feature with point-pair members. Ordinary straight
+members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
   circles makes a tube). With nothing picked, **Profile** chooses a built-in profile and its
   dimensions follow; optional ones left empty take their defaults.
@@ -399,10 +408,16 @@ placement axes, expressions and hole-pattern limits.
 
 ## frame.member
 
-- `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D lines or 3D sketch
-  lines), each once; left out, every straight line drawn in the sketch: not construction, not
+- `sketch`: the frame sketch. `lines`: the curve ids to lay members on (2D or 3D sketch
+  lines and circular arcs), each once; left out, every straight line drawn in the sketch: not construction, not
   projected or otherwise linked (a sketch on a face projects the face's edges; they are
   references, not members), and with a length.
+- `continuous`: false by default. When true, explicitly selected `lines` form one physical
+  member, in path order. Their ends must meet within 0.000001 mm and their tangents within
+  0.000001 rad. Open line/arc paths are supported; splines and closed members are refused.
+  The section starts with the orientation below and rotates through each bend, carrying that
+  orientation into subsequent straights and bends in other planes. A bend whose axis crosses
+  the anchored section is refused. This models nominal geometry, not tube deformation or springback.
 - `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them. A profile sketch's
   section is its material as nested loops alternate (an outline is material, a loop inside it a
   hole, a loop inside that material again), so two circles make a tube; pick other regions with
@@ -429,11 +444,30 @@ placement axes, expressions and hole-pattern limits.
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
   `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
   them unless the edit changes `body_name`.
+  A continuous member uses `names: {"$path": "Main hoop"}` so its name survives reversing
+  the path or changing the first selected segment.
+
 - `groups` (`[{lines, anchor?, locate?, angle?, mirror?, body_name?}]`): several groups of lines
   in the feature's one profile, each placed and named its own way. Each group lists its lines, and
   no line is in two groups. With `groups`, give `lines`, `anchor`, `locate`, `angle`, `mirror` and
   `body_name` in each group, not beside them. A feature with one group saves as before, so designs without
   groups don't change.
+
+### A bent chassis tube
+
+Draw a line from `(100, -200)` to `(100, 0)`, a quarter-circle arc with centre `(0, 0)` from
+`(100, 0)` to `(0, 100)`, and a line to `(-300, 100)`. With those curve ids `l1`, `a1`, `l2`:
+
+```json
+{"command":"frame.member","params":{"sketch":"Chassis","lines":["l1","a1","l2"],"continuous":true,"profile":{"kind":"round_tube","diameter":20,"wall":2},"body_name":"Main hoop"}}
+```
+
+The result is one tube, with two straight lengths of 200 and 300 mm and a 100 mm centreline
+bend radius. Its nominal centreline length is `500 + 50π` mm. Grouping three separate
+members or combining their solids does not record this continuous manufacturing path.
+
+Bend-list output and flattened round-tube cope DXF templates are subsequent fabrication
+steps tracked under #4003. A continuous member does not yet produce either export.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). Standard steel sizes (below) fill in a profile's dimensions from a
@@ -447,6 +481,8 @@ separate body per end, named after the member (`Post End Cap`). Pick the end fac
 each must be a flat open end of a frame member, square to its line: an uncut end, or the through
 member's end of a Butt corner, coped or not. The butting member's end and a cope face are refused ("not
 an open end of the member"), as is a mitre ("not square to the member's line").
+Curved or multi-piece continuous members are refused until End Cap supports their transported
+terminal frames. A continuous member consisting of one straight line retains both open ends.
 
 - The plate covers the outside of the profile: on a closed section (a square or rectangular
   tube, a pipe, a bar) it is the profile's outer outline; on an open section (an angle, a
