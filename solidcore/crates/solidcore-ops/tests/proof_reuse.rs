@@ -184,6 +184,8 @@ fn reads() -> Vec<Read> {
     let (_, order) = cut(plate(), drill(1)).to_record().unwrap();
     let order2 = order.clone();
     let order3 = order.clone();
+    let order4 = order.clone();
+    let order5 = order.clone();
     vec![
         (
             "bounds",
@@ -233,7 +235,68 @@ fn reads() -> Vec<Read> {
                 b.vertex_distance(&order3, 0, [1.0, 2.0, 3.0]).unwrap();
             }),
         ),
+        // the mass measures read a body whose UV trims exist (a boolean's result has them)
+        // through the shared door; one without makes them through the edit door
+        (
+            "mass_properties",
+            Box::new(|b: &Body| {
+                b.mass_properties(1e-9).unwrap();
+            }),
+        ),
+        (
+            "area",
+            Box::new(|b: &Body| {
+                b.area(1e-9).unwrap();
+            }),
+        ),
+        (
+            "face_area",
+            Box::new(move |b: &Body| {
+                b.face_area(&order4, 0, 1e-9).unwrap();
+            }),
+        ),
+        (
+            "face_centroid",
+            Box::new(move |b: &Body| {
+                b.face_centroid(&order5, 0, 1e-9).unwrap();
+            }),
+        ),
     ]
+}
+
+/// A body without its UV trim curves (dropped through the edit door) measures as one with
+/// them: the mass measures make the trims through the edit door, then read as before.
+#[test]
+fn a_body_without_uv_trims_still_measures() {
+    all_fixes();
+    let with = cut(plate(), drill(1));
+    let without = cut(plate(), drill(1));
+    {
+        let mut b = without.kernel();
+        let uses: Vec<_> = b.edgeuses().ids().collect();
+        for u in uses {
+            b.edgeuse_mut(u).unwrap().uv_trim_curve = None;
+        }
+    }
+    let (m, n) = (
+        with.mass_properties(1e-9).unwrap(),
+        without.mass_properties(1e-9).unwrap(),
+    );
+    let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+    assert!(
+        near(m.volume, n.volume) && near(m.area, n.area),
+        "{m:?} {n:?}"
+    );
+    for i in 0..3 {
+        assert!(near(m.centroid[i], n.centroid[i]), "{m:?} {n:?}");
+    }
+    assert!(near(with.area(1e-9).unwrap(), without.area(1e-9).unwrap()));
+    // the trims are made (each edge use's, or its mate's): the edit door ran
+    let b = without.kernel();
+    assert_eq!(
+        solidcore::mass::integrator::properties::missing_uv_trim(&b, None).unwrap(),
+        None
+    );
 }
 
 /// A read through the shared door leaves the proof beside the body standing: the next proved

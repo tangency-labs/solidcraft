@@ -1632,17 +1632,15 @@ impl KeptDefinition {
     /// under a uniform one ([`crate::surface::procedural_sweep::ProceduralSweep::follows`]);
     /// a round's, a corner's and a drafted face's always (their own transforms refuse what
     /// they cannot follow: a draft, a scale that is not uniform); a section blend's always (it
-    /// keeps the motion); a foot blend's always (it keeps the motion, and its transform
-    /// refuses a scale that is not uniform, as a draft's).
+    /// keeps the motion); a foot blend's only under a rigid one (no scale, or 1 on every
+    /// axis): its legs, sagitta and bound are lengths it does not scale, and a mirror turns
+    /// its sides, so a mirrored or scaled bead face is left behind as a sweep's is.
     #[must_use]
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
             Self::Sweep(_) => crate::surface::procedural_sweep::ProceduralSweep::follows(scale),
-            Self::Round(_)
-            | Self::Corner(_)
-            | Self::Draft(_)
-            | Self::SectionBlend(_)
-            | Self::FootBlend(_) => true,
+            Self::FootBlend(_) => scale.is_none_or(|s| s.x == 1.0 && s.y == 1.0 && s.z == 1.0),
+            Self::Round(_) | Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => true,
         }
     }
 

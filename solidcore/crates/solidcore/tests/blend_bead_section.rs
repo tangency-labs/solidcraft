@@ -554,7 +554,7 @@ fn a_bead_broken_along_the_edge_is_one_body_per_span() {
 }
 
 /// Spans outside the edge, of no length, out of order or overlapping are refused; spans that
-/// meet end to start are fine.
+/// meet end to start are one span.
 #[test]
 fn spans_off_the_edge_or_overlapping_are_refused() {
     for (from, to) in [
@@ -569,8 +569,32 @@ fn spans_off_the_edge_or_overlapping_are_refused() {
     assert!(BeadSpan::along(&[]).is_err());
     assert!(BeadSpan::along(&[(0.5, 0.8), (0.1, 0.3)]).is_err());
     assert!(BeadSpan::along(&[(0.1, 0.5), (0.4, 0.8)]).is_err());
-    assert_eq!(BeadSpan::along(&[(0.1, 0.5), (0.5, 0.8)]).unwrap().len(), 2);
+    let met = BeadSpan::along(&[(0.1, 0.5), (0.5, 0.8), (0.9, 1.0)]).unwrap();
+    assert_eq!(met.len(), 2);
+    assert!(met[0].from == 0.1 && met[0].to == 0.8, "{met:?}");
     assert!((BeadSpan::new(0.3, 0.7).unwrap().share() - 0.4).abs() < 1e-15);
+}
+
+/// Two spans of a bead body that meet end to start build one bead, the whole edge's, not two
+/// pieces capped on the same section (which closed into no manifold body).
+#[test]
+fn bead_spans_that_meet_end_to_start_build_one_bead() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let halves = [
+        BeadSpan::new(0.0, 0.5).unwrap(),
+        BeadSpan::new(0.5, 1.0).unwrap(),
+    ];
+    let mut met =
+        weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &halves, SQUARE).unwrap();
+    let mut whole =
+        weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let (v, want) = (volume(&k, &mut met), volume(&k, &mut whole));
+    assert!(((v - want) / want).abs() <= 1e-9, "{v} against {want}");
+    assert!(smb(&k, &b) == before, "the part changed");
 }
 
 /// The 90 degree corner with a bead over 0.3 to 0.7 and the 60 degree corner with the bead
@@ -2043,12 +2067,13 @@ fn shaped_ends_are_built_round_a_tube_and_short_spans_are_refused() {
     }
 }
 
-/// A moved bead keeps its motion: each section face's surface turned, moved and scaled by 2
-/// still re-checks against its definition (the motion replayed on the rebuilt net), and names
-/// no support (its supports stay where the bead was made, as a section blend's has none). A
-/// scale that is not uniform is refused: the legs would no longer be the net's.
+/// A moved bead keeps its motion: each section face's surface turned and moved still
+/// re-checks against its definition (the motion replayed on the rebuilt net), and names no
+/// support (its supports stay where the bead was made, as a section blend's has none). A
+/// scale, uniform or not, and a mirror move the face without its definition: its legs,
+/// sagitta and bound are not the moved net's (a mirrored part with a bead still moves).
 #[test]
-fn a_moved_bead_keeps_its_motion_and_a_scale_not_uniform_is_refused() {
+fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
     let mut k = kernel();
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
@@ -2060,26 +2085,36 @@ fn a_moved_bead_keeps_its_motion_and_a_scale_not_uniform_is_refused() {
     let found = foot_faces(&body);
     assert!(!found.is_empty());
     for (_, made) in found {
-        let mut moved = made.clone();
-        moved
-            .transform(&k, &turn, Some(Vec3::new(2.0, 2.0, 2.0)))
-            .unwrap();
-        let def = moved.procedural_blend().unwrap();
-        assert!(def.support(0).is_none() && def.support(1).is_none());
-        assert!(def.foot_blend().is_some_and(|d| d.support(0).is_some()));
-        assert!(
-            def.recertify(&k).is_ok(),
-            "a moved face is no longer its definition's"
-        );
-        let mut stretched = made.clone();
-        let r = stretched.transform(&k, &turn, Some(Vec3::new(1.0, 2.0, 1.0)));
-        assert!(r.is_err(), "a scale that is not uniform moved a weld bead");
+        for rigid in [None, Some(Vec3::new(1.0, 1.0, 1.0))] {
+            let mut moved = made.clone();
+            moved.transform(&k, &turn, rigid).unwrap();
+            let def = moved.procedural_blend().unwrap();
+            assert!(def.support(0).is_none() && def.support(1).is_none());
+            assert!(def.foot_blend().is_some_and(|d| d.support(0).is_some()));
+            assert!(
+                def.recertify(&k).is_ok(),
+                "a moved face is no longer its definition's"
+            );
+        }
+        for scale in [
+            Vec3::new(2.0, 2.0, 2.0),
+            Vec3::new(1.0, 2.0, 1.0),
+            Vec3::new(-1.0, 1.0, 1.0),
+        ] {
+            let mut left = made.clone();
+            left.transform(&k, &turn, Some(scale)).unwrap();
+            assert!(
+                left.procedural_blend().is_none(),
+                "{scale:?} kept the definition"
+            );
+        }
     }
 }
 
 /// A toe on its face's surface but off the face, in a notch cut out of one arm (x from 30 mm,
 /// z from 40 to 60 mm), is refused before anything is built, naming that face, with the
-/// largest leg on its side whose toes stay on it: 30 mm, which builds. The part is unchanged.
+/// largest leg on its side whose toes stay on it: 30 mm, which builds. A span clear of the
+/// notch builds at the full legs. The part is unchanged.
 #[test]
 fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
     use solidcore::boolean::api_brep::boolean_difference;
@@ -2104,6 +2139,10 @@ fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
     assert!(format!("{err:?}").contains("LegPastFace"), "{err:?}");
     let fits = ChamferSize::Distances([fit.size, fit.size]);
     assert!(weld_bead_body(&mut k, &mut b, &[edge], &[fits], 0.0, &[], &[], SQUARE).is_ok());
+    // a span clear of the notch (z 0 to 25 or 75 to 100, either way along the edge) builds at
+    // the full legs: only the toes the bead covers are checked
+    let clear = [BeadSpan::new(0.0, 0.25).unwrap()];
+    assert!(weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &clear, SQUARE).is_ok());
     assert!(smb(&k, &b) == before, "the part changed");
 }
 
@@ -3001,4 +3040,57 @@ mod corners {
         assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
         assert!(smb(&k, &part) == before, "the part changed");
     }
+}
+
+/// #21138: a leg below the body's resolution (eight times its tolerance) is a toe on the edge
+/// within tolerance, a sliver, and is refused as a chamfer's setback that small is (#21004):
+/// `SizeBelowResolution` naming the edge and the leg, before anything is built and before
+/// the sagitta's bound. In the square corner a distance of 0.001 at an angle of 1e-300 gives
+/// the second leg 0.001 sin(1e-300) / sin(pi/2 + 1e-300) = 1e-303; a leg of 1e-9 given as a
+/// distance is refused alike. The same distance at 22.5 degrees (second leg 0.001 tan(22.5
+/// degrees) = 0.000414) builds.
+#[test]
+fn a_leg_below_the_body_s_resolution_is_refused_naming_the_edge() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let tolerance = b.tolerance();
+    let before = smb(&k, &b);
+    let sliver = ChamferSize::DistanceAngle {
+        distance: 0.001,
+        angle: 1e-300,
+    };
+    for (size, sagitta, leg) in [
+        (sliver, 0.0, 1e-303),
+        (sliver, 1.0, 1e-303),
+        (ChamferSize::Distances([SETBACK, 1e-9]), 0.0, 1e-9),
+    ] {
+        let err = beads_apart(&mut k, &mut b, &[edge], &[size], sagitta, &[]).unwrap_err();
+        let Some(&BlendFailure::SizeBelowResolution {
+            size: got,
+            tolerance: t,
+        }) = err.blend_failure()
+        else {
+            panic!("{size:?}, sagitta {sagitta}: {err:?}");
+        };
+        // the leg below resolution, not the distance asked: positive, finite, a sliver
+        assert!(got > 0.0 && (got - leg).abs() <= 1e-12 * leg, "{got} {leg}");
+        assert_eq!(t, tolerance);
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err:?}");
+        assert_eq!(err.entity(), Some(EntityRef::Edge(edge)), "{err:?}");
+        assert_eq!(named_edge(&err), Some(edge), "{err:?}");
+        assert_eq!(err.operation(), "blend::weld_bead");
+        assert_eq!(
+            solidcore::error::upstream_status(&err),
+            Some(solidcore::error::SM_ERR_INVALID_INPUT)
+        );
+        assert!(smb(&k, &b) == before, "the corner changed");
+    }
+    let good = ChamferSize::DistanceAngle {
+        distance: 0.001,
+        angle: PI / 8.0,
+    };
+    let beads = beads_apart(&mut k, &mut b, &[edge], &[good], 0.0, &[]).unwrap();
+    assert_eq!(beads.len(), 1);
+    assert!(smb(&k, &b) == before, "the corner changed");
 }

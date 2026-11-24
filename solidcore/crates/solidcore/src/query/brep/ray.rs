@@ -30,6 +30,7 @@ pub use live::{
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::error::query::QueryFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Point2;
@@ -204,7 +205,7 @@ fn face_surface_cache(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+        .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     // WR-732: while editing, classify against the face's current trims; a face whose
     // loops are open has no boundary to implant, and no answer
@@ -382,7 +383,7 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
+            .ok_or_else(|| SolidError::query(OP, QueryFailure::FaceWithoutSurface))?
             .face()?;
         if surface.face()? != owner {
             return Err(SolidError::invalid_input(OP, "surface owner mismatch"));
@@ -401,6 +402,13 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
             return Err(SolidError::invalid_input(OP, "expected face"));
         };
         PreparedFaceQueries::new(self.brep, id, &cache_handle)?.face_zone_tol_3d(face)
+    }
+
+    fn face_has_loopuses(&self, face: CacheObject) -> Result<bool> {
+        let CacheObject::Face(id) = face else {
+            return Err(SolidError::invalid_input(OP, "expected face"));
+        };
+        crate::topology::face::p4::has_loopuses(self.brep, id)
     }
 
     fn face_point_classify(
@@ -513,22 +521,22 @@ mod tests {
         );
     }
 
-    /// During a Boolean operation `smsurf_GetSurfaceCache` defers the tree build
-    /// (`CacheMakeOrValidate`), so `GlobalPointSolve`'s fast-drop face test reads the
-    /// `SmTrimSrfCache` constructor's state bits until a solve's `GetTree` builds the
-    /// tree, whose build turns point testing off on a face without loops (the
+    /// #20179: whether `GlobalPointSolve`'s fast-drop face test runs depends only on
+    /// the face, not on when its cache was built. During a Boolean operation
+    /// `smsurf_GetSurfaceCache` defers the tree build (`CacheMakeOrValidate`), so the
+    /// cache keeps the `SmTrimSrfCache` constructor's state until a solve's `GetTree`
+    /// builds the tree; upstream's build then turns point testing off on a face without
+    /// loop uses, so the same face rejected every candidate (a face without loop uses
+    /// classifies every point as unknown) before the build and kept them after (the
     /// `blend.fillet_executive_p3` rollover-404 case, a merged face without loop uses).
     /// On a full torus whose face's loops are unlinked from it (`RemoveLoop`: a face
-    /// without loop uses, as the merged face mid-Boolean is) the context reader
-    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`]) and the live reader
-    /// (`live_face_fast_drop_test`) both see point testing on while the tree is
-    /// deferred, as upstream does (main's answer in the rollover case). Outside a
-    /// Boolean operation both readers make the cache with its tree, so both see point
-    /// testing off. The test pins what the readers do and that they agree; which value
-    /// the bit should have on a face without loops is the open question of the
-    /// point-test follow-up issue.
+    /// without loop uses) the context reader
+    /// ([`SurfaceSolveContext::surface_cache_without_get_tree`] read through
+    /// [`SurfaceCache::point_test_with`]) and the live reader
+    /// (`live_face_fast_drop_test`) keep the point in both orders: while the tree is
+    /// deferred and once it is built.
     #[test]
-    fn fast_drop_point_test_on_a_face_without_loops_while_the_tree_is_deferred() {
+    fn fast_drop_point_test_on_a_face_without_loops_does_not_depend_on_the_tree_build() {
         let mut k = Kernel::default();
         // a torus whose single face has its loops unlinked
         let loopless = |k: &mut Kernel| {
@@ -579,13 +587,25 @@ mod tests {
         let state = services
             .surface_cache_without_get_tree(&k, &surface, handle)
             .unwrap();
-        assert!(services.into_caches().get(&face).unwrap().tree().is_none());
+        let caches = services.into_caches();
+        let kept = caches.get(&face).unwrap();
+        assert!(kept.tree().is_none());
+        // the cache still reads as trimmed with point testing on, but the face has no
+        // loop uses: the point is kept, not classified
         assert!(on(&state));
-        assert_eq!(live_on, Some(on(&state)));
+        let copy = kept.map_handles(Ok).unwrap();
+        let services = BrepFaceServices::with_caches(&mut b, caches);
+        assert_eq!(
+            copy.point_test_with(&k, uv, Some(1e-6), Some(&services))
+                .unwrap(),
+            (true, None)
+        );
+        assert_eq!(live_on, Some(false));
+        drop(services);
 
         // outside a Boolean operation, on fresh B-reps (no cache kept from the first half):
         // both readers make the face's cache with its tree, whose build on a face without
-        // loops leaves it untrimmed and turns point testing off
+        // loops leaves it untrimmed (no trim test); the answer is the same
         let mut k = Kernel::default();
         let (mut b, face) = loopless(&mut k);
         let (mut live_b, _) = loopless(&mut k);
@@ -613,9 +633,58 @@ mod tests {
             .unwrap();
         assert!(services.into_caches().get(&face).unwrap().tree().is_some());
         assert!(!state.is_trimmed());
-        assert!(!state.point_test_enabled);
         assert!(!on(&state));
         assert_eq!(live_on, Some(false));
+    }
+
+    /// #20179: a face with loop uses tests the fast drop's points whatever mode its
+    /// cache was built in. Upstream's `BuildTree` turns point testing off when the
+    /// B-rep is being edited (the standalone branch), and its face branch's restore
+    /// brings back the value from before the build, so a cache first built while the
+    /// B-rep was edited kept every point, even one far off the face, while the same
+    /// face built outside an edit rejected it.
+    #[test]
+    fn point_test_of_a_face_with_loops_does_not_depend_on_the_build_mode() {
+        use crate::query::face::p2::{face_cache_tree, face_surface_cache};
+        let answers = |editing: bool| {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+            assert!(crate::topology::face::p4::has_loopuses(&b, face).unwrap());
+            let domain = b.face(face).unwrap().uv_domain;
+            let inside = Point2::new(
+                0.5 * (domain.min.x + domain.max.x),
+                0.5 * (domain.min.y + domain.max.y),
+            );
+            let outside = Point2::new(
+                domain.max.x + 10.0 * (domain.max.x - domain.min.x),
+                domain.max.y + 10.0 * (domain.max.y - domain.min.y),
+            );
+            b.set_editing_enabled(editing);
+            let mut lease = face_surface_cache(&k, &mut b, face).unwrap();
+            face_cache_tree(&k, &mut b, face, &mut lease.cache).unwrap();
+            b.set_editing_enabled(false);
+            assert!(lease.trimmed);
+            let mut test = |uv| {
+                lease
+                    .cache
+                    .point_test_in(&k, &mut BrepCacheFace { b: &mut b, f: face }, uv, None)
+                    .unwrap()
+                    .0
+            };
+            let answers = (test(inside), test(outside));
+            lease.release();
+            answers
+        };
+        assert_eq!(answers(false), (true, false));
+        assert_eq!(answers(true), (true, false));
     }
 
     /// The state bits a solve reads from a face's kept cache
