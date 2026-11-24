@@ -198,6 +198,12 @@ pub enum BlendFailure {
         /// The drop's tolerance: the face's.
         tolerance: f64,
     },
+    /// The body's edge `edge` has no curve. An argument check ([`ErrorKind::InvalidInput`]):
+    /// the body as supplied; status `SM_ERR_NULL_POINTER`.
+    BodyEdgeWithoutCurve {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
     /// A surface binding of the fillet insertion is resolved after its face's surface was
     /// removed: a stale binding the caller kept past an edit of the body; the failure is at
     /// the face. A check of the caller's input ([`ErrorKind::InvalidInput`]); status
@@ -424,6 +430,12 @@ pub enum BlendFailure {
     /// A check of the caller's body ([`ErrorKind::InvalidInput`]); status
     /// `SM_ERR_NULL_POINTER` unless its site says otherwise.
     EdgeWithoutCurve,
+    /// The body's edge `edge` lacks a vertex at one of its ends. An argument check
+    /// ([`ErrorKind::InvalidInput`]): the body as supplied; status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutVertices {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
     /// The side curve of a fillet surface on its end face (their intersection, or the rib
     /// from a tangent end) could not be built: the stage's error is kept as the cause and
     /// decides whether the failure is a defect or a refusal. A failed stage
@@ -475,6 +487,12 @@ pub enum BlendFailure {
     /// where a stage reads the surface unchecked, upstream `NER`, and `SM_ERR` where the
     /// fork's tangent roll-over returns that).
     FaceHasNoSurface,
+    /// The body's face `face` has no surface. An argument check
+    /// ([`ErrorKind::InvalidInput`]): the body as supplied; status `SM_ERR_NULL_POINTER`.
+    FaceWithoutSurface {
+        /// The face.
+        face: crate::topology::FaceId,
+    },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -570,6 +588,9 @@ pub enum BlendFailure {
     /// status here, so its kind is [`ErrorKind::InvalidInput`]. A phrase cause
     /// ([`BlendFailure::is_phrase`]); an argument check is [`crate::SolidError::InvalidInput`].
     InvalidValue(&'static str),
+    /// The surface direction given for iso curves is neither u nor v. An argument check
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    IsoDirectionNotUOrV,
     /// A Join some of whose blends roll a rail over a smooth far edge of their faces has no
     /// blend whose rails roll on the two faces its shared section ends on, so the section
     /// has no ends to take (#16491). Unsupported ([`ErrorKind::Unsupported`]): the kernel
@@ -591,6 +612,12 @@ pub enum BlendFailure {
         /// The blend's place among the Join's blends.
         blend: usize,
     },
+    /// No feature came off the base: putting a kept feature's faces back was the only way not
+    /// to leave its hole open, and no construction named why its base patch was not built
+    /// (that is [`Reason::Defeature`]). The error that construction failed with, where there
+    /// is one, is kept as the cause. A combination the defeature does not support
+    /// ([`ErrorKind::Unsupported`]), as the named limits are; status `SM_ERR`.
+    KeptFeatureLeavesBaseOpen,
     /// A round kept round a feature standing in its band (the fork's `KeepFeaturesInBands`)
     /// is not built ([`KeepStop`] says why, and gives the kind). The executive notes the
     /// refusal in its error info as well; status `SM_ERR`.
@@ -611,6 +638,20 @@ pub enum BlendFailure {
     /// A radius law is evaluated over an interval of zero length. A check of the caller's
     /// arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
     LawIntervalEmpty,
+    /// A feature's loop does not split the body at the loop edge `edge`: the edge does not
+    /// border exactly two faces, one in the feature and one outside it. An argument check
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_ASSERT_FAILURE`.
+    LoopDoesNotSplitBody {
+        /// The loop edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// The loop edges given branch at `vertex`: more than two of them meet there (a figure
+    /// 8), so they do not chain into loops. An argument check ([`ErrorKind::InvalidInput`]);
+    /// status `SM_ERR`.
+    LoopEdgesBranch {
+        /// The vertex where they branch.
+        vertex: crate::topology::VertexId,
+    },
     /// The face `face` a point or curve is built on (a mate vertex's face, or the face a
     /// rail/rail interpolation curve lies on) has a surface of kind `kind` (its type string),
     /// which is not of a B-spline class: the point or curve is evaluated on the surface's
@@ -651,6 +692,10 @@ pub enum BlendFailure {
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT` (`SM_ERR` for the
     /// preview).
     NoEdgesGiven,
+    /// The faces or the loop edges a defeature was given make no feature: they do not bound
+    /// a set of the body's faces that the loops split from the rest. An argument check
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_ASSERT_FAILURE`.
+    NoFeatureMade,
     /// A surface fillet is given a face of the first surface's body where the first surface
     /// has none (it is itself that face, or a free surface). A check of the caller's
     /// arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR_INVALID_INPUT`.
@@ -1105,6 +1150,15 @@ pub enum BlendFailure {
         /// The surface's kind, as its type string.
         kind: &'static str,
     },
+    /// The face `face` has a surface of kind `kind` (its type string) with no B-spline form,
+    /// which the routine reads. An unsupported kind ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    SurfaceWithoutBSplineForm {
+        /// The face.
+        face: crate::topology::FaceId,
+        /// The surface's kind, as its type string.
+        kind: &'static str,
+    },
     /// The end surface's parametrization is singular at a tangent end, at its `(u, v)`
     /// (its first derivatives there span no plane): the zero-speed rib's end conditions
     /// need its tangent plane there, and no construction is built at a singular point. A
@@ -1215,6 +1269,7 @@ impl BlendFailure {
             Self::BevelVertexNotFilleted => SM_ERR_NULL_POINTER,
             Self::BlendingRailEndOffFace { .. } => SM_ERR,
             Self::BlendingRailOffFace { .. } => SM_ERR,
+            Self::BodyEdgeWithoutCurve { .. } => SM_ERR_NULL_POINTER,
             Self::BoundSurfaceRemoved => SM_ERR_NULL_POINTER,
             Self::ChamferFaceNotOfEdge => SM_ERR_INVALID_INPUT,
             Self::ChamferSizeInvalid => SM_ERR_INVALID_INPUT,
@@ -1248,12 +1303,14 @@ impl BlendFailure {
             Self::EdgeSplitDeclined { .. } => SM_ERR,
             Self::EdgeUseWithoutEdge => SM_ERR_NULL_POINTER,
             Self::EdgeWithoutCurve => SM_ERR_NULL_POINTER,
+            Self::EdgeWithoutVertices { .. } => SM_ERR_NULL_POINTER,
             Self::EndRibNotBuilt => SM_ERR,
             Self::ExactBlendAxisCannotPlaceEdge { .. } => SM_ERR,
             Self::ExecutiveStepFailed => SM_ERR,
             Self::ExtendedEdgeFaceCount { .. } => SM_ERR,
             Self::ExtensionEndOnTwoSideLines => SM_ERR,
             Self::FaceHasNoSurface => SM_ERR_INVALID_INPUT,
+            Self::FaceWithoutSurface { .. } => SM_ERR_NULL_POINTER,
             Self::Failed(_) => SM_ERR,
             Self::FilletCrossesItself { .. } => SM_ERR,
             Self::FilletEndVertexOffSideEdge { .. } => SM_ERR,
@@ -1267,19 +1324,24 @@ impl BlendFailure {
             Self::IntersectionCurveNotBSpline { .. } => SM_ERR,
             Self::IntersectionEndsOffFace { .. } => SM_ERR,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
+            Self::IsoDirectionNotUOrV => SM_ERR_NULL_POINTER,
             Self::JoinBlendsRollOffSection => SM_ERR,
             Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::JoinSectionNotConverged { .. } => SM_ERR,
+            Self::KeptFeatureLeavesBaseOpen => SM_ERR,
             Self::KeptFeatureNotBuilt(_) => SM_ERR,
             Self::LawCornerNotFound { .. } => SM_ERR_NULL_POINTER,
             Self::LawHasNoValue => SM_ERR,
             Self::LawIntervalEmpty => SM_ERR,
+            Self::LoopDoesNotSplitBody { .. } => SM_ERR_ASSERT_FAILURE,
+            Self::LoopEdgesBranch { .. } => SM_ERR,
             Self::MateFaceSurfaceNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::MixedCornerUnbuildable(_) => SM_ERR,
             Self::NeighbourVertexNotProcessed { .. } => SM_ERR,
             Self::NoBlendedEdgeNearExtension => SM_ERR,
             Self::NoEdgesGiven => SM_ERR_INVALID_INPUT,
+            Self::NoFeatureMade => SM_ERR_ASSERT_FAILURE,
             Self::NoFirstBody => SM_ERR_INVALID_INPUT,
             Self::NoRoom(_) => SM_ERR,
             Self::NoVertexGiven => SM_ERR_NULL_POINTER,
@@ -1335,6 +1397,7 @@ impl BlendFailure {
             Self::StageFailed => SM_ERR,
             Self::StationDidNotConverge { .. } => SM_ERR,
             Self::SurfaceKindNotBuilt { .. } => SM_ERR,
+            Self::SurfaceWithoutBSplineForm { .. } => SM_ERR_NULL_POINTER,
             Self::TangentEndSingular { .. } => SM_ERR,
             Self::TargetNotGiven => SM_ERR_INVALID_INPUT,
             Self::Trace(t) => t.comparison_status(),
@@ -1368,6 +1431,7 @@ impl BlendFailure {
             Self::BevelVertexNotFilleted => ErrorKind::InvalidInput,
             Self::BlendingRailEndOffFace { .. } => ErrorKind::NotFound,
             Self::BlendingRailOffFace { .. } => ErrorKind::NotFound,
+            Self::BodyEdgeWithoutCurve { .. } => ErrorKind::InvalidInput,
             Self::BoundSurfaceRemoved => ErrorKind::InvalidInput,
             Self::ChamferFaceNotOfEdge => ErrorKind::InvalidInput,
             Self::ChamferSizeInvalid => ErrorKind::InvalidInput,
@@ -1401,12 +1465,14 @@ impl BlendFailure {
             Self::EdgeSplitDeclined { .. } => ErrorKind::Failed,
             Self::EdgeUseWithoutEdge => ErrorKind::InvalidInput,
             Self::EdgeWithoutCurve => ErrorKind::InvalidInput,
+            Self::EdgeWithoutVertices { .. } => ErrorKind::InvalidInput,
             Self::EndRibNotBuilt => ErrorKind::Failed,
             Self::ExactBlendAxisCannotPlaceEdge { .. } => ErrorKind::InvalidInput,
             Self::ExecutiveStepFailed => ErrorKind::Failed,
             Self::ExtendedEdgeFaceCount { .. } => ErrorKind::Unsupported,
             Self::ExtensionEndOnTwoSideLines => ErrorKind::Unsupported,
             Self::FaceHasNoSurface => ErrorKind::InvalidInput,
+            Self::FaceWithoutSurface { .. } => ErrorKind::InvalidInput,
             Self::Failed(_) => ErrorKind::of_status(self.comparison_status()),
             Self::FilletCrossesItself { .. } => ErrorKind::Unsupported,
             Self::FilletEndVertexOffSideEdge { .. } => ErrorKind::Unsupported,
@@ -1420,19 +1486,24 @@ impl BlendFailure {
             Self::IntersectionCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::IntersectionEndsOffFace { .. } => ErrorKind::NotFound,
             Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::IsoDirectionNotUOrV => ErrorKind::InvalidInput,
             Self::JoinBlendsRollOffSection => ErrorKind::Unsupported,
             Self::JoinCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::JoinSectionNotConverged { .. } => ErrorKind::NotConverged,
+            Self::KeptFeatureLeavesBaseOpen => ErrorKind::Unsupported,
             Self::KeptFeatureNotBuilt(stop) => stop.class(),
             Self::LawCornerNotFound { .. } => ErrorKind::NotFound,
             Self::LawHasNoValue => ErrorKind::Unsupported,
             Self::LawIntervalEmpty => ErrorKind::InvalidInput,
+            Self::LoopDoesNotSplitBody { .. } => ErrorKind::InvalidInput,
+            Self::LoopEdgesBranch { .. } => ErrorKind::InvalidInput,
             Self::MateFaceSurfaceNotBSpline { .. } => ErrorKind::Unsupported,
             Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
             Self::MixedCornerUnbuildable(step) => step.class(),
             Self::NeighbourVertexNotProcessed { .. } => ErrorKind::InvalidInput,
             Self::NoBlendedEdgeNearExtension => ErrorKind::NotFound,
             Self::NoEdgesGiven => ErrorKind::InvalidInput,
+            Self::NoFeatureMade => ErrorKind::InvalidInput,
             Self::NoFirstBody => ErrorKind::InvalidInput,
             Self::NoRoom(reason) => no_room_class(*reason),
             Self::NoVertexGiven => ErrorKind::InvalidInput,
@@ -1488,6 +1559,7 @@ impl BlendFailure {
             Self::StageFailed => ErrorKind::StageFailed,
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::SurfaceKindNotBuilt { .. } => ErrorKind::Unsupported,
+            Self::SurfaceWithoutBSplineForm { .. } => ErrorKind::Unsupported,
             Self::TangentEndSingular { .. } => ErrorKind::Unsupported,
             Self::TargetNotGiven => ErrorKind::InvalidInput,
             Self::Trace(t) => t.class(),
@@ -1534,6 +1606,7 @@ impl BlendFailure {
             Self::BevelVertexNotFilleted => true,
             Self::BlendingRailEndOffFace { .. } => true,
             Self::BlendingRailOffFace { .. } => true,
+            Self::BodyEdgeWithoutCurve { .. } => true,
             Self::BoundSurfaceRemoved => true,
             Self::ChamferFaceNotOfEdge => true,
             Self::ChamferSizeInvalid => true,
@@ -1567,12 +1640,14 @@ impl BlendFailure {
             Self::EdgeSplitDeclined { .. } => true,
             Self::EdgeUseWithoutEdge => true,
             Self::EdgeWithoutCurve => true,
+            Self::EdgeWithoutVertices { .. } => true,
             Self::EndRibNotBuilt => true,
             Self::ExactBlendAxisCannotPlaceEdge { .. } => true,
             Self::ExecutiveStepFailed => true,
             Self::ExtendedEdgeFaceCount { .. } => true,
             Self::ExtensionEndOnTwoSideLines => true,
             Self::FaceHasNoSurface => true,
+            Self::FaceWithoutSurface { .. } => true,
             Self::Failed(_) => true,
             Self::FilletCrossesItself { .. } => true,
             Self::FilletEndVertexOffSideEdge { .. } => true,
@@ -1586,19 +1661,24 @@ impl BlendFailure {
             Self::IntersectionCurveNotBSpline { .. } => true,
             Self::IntersectionEndsOffFace { .. } => true,
             Self::InvalidValue(_) => true,
+            Self::IsoDirectionNotUOrV => true,
             Self::JoinBlendsRollOffSection => true,
             Self::JoinCurveNotBSpline { .. } => true,
             Self::JoinSectionNotConverged { .. } => true,
+            Self::KeptFeatureLeavesBaseOpen => true,
             Self::KeptFeatureNotBuilt(_) => true,
             Self::LawCornerNotFound { .. } => true,
             Self::LawHasNoValue => true,
             Self::LawIntervalEmpty => true,
+            Self::LoopDoesNotSplitBody { .. } => true,
+            Self::LoopEdgesBranch { .. } => true,
             Self::MateFaceSurfaceNotBSpline { .. } => true,
             Self::Missing(_) => true,
             Self::MixedCornerUnbuildable(_) => true,
             Self::NeighbourVertexNotProcessed { .. } => true,
             Self::NoBlendedEdgeNearExtension => true,
             Self::NoEdgesGiven => true,
+            Self::NoFeatureMade => true,
             Self::NoFirstBody => true,
             Self::NoRoom(_) => true,
             Self::NoVertexGiven => true,
@@ -1654,6 +1734,7 @@ impl BlendFailure {
             Self::StageFailed => true,
             Self::StationDidNotConverge { .. } => true,
             Self::SurfaceKindNotBuilt { .. } => true,
+            Self::SurfaceWithoutBSplineForm { .. } => true,
             Self::TangentEndSingular { .. } => true,
             Self::TargetNotGiven => true,
             Self::Trace(_) => true,
@@ -1719,6 +1800,9 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the blending rail's curve does not drop onto its bilinear face {face:?} within {tolerance}",
                 self.class()
             ),
+            Self::BodyEdgeWithoutCurve { edge } => {
+                write!(f, "{}: edge {edge:?} has no curve", self.class())
+            }
             Self::BoundSurfaceRemoved => write!(
                 f,
                 "{}: the face's surface was removed after its binding was captured",
@@ -1851,6 +1935,9 @@ impl core::fmt::Display for BlendFailure {
                 "{}: an edge of the body the fillet reads has no curve",
                 self.class()
             ),
+            Self::EdgeWithoutVertices { edge } => {
+                write!(f, "{}: edge {edge:?} lacks an end vertex", self.class())
+            }
             Self::EndRibNotBuilt => write!(
                 f,
                 "{}: the fillet surface's side curve on its end face could not be built",
@@ -1890,6 +1977,9 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::FaceHasNoSurface => {
                 write!(f, "{}: a face of the fillet has no surface", self.class())
+            }
+            Self::FaceWithoutSurface { face } => {
+                write!(f, "{}: face {face:?} has no surface", self.class())
             }
             Self::Failed(what) => f.write_str(what),
             Self::FilletCrossesItself { first, second } => write!(
@@ -1942,6 +2032,11 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::InvalidValue(what) => f.write_str(what),
+            Self::IsoDirectionNotUOrV => write!(
+                f,
+                "{}: the iso curves' direction is neither u nor v",
+                self.class()
+            ),
             Self::JoinBlendsRollOffSection => write!(
                 f,
                 "{}: no blend of the Join rolls on the two faces its shared section ends on",
@@ -1955,6 +2050,11 @@ impl core::fmt::Display for BlendFailure {
             Self::JoinSectionNotConverged { blend } => write!(
                 f,
                 "{}: the solve for blend {blend}'s ball in the Join's section plane stopped without a ball",
+                self.class()
+            ),
+            Self::KeptFeatureLeavesBaseOpen => write!(
+                f,
+                "{}: no feature comes off: each kept feature would leave the base open",
                 self.class()
             ),
             Self::KeptFeatureNotBuilt(stop) => write!(f, "{}: {}", self.class(), stop.what()),
@@ -1974,6 +2074,16 @@ impl core::fmt::Display for BlendFailure {
             Self::LawIntervalEmpty => write!(
                 f,
                 "{}: the radius law is evaluated over an interval of zero length",
+                self.class()
+            ),
+            Self::LoopDoesNotSplitBody { edge } => write!(
+                f,
+                "{}: the feature's loop does not split the body at edge {edge:?}",
+                self.class()
+            ),
+            Self::LoopEdgesBranch { vertex } => write!(
+                f,
+                "{}: the loop edges branch at vertex {vertex:?}",
                 self.class()
             ),
             Self::MateFaceSurfaceNotBSpline { face, kind } => write!(
@@ -2000,6 +2110,11 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::NoEdgesGiven => write!(f, "{}: no edges are given to fillet", self.class()),
+            Self::NoFeatureMade => write!(
+                f,
+                "{}: the faces or loop edges given make no feature the loops split from the body",
+                self.class()
+            ),
             Self::NoFirstBody => write!(
                 f,
                 "{}: a face of the first surface's body is given where the first surface has no body",
@@ -2286,6 +2401,11 @@ impl core::fmt::Display for BlendFailure {
             Self::SurfaceKindNotBuilt { face, kind } => write!(
                 f,
                 "{}: the face {face:?}'s surface is a {kind}, which has no B-spline form: its extended edge is not intersected on it",
+                self.class()
+            ),
+            Self::SurfaceWithoutBSplineForm { face, kind } => write!(
+                f,
+                "{}: face {face:?}'s {kind} surface has no B-spline form",
                 self.class()
             ),
             Self::TangentEndSingular { u, v } => write!(
@@ -4018,7 +4138,7 @@ mod tests {
         // the decisions that read a failure's entity read the untyped entity, which `or_at`
         // never writes
         let open_base = |entity| {
-            let failure = BlendFailure::Failed("a kept feature would leave the base open");
+            let failure = BlendFailure::KeptFeatureLeavesBaseOpen;
             match entity {
                 Some(at) => SolidError::blend_at("blend::feature_executive", failure, at),
                 None => SolidError::blend("blend::feature_executive", failure),
