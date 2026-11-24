@@ -21,7 +21,7 @@
 //! curve ([`crate::curve::hermite_curve::HermiteCurve`]) with end derivatives `3 h c' / |c'|`.
 //!
 //! The result is checked, not trusted: each end's continuity is measured on the curve built
-//! ([`evaluate_curve_continuity_with`], its geometric G2 test, at the kernel's angle tolerance
+//! ([`evaluate_curve_continuity`], its geometric G2 test, at the kernel's angle tolerance
 //! [`ANG_TOL_DEG`]), and a blend that does not meet an end at the contact asked is refused.
 //!
 //! Deviations: none (not a port). Bounded: at most degree 5, six control points, no loop.
@@ -30,9 +30,7 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
-use crate::geom::geom_utility::p2::{
-    evaluate_curve_continuity_with, ContinuityOptions, ContinuityType, CurveEval,
-};
+use crate::geom::geom_utility::p2::{evaluate_curve_continuity, ContinuityType, CurveEval};
 use crate::geom::tol::{ANG_TOL_DEG, ZONE_TOL_3D};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO};
@@ -198,7 +196,7 @@ fn reached(c: ContinuityType) -> Option<usize> {
 /// already pointing away from the end).
 fn measure(jet: &Jet, d: [Vec3; 3]) -> Result<ContinuityType> {
     let [position, first, second] = d;
-    evaluate_curve_continuity_with(
+    evaluate_curve_continuity(
         &CurveEval {
             position: jet.point,
             first: jet.first,
@@ -212,7 +210,6 @@ fn measure(jet: &Jet, d: [Vec3; 3]) -> Result<ContinuityType> {
             third: None,
         },
         ANG_TOL_DEG,
-        &ContinuityOptions { geometric_g2: true },
     )
 }
 

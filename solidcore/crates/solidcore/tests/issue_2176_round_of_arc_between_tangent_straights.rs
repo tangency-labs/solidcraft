@@ -50,14 +50,12 @@ const RADIUS: f64 = 0.5;
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 
-/// Every opt-in fix on except `geometric_g2_continuity` (SolidCraft's set, as in the issue).
+/// Every opt-in fix on (SolidCraft's set, as in the issue).
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

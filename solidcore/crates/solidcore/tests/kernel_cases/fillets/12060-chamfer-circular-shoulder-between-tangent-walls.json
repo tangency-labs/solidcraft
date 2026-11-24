@@ -1,0 +1,117 @@
+{
+  "case": "12060-chamfer-circular-shoulder-between-tangent-walls",
+  "area": "fillets",
+  "sources": [
+    "tangency-labs/solidcraft#12060"
+  ],
+  "what": "A 17 mm high cylindrical boss of radius R = 3 mm shares the top of a 22 x 6 x 9 mm plate. The plate walls y = ±R both touch the boss at the bottom. An equal-distance 0.75 mm concave chamfer follows the whole circular shoulder. The chamfer runs out into both existing walls, which remain planar.",
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  3.0,
+                  0.0
+                ]
+              ],
+              "index": 16
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  3.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  -3.0,
+                  0.0
+                ]
+              ],
+              "index": 14
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  -3.0,
+                  0.0
+                ],
+                [
+                  3.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 15
+            }
+          ],
+          "points": [
+            [
+              2.1213203435596424,
+              2.1213203435596424,
+              0.0
+            ],
+            [
+              -2.1213203435596424,
+              2.1213203435596424,
+              0.0
+            ],
+            [
+              2.1213203435596424,
+              -2.1213203435596424,
+              0.0
+            ]
+          ],
+          "tolerance": 1e-09
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.75
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "12060-chamfer-circular-shoulder-between-tangent-walls.bodies.json.gz",
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
+  "expected": {
+    "body_count": 1,
+    "method": "At height z above the plate, 0 <= z <= d = 0.75, the chamfer has radius r = R + d - z. Its cross-section within |y| <= R has area A(r) = 2(R q + r^2 asin(R/r)), where q = sqrt(r^2 - R^2). An antiderivative is F(r) = (2/3)(2 R r q + r^3 asin(R/r) - R^3 ln((r + q)/R)). The added volume is F(R+d) - F(R) - pi R^2 d = 4.39348896375093 mm^3. Add this to the plate and boss volume 22*6*9 + 17*pi*R^2.",
+    "source": "analytic",
+    "tolerance": {
+      "abs_mm": 1e-05
+    },
+    "volume_mm3": 1673.0571649629894
+  },
+  "expressible": true,
+  "operation_expressible": true
+}

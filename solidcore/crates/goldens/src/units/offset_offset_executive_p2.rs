@@ -1779,6 +1779,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         ),
     };
     let (status, mut result) = operation(result)?;
+    if let Some(brep) = result.as_ref() {
+        crate::dump::body(&kernel, "result", brep);
+    }
     let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
     let offset_projection = exec
         .as_ref()
@@ -3063,8 +3066,16 @@ mod tests {
                 });
             assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
 
-            // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
-            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-6 });
+            // the enclosure is asked for a quarter of the relative width accepted below on the
+            // closed forms, half on the half pipes: a tighter ask only refines past it, to the
+            // cell budget (the half pipes, and the 2e-6 slab at 1e-8). Not the width itself:
+            // the ask is relative to the sign's enclosure's upper end, the acceptance to the
+            // final one's, which is lower (MEASURED: asked 2e-4, the R 12 inner half pipe ends
+            // 2.01e-4 of its upper end wide; asked half, the cylinder sheets end 9.8e-8 wide,
+            // within 2% of the 1e-7 accepted; asked a quarter, 4.7e-8, at no extra time; a
+            // quarter on the half pipes doubles the test's time)
+            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            crate::soundness::start_enclosing(width / if closed_form.is_some() { 4.0 } else { 2.0 });
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
@@ -3100,20 +3111,20 @@ mod tests {
                 "{name}: {:?}",
                 body.volume
             );
-            // the certified enclosure, asked for 1e-9 of the volume (1e-6 on the half pipes)
+            // the certified enclosure, asked for `width` of the volume
             let Some(Ok(e)) = &body.enclosure else {
                 panic!("{name}: {:?}", body.enclosure);
             };
             eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
-            // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
-            // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
-            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
-            // half pipes the closed form inside the enclosure so certifies the body's
-            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width.
-            // It is enough here (argued) because a wall is replaced only where its control
-            // points lie within SM_EFF_ZERO of the new plane, so the replacement moves the
-            // volume by at most the replaced walls' area times SM_EFF_ZERO
-            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            // measured, asked 1e-9 (1e-6 on the half pipes): the plane and cylinder sheets
+            // refine to 1.5e-8 of the volume or below (the 2e-6 slab is the widest); the half
+            // pipes' refinement ends at its cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of
+            // it, on main as here. On the half pipes the closed form inside the enclosure so
+            // certifies the body's volume only to 2e-4 of it: acceptance slack set from the
+            // measured R 20 width. It is enough here (argued) because a wall is replaced only
+            // where its control points lie within SM_EFF_ZERO of the new plane, so the
+            // replacement moves the volume by at most the replaced walls' area times
+            // SM_EFF_ZERO
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {
                 assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);

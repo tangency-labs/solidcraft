@@ -706,12 +706,13 @@ pub(crate) fn command_done(
         }
         let kind = if p.recovered { "kernel_panic_recovered" } else { "command_panic" };
         let (openable, left_out) = drawing::openable(before);
-        let design = solidcraft_io::write_design(&openable);
+        // A container, as the design's own file is: it carries binary data a JSON design can't.
+        let design = solidcraft_io::write_design_container(&openable).ok();
         let replay = json!({ "commands": [{ "command": id, "params": params }], "ids": ids });
         let recent = if journaled { read_live_journal(state).recent } else { Vec::new() };
         let extra = Extra {
             command: Some(json!({ "command": id, "params": params })),
-            design: Some(design),
+            design,
             replay: Some(replay),
             recent,
             base: json!("the design as it was when the command started"),

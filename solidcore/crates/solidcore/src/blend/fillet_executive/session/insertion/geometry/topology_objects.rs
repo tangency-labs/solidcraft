@@ -26,7 +26,6 @@ use crate::intersect::topology_solver::p1::TopologyObjects;
 use crate::math::Point3;
 use crate::topology::brep::p3::topology_ref;
 use crate::topology::{Brep, FaceId};
-use crate::SolidError;
 
 const ROLES: [InsertionBody; 3] = [
     InsertionBody::Target,
@@ -192,7 +191,10 @@ impl TopologyObjects<FilletObject> for InsertionGeometry<'_> {
     fn face_surface(&self, face: FilletObject) -> Result<FilletObject> {
         InsertionGeometry::face_surface(self, face)
             .ok_or_else(|| invalid("not an actual Face handle"))?
-            .ok_or_else(|| SolidError::blend_missing(super::OP, "the face's surface"))
+            .ok_or_else(|| match InsertionGeometry::topology(face) {
+                Some((_, EntityRef::Face(id))) => super::face_without_surface(id),
+                _ => invalid("not an actual Face handle"),
+            })
     }
     fn surface(&self, object: FilletObject) -> Result<&Surface> {
         if let FilletObject::Surface(binding) = object {
