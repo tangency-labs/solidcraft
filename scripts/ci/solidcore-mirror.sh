@@ -9,8 +9,9 @@
 # C:solidcore, its parent is the previous mirror commit, and it keeps C's author, committer, dates
 # and message, plus a `solidcraft: <C>` trailer. The last commit of each run also carries
 # `solidcraft-main: <main>`, the main commit the run mirrored up to, so the next run walks only
-# <that>..main. Commits reached through a merge's second parent (a kernel branch's own commits)
-# are mirrored one by one, like main's own.
+# <that>..main. Only main's first-parent commits are mirrored: one per pull request, whether the
+# queue squashed it or landed it as a merge commit. A merged branch's own commits (work in
+# progress, built on an older main) are not mirrored one by one; its merge commit carries them.
 #
 # The first run (no trailer on solidcore's tip) starts from the vendoring merge: the merge on main
 # whose second parent is solidcore's tip (git subtree add), so the vendored history maps to itself.
@@ -71,9 +72,9 @@ mirror() { # <commit> [main]: one mirror commit for <commit> on top of $tip
   count=$((count + 1))
 }
 
-# Every commit since the last run that changes solidcore/, oldest first. History simplification
-# follows a merge into the side it took solidcore/ from, so a merged branch's commits are listed.
-mapfile -t commits < <(git rev-list --reverse --topo-order "$last..$main" -- "$prefix")
+# Every first-parent commit since the last run that changes solidcore/, oldest first. A merge
+# counts when solidcore/ differs from its first parent.
+mapfile -t commits < <(git rev-list --reverse --first-parent "$last..$main" -- "$prefix")
 n=${#commits[@]}
 for i in "${!commits[@]}"; do
   if [ "$i" -eq $((n - 1)) ] && [ "$(git rev-parse "${commits[$i]}:$prefix")" = "$(git rev-parse "$main:$prefix")" ]; then
@@ -82,7 +83,7 @@ for i in "${!commits[@]}"; do
     mirror "${commits[$i]}"
   fi
 done
-# A merge that resolved solidcore/ to neither side is not listed: then mirror main's tree itself.
+# Should the walk miss main's tree (it should not with --first-parent), mirror main's tree itself.
 if [ "$(git rev-parse "$tip^{tree}")" != "$(git rev-parse "$main:$prefix")" ]; then
   mirror "$(git rev-list -1 --first-parent "$main" -- "$prefix")" "$main"
   [ "$(git rev-parse "$tip^{tree}")" = "$(git rev-parse "$main:$prefix")" ] || { echo "::error::could not reach $main:$prefix" >&2; exit 1; }
