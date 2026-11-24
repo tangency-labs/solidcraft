@@ -13,6 +13,239 @@ pub(super) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     }
 }
 
+fn coderabbit_review_plane_joint() -> (Session, Value) {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "ReviewA", "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "ReviewB", "grounded": false}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let p = json!({"name":"ReviewJoint", "type":"rigid", "angle":0,
+        "a":{"occurrence":"ReviewA", "plane":"XY"}, "b":{"occurrence":"ReviewB", "plane":"XY"}});
+    (s, p)
+}
+
+fn coderabbit_review_saved_x(s: &Session, side: &str) -> Option<solidcraft_doc::joints::XRef> {
+    use solidcraft_doc::joints::Snap;
+    let j = &s.doc.assembly.joints[0];
+    match if side == "a" { &j.a.snap } else { &j.b.snap } {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.clone(),
+        _ => None,
+    }
+}
+
+#[test]
+fn coderabbit_review_primary_replacement_retains_alignment_and_validates_it() {
+    use solidcraft_doc::joints::XRef;
+    for (side, occurrence) in [("a", "ReviewA"), ("b", "ReviewB")] {
+        let (mut s, mut p) = coderabbit_review_plane_joint();
+        let alignment_key = format!("{side}_alignment");
+        p[&alignment_key] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+        run(&mut s, "joint.create", p);
+        let saved = coderabbit_review_saved_x(&s, side);
+        assert!(matches!(saved, Some(XRef::Reference { .. })));
+        let primary = json!({"occurrence":occurrence, "plane":"XY"});
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:primary}));
+        assert_eq!(coderabbit_review_saved_x(&s, side), saved, "omitted {alignment_key} must retain its reference");
+
+        let before = s.doc.clone();
+        let error = s.execute("joint.edit", &json!({"joint":"ReviewJoint", side:{"occurrence":occurrence, "plane":"XZ"}})).unwrap_err();
+        assert!(error.to_string().contains("parallel"), "{error}");
+        assert_eq!(s.doc, before, "invalid replacement must be atomic");
+
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:primary, (alignment_key.as_str()):null}));
+        assert!(!matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { .. } | XRef::Planar { .. })));
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (alignment_key.as_str()):{"reference":{"type":"origin_axis", "axis":"Y"}}}));
+        run(
+            &mut s,
+            "joint.edit",
+            json!({"joint":"ReviewJoint", side:{"occurrence":occurrence,"plane":"XY", "x":{"reference":{"type":"origin_axis","axis":"X"}}}}),
+        );
+        assert!(
+            matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { reference:solidcraft_doc::joints::AlignmentRef::OriginAxis { axis }, .. }) if axis == "X")
+        );
+        run(
+            &mut s,
+            "joint.origin",
+            json!({"name":"ReviewNamed", "occurrence":occurrence, "plane":"XY", "x":{"reference":{"type":"origin_axis","axis":"Y"}}}),
+        );
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", side:"ReviewNamed"}));
+        assert!(
+            matches!(coderabbit_review_saved_x(&s, side), Some(XRef::Reference { reference:solidcraft_doc::joints::AlignmentRef::OriginAxis { axis }, .. }) if axis == "Y")
+        );
+    }
+}
+
+#[test]
+fn coderabbit_review_lateral_offsets_refuse_secondary_alignment_atomically() {
+    for side in ["a", "b"] {
+        for offset in ["offset_x", "offset_y"] {
+            for inline in [false, true] {
+                let (mut s, mut p) = coderabbit_review_plane_joint();
+                p[offset] = json!(10);
+                if inline {
+                    p[side]["x"] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+                } else {
+                    p[format!("{side}_alignment")] = json!({"reference":{"type":"origin_axis", "axis":"Y"}});
+                }
+                let before = s.doc.clone();
+                let error = s.execute("joint.create", &p).unwrap_err();
+                assert!(error.to_string().contains("lateral"), "{side} {offset} {inline}: {error}");
+                assert_eq!(s.doc, before);
+            }
+        }
+    }
+    for side in ["a", "b"] {
+        let (mut s, mut p) = coderabbit_review_plane_joint();
+        p["offset_x"] = json!(10);
+        run(&mut s, "joint.create", p);
+        let before = s.doc.clone();
+        let key = format!("{side}_alignment");
+        let error =
+            s.execute("joint.edit", &json!({"joint":"ReviewJoint", (key.as_str()):{"reference":{"type":"origin_axis","axis":"Y"}}})).unwrap_err();
+        assert!(error.to_string().contains("lateral"), "{error}");
+        assert_eq!(s.doc, before);
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (key.as_str()):null}));
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", "offset_x":0, (key.as_str()):{"reference":{"type":"origin_axis","axis":"Y"}}}));
+        let before = s.doc.clone();
+        assert!(s.execute("joint.edit", &json!({"joint":"ReviewJoint", "offset_y":10})).is_err());
+        assert_eq!(s.doc, before);
+        // Old documents may already contain this unsupported combination: clearing remains possible.
+        s.doc_mut().assembly.joints[0].offset_xy = [10.0, 0.0];
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", (key.as_str()):null}));
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [10.0, 0.0]);
+    }
+}
+
+#[test]
+fn coderabbit_review_nested_inline_secondary_references_match_side_argument_restrictions() {
+    let mut s = Session::default();
+    let (first, second, header) = board_twice(&mut s);
+    for (parent, point) in [(first, json!([-5, 25, 10])), (second, json!([95, 25, 10]))] {
+        for inline in [false, true] {
+            let mut p = json!({"type":"rigid", "a":{"occurrence":header,"path":[parent,header],"face":point},
+                "b":{"occurrence":"Probe", "plane":"XY"}});
+            let reference = json!({"reference":{"type":"origin_axis","axis":"X"}});
+            if inline {
+                p["a"]["x"] = reference;
+            } else {
+                p["a_alignment"] = reference;
+            }
+            let before = s.doc.clone();
+            let error = s.execute("joint.create", &p).unwrap_err();
+            assert!(error.to_string().contains("nested occurrence paths"), "{inline}: {error}");
+            assert_eq!(s.doc, before);
+        }
+    }
+}
+
+#[test]
+fn secondary_construction_axis_follows_edits_undo_and_uncached_reopen() {
+    use solidcraft_doc::joints::{self, XRef};
+    use solidcraft_doc::{Document, apply_point, apply_vector};
+    let mut s = Session::default();
+    let id = run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]}, "b": {"point": [1, 0, 0]}, "name": "Clocking",
+        }),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": id}});
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "plane": "XY", "x": x, "name": "Seat"}));
+    let made = run(&mut s, "component.create", json!({"name": "Peg", "grounded": false}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": 0, "plane": "XY", "x": x},
+        "b": {"occurrence": occurrence, "plane": "XY"}, "flip": true, "angle": 0}),
+    );
+    let check = |s: &Session, expected: Vec3| {
+        let j = &s.doc.assembly.joints[0];
+        assert!(matches!(j.a.snap, joints::Snap::Plane { x: Some(XRef::Reference { .. }), .. }));
+        let m = joints::resolve_origin(&s.doc, &s.model.state(), &j.a).unwrap();
+        assert_eq!(apply_vector(&m, Vec3::X), expected);
+        assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+        assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&joints::occurrence_world(&s.doc, occurrence), Vec3::X), expected);
+    };
+    check(&s, Vec3::X);
+    let joint = s.doc.assembly.joints[0].id;
+    run(&mut s, "joint.edit", json!({"joint": joint, "a": {"occurrence": 0, "plane": "XY", "x": x}}));
+    check(&s, Vec3::X);
+    run(&mut s, "timeline.rename", json!({"feature": id, "name": "Renamed"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "construct.axis.two_points",
+        "params": {"a": {"point": [0, 0, 0]}, "b": {"point": [0, 1, 0]}}}),
+    );
+    check(&s, Vec3::Y);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, Vec3::X);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, Vec3::Y);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    check(&reopened, Vec3::Y);
+    for dir in [[-0.6, 0.8, 0.0], [-0.8, 0.6, 0.0]] {
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({"feature": id, "command": "construct.axis.two_points",
+            "params": {"a": {"point": [0, 0, 0]}, "b": {"point": dir}}}),
+        );
+        check(&reopened, Vec3::new(dir[0], dir[1], dir[2]));
+    }
+    let before = reopened.doc.clone();
+    assert!(reopened.execute("joint.origin", &json!({"occurrence": occurrence, "plane": "XY", "x": x})).is_err());
+    assert_eq!(reopened.doc, before, "cross-component X is refused transactionally");
+}
+
+#[test]
+fn secondary_construction_axis_does_not_disappear_into_circle_point_fallback() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    for z in [json!([0, 0, 1]), Value::Null] {
+        let p = json!({"occurrence": 0, "circle": [0, 0, 0], "z": z,
+            "x": {"reference": {"type": "construction", "feature": 999}}, "name": "Bad"});
+        assert!(s.execute("joint.origin", &p).is_err());
+        assert_eq!(s.doc, before, "a missing axis must not leave a point origin");
+    }
+}
+
+#[test]
+fn secondary_construction_axis_is_not_ignored_by_unsupported_origins() {
+    let mut s = Session::default();
+    let x = json!({"reference": {"type": "construction", "feature": 999}});
+    for primary in [
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}),
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}),
+        json!({"edge": [1, 2, 3], "z": [0, 0, 1]}),
+        json!({"edge": [1, 2, 3]}),
+    ] {
+        let mut p = primary;
+        p["occurrence"] = json!(0);
+        p["x"] = x.clone();
+        let before = s.doc.clone();
+        assert!(s.execute("joint.origin", &p).is_err(), "unsupported primary silently discarded X: {p}");
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
+fn secondary_construction_axis_cannot_hide_inside_a_point_vector() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    let p = json!({"occurrence": 0, "point": [0, 0, 0],
+        "x": {"x": 1, "y": 0, "z": 0, "reference": {"type": "construction", "feature": 999}}});
+    assert!(s.execute("joint.origin", &p).is_err());
+    assert_eq!(s.doc, before);
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "point": [0, 0, 0], "x": {"x": 1, "y": 0, "z": 0}}));
+}
+
 pub(super) fn occ(s: &Session, component: &str) -> u64 {
     let c = s.doc.find_component(component).unwrap_or(0);
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
@@ -4571,4 +4804,61 @@ fn joint_list_filters_and_summarises_rigid_groups() {
     assert_eq!(summary["rigid_groups"].as_array().map(Vec::len), Some(20), "{summary}");
     assert_eq!(summary["rigid_groups"][0]["name"], "Kit", "the largest first: {summary}");
     assert_eq!(summary["more_rigid_groups"], json!({"groups": 1, "joints": 1}), "{summary}");
+}
+
+/// Two cubes on a cylindrical joint.
+fn sleeve() -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).ok();
+        s.execute("component.create", &json!({"name": name})).ok();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).ok();
+    }
+    s.execute("joint.create", &json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Sleeve"})).ok();
+    s
+}
+
+#[test]
+fn joint_dynamics_clears_when_nothing_is_given() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics[0].and_then(|d| d.damping), Some(0.5));
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve"})).is_ok());
+    assert!(s.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn a_changed_joint_type_keeps_only_its_own_slots() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "index": 1, "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 2);
+    assert!(s.execute("joint.edit", &json!({"joint": "Sleeve", "type": "revolute"})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 1);
+}
+
+#[test]
+fn joint_dynamics_are_reported_by_the_joint_list() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "effort": 3.0})).is_ok());
+    let list = s.execute("joint.list", &json!({})).unwrap_or_default();
+    assert_eq!(list["joints"][0]["values"][0]["dynamics"]["effort"], json!(3.0), "{list}");
+}
+
+#[test]
+fn joint_dynamics_refuses_hostile_values() {
+    let mut s = sleeve();
+    for p in [
+        json!({"joint": "Sleeve", "effort": 0.0}),
+        json!({"joint": "Sleeve", "velocity": -1.0}),
+        json!({"joint": "Sleeve", "damping": -1.0}),
+        json!({"joint": "Sleeve", "friction": 1e300}),
+        json!({"joint": "Sleeve", "index": 99, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": -1, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": 0.5, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": "0", "damping": 1.0}),
+        json!({"joint": "Nobody", "damping": 1.0}),
+    ] {
+        assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
+    }
+    assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
 }

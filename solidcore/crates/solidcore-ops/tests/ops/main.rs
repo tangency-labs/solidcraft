@@ -83,6 +83,8 @@ mod face_surface_eval;
 mod failure_code;
 #[path = "../fillet_sheets_long_run.rs"]
 mod fillet_sheets_long_run;
+#[path = "../frame_trim.rs"]
+mod frame_trim;
 #[path = "../heal.rs"]
 mod heal;
 #[path = "../issue_2843_round_on_tangent_line.rs"]

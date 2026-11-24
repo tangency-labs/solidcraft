@@ -70,6 +70,68 @@ pub(crate) fn startup_step(step: &'static str, detail: &str) {
     }
 }
 
+/// SolidCraft: a frame whose texture took at least this long to acquire stalled. wgpu waits at
+/// most a second for the swap chain's next image, and D3D12 then goes on as if it had come: a
+/// hung GPU shows as frames that each wait that second and never reach the screen, a white
+/// window with nothing reported (#3321).
+pub const STALLED_ACQUIRE: std::time::Duration = std::time::Duration::from_millis(950);
+
+static STALLED_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// SolidCraft: how many of the main window's frames in a row stalled acquiring their texture
+/// ([`STALLED_ACQUIRE`]). Other viewports (the agent chat's window) don't count: a frame on time
+/// there would start a stalled main window's count over.
+pub fn stalled_frames() -> u32 {
+    STALLED_FRAMES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The frames in a row that stalled, after one whose texture took `elapsed`. Only the `winit`
+/// painter acquires textures.
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+fn count_stall(stalled: u32, elapsed: std::time::Duration) -> u32 {
+    if elapsed >= STALLED_ACQUIRE {
+        stalled.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// The main window's acquire took `elapsed`; `frame`: it gave a texture to draw to, so its surface
+/// works again, if it didn't. An acquire that gives none (`Outdated`, `Validation`) still counts
+/// as a stall if it waited, but doesn't end the time without a texture ([`refused_for`]): a
+/// surface that configures, gives no frame and is refused again would otherwise start that time
+/// over each round (#3321 review).
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_acquire(elapsed: std::time::Duration, frame: bool) {
+    let stalled = count_stall(stalled_frames(), elapsed);
+    STALLED_FRAMES.store(stalled, std::sync::atomic::Ordering::Relaxed);
+    if frame && let Ok(mut since) = REFUSED_SINCE.lock() {
+        *since = None;
+    }
+}
+
+static REFUSED_SINCE: std::sync::Mutex<Option<web_time::Instant>> = std::sync::Mutex::new(None);
+
+/// SolidCraft: how long the main window has gone without acquiring a texture because its surface
+/// refuses its configuration (or waits for a refused one's retry, #1935); `None` while it gets
+/// textures. Those frames are skipped before the acquire, so they never count as stalled: a
+/// surface refused for good after a GPU reset leaves a blank window with nothing else to show
+/// for it (#3321).
+pub fn refused_for() -> Option<std::time::Duration> {
+    REFUSED_SINCE.lock().ok().and_then(|since| *since).map(|since| since.elapsed())
+}
+
+/// The main window skipped a frame at `now` on a refused configure. That frame ends the stalled
+/// streak: stalls before and after a refusal aren't frames in a row ([`refused_for`] counts
+/// the refusal itself).
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_refused(now: web_time::Instant) {
+    STALLED_FRAMES.store(0, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut since) = REFUSED_SINCE.lock() {
+        since.get_or_insert(now);
+    }
+}
+
 /// An error produced by egui-wgpu.
 #[derive(thiserror::Error, Debug)]
 pub enum WgpuError {
@@ -138,8 +200,8 @@ impl SurfaceConfig {
 /// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
 /// fails: from then on every call on the device fails quietly, and the device's lost callback
 /// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter first probes the device ([`DeviceLost::probe`]):
-/// the probe meets the loss instead, and the frame's uploads are skipped.
+/// (`PendingWrites::activate`), so the painter survives that panic ([`DeviceLost::survive`]),
+/// which probes the device to tell a loss from any other panic.
 #[derive(Clone, Debug, Default)]
 pub struct DeviceLost {
     lost: Arc<std::sync::atomic::AtomicBool>,
@@ -202,10 +264,10 @@ impl DeviceLost {
     }
 
     /// Run `draw`, GPU work on this device, and survive a panic it meets once the device is lost:
-    /// `None` then. The driver resets a device at any moment, so a reset can land after the
-    /// probe and a queue write (or the present) still be the first call to meet it, which panics
-    /// inside wgpu (`PendingWrites::activate` unwraps `Lost`, #10240). After such a panic the
-    /// probe meets the loss and marks it. Any other panic carries on unwinding.
+    /// `None` then. The driver resets a device at any moment, and a queue write (or the present)
+    /// can be the first call to meet it, which panics inside wgpu (`PendingWrites::activate`
+    /// unwraps `Lost`, #10240). After such a panic the probe meets the loss and marks it. Any
+    /// other panic carries on unwinding.
     pub fn survive<R>(
         &self,
         device: &wgpu::Device,
@@ -897,6 +959,42 @@ mod msaa_tests {
         assert_eq!(super::msaa_counts(adapter, Some(F::MULTISAMPLE_X4)), [1, 4]);
         assert_eq!(super::msaa_counts(F::MULTISAMPLE_X4, None), [1]);
         assert_eq!(super::clamp_msaa_samples(&[], 8), 1);
+    }
+
+    /// Frames that each waited out wgpu's one-second acquire count up; one on time starts over
+    /// (#3321).
+    #[test]
+    fn frames_that_wait_out_the_acquire_count_as_stalled() {
+        use std::time::Duration;
+        let second = Duration::from_millis(1000);
+        let stalled = (0..3).fold(0, |n, _| super::count_stall(n, second));
+        assert_eq!(stalled, 3);
+        assert_eq!(super::count_stall(stalled, Duration::from_millis(16)), 0);
+        // A slow frame isn't a stall: the image came before the timeout.
+        assert_eq!(super::count_stall(0, Duration::from_millis(400)), 0);
+        assert_eq!(super::count_stall(u32::MAX, second), u32::MAX);
+    }
+
+    /// Four stalls, then frames skipped on a refused configure, then one stall: one in a row,
+    /// not five (CodeRabbit on #4016). Only this test drives the main window's counters.
+    #[test]
+    fn a_refused_configure_ends_the_stalled_streak() {
+        use std::time::Duration;
+        let second = Duration::from_millis(1000);
+        (0..4).for_each(|_| super::note_acquire(second, true));
+        assert_eq!(super::stalled_frames(), 4);
+        super::note_refused(web_time::Instant::now());
+        assert_eq!(super::stalled_frames(), 0);
+        assert!(super::refused_for().is_some());
+        // An acquire that gives no texture (`Outdated`, `Validation`) doesn't end the time
+        // without one (#3321 review); one that does, does.
+        super::note_acquire(Duration::from_millis(16), false);
+        assert!(super::refused_for().is_some(), "no texture yet");
+        super::note_acquire(second, true);
+        assert_eq!(super::stalled_frames(), 1);
+        assert!(super::refused_for().is_none(), "a texture ends the refusal");
+        super::note_acquire(Duration::from_millis(16), true);
+        assert_eq!(super::stalled_frames(), 0);
     }
 }
 

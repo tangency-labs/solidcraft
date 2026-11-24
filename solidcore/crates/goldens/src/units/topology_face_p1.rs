@@ -766,6 +766,8 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 return Ok(o);
             }
             let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
+            #[cfg(test)]
+            let before = tests::before(&mut b);
             let fp = face_props(*props)?;
             let opts = fp1::MoveSeamOptions {
                 ok_to_move_to_center: *center,
@@ -784,6 +786,8 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 &|_| None,
             );
             o.push(status(&r)?);
+            #[cfg(test)]
+            let refused = r.as_ref().err().map(ToString::to_string);
             let r = r.unwrap_or_default();
             o.extend([
                 f64::from(r.u as u8),
@@ -795,6 +799,11 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             let serial =
                 solidcore::topology::brep::p3::notify_serial(&mut k.context, &mut b).map_err(e)?;
             put_owners(&mut o, &b, serial).map_err(e)?;
+            #[cfg(test)]
+            {
+                let found = tests::problems(&mut b, &before, refused);
+                AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = Some(found));
+            }
         }
         OpIn::SplitAtSeam { props } => {
             let face = b.face(f).map_err(e)?;
@@ -1057,6 +1066,12 @@ pub(super) fn own_built(
 
 /// A file source's key (path, rebuild, `validate_only`) and its Rust read.
 type OwnRead = ((String, bool, bool), Brep);
+
+#[cfg(test)]
+thread_local! {
+    /// What the seam replay test found wrong with the B-rep a `MoveSeam` op left.
+    static AFTER_MOVE_SEAM: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
 
 thread_local! {
     /// The last few Rust `.smb` reads, by key.
@@ -1413,5 +1428,354 @@ impl UnitDiff for Runner {
             }
         }
         Ok(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! #21368's replay of the 62 `MoveSeam` rows whose face properties report a crossed or
+    //! near-miss seam in a direction the face's surface is not periodic in (the 37 UB-137
+    //! rows on `vase_rev.smb`, periodic in U but open in V, and 25 on other files).
+    //!
+    //! Before the fix `move_seam` split the surface there and joined the open ends. On
+    //! `vase_rev.smb` it split at V = 58.166, so the face's surface left its edges (11.8
+    //! away), and the seam split merged interval ends onto edge points up to 4.19 away,
+    //! growing vertex tolerances to 1.18-2.59 (Test #82 allows 2L = 0.02). Each row is replayed
+    //! and its B-rep checked against what the geometry needs; without the fix every row
+    //! breaks at least one of these:
+    //! 0. `move_seam` succeeds: the input is valid (before the fix it refused the three
+    //!    `plane_circ.smb` rows with `SM_ERR_INVALID_INPUT` when splitting the plane);
+    //! 1. `check_brep` at Level 2 reports no kind of failure the B-rep did not already
+    //!    have before the op (the loaded files already fail some checks);
+    //! 2. every edge end (the 3D curve evaluated at its interval end) lies within its
+    //!    vertex's tolerance;
+    //! 3. every vertex tolerance is at most the largest of its tolerance before the op,
+    //!    the body tolerance `1e-5` (a new vertex's) and the widest edge-end gap at it plus
+    //!    a rounding allowance: the gap is one `Vec3`
+    //!    distance of coordinates at most `m` in size, so it is exact to within
+    //!    `4 * EPSILON * m` (three differences, squares and a sum, a square root, each one
+    //!    rounding of at most `m * EPSILON / 2` scaled by the norm); the allowance is
+    //!    `16 * EPSILON * m`, four times that.
+    //!
+    //! Each replay must also be the committed golden row, so the checks before the op
+    //! (`check_brep` takes the B-rep `&mut`) change nothing the row records. The golden
+    //! file is blessed by the `goldens` binary, built without `cfg(test)` and so without
+    //! these checks.
+    use super::*;
+    use crate::units::topology_vertexuse::{BssIn, SrfIn};
+    use solidcore::geom::geom_utility::p2::ContinuityType;
+    use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
+    use solidcore::topology::{edge, vertex};
+
+    /// The body tolerance, a new vertex's tolerance.
+    const BODY_TOL: f64 = 1e-5;
+
+    /// The rows the fix moves (every one a seam op whose face properties report a seam
+    /// in a direction the surface does not close in).
+    const MOVED: [&str; 62] = [
+        "Endcap.smb_0_f1_op9",
+        "Endcap.smb_1_f5_op9",
+        "Mouse.smb_0_f1_op9",
+        "Mouse.smb_1_f5_op9",
+        "box_with_large_fillet.smb_0_f1_op9",
+        "cone.smb_0_f1_op9",
+        "cone.smb_1_f5_op9",
+        "ellips_ts2.smb_0_f1_op9",
+        "ellips_ts2.smb_0_f2_op9",
+        "ellips_ts2.smb_1_f5_op9",
+        "guard_vase_rev_m0_c01_00",
+        "guard_vase_rev_m0_c01_01",
+        "guard_vase_rev_m0_c01_10",
+        "guard_vase_rev_m0_c01_11",
+        "guard_vase_rev_m0_c10_00",
+        "guard_vase_rev_m0_c10_01",
+        "guard_vase_rev_m0_c10_10",
+        "guard_vase_rev_m0_c10_11",
+        "guard_vase_rev_m0_c11_00",
+        "guard_vase_rev_m0_c11_01",
+        "guard_vase_rev_m0_c11_10",
+        "guard_vase_rev_m0_c11_11",
+        "guard_vase_rev_m1_c01_00",
+        "guard_vase_rev_m1_c01_01",
+        "guard_vase_rev_m1_c01_10",
+        "guard_vase_rev_m1_c01_11",
+        "guard_vase_rev_m1_c10_00",
+        "guard_vase_rev_m1_c10_01",
+        "guard_vase_rev_m1_c10_10",
+        "guard_vase_rev_m1_c10_11",
+        "guard_vase_rev_m1_c11_00",
+        "guard_vase_rev_m1_c11_01",
+        "guard_vase_rev_m1_c11_10",
+        "guard_vase_rev_m1_c11_11",
+        "guard_vase_rev_m3_c01_00",
+        "guard_vase_rev_m3_c01_01",
+        "guard_vase_rev_m3_c01_10",
+        "guard_vase_rev_m3_c01_11",
+        "guard_vase_rev_m3_c10_00",
+        "guard_vase_rev_m3_c10_01",
+        "guard_vase_rev_m3_c10_10",
+        "guard_vase_rev_m3_c10_11",
+        "guard_vase_rev_m3_c11_00",
+        "guard_vase_rev_m3_c11_01",
+        "guard_vase_rev_m3_c11_10",
+        "guard_vase_rev_m3_c11_11",
+        "plane_circ.smb_0_f1_op9",
+        "plane_circ.smb_0_f2_op9",
+        "plane_circ.smb_1_f5_op9",
+        "seam_cone.smb_p5_f0_0",
+        "seam_cone.smb_p5_f1_0",
+        "seam_cone.smb_p5_f2_0",
+        "seam_cone.smb_p5_f3_0",
+        "seam_vase_rev.smb_p5_f0_0",
+        "seam_vase_rev.smb_p5_f1_0",
+        "seam_vase_rev.smb_p5_f2_0",
+        "seam_vase_rev.smb_p5_f3_0",
+        "surf_sphere150.smb_0_f1_op9",
+        "surf_sphere150.smb_0_f2_op9",
+        "surf_sphere150.smb_1_f5_op9",
+        "vase_rev.smb_0_f1_op9",
+        "vase_rev.smb_1_f5_op9",
+    ];
+
+    fn moved_rows() -> Vec<Case> {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        cases
+            .into_iter()
+            .filter(|c| MOVED.contains(&c.name.as_str()))
+            .collect()
+    }
+
+    /// The widest edge-end gap at each vertex, with the largest coordinate seen there.
+    fn end_gaps(b: &Brep) -> Vec<(VertexId, f64, f64)> {
+        let k = crate::runner_kernel();
+        let mut gaps: Vec<(VertexId, f64, f64)> = Vec::new();
+        let edges: Vec<EdgeId> = b.edges().ids().collect();
+        for e in edges {
+            let Some(c) = edge::curve(b, e).expect("curve") else {
+                continue;
+            };
+            let iv = edge::interval(b, e).expect("interval");
+            let ends = [
+                (edge::start_vertex(b, e).expect("start"), iv.min()),
+                (edge::end_vertex(b, e).expect("end"), iv.max()),
+            ];
+            for (v, t) in ends {
+                let Some(v) = v else { continue };
+                let p = c.evaluate_point(&k, t).expect("end point");
+                let q = vertex::point(b, v).expect("vertex point");
+                let gap = p.distance(q);
+                let m = [p.x, p.y, p.z, q.x, q.y, q.z]
+                    .iter()
+                    .fold(0.0f64, |a, x| a.max(x.abs()));
+                match gaps.iter_mut().find(|g| g.0 == v) {
+                    Some(g) => {
+                        g.1 = g.1.max(gap);
+                        g.2 = g.2.max(m);
+                    }
+                    None => gaps.push((v, gap, m)),
+                }
+            }
+        }
+        gaps
+    }
+
+    /// The B-rep's state before the op: every vertex's tolerance and the `check_brep`
+    /// failures (by check name and message) it already had.
+    pub(super) struct Before {
+        tolerances: Vec<(VertexId, f64)>,
+        failures: Vec<String>,
+    }
+
+    /// The `check_brep` Level-2 failures, as sorted `name: message` lines.
+    fn failures(b: &mut Brep) -> Vec<String> {
+        let mut k = crate::runner_kernel();
+        let mut out: Vec<String> = match check_brep_with_keys(&mut k, b, CheckLevel::Level2, &key_of) {
+            Ok(check) => check
+                .failures()
+                .map(|r| format!("{}: {:?}", r.name, r.message))
+                .collect(),
+            Err(e) => vec![format!("check_brep error {e}")],
+        };
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Records the B-rep's state before the op.
+    pub(super) fn before(b: &mut Brep) -> Before {
+        let ids: Vec<VertexId> = b.vertices().ids().collect();
+        let tolerances = ids
+            .into_iter()
+            .map(|v| (v, vertex::tolerance(b, v).expect("tolerance")))
+            .collect();
+        Before {
+            tolerances,
+            failures: failures(b),
+        }
+    }
+
+    /// The invariants (0-3 above) the B-rep breaks; `before` holds its state before the
+    /// op (a vertex the op made had no tolerance).
+    pub(super) fn problems(b: &mut Brep, before: &Before, refused: Option<String>) -> Vec<String> {
+        let mut problems = Vec::new();
+        if let Some(e) = refused {
+            problems.push(format!("move_seam refused valid input: {e}"));
+        }
+        for f in failures(b) {
+            if !before.failures.contains(&f) {
+                problems.push(format!("new check_brep failure {f}"));
+            }
+        }
+        let before = &before.tolerances;
+        for (v, gap, m) in end_gaps(b) {
+            let tol = vertex::tolerance(b, v).expect("tolerance");
+            if gap > tol {
+                problems.push(format!("{v:?} end gap {gap} past {tol}"));
+            }
+            let had = before.iter().find(|x| x.0 == v).map_or(0.0, |x| x.1);
+            let need = had.max(BODY_TOL).max(gap + 16.0 * f64::EPSILON * m);
+            if tol > need {
+                problems.push(format!("{v:?} tolerance {tol} past {need} (gap {gap}, had {had})"));
+            }
+        }
+        problems
+    }
+
+    #[test]
+    fn seam_move_rows_keep_the_tolerances_the_geometry_needs() {
+        let rows = moved_rows();
+        assert_eq!(rows.len(), MOVED.len(), "every moved row is a case");
+        let golden =
+            crate::golden::read(&crate::golden::default_dir(), "topology.face_p1").expect("golden");
+        let mut problems = Vec::new();
+        for case in &rows {
+            AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = None);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let out = run_rust(&inputs).expect("row runs");
+            // the checks before the op take the B-rep `&mut`; the row must still be the
+            // committed golden one, so they changed nothing the row records
+            if golden.get(&case.name) != Some(&crate::golden::encode(&case.name, &out)) {
+                problems.push(format!("{}: the replay is not the committed golden row", case.name));
+            }
+            match AFTER_MOVE_SEAM.with(|c| c.borrow_mut().take()) {
+                Some(found) => {
+                    problems.extend(found.into_iter().map(|p| format!("{}: {p}", case.name)));
+                }
+                None => problems.push(format!("{}: MoveSeam did not run", case.name)),
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// A square tube `|x| + |y| = 1`, `z` in `[0, 1]`: bilinear, U along `z`, V round the
+    /// square from `(1, 0)` back to it. The first and last control points of every V row
+    /// are equal (`net[i][0] == net[i][4]`), so the surface closes in V exactly, but
+    /// the tube turns 90 degrees there (`d/dv` is `(-1, 1, 0)` at `v = 0` and `(1, 1, 0)`
+    /// at `v = 4`), so `IsPeriodic` is false in V: a seam reaches the move only through the
+    /// face properties' closure. (The properties are set by hand: the healer would not
+    /// report C1 across this kink; the case covers the gate, not the healer.)
+    fn kinked_tube() -> BrepIn {
+        let row = |z: f64| {
+            vec![
+                [1.0, 0.0, z, 1.0],
+                [0.0, 1.0, z, 1.0],
+                [-1.0, 0.0, z, 1.0],
+                [0.0, -1.0, z, 1.0],
+                [1.0, 0.0, z, 1.0],
+            ]
+        };
+        BrepIn::Face {
+            surface: SrfIn::Bspline(BssIn {
+                oob: false,
+                form: 0,
+                net: vec![row(0.0), row(1.0)],
+                p: 1,
+                q: 1,
+                u: vec![0.0, 0.0, 1.0, 1.0],
+                v: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0],
+            }),
+            // the face covers V in [0.5, 2.5]: the seam at V = 0 lies outside it
+            dom: [0.0, 0.5, 1.0, 2.5],
+        }
+    }
+
+    /// `move_seam` on [`kinked_tube`] with face properties that report a seam crossed in V
+    /// and closed in V as `closed_v` at `closed_val_v`: the result, the invariant check of
+    /// the replays above, and `IsPeriodic` in V on the input surface.
+    fn move_seam_on_kinked_tube(
+        closed_v: Tri,
+        closed_val_v: ContinuityType,
+    ) -> (fp1::MoveSeamResult, Vec<String>, bool) {
+        let mut k = crate::runner_kernel();
+        let Ok(Ok((mut b, _))) = own_brep(&kinked_tube(), false, false) else {
+            panic!("the tube face did not build");
+        };
+        let faces: Vec<FaceId> = b.faces().ids().collect();
+        let [f] = faces[..] else {
+            panic!("the tube is one face, got {}", faces.len());
+        };
+        let s = b.face(f).unwrap().surface.clone().unwrap();
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let periodic_v = s.is_periodic(&k, &d, SurfParamType::V).unwrap();
+        let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut Vec::new())
+            .unwrap_or_else(|_| panic!("HasSeamProblem failed on the tube"));
+        let before = before(&mut b);
+        let mut fp = FaceProps::<H>::new();
+        fp.bad_crossed_seam_dir = SurfParamType::V;
+        fp.bad_missing_seam_dir = SurfParamType::Neither;
+        fp.bad_near_miss_seam_dir = SurfParamType::Neither;
+        fp.closed_u = Tri::False;
+        fp.closed_v = closed_v;
+        fp.closed_val_v = closed_val_v;
+        let r = fp1::move_seam(
+            &mut k,
+            &mut b,
+            f,
+            key_of(EntityRef::Face(f)),
+            &mut cu,
+            &mut cv,
+            problem,
+            fp1::MoveSeamOptions::default(),
+            Some(&fp),
+            &|_| None,
+        );
+        let refused = r.as_ref().err().map(ToString::to_string);
+        let found = problems(&mut b, &before, refused);
+        (r.unwrap_or_default(), found, periodic_v)
+    }
+
+    /// The face properties' closure gate (review of #21381): a seam the properties
+    /// report in a direction they close at C1 is still moved when `IsPeriodic` is false
+    /// there, and the move keeps the B-rep valid (invariants 0-3 above); the same seam
+    /// reported closed only at C0, or at C1 but `closed_v` False, is no seam problem, so
+    /// nothing moves. The face covers V in `[0.5, 2.5]`, not the whole period, so the move is
+    /// out of the face (to the middle of the unused `[2.5, 4.5]`, snapped to knot 3). The
+    /// surface closes exactly, so the split and the rejoin at the old seam glue coincident
+    /// rows: no edge leaves the surface and no tolerance needs to grow.
+    #[test]
+    fn move_seam_props_c1_closure_on_a_non_periodic_surface() {
+        let (r, found, periodic_v) = move_seam_on_kinked_tube(Tri::True, ContinuityType::C1);
+        assert!(!periodic_v, "the tube must not be periodic in V");
+        assert_eq!(r.u, fp1::FixSeamPlanType::NoChanges);
+        assert_eq!(
+            r.v,
+            fp1::FixSeamPlanType::MoveOutOfFace,
+            "a seam closed at C1 by the face properties was not moved out of the face"
+        );
+        assert!(found.is_empty(), "{}", found.join("\n"));
+
+        for (closed_v, val) in [
+            (Tri::True, ContinuityType::C0),
+            (Tri::False, ContinuityType::C1),
+        ] {
+            let (r, found, _) = move_seam_on_kinked_tube(closed_v, val);
+            assert_eq!(r.u, fp1::FixSeamPlanType::NoChanges);
+            assert_eq!(r.v, fp1::FixSeamPlanType::NoChanges, "{closed_v:?} {val:?}");
+            assert!(found.is_empty(), "{}", found.join("\n"));
+        }
     }
 }

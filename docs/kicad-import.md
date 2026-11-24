@@ -3,7 +3,7 @@
 SolidCraft reads KiCad printed-circuit boards (`.kicad_pcb`, or a `.kicad_pro` project, which resolves to its same-stem board). The reader in `crates/io/src/kicad_in.rs` is written from KiCad's documented s-expression format; it brings the substrate in as an exact solid, with its copper, silkscreen and footprint models as meshes in a component named after the file, building the 3D models of its footprints as nested components laid out on the board.
 
 - **Open**: File → Open (`doc.open`) lists KiCad boards (`.kicad_pcb` and `.kicad_pro`) and asks for the import settings before opening one as a new design; `solidcraft board.kicad_pcb`; the MCP `open` tool, which opens a board with the default settings.
-- **Drag and drop** a board on the window: it opens as a new design through the same settings window.
+- **Drag and drop** a board on the window: it opens as a new design through the same import options window.
 
 The board's geometry is built once, at import: the design stores the resulting solids and meshes, so it reopens without the board file or its 3D models. Changing the options means opening the board again.
 
@@ -15,7 +15,7 @@ The board substrate always comes in:
 - **Cutouts**: a closed contour inside the outline is a hole through the board (even-odd nesting, so an island inside a cutout is board again).
 - **Drilled holes**: pad drills and via drills, round or slotted, are removed from the substrate. If a drill that touches a cutout defeats the profile, the board is rebuilt without the drills rather than failing.
 - **Placement**: the board's lower-left corner (the smallest X and Y of its outline) comes in at X = Y = 0. A board drawn anywhere on KiCad's project sheet lands at the design's origin with its corner there, not at the coordinates the file stores; the import's component carries that one shift, so its contents keep the board's own coordinates inside it.
-- **Thickness**: the board's own `general.thickness`, unless the `thickness` option overrides it. The substrate top is Z = 0, so components sit above it and back-side parts below.
+- **Thickness**: the board's own `general.thickness`, unless the `thickness` option overrides it. The board's substrate spans Z = 0 (the back face) to Z = thickness (the front face), so front-side components stand on the front face at Z = thickness and back-side parts hang below Z = 0, as in KiCad's own STEP export.
 - **Solid substrate**: the board is a B-rep solid (`representation: "brep"`, the default): an Import feature of its own, so its faces and edges can be picked and used in later features. A profile the kernel cannot build falls back to the mesh, with a warning; `representation: "mesh"` keeps the triangle mesh deliberately.
 
 The other layers are options:
@@ -52,7 +52,7 @@ The other layers are options:
 
 ## In the window
 
-File → Open… and choose a board (the picker lists KiCad PCB files), or drop one on the window: SolidCraft opens **Open KiCad PCB** first — **Include components**, the copper as **Overlay on the board** (the default), **None** or **Modelled**, **Include silkscreen**, the board colour and thickness (starting at the board's own) — and **Open** brings the board in as a new design with those options; **Cancel** leaves the current design alone.
+File → Open… and choose a board (the picker lists KiCad PCB files), or drop one on the window: SolidCraft opens **Open KiCad PCB** first, the import options window every format with options shares — **Include components**, the copper as **Overlay on the board** (the default), **None** or **Modelled**, **Include silkscreen**, the **Board colour** and **Board thickness** (starting at the board's own), and the **Board** as a **Solid** (the default) or a **Mesh** — and **Open** (or Enter) brings the board in as a new design with those options; **Cancel** (or Esc) leaves the current design alone. Only the options changed in the window are sent, so a board opened without changes comes in exactly as `doc.open` with its path alone brings it. A board always asks, even with Preferences › General › Dialogs "Ask for a file's import options" off, which only skips the other formats' questions; a board chosen with Insert Design opens as a design of its own.
 
 `doc.open` takes the same options, so a script or the CLI opens a board without the window. The MCP `open` tool takes only the path, so it opens a board with the default settings and does not forward the KiCad import options.
 

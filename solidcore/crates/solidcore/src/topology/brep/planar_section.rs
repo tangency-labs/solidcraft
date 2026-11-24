@@ -49,6 +49,7 @@
 //!   `SM_VALIDATE_INTERSECTORS`.
 
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
@@ -142,9 +143,9 @@ pub fn create_plane_from_bbox(
     let bilinear = BSplineSurface::create_bilinear_surface(p00, p10, p01, p11)?;
     match Plane::is_nurb_surface_plane(k, &bilinear, 1.0) {
         Ok(Some(plane)) => Ok(Some(Surface::from(plane))),
-        Ok(None) => Err(SolidError::topology_failed(
+        Ok(None) => Err(SolidError::topology(
             OP_PLANE,
-            "the bounding box's corners are not on a plane",
+            TopologyFailure::SectionPlaneNotMade,
         )),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (an `SER` inside reads as `TRUE` and leaves no plane)
@@ -407,7 +408,7 @@ pub fn create_planar_section_curves(
         let uv_domain = face2::uv_domain(b, f)?;
         // the face's surface, as an evaluation copy (same owner and cache slot)
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::topology_missing(OP_SECTION, "the face's surface"))?
+            .ok_or_else(|| SolidError::topology(OP_SECTION, TopologyFailure::FaceWithoutSurface))?
             .clone_for_evaluation()?;
         let face_tol = face2::tolerance(b, f)?;
 
@@ -506,7 +507,7 @@ pub fn create_planar_section_curves(
                     let face_curve =
                         status_free(edge::curve(b, e).map(Option::<&Curve>::cloned), None)?
                             .ok_or_else(|| {
-                                SolidError::topology_missing(OP_SECTION, "the edge's curve")
+                                SolidError::topology(OP_SECTION, TopologyFailure::EdgeWithoutCurve)
                             })?;
                     let edge_ivl = status_free(edge::interval(b, e), Extent1d::new())?;
                     if is_full_coincidence(&face_curve, &edge_ivl)? {
