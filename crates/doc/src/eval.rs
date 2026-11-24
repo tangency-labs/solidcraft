@@ -8080,15 +8080,9 @@ fn brep_face_start(st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
         let Ok(Some(foot)) = b.body.point_lies_on_face(face as usize, p, tol) else { continue };
         on = true;
         // How far the meeting may lie from `p` is bounded across the surface (the same gap the
-        // membership test allows), not along an oblique axis: along the direction `p` is off the
-        // surface, when it is off it; else, with `p` on it, by distance.
-        let off = p - foot;
-        let across = |q: Vec3| match off.normalized() {
-            Some(n) if off.len2() > 1e-24 => (q - p).dot(n).abs(),
-            _ => q.dist(p),
-        };
+        // membership test allows), not along an oblique axis.
         if let Ok(Some(q)) = b.body.face_line_hit(face as usize, p, dir)
-            && across(q) <= tol
+            && solidcraft_kernel::Body::distance_across_surface(p, foot, q) <= tol
             && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
         {
             best = Some(q);

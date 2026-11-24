@@ -315,18 +315,6 @@ pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
     Some((t, if !m.closed && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
-/// Where the line through `o` along unit `d` meets a mesh body's triangles, the meeting nearest
-/// `o` on either side, as a signed distance along `d`.
-pub(crate) fn mesh_line_hit(m: &TriMesh, o: Vec3, d: Vec3) -> Option<f64> {
-    let mesh = m.to_mesh();
-    let ahead = mesh.raycast(o, d).map(|(t, _)| t);
-    let behind = mesh.raycast(o, d * -1.0).map(|(t, _)| -t);
-    match (ahead, behind) {
-        (Some(a), Some(b)) => Some(if b.abs() < a.abs() { b } else { a }),
-        (a, b) => a.or(b),
-    }
-}
-
 impl Body {
     /// Build from the packed coordinates and corner normals stored in a design.
     pub fn from_packed_mesh(positions: &[[f64; 3]], triangles: &[[u32; 3]], normals: &[[f64; 9]]) -> Result<Self> {

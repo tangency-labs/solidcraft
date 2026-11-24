@@ -2220,10 +2220,18 @@ impl Body {
     /// runs along it, for an index out of range and a line that is not usable; `Err` for the
     /// kernel's failure.
     pub fn face_line_hit(&self, face_index: usize, through: Vec3, direction: Vec3) -> Result<Option<Vec3>> {
-        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-        let Some(d) = direction.normalized().filter(|d| finite(through) && finite(*d)) else { return Ok(None) };
+        let (through_a, direction_a) = ([through.x, through.y, through.z], [direction.x, direction.y, direction.z]);
         if let Some(m) = &self.mesh {
-            return Ok((face_index == 0).then(|| crate::meshbody::mesh_line_hit(m, through, d)).flatten().map(|t| through + d * t));
+            let Some(unit) = solidcore_ops::unit_direction(direction_a).filter(|_| through_a.iter().all(|x| x.is_finite())) else { return Ok(None) };
+            if face_index != 0 {
+                return Ok(None);
+            }
+            let d = Vec3::new(unit[0], unit[1], unit[2]);
+            let ahead = crate::meshbody::mesh_ray(m, through, d).map(|(t, _)| t);
+            let behind = crate::meshbody::mesh_ray(m, through, d * -1.0).map(|(t, _)| t);
+            return Ok(solidcore_ops::nearer_line_meeting(ahead, behind)
+                .and_then(|t| solidcore_ops::point_along_line(through_a, unit, t))
+                .map(|p| Vec3::new(p[0], p[1], p[2])));
         }
         if face_index >= self.record.faces.len() {
             return Ok(None);
@@ -2232,19 +2240,19 @@ impl Body {
             return Err(KernelError::Failed("line meets face: exact face form unavailable".into()));
         };
         let (body, order) = &*form;
-        match body.face_line_hits(order, face_index, [through.x, through.y, through.z], [d.x, d.y, d.z]) {
-            Ok(hits) => {
-                let Some(nearest) = hits.iter().map(|h| h.parameter.abs()).min_by(f64::total_cmp) else { return Ok(None) };
-                let tie = (self.size() * 1e-9).max(1e-9);
-                Ok(hits
-                    .into_iter()
-                    .filter(|h| h.parameter.abs() <= nearest + tie)
-                    .max_by(|a, b| a.parameter.total_cmp(&b.parameter))
-                    .map(|h| Vec3::new(h.point[0], h.point[1], h.point[2])))
-            }
+        let tie = (self.size() * 1e-9).max(1e-9);
+        match body.face_line_nearest(order, face_index, through_a, direction_a, tie) {
+            Ok(hit) => Ok(hit.map(|p| Vec3::new(p[0], p[1], p[2]))),
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("line meets face: {e}"))),
         }
+    }
+
+    /// How far `q` lies from `p` measured across a surface whose nearest point to `p` is `foot`
+    /// ([`solidcore_ops::distance_across_surface`]).
+    #[must_use]
+    pub fn distance_across_surface(p: Vec3, foot: Vec3, q: Vec3) -> f64 {
+        solidcore_ops::distance_across_surface([p.x, p.y, p.z], [foot.x, foot.y, foot.z], [q.x, q.y, q.z]).unwrap_or(f64::INFINITY)
     }
 
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level

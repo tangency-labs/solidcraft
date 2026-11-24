@@ -20,6 +20,7 @@ pub mod face;
 mod face_surface;
 pub mod faces_continue;
 pub mod flush_contact;
+mod line_meeting;
 pub mod r#loop;
 pub mod member_turn;
 pub mod normal;
@@ -33,4 +34,8 @@ pub mod vertex_meet;
 
 pub use face_surface::{
     face_line_hits, face_surface_feet, face_surface_intersect, FaceLineHit, SurfaceFoot,
+};
+pub use line_meeting::{
+    distance_across_surface, line_unit_direction, nearer_line_meeting, nearest_line_hit,
+    point_along_line,
 };

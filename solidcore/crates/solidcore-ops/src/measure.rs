@@ -975,6 +975,31 @@ impl Body {
             .collect())
     }
 
+    /// Where the line through `through` along `direction` meets record face `face`, of its
+    /// meetings ([`Body::face_line_hits`]) the nearest `through` on either side. Meetings as near
+    /// as each other within `tie` are a tie, which goes to the one furthest along `direction`:
+    /// ahead of `through` rather than behind it (a line through a cylinder's axis meets its side
+    /// ahead). `None` where the line misses the face or only runs along it.
+    ///
+    /// # Errors
+    /// As [`Body::face_line_hits`].
+    pub fn face_line_nearest(
+        &self,
+        order: &Order,
+        face: usize,
+        through: [f64; 3],
+        direction: [f64; 3],
+        tie: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let (through, direction) = (point(through)?, point(direction)?);
+        Ray::new(through, direction).map_err(|_| Error::Argument)?;
+        let hits = with_body("face_line_nearest", self, |k, b| {
+            solidcore::query::face_line_hits(k, b, f, through, direction)
+        })?;
+        Ok(solidcore::query::nearest_line_hit(&hits, tie).map(|h| array(h.point)))
+    }
+
     /// Record edge `edge`'s curve over the edge's own interval, copied out of the body to measure
     /// against faces and edges of this or another body ([`Body::closest_to_curve`]).
     ///
@@ -2000,6 +2025,45 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
             "a rim edge without exactly one face across it",
         )),
     })
+}
+
+/// `direction` made unit at any finite length, `None` for a coordinate that is not finite or a
+/// direction of no length (`solidcore::query::line_unit_direction`).
+#[must_use]
+pub fn unit_direction(direction: [f64; 3]) -> Option<[f64; 3]> {
+    let direction = point(direction).ok()?;
+    solidcore::query::line_unit_direction(direction).map(array)
+}
+
+/// Of a line's two nearest meetings with something, `ahead` along its unit direction and `behind`
+/// it (each a distance, not negative), the nearer as a signed distance along the direction
+/// (behind negative); the one ahead on a tie (`solidcore::query::nearer_line_meeting`).
+#[must_use]
+pub fn nearer_line_meeting(ahead: Option<f64>, behind: Option<f64>) -> Option<f64> {
+    solidcore::query::nearer_line_meeting(ahead, behind)
+}
+
+/// The point `parameter` along the line from `through` along its unit `direction`
+/// (`solidcore::query::point_along_line`); `None` for a coordinate that is not finite.
+#[must_use]
+pub fn point_along_line(
+    through: [f64; 3],
+    direction: [f64; 3],
+    parameter: f64,
+) -> Option<[f64; 3]> {
+    let (through, direction) = (point(through).ok()?, point(direction).ok()?);
+    Some(array(solidcore::query::point_along_line(
+        through, direction, parameter,
+    )))
+}
+
+/// How far `q` lies from `point`, measured across a surface whose nearest point to `point` is
+/// `foot` (`solidcore::query::distance_across_surface`); `None` for a coordinate that is not
+/// finite.
+#[must_use]
+pub fn distance_across_surface(point_: [f64; 3], foot: [f64; 3], q: [f64; 3]) -> Option<f64> {
+    let (p, f, q) = (point(point_).ok()?, point(foot).ok()?, point(q).ok()?);
+    Some(solidcore::query::distance_across_surface(p, f, q))
 }
 
 #[cfg(test)]

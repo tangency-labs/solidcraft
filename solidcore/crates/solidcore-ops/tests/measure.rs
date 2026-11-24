@@ -1161,3 +1161,41 @@ fn edge_points_lie_on_the_circles_of_a_cylinder() {
     }
     assert_eq!(rims, 2, "the cylinder's two rims");
 }
+
+/// The line helpers the app's hole start uses: a direction made unit (and refused when it has no
+/// length or a bad coordinate), the nearer of two meetings with ties going ahead, a point along a
+/// line, and a distance measured across a surface.
+#[test]
+fn line_helpers_make_unit_choose_the_nearer_meeting_and_measure_across() {
+    assert_eq!(
+        solidcore_ops::unit_direction([0.0, 0.0, 5.0]),
+        Some([0.0, 0.0, 1.0])
+    );
+    assert_eq!(solidcore_ops::unit_direction([0.0; 3]), None);
+    assert_eq!(solidcore_ops::unit_direction([f64::NAN, 0.0, 1.0]), None);
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(3.0), Some(2.0)),
+        Some(-2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(2.0), Some(2.0)),
+        Some(2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(None, Some(4.0)),
+        Some(-4.0)
+    );
+    assert_eq!(solidcore_ops::nearer_line_meeting(None, None), None);
+    assert_eq!(
+        solidcore_ops::point_along_line([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], -2.0),
+        Some([1.0, 2.0, 1.0])
+    );
+    // Off a surface along its normal (z): only the z gap counts across it; on it, plain distance.
+    let across =
+        solidcore_ops::distance_across_surface([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [3.0, 0.0, 3.0])
+            .unwrap();
+    assert!((across - 2.0).abs() < 1e-12, "{across}");
+    let plain =
+        solidcore_ops::distance_across_surface([0.0; 3], [0.0; 3], [3.0, 4.0, 0.0]).unwrap();
+    assert!((plain - 5.0).abs() < 1e-12, "{plain}");
+}
