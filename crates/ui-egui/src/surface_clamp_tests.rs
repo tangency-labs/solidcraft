@@ -62,3 +62,39 @@ fn a_surface_that_only_waits_and_a_chosen_mode_without_vsync_are_kept() {
         assert_eq!(viewport_present_mode(true, configured, &[PresentMode::Fifo]), configured);
     }
 }
+
+/// The window's device asks for egui-wgpu's own texture limit, 8192 a side, not all the adapter
+/// offers. A window larger than that (three 4K monitors side by side) is drawn on a surface the
+/// clamp keeps within it, and the device takes a texture of that size without an error.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_window_wider_than_the_device_limit_fits_once_clamped() {
+    use egui_wgpu::wgpu;
+    let Some((adapter, _, _)) = crate::gpu::offscreen_own_device() else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let descriptor = (egui_wgpu::WgpuSetupCreateNew::without_display_handle().device_descriptor)(&adapter);
+    assert_eq!(descriptor.required_limits.max_texture_dimension_2d, 8192);
+    let Ok((device, _queue)) = pollster::block_on(adapter.request_device(&descriptor)) else {
+        panic!("the window's device descriptor is refused by {:?}", adapter.get_info().name);
+    };
+    let max_side = device.limits().max_texture_dimension_2d;
+    assert_eq!(max_side, 8192);
+    let (width, height, scale) = clamp_surface_extent(11520, 2160, max_side);
+    assert_eq!((width, height), (8192, 1536));
+    assert!((scale - 8192.0 / 11520.0).abs() < 1e-6);
+    let (_texture, error) = egui_wgpu::capture_errors(&device, || {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("clamped window surface"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+    });
+    assert!(error.is_none(), "{error:?}");
+}

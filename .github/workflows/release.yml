@@ -433,6 +433,8 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/solidcraft
             target/${{ matrix.target }}/release/solidcraft-cli
+            target/${{ matrix.target }}/release/solidcraft-thumbnail-extension
+            target/${{ matrix.target }}/release/solidcraft-preview-extension
           if-no-files-found: error
 
   macos:
@@ -466,7 +468,8 @@ jobs:
       - name: Join, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
         run: |
           # Artifacts don't keep the executable bit.
-          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli \
+            target/*-apple-darwin/release/solidcraft-thumbnail-extension target/*-apple-darwin/release/solidcraft-preview-extension
           packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()

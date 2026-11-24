@@ -146,6 +146,12 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
 }
 
 impl Default for Caches {
@@ -153,16 +159,18 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
             ..Self::default()
         };
     }
@@ -202,6 +210,7 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
 }
@@ -411,6 +420,17 @@ impl WorkCounters {
         self.seam_tests.get()
     }
 
+    /// Stretches a curve intersection certified to keep its two curves within the
+    /// tolerance, from a point solution to an end of either curve, to learn whether the
+    /// solution moves to that end (`move_contacts_to_curve_ends`): each certificate
+    /// subdivides the stretch. The count grows with the point solutions near an end, so
+    /// two curves that coincide within the tolerance along many turns, crossing at
+    /// thousands of points, show here. Not the fork's.
+    #[must_use]
+    pub fn contact_stretch_certifications(&self) -> u64 {
+        self.contact_stretch_certifications.get()
+    }
+
     /// UV trim curves built for an edge use
     /// (`topology::edgeuse::p3::create_uv_trim_curve`): each build, whether it
     /// attaches its curve or fails. Not the fork's (#21105).
@@ -452,6 +472,7 @@ impl WorkCounters {
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
+        self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
     }
@@ -471,6 +492,12 @@ impl WorkCounters {
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
     pub(crate) fn add_seam_test(&self) {
         self.seam_tests.set(self.seam_tests.get().saturating_add(1));
+    }
+
+    /// Counts one stretch certified for a contact's move to a curve end.
+    pub(crate) fn add_contact_stretch_certification(&self) {
+        self.contact_stretch_certifications
+            .set(self.contact_stretch_certifications.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -979,11 +1006,6 @@ pub struct Kernel {
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
-    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
-    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
-    /// and then it changes nothing. Shared with the kernel copies an operation makes.
-    #[cfg(feature = "wr469-replay")]
-    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1059,8 +1081,6 @@ impl Kernel {
             strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
-            #[cfg(feature = "wr469-replay")]
-            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
     }
 
@@ -1083,6 +1103,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 

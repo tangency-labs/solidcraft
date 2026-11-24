@@ -131,7 +131,9 @@ click in the sketch to place a point. Existing toolbar customizations are kept; 
 Lines and polylines (L), rectangles (two-point R, three-point, centre), circles (centre C,
 two-point, three-point, tangent), arcs (three-point, centre, tangent), polygons, slots, ellipses,
 fit-point and control-point splines, conics, points and text. **Construction** (X) turns curves
-into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
+into reference geometry that doesn't form profiles. It switches selected points too: a
+construction point is drawn as an open square and a Hole from the whole sketch leaves it out.
+A Hole already made keeps its sites. Preferences › Sketch › *X switches selected points to construction* (on by default) controls this: off, points are left out and X with only points selected switches the drawing mode, as it always has. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`). Fillet also rounds a corner
@@ -413,14 +415,15 @@ fresh link once the source is available; their stored point values are preserved
 
 **Horizontal/Vertical** accepts a click on a line or clicks on two distinct sketch points,
 including the origin, endpoints and circle centres. For two points, it chooses horizontal
-or vertical alignment from their current positions. Hold **Shift** near a line's midpoint to
-highlight and select it as either point. The midpoint follows both endpoints as the line moves,
-resizes or rotates. Two line midpoints can also be aligned. Hovering and the first pick are
-only previews; Esc cancels them without changing the sketch. Accepting the second pick reuses
-or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V constraint
-in one undo step. Both constraints can be selected and deleted independently; deleting either
-keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original full
-side, retained as construction geometry, just like a manually constrained midpoint.
+or vertical alignment from their current positions. With a point already picked, a click on a
+line's midpoint takes that midpoint, the way the line's ends are taken. Hold **Shift** near a
+line's midpoint to highlight and select it as either point. The midpoint follows both endpoints
+as the line moves, resizes or rotates. Two line midpoints can also be aligned. Hovering and the
+first pick are only previews; Esc cancels them without changing the sketch. Accepting the second
+pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V
+constraint in one undo step. Both constraints can be selected and deleted independently; deleting
+either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
+full side, retained as construction geometry, just like a manually constrained midpoint.
 
 Scripts use the same command, with a midpoint reference in the `points` array:
 
