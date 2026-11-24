@@ -247,7 +247,7 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{NOW, NOZ};
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::query::brep::BrepFaceServices;
 use crate::query::edge::ClosestPoint;
 use crate::surface::implicit::{AnalyticSupport, Implicit};
@@ -2361,11 +2361,24 @@ fn exact_search_domain(marched: &Extent2d, domain: &Extent2d) -> Option<Extent2d
 /// copy over the same span: from `marched`'s start point to its end point, the way
 /// round through its middle (all of a closed conic for a closed piece). `None` when no
 /// line or conic of `exact` runs through all three points within `tol`.
+///
+/// Not upstream (#21301): `planes` are the two surfaces' planes (origin, unit normal) when
+/// both are planes. Their one line is then also taken where each point is within `tol` of
+/// both planes ([`within_of_plane`]), as the B-rep holds an edge point on its faces, though
+/// it is farther than `tol` from the line. That is where the planes meet at a small angle:
+/// a point within `tol` of two planes whose normals make the angle `φ` is within
+/// `tol / min(sin(φ/2), cos(φ/2))` of their line, and no closer bound holds (the point
+/// `±tol` from each plane along the normals' difference or sum is that far). Between two
+/// planes 10° apart the marched piece of their B-spline extensions, within 8.7e-7 of each,
+/// is 1.0000000014e-5 from the line (`a_draft_moves_a_face`, away from the wall above). The
+/// line is the planes' exact intersection whatever the angle; the three points only fix
+/// its span, and the caller still drops the piece on both extended surfaces within `tol`.
 fn exact_piece(
     k: &Kernel,
     marched: &Curve,
     exact: &[Curve],
     tol: f64,
+    planes: Option<[(Point3, Vec3); 2]>,
 ) -> Result<Option<ExactPiece>> {
     let ivl = marched.natural_interval();
     // start, middle, end
@@ -2390,7 +2403,13 @@ fn exact_piece(
             }
             *tk = candidate.step_inversion(k, *pk)?;
             let on_curve = candidate.evaluate_step_point(k, *tk)?;
-            on = distance(on_curve, *pk) <= tol;
+            on = distance(on_curve, *pk) <= tol
+                || (line
+                    && planes.is_some_and(|planes| {
+                        planes
+                            .iter()
+                            .all(|&(origin, normal)| within_of_plane(*pk, origin, normal, tol))
+                    }));
         }
         if !on {
             continue;
@@ -2452,6 +2471,19 @@ fn exact_piece(
         }));
     }
     Ok(None)
+}
+
+/// Not upstream (#21301): whether `p` is within `tol` of the plane through `origin` with the
+/// unit normal `normal`, certified: the computed `|(p - origin) . normal|` with a bound on its
+/// rounding, as [`crate::boolean`]'s coincident strip bounds it (the difference rounds by
+/// `γ_1` and the dot by `γ_3` of `|p - origin|` per component, the normal is unit within
+/// `γ_8`), is at most `tol`. A non-finite value is not within.
+fn within_of_plane(p: Point3, origin: Point3, normal: Vec3, tol: f64) -> bool {
+    let w = p - origin;
+    let bound = (w.dot(normal).abs() * (1.0 + gamma(8))
+        + 2.0 * (gamma(1) + gamma(3)) * w.length() * (1.0 + gamma(5)))
+        * (1.0 + gamma(2));
+    bound <= tol
 }
 
 /// `piece` ([`exact_piece`]) reversed where it runs against `curve`, the curve it was
@@ -2850,7 +2882,7 @@ fn exact_edge(
         Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
         Ok(None) | Err(_) => return Ok(None),
     };
-    let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
+    let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol, None)? else {
         return Ok(None);
     };
     // The piece runs as the edge does (exact_piece may give it end to start).
@@ -6594,12 +6626,23 @@ impl OffsetGeometryCreation {
                     Some(deg20_rad),
                 )?;
                 let tol = brep.brep_tolerance(edge)?;
+                // (two planes: their line is also taken where the marched points are within
+                // `tol` of both, `exact_piece`'s docs)
+                let planes = match (analytic1.kind(), analytic2.kind()) {
+                    (SurfaceKind::Plane(p1), SurfaceKind::Plane(p2)) => {
+                        let (o1, n1, _) = p1.is_planar();
+                        let (o2, n2, _) = p2.is_planar();
+                        Some([(o1, n1), (o2, n2)])
+                    }
+                    _ => None,
+                };
                 for ii in 0..ssi.curves_3d.len() {
                     let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
                     if is_exact_kind(marched) || marched.is_degenerate(k, EFF_ZERO, None)? {
                         continue;
                     }
-                    let Some(mut piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                    let Some(mut piece) = exact_piece(k, marched, &exact.curves_3d, tol, planes)?
+                    else {
                         continue;
                     };
                     // The piece runs as the marched one does: the trims below find the
@@ -9216,6 +9259,56 @@ mod tests {
         run_as(&k, &mut forwards, &marched, OP_MATE).unwrap();
         let (a, b) = (tangent(&Curve::from(forwards)), tangent(&marched));
         assert!(a.dot(b) > 0.0);
+    }
+
+    /// Two planes whose normals are 10° apart (the draft of `a_draft_moves_a_face`): a
+    /// marched piece `2e-5` off their line along the normals' difference is within
+    /// `2e-5 * sin(5°) = 1.74e-6` of each plane, so it lies on both faces within the
+    /// tolerance `1e-5`, yet farther than it from the line. The line is taken only when the
+    /// planes are given; a piece `2e-5` off along the normals' sum (about `2e-5` from each
+    /// plane) is refused either way.
+    #[test]
+    fn a_piece_on_two_planes_at_a_small_angle_takes_their_line() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let phi = 10.0_f64.to_radians();
+        let origin = Point3::new(20.0, 0.0, 10.0);
+        let n1 = Vec3::new(1.0, 0.0, 0.0);
+        let n2 = Vec3::new(phi.cos(), 0.0, phi.sin());
+        let planes = Some([(origin, n1), (origin, n2)]);
+        let line = Curve::from(Line::from_points(
+            Point3::new(20.0, -10.0, 10.0),
+            Point3::new(20.0, 10.0, 10.0),
+            3,
+        ));
+        let marched_along = |dir: Vec3| {
+            let off = dir * (2e-5 / dir.length());
+            Curve::from(Line::from_points(
+                Point3::new(20.0, -5.0, 10.0) + off,
+                Point3::new(20.0, 5.0, 10.0) + off,
+                3,
+            ))
+        };
+        let across = marched_along(n1 - n2);
+        let exact = std::slice::from_ref(&line);
+        assert!(exact_piece(&k, &across, exact, tol, None)
+            .unwrap()
+            .is_none());
+        match exact_piece(&k, &across, exact, tol, planes).unwrap() {
+            Some(ExactPiece::Line(l)) => {
+                let c = Curve::from(l);
+                let ivl = c.natural_interval();
+                for (t, y) in [(ivl.min(), -5.0), (ivl.max(), 5.0)] {
+                    let p = c.evaluate_point(&k, t).unwrap();
+                    assert!(distance(p, Point3::new(20.0, y, 10.0)) <= 1e-12, "{p:?}");
+                }
+            }
+            other => panic!("not the line: {other:?}"),
+        }
+        let off_both = marched_along(n1 + n2);
+        assert!(exact_piece(&k, &off_both, exact, tol, planes)
+            .unwrap()
+            .is_none());
     }
 
     /// The pieces of one cubic split apart and joined back again: the joint knot (full
