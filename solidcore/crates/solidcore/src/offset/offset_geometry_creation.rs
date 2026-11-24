@@ -2641,13 +2641,15 @@ fn move_within(distance: f64, allowed: f64) -> bool {
 ///   bounds ends within that of the new point ([`vertex_move_fits`]); otherwise every
 ///   changed edge at that vertex keeps its marched curve, and the check is made again
 ///   over the remaining ones;
-/// * an edge whose exact curve cannot be found or checked (any error but a missing callee or
-///   a cancellation, [`exact_edge`]) keeps its marched curve rather than fail the shell.
+/// * an edge whose exact curve cannot be found or checked keeps its marched curve rather
+///   than fail the shell: a grown copy refused, the intersection failing, the edge's
+///   trimmed curve not built, no line or conic through its three points, or the piece
+///   failing its validity check ([`exact_edge`]).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the intersections; [`SolidError::Cancelled`]; those of
-/// the vertex checks and moves, of the curve replacement and of `CreateUVTrimCurves`.
+/// Those of [`exact_edge`]; those of the vertex checks and moves, of the curve
+/// replacement and of `CreateUVTrimCurves`.
 pub fn make_edges_on_analytics_exact(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2659,15 +2661,8 @@ pub fn make_edges_on_analytics_exact(
     let margin = tol + 2.0 * approx_tol3d(k, ssi_tol);
     let mut exact_edges: Vec<ExactEdge> = Vec::new();
     for e in bp1::edges(b, None)? {
-        // Not upstream (WR-545 retired): an edge whose exact curve cannot be found or checked
-        // keeps its marched curve rather than fail the shell; only a missing callee or a
-        // cancellation stops the pass. Nothing has changed the body yet.
-        match exact_edge(k, b, e, tol, ssi_tol, deg20_rad, margin) {
-            Ok(Some(x)) => exact_edges.push(x),
-            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
-            }
-            Ok(None) | Err(_) => {}
+        if let Some(x) = exact_edge(k, b, e, tol, ssi_tol, deg20_rad, margin)? {
+            exact_edges.push(x);
         }
     }
 
@@ -2734,11 +2729,18 @@ pub fn make_edges_on_analytics_exact(
 }
 
 /// The exact curve [`make_edges_on_analytics_exact`] gives the edge `e`, or `None` where it
-/// keeps its marched curve.
+/// keeps its marched curve: the edge is outside the pass, or its exact curve cannot be
+/// found or checked (a grown copy refused, the intersection or the trimmed curve failing,
+/// no line or conic through its three points, the piece failing its validity check).
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the intersections; those of the evaluations.
+/// [`SolidError::Unported`] and [`SolidError::Cancelled`] from the growth, the
+/// intersection and the trimmed curve; those of the topology reads, the surface copies
+/// and domains and the evaluations; a defect where an evaluation gives no tangent.
+/// `exact_piece`'s [`SolidError::NotConverged`] is its turn-count guard, not a failed
+/// match: the STEP parameters it counts come from the conic's own inversion, within a
+/// turn, so only a broken conic reaches it, and that propagates.
 fn exact_edge(
     k: &mut Kernel,
     b: &mut Brep,
