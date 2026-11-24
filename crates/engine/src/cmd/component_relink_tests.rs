@@ -2338,6 +2338,95 @@ fn internal_components_are_picked_from_another_design_with_their_timelines() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// Insert from Design with `link` (#6892): the picked part stays in the design it is in and the
+/// component is linked to it there. Nothing is stored in this design, the link names the other
+/// design's file and then the part, Update Links reads the part from that design again, and the
+/// same pick a second time is one more placement.
+#[test]
+fn a_part_picked_from_another_design_can_stay_linked_to_it() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("insert-from-design-linked");
+    let (src, job) = (root.join("src"), root.join("job"));
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&job).unwrap();
+    hinge(&src, &src.join("hinge.scasm"));
+    part(&src.join("plate.scprt"), 20);
+    part(&src.join("thick.scprt"), 30);
+    let source = src.join("source.sc");
+    let mut made = Session::default();
+    run(&mut made, "file.save", json!({"path": source}));
+    run(&mut made, "component.insert_design", json!({"path": src.join("plate.scprt"), "translate": [50, 0, 0]}));
+    run(&mut made, "component.insert_design", json!({"path": src.join("hinge.scasm")}));
+    run(&mut made, "component.make_internal", json!({"component": "plate"}));
+    run(&mut made, "component.make_internal", json!({"component": "hinge"}));
+    run(&mut made, "file.save", json!({}));
+
+    let target = job.join("target.sc");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": target}));
+    let reply =
+        run(&mut s, "component.insert_from_design", json!({"path": source, "members": ["plate.scprt", "hinge.scasm/pin.scprt"], "link": true}));
+    let inserted = reply["inserted"].as_array().unwrap();
+    assert!(inserted.iter().all(|m| m["linked"] == true && m.get("reused").is_none()), "{reply}");
+    let plate = inserted[0]["component"].as_u64().unwrap();
+
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.component == plate).unwrap().transform[3], [50.0, 0.0, 0.0, 1.0]);
+    // The plate 4000 and the pin 1000.
+    assert!((volume(&mut s) - 5000.0).abs() < 1e-6, "{}", volume(&mut s));
+    let links = run(&mut s, "component.links", json!({}));
+    let listed = links["links"].as_array().unwrap();
+    assert!(listed.iter().all(|l| l["found"] == true && l["changed"] == false && l.get("internal").is_none()), "{links}");
+    assert!(listed.iter().all(|l| l["inside"].as_str().is_some_and(|holder| holder.ends_with("source.sc"))), "{links}");
+    assert!(listed.iter().any(|l| l["path"] == "../src/source.sc/.~internal/hinge.scasm/pin.scprt"), "{links}");
+
+    // Nothing of them is stored in this design or unpacked beside it.
+    run(&mut s, "file.save", json!({}));
+    assert!(solidcraft_io::internal_components(&std::fs::read(&target).unwrap()).unwrap().is_empty());
+    let saved = solidcraft_io::read_design(&std::fs::read(&target).unwrap()).unwrap();
+    assert_eq!(saved.links[&plate].path, "../src/source.sc/.~internal/plate.scprt", "relative, as any link is saved");
+    assert!(!job.join(".~target.sc.parts").join("plate.scprt").exists());
+
+    // Picked again, it is one more placement of the same component.
+    let again = run(&mut s, "component.insert_from_design", json!({"path": source, "members": ["plate.scprt"], "link": true}));
+    assert_eq!(again["inserted"][0]["reused"], true, "{again}");
+    assert_eq!(again["inserted"][0]["component"].as_u64(), Some(plate), "{again}");
+    assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == plate).count(), 2);
+    run(&mut s, "edit.undo", json!({}));
+
+    // The other design changes its plate (10 x 20 x 30 now): this one sees it and reads it again.
+    let mut other = Session::default();
+    assert_eq!(run(&mut other, "doc.open", json!({"path": source}))["errors"], 0);
+    let mut edited = Session::default();
+    assert_eq!(run(&mut edited, "doc.open", json!({"path": src.join(".~source.sc.parts").join("plate.scprt")}))["errors"], 0);
+    run(&mut edited, "solid.box", json!({"length": 10, "width": 20, "height": 10, "corner": [0, 0, 20]}));
+    run(&mut edited, "file.save", json!({}));
+    run(&mut other, "file.save", json!({}));
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": target}))["errors"], 0);
+    assert!((volume(&mut opened) - 5000.0).abs() < 1e-6, "as saved until the links are updated");
+    let links = run(&mut opened, "component.links", json!({}));
+    let changed: Vec<&str> =
+        links["links"].as_array().unwrap().iter().filter(|l| l["changed"] == true).map(|l| l["name"].as_str().unwrap()).collect();
+    assert_eq!(changed, ["plate"], "{links}");
+    assert_eq!(run(&mut opened, "component.update_links", json!({}))["updated"], json!(["plate"]));
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-6, "{}", volume(&mut opened));
+
+    // The other design replaces its plate by another part: this one's link finds nothing
+    // there, says so, and the component keeps its bodies.
+    run(&mut other, "component.make_internal", json!({"component": "plate", "path": src.join("thick.scprt")}));
+    run(&mut other, "file.save", json!({}));
+    drop(other);
+    let links = run(&mut opened, "component.links", json!({}));
+    let lost = links["links"].as_array().unwrap().iter().find(|l| l["name"] == "plate").unwrap();
+    assert_eq!((lost["found"].as_bool(), lost["state"].as_str()), (Some(false), Some("missing")), "{links}");
+    assert!(lost["reason"].as_str().is_some_and(|why| why.contains("holds no internal component `plate.scprt`")), "{links}");
+    assert!((volume(&mut opened) - 7000.0).abs() < 1e-6, "{}", volume(&mut opened));
+    let gone =
+        opened.execute("component.insert_from_design", &json!({"path": source, "members": ["bolt.scprt"], "link": true})).unwrap_err().to_string();
+    assert!(gone.contains("holds no internal component `bolt.scprt`"), "{gone}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A part edited in place and not yet saved is the app's autosave to bring back (#6892). The
 /// recovered copy is still a part and still belongs to its design, so a save puts it back in
 /// its place in the work folder, where the design offers it as a recovery component. The lock

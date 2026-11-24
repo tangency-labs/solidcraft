@@ -1303,6 +1303,9 @@ fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
     {
         // The design is named, so no file picker: the window opens on what it holds (#6892).
         crate::insert_from_design::open(app, path);
+        if let Some(window) = app.insert_from_design.as_mut() {
+            window.link = q.params.get("link").and_then(Value::as_bool).unwrap_or(false);
+        }
         let mut reply = started(app);
         reply["insert_from_design"] = json!(
             app.insert_from_design.as_ref().map(|window| window

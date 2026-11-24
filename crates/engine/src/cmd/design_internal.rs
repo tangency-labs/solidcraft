@@ -331,6 +331,28 @@ fn tidy(design: &str, depth: usize) -> usize {
     removed
 }
 
+/// How deep a pick goes into sub-assemblies ([`member`]).
+const PICK_DEPTH: usize = 16;
+
+/// The bytes of the internal component `pick` names inside the design file `container`: its
+/// name there, after the names of the sub-assemblies it is inside, with `/` between
+/// (`hinge.scasm/arm.scprt`).
+pub(crate) fn member(container: &[u8], pick: &str) -> Result<Vec<u8>, String> {
+    let segments: Vec<&str> = pick.split('/').collect();
+    if segments.len() > PICK_DEPTH || segments.iter().any(|segment| segment.is_empty()) {
+        return Err(format!("`{pick}` does not name an internal component"));
+    }
+    let mut bytes = container.to_vec();
+    for segment in segments {
+        let held = solidcraft_io::internal_components(&bytes).map_err(|e| e.to_string())?;
+        let Some((_, inner)) = held.into_iter().find(|(name, _)| name.eq_ignore_ascii_case(segment)) else {
+            return Err(format!("the design holds no internal component `{pick}`"));
+        };
+        bytes = inner;
+    }
+    Ok(bytes)
+}
+
 /// Whether `entry`, in the work folder `folder`, is a work file's lock that nobody holds any
 /// more: one that can't be read, one whose app is no longer running on this computer, or one not
 /// refreshed for so long that its owner (another computer, on a shared folder) is taken for

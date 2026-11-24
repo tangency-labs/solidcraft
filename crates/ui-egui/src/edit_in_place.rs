@@ -324,6 +324,11 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
     let Some(part) = link["file"].as_str().map(str::to_string) else {
         return Err(app.tr_label("ui.relink_not_linked").to_string());
     };
+    // A part inside another design (#6892) has no file of its own to open: it is edited in
+    // the design that holds it.
+    if let Some(holder) = link["inside"].as_str() {
+        return Err(solidcraft_ui_text::format("ui.edit_in_place_inside", &[("name", &file_name(holder))]));
+    }
     if !ask {
         // A network location not allowed yet, a missing file or one open in another SolidCraft
         // would ask or stop the open: as a command, that is its answer.

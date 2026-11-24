@@ -21,6 +21,8 @@ pub struct InsertFromDesign {
     pub path: String,
     /// The tree, parents before what they hold.
     pub rows: Vec<Row>,
+    /// Keep what is picked linked to the design, instead of copying it in.
+    pub link: bool,
 }
 
 /// One internal component of the design picked from.
@@ -78,7 +80,7 @@ pub(crate) fn open(app: &mut SolveApp, path: &str) {
                 app.insert_from_design = None;
                 app.set_status(solidcraft_ui_text::format("insert_from_design.none", &[("name", &file_name(path))]), false);
             } else {
-                app.insert_from_design = Some(InsertFromDesign { path: path.to_string(), rows });
+                app.insert_from_design = Some(InsertFromDesign { path: path.to_string(), rows, link: false });
             }
         }
         Err(e) => app.set_status(e.to_string(), true),
@@ -127,7 +129,7 @@ pub(crate) fn insert(app: &mut SolveApp) {
     }
     app.insert_from_design = None;
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
-    match app.run("component.insert_from_design", json!({"path": state.path, "members": members})) {
+    match app.run("component.insert_from_design", json!({"path": state.path, "members": members, "link": state.link})) {
         Ok(reply) => {
             let count = reply["inserted"].as_array().map_or(0, Vec::len).to_string();
             app.fit_view();
@@ -187,6 +189,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
             });
+            // Copied in (the default) or kept linked to the design picked from.
+            let keep = ui_kit::checkbox(ui, &solidcraft_ui_text::format("insert_from_design.link", &[("name", &name)]), &mut state.link);
+            crate::scenario::publish_target("insert_from_design_link", keep.rect);
+            if state.link {
+                let linked = solidcraft_ui_text::format("insert_from_design.link_detail", &[("name", &name)]);
+                ui_kit::text(ui, &linked, ui_kit::Text::Report("insert_from_design_link", false));
+            }
         });
     app.insert_from_design = Some(state);
     match action {

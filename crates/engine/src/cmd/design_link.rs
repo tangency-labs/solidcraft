@@ -94,6 +94,10 @@ pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
     if let Some(member) = super::design_internal::member_at(design, file) {
         return solidcraft_doc::internal::link(&member);
     }
+    // An internal component of another design: that design's path as a link keeps it, then the part.
+    if let Some((holder, pick)) = inside(file) {
+        return format!("{}/{}{pick}", stored(design, &holder), solidcraft_doc::internal::LINK);
+    }
     let whole = absolute(file);
     let Some(base) = base_dir(design) else {
         return whole.to_string_lossy().into_owned();
@@ -107,7 +111,44 @@ pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
 
 /// A link's absolute target, resolving directory aliases while keeping file symlinks distinct.
 pub(super) fn link_target(file: &Path) -> PathBuf {
+    if let Some((holder, pick)) = inside(file) {
+        return pick.split('/').fold(link_target(&holder).join(INSIDE), |path, part| path.join(part));
+    }
     parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
+}
+
+/// The folder name that, after a design file's path, starts the name of one of its internal
+/// components ([`inside`]).
+const INSIDE: &str = ".~internal";
+
+/// A link to an internal component of another design (experimental, #6892): `file` is that
+/// design's path, then `.~internal`, then the component's name, after the names of the
+/// sub-assemblies it is inside (`lib/library.sc/.~internal/hinge.scasm/arm.scprt`). Gives the
+/// design that holds it and the pick `component.design_contents` lists it by. No file is at such
+/// a path: every read goes to the design ([`read_linked_file`]), and a build that does not know
+/// them reports the link as not found and keeps its bodies.
+pub(super) fn inside(file: &Path) -> Option<(PathBuf, String)> {
+    let parts: Vec<PathPart<'_>> = file.components().collect();
+    let at = parts.iter().position(|part| matches!(part, PathPart::Normal(name) if name.to_str() == Some(INSIDE)))?;
+    // With nothing before it, it is one of the design's own internal components.
+    if at == 0 || at + 1 >= parts.len() {
+        return None;
+    }
+    let holder: PathBuf = parts[..at].iter().map(|part| part.as_os_str()).collect();
+    let pick: Option<Vec<&str>> = parts[at + 1..]
+        .iter()
+        .map(|part| match part {
+            PathPart::Normal(name) => name.to_str(),
+            _ => None,
+        })
+        .collect();
+    solidcraft_io::is_design_path(&holder.to_string_lossy()).then_some(holder).zip(pick.map(|pick| pick.join("/")))
+}
+
+/// The file the disk is asked about for the link at `file`: the design that holds it when it
+/// names an internal component of another design ([`inside`]), else itself.
+pub(super) fn on_disk(file: &Path) -> PathBuf {
+    inside(file).map_or_else(|| file.to_path_buf(), |(holder, _)| holder)
 }
 
 /// The file a stored link path names, for a design saved at `design`.
@@ -368,7 +409,7 @@ fn refusal(shown: &str, design: Option<&str>) -> Option<LinkProblem> {
 /// Cheap, for a design being opened, which must not read every file it links. A refused network
 /// or device path is judged from its text alone, with nothing asked of the disk or the network.
 pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkProblem> {
-    let shown = file.display().to_string();
+    let shown = on_disk(file).display().to_string();
     refusal(&shown, design).or_else(|| solidcraft_io::vfs::len(&shown).err().map(|e| io_problem(&shown, &e)))
 }
 
@@ -378,6 +419,11 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 /// name, missing, larger than the design (or STEP) size limit, or outside an agent's folders. Each with the
 /// reason to show. Every kind of link reads its file here.
 pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<u8>, LinkProblem> {
+    // An internal component of another design: that design is read, and the part taken from it.
+    if let Some((holder, pick)) = inside(file) {
+        let bytes = read_linked_file(&holder, design)?;
+        return super::design_internal::member(&bytes, &pick).map_err(|why| problem(LinkState::Missing, format!("{}: {why}", holder.display())));
+    }
     let shown = file.display().to_string();
     if let Some(why) = refusal(&shown, design) {
         return Err(why);

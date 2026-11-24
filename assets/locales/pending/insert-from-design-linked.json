@@ -1,0 +1,42 @@
+{
+  "en": {
+    "insert_from_design.link": "Keep linked to {name}",
+    "insert_from_design.link_detail": "Linked parts are not copied: this design reads them from {name}, Update Links brings in their changes, and they are edited there.",
+    "ui.edit_in_place_inside": "This component is linked to a part inside {name}. Open {name} to edit it."
+  },
+  "ar": {
+    "insert_from_design.link": "الإبقاء على الارتباط مع {name}",
+    "insert_from_design.link_detail": "الأجزاء المرتبطة لا تُنسخ: يقرؤها هذا التصميم من {name}، ويجلب «تحديث الروابط» تغييراتها، وتُحرَّر هناك.",
+    "ui.edit_in_place_inside": "هذا المكوِّن مرتبط بجزء داخل {name}. افتح {name} لتحريره."
+  },
+  "de": {
+    "insert_from_design.link": "Mit {name} verknüpft lassen",
+    "insert_from_design.link_detail": "Verknüpfte Teile werden nicht kopiert: Diese Konstruktion liest sie aus {name}, „Verknüpfungen aktualisieren“ übernimmt ihre Änderungen, und bearbeitet werden sie dort.",
+    "ui.edit_in_place_inside": "Diese Komponente ist mit einem Teil in {name} verknüpft. Öffnen Sie {name}, um es zu bearbeiten."
+  },
+  "he": {
+    "insert_from_design.link": "השאר מקושר אל {name}",
+    "insert_from_design.link_detail": "חלקים מקושרים אינם מועתקים: תכן זה קורא אותם מתוך {name}, ״עדכן קישורים״ מביא את השינויים בהם, והם נערכים שם.",
+    "ui.edit_in_place_inside": "רכיב זה מקושר לחלק שבתוך {name}. פתח את {name} כדי לערוך אותו."
+  },
+  "ja": {
+    "insert_from_design.link": "{name} にリンクしたままにする",
+    "insert_from_design.link_detail": "リンクした部品はコピーされません。この設計は {name} から読み込み、「リンクを更新」で変更を取り込み、編集は {name} 側で行います。",
+    "ui.edit_in_place_inside": "このコンポーネントは {name} 内の部品にリンクされています。編集するには {name} を開いてください。"
+  },
+  "ko": {
+    "insert_from_design.link": "{name}에 링크된 상태로 유지",
+    "insert_from_design.link_detail": "링크된 부품은 복사되지 않습니다. 이 설계는 {name}에서 부품을 읽고, 링크 업데이트로 변경 사항을 가져오며, 편집은 그쪽에서 합니다.",
+    "ui.edit_in_place_inside": "이 구성요소는 {name} 안의 부품에 링크되어 있습니다. 편집하려면 {name}을(를) 여십시오."
+  },
+  "vi": {
+    "insert_from_design.link": "Giữ liên kết với {name}",
+    "insert_from_design.link_detail": "Chi tiết được liên kết không bị sao chép: thiết kế này đọc chúng từ {name}, Cập nhật liên kết đưa các thay đổi của chúng vào, và chúng được chỉnh sửa tại đó.",
+    "ui.edit_in_place_inside": "Thành phần này được liên kết với một chi tiết bên trong {name}. Hãy mở {name} để chỉnh sửa."
+  },
+  "zh": {
+    "insert_from_design.link": "保持与 {name} 的链接",
+    "insert_from_design.link_detail": "链接的零件不会被复制：此设计从 {name} 读取它们，“更新链接”会带入其更改，编辑在 {name} 中进行。",
+    "ui.edit_in_place_inside": "此组件链接到 {name} 内的零件。请打开 {name} 进行编辑。"
+  }
+}

@@ -613,6 +613,11 @@ pub struct InsertFromDesignParams {
     pub path: String,
     /// What to take: each a `pick` of `component.design_contents`.
     pub members: Vec<String>,
+    /// Keep each picked one linked to the design it is in, instead of copying it: nothing is
+    /// stored in this design, `component.update_links` reads it from that design again, and it
+    /// is edited there. Default false: a copy, independent of where it came from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub link: bool,
 }
 
 /// What `component.insert_from_design` returns.
@@ -642,6 +647,10 @@ pub struct PickedMember {
     /// its component got one more placement.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reused: bool,
+    /// With `link`: the component is linked to the part inside the design picked from, and
+    /// `file` is that link, not a file on disk.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub linked: bool,
 }
 
 /// What `component.make_internal` returns.
@@ -767,6 +776,11 @@ pub enum LinkInfo {
         /// that unpacked file.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         recovery: bool,
+        /// Experimental (#6892): for a link to an internal component of another design, that
+        /// design's file. `file` then names the component inside it and is no file on disk;
+        /// `found` and `changed` are about that design and the part it holds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inside: Option<String>,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.
         #[serde(default, skip_serializing_if = "Option::is_none")]

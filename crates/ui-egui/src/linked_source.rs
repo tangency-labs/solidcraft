@@ -174,7 +174,8 @@ pub(crate) fn stamps_of(session: &mut solidcraft_engine::Session, on: bool) -> V
         .flatten()
         .filter_map(|l| {
             let found = l["found"].as_bool() == Some(true);
-            Some((l["component"].as_u64()?, if found { stamp(l["file"].as_str()?) } else { None }))
+            // A part inside another design changes when that design's file does.
+            Some((l["component"].as_u64()?, if found { stamp(l["inside"].as_str().or(l["file"].as_str())?) } else { None }))
         })
         .collect()
 }
@@ -198,7 +199,9 @@ fn changed_since_read(session: &mut solidcraft_engine::Session) -> Vec<u64> {
 /// (`component.links` `file`).
 fn read_files(session: &mut solidcraft_engine::Session) -> Vec<(u64, PathBuf)> {
     let Ok(links) = session.execute("component.links", &json!({})) else { return Vec::new() };
-    links["links"].as_array().into_iter().flatten().filter_map(|l| Some((l["component"].as_u64()?, PathBuf::from(l["file"].as_str()?)))).collect()
+    // A part inside another design is read from that design's file.
+    let file = |l: &Value| l["inside"].as_str().or(l["file"].as_str()).map(PathBuf::from);
+    links["links"].as_array().into_iter().flatten().filter_map(|l| Some((l["component"].as_u64()?, file(l)?))).collect()
 }
 
 /// The links of the shown design it holds no record of yet (it was just opened, a link was just

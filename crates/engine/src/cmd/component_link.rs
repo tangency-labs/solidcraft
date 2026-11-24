@@ -18,7 +18,9 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, MeshData, UserMaterial};
 
 use super::CommandSpec;
-use super::design_link::{LinkState, absolute, inside_design_folder, link_presence, link_target, read_linked_file, resolve, same_file, stored};
+use super::design_link::{
+    LinkState, absolute, inside, inside_design_folder, link_presence, link_target, on_disk, read_linked_file, resolve, same_file, stored,
+};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignContentsParams, DesignContentsResult, DesignInserted, DesignMember,
@@ -118,8 +120,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         "path: a saved design to pick from; members: [each a `pick` of component.design_contents, e.g. \"hinge.scasm\" or \
          \"hinge.scasm/arm.scprt\"] — experimental (hybrid environment): each picked part or sub-assembly is copied into this design's file as \
          an internal component with its timeline (a sub-assembly whole, with its parts and their joints) and placed in the active component \
-         where the other design had it; independent of the design it came from; this design must be saved; returns inserted: [{pick, component, \
-         name, member, file}]",
+         where the other design had it; independent of the design it came from; a part the design already holds unchanged under that name is \
+         placed once more instead (reused); link?: bool (default false): keep each picked one linked to the design it is in instead of copying \
+         it: nothing is stored here, component.update_links reads it from that design again, and it is edited there; this design must be \
+         saved; returns inserted: [{pick, component, name, member, file, reused?, linked?}]",
     ),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
@@ -669,7 +673,7 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     // connects to the host), so a refused path skips the self-link check, which resolves it, and
     // `read_linked_file` says why it is refused.
     let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
-    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), &on_disk(file))) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
     read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
@@ -704,7 +708,7 @@ const DIGESTS_SIZE: usize = 256;
 /// when its time or size changed since; the browser build keeps no times and reads it each time.
 pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     let file = absolute(file);
-    let stamp = solidcraft_io::vfs::design_path_stamp(&file.to_string_lossy(), own);
+    let stamp = solidcraft_io::vfs::design_path_stamp(&on_disk(&file).to_string_lossy(), own);
     if let Some(stamp) = stamp
         && let Some(known) = DIGESTS.lock().ok()?.iter().find(|(f, s, _)| *f == file && *s == stamp).map(|(_, _, d)| d.clone())
     {
@@ -2141,12 +2145,33 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad(cmd, format!("`members` must be 1 to {MAX_PICKS} picks of component.design_contents"))),
     };
     let source = read_link(Path::new(path), Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
+    let keep_linked = p.get("link").and_then(Value::as_bool).unwrap_or(false);
     let design = Path::new(&own).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let mut inserted = Vec::new();
     for pick in picks {
         let (given, bytes, placement) = picked(&source, &pick).map_err(|why| bad(cmd, format!("{path}: {why}")))?;
         // Row-major 3x4, as `component.insert_design` takes it.
         let rows = placement.map(|at| (0..3).flat_map(|row| (0..4).map(move |column| at[column][row])).collect::<Vec<f64>>());
+        // Kept linked: the component follows the part where it is, inside the other design.
+        // Nothing is stored here. A second pick of the same one is one more placement.
+        if keep_linked {
+            let file = pick.split('/').fold(Path::new(path).join(".~internal"), |file, part| file.join(part));
+            let target = link_target(&file);
+            let reused = s.doc.links.values().any(|link| !link.path.is_empty() && link_target(&resolve(Some(&own), &link.path)) == target);
+            let name = given.rsplit_once('.').map_or(given.as_str(), |(stem, _)| stem).to_string();
+            let mut params = json!({"path": file.to_string_lossy(), "name": name});
+            if reused {
+                params["reuse"] = json!(true);
+            }
+            if let Some(rows) = &rows {
+                params["to_matrix"] = json!(rows);
+            }
+            let made = insert_design(s, &params)?;
+            let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+            let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
+            inserted.push(PickedMember { pick, component, name, member: given, file: file.to_string_lossy().into_owned(), reused, linked: true });
+            continue;
+        }
         // A part this design already holds is not stored a second time: it is placed once more.
         if let Some(member) = super::design_internal::same_part(&s.doc, &s.internal_held, &own, &given, &bytes)
             && let Some(file) = super::design_internal::work_file(Some(&own), &member)
@@ -2158,7 +2183,7 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
             let made = insert_design(s, &params)?;
             let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
             let name = s.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-            inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: true });
+            inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: true, linked: false });
             continue;
         }
         let member = super::design_internal::free_name(&s.doc, &own, Path::new(&given));
@@ -2187,7 +2212,7 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
             kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
         }
         let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
-        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: false });
+        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: false, linked: false });
     }
     reply(cmd, InsertFromDesignResult { inserted, param_warnings: Vec::new() })
 }
@@ -2284,6 +2309,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     changed: None,
                     internal: false,
                     recovery: false,
+                    inside: None,
                     state: None,
                     reason: None,
                 };
@@ -2294,7 +2320,13 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
                 None => {
-                    let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
+                    // An internal component of another design is there when that design is.
+                    let holder = inside(&file).map(|(holder, _)| holder.to_string_lossy().into_owned());
+                    let found = solidcraft_io::vfs::design_path_is_file(holder.as_deref().unwrap_or(&shown), s.path.as_deref());
+                    // That design may no longer hold the part: read (once per change of its
+                    // file, [`file_sha256`]), and not found when it does not.
+                    let dropped = holder.is_some() && found == Some(true) && file_sha256(Path::new(&shown), s.path.as_deref()).is_none();
+                    let found = if dropped { Some(false) } else { found };
                     // Whether the file is no longer what this design last read (#9739): `null`
                     // when it isn't found, or the link keeps no digest (made before they were).
                     let current =
@@ -2310,6 +2342,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     // Why a file that can't be reached can't be: `None` when it can be read.
                     let (state, reason) = match link_presence(&file, s.path.as_deref()) {
                         Some(why) => (Some(why.state), Some(why.reason)),
+                        None if dropped => (Some(LinkState::Missing), read_link(&file, s.path.as_deref()).err().map(|e| e.to_string())),
                         None => (None, None),
                     };
                     // An internal component, and whether it waits as a recovery component (#6892).
@@ -2325,6 +2358,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         changed,
                         internal: internal.is_some(),
                         recovery,
+                        inside: holder,
                         state,
                         reason,
                     }
