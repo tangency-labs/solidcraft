@@ -9,7 +9,6 @@
 //! inside the target, so the outer shape is the flush join.
 
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
 
 use crate::{DocError, Result};
@@ -17,9 +16,6 @@ use crate::{DocError, Result};
 /// Depths tried, smallest first. Each is far more than the coincidence tolerance and far less
 /// than the body-scaled separation (several millimetres on a part a few hundred millimetres long).
 const DEPTHS_MM: [f64; 3] = [0.05, 0.2, 0.5];
-
-/// Back-to-back contacts offset in one retry. More than this is left to the error.
-const MAX_CONTACTS: usize = 8;
 
 /// Join `tool` onto `target`. A flush contact that the kernel refuses is retried with the
 /// tool's back-to-back faces overlapped a fraction of a millimetre into the target.
@@ -53,39 +49,19 @@ fn flush_overlap_join(target: &Body, tool: &Body) -> Option<Body> {
     None
 }
 
-/// Centroids of the tool's planar faces that lie back-to-back on a planar face of the target.
+/// Centroids of the tool's planar faces that lie back-to-back on a planar face of the target
+/// ([`solidcore_ops::flush_contact_points`]).
 fn contact_points(target: &Body, tool: &Body) -> Vec<Vec3> {
-    let size = target.size().max(tool.size());
-    if !(size.is_finite() && size > 0.0 && size < 1e7) {
-        return Vec::new();
-    }
-    let plane_tol = (size * 1e-4).max(1e-3);
-    let face_tol = (size * 1e-3).max(1e-3);
-    let (Ok(tool_faces), Ok(target_faces)) = (tool.faces(face_tol), target.faces(face_tol)) else {
+    let Ok((target, _)) = solidcore_ops::Body::from_record(target.record(), true) else {
         return Vec::new();
     };
-    let mut points = Vec::new();
-    for face in &tool_faces {
-        if points.len() >= MAX_CONTACTS {
-            break;
-        }
-        let Some(normal) = face.plane_normal else { continue };
-        if face.area < 1e-4 || !normal.x.is_finite() || !normal.y.is_finite() || !normal.z.is_finite() {
-            continue;
-        }
-        let at = face.centroid;
-        if !at.x.is_finite() || !at.y.is_finite() || !at.z.is_finite() {
-            continue;
-        }
-        let meets = target_faces.iter().any(|other| {
-            let Some(outward) = other.plane_normal else { return false };
-            normal.dot(outward) < -1.0 + 1e-4 && outward.dot(at - other.centroid).abs() < plane_tol
-        });
-        if meets {
-            points.push(at);
-        }
-    }
-    points
+    let Ok((tool, _)) = solidcore_ops::Body::from_record(tool.record(), true) else {
+        return Vec::new();
+    };
+    let Ok(points) = solidcore_ops::flush_contact_points(&target, &tool) else {
+        return Vec::new();
+    };
+    points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect()
 }
 
 /// The flush union adds the two volumes. A result that grew or lost material is not it.
@@ -105,6 +81,7 @@ fn volumes_agree(target: &Body, tool: &Body, joined: &Body) -> bool {
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+    use solidcraft_geom::Loop2Geom;
     use solidcraft_kernel::{self as kernel, BoolOp};
 
     use super::*;
