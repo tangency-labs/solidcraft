@@ -346,7 +346,7 @@ fn copy_curve(curve: &BSplineCurve) -> BSplineCurve {
 }
 
 /// A chamfer's sizes as the database holds them (#2486): kind 0 two distances, 1 a
-/// distance and an angle, 2 a chord (its one size the first), then the wedge.
+/// distance and an angle, 2 a chord, 3 an equal setback at every station, then the wedge.
 fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
     let [a, b, wedge] = sizes;
     let size = match kind {
@@ -356,6 +356,10 @@ fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
             angle: b,
         },
         2 => ChamferSize::Chord(a),
+        3 => {
+            return ChamferDefinition::new(ChamferSize::Distances([a; 2]), wedge)?
+                .at_every_station()
+        }
         _ => {
             return Err(SolidError::invalid_input(
                 OP_READ,
@@ -369,6 +373,9 @@ fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
 /// The database's numbers of a chamfer's sizes ([`chamfer_of_db`]'s inverse).
 #[must_use]
 pub fn chamfer_to_db(c: &ChamferDefinition) -> (i64, [f64; 3]) {
+    if let Some(d) = c.constant_setback() {
+        return (3, [d, 0.0, c.wedge]);
+    }
     match c.size {
         ChamferSize::Distances([a, b]) => (0, [a, b, c.wedge]),
         ChamferSize::DistanceAngle { distance, angle } => (1, [distance, angle, c.wedge]),
@@ -720,13 +727,14 @@ impl ProceduralBlend {
         &self.def.leader
     }
 
-    /// `GetLaw`: the radius law r(s), or none (a ball of one radius).
+    /// `GetLaw`: the radius law r(s) when prescribed as a curve on the leader.
     #[must_use]
     pub const fn law(&self) -> Option<&BSplineCurve> {
         self.def.law.as_ref()
     }
 
-    /// `GetOffset(i)`: the ball's offset from support `i` (0 with a law).
+    /// `GetOffset(i)`: the ball's offset from support `i` at the reference wedge
+    /// (0 when the radius is prescribed as a curve on the leader).
     #[must_use]
     pub fn offset(&self, i: usize) -> Option<f64> {
         self.def.offsets.get(i).copied()
@@ -2146,6 +2154,25 @@ mod tests {
         assert!(chord(&k, 0, [1.0, 2.0], c).is_err());
         assert!(chord(&k, 1, [2.0, 1.0], c).is_err());
         assert!(chord(&k, 2, [2.0, 1.0], c).is_err());
+    }
+
+    #[test]
+    fn the_database_preserves_which_chamfer_dimension_is_constant() {
+        let wedge = 0.4 * crate::math::PI;
+        let size = ChamferDefinition::new(ChamferSize::Distances([0.2; 2]), wedge).unwrap();
+        let local = size.at_every_station().unwrap();
+        for (c, tag) in [(size, 0), (local, 3)] {
+            let (kind, sizes) = chamfer_to_db(&c);
+            assert_eq!(kind, tag);
+            assert_eq!(chamfer_of_db(kind, sizes).unwrap(), c);
+        }
+        assert_eq!(local.scaled(3.0).constant_setback(), Some(3.0 * 0.2));
+        assert!(
+            ChamferDefinition::new(ChamferSize::Distances([0.2, 0.3]), wedge)
+                .unwrap()
+                .at_every_station()
+                .is_err()
+        );
     }
 
     #[test]

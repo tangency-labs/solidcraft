@@ -1081,14 +1081,33 @@ impl SurfaceSurfaceFs {
 
 // ---- SmConstantDistanceFS -----------------------------------------------------------------
 
-/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): every cross
-/// section has the same chord length between the rails.
+/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): a fixed
+/// chord between rails, or a fixed common setback on the two tangent planes.
 #[derive(Debug, Clone)]
 pub struct ConstantDistanceFs {
     /// The `SmFilletSolver` base.
     pub solver: FilletSolver,
     /// `m_dDistance`: the distance between corresponding rail points.
     pub distance: f64,
+}
+
+/// The equal setback's rolling radius and its derivative with respect to the dot
+/// of the inward unit normals. Their angle is the supplement of the tangent
+/// planes' wedge, so r/d = tan(wedge/2) = |n0+n1| / |n0-n1|.
+pub(crate) fn equal_setback_radius(setback: f64, [n0, n1]: [Vec3; 2]) -> Result<(f64, f64)> {
+    let sum_sq = (n0 + n1).length_squared();
+    let diff_sq = (n0 - n1).length_squared();
+    let radius = setback * (sum_sq / diff_sq).sqrt();
+    let derivative = 4.0 * radius / (sum_sq * diff_sq);
+    if !radius.is_finite() || radius <= 0.0 || !derivative.is_finite() {
+        return Err(SolidError::blend_trace(
+            OP_CD_JAC,
+            TraceFailure::EdgeFacesTangent {
+                dot: Some(n0.dot(n1)),
+            },
+        ));
+    }
+    Ok((radius, derivative))
 }
 
 /// The outputs of [`ConstantDistanceFs::load_initial_values`] besides the arrays it
@@ -1311,6 +1330,34 @@ impl ConstantDistanceFs {
         // set sDiff2 = vector between points on the fillet center curve (desire sDiff2.Length == 0.0)
         let diff2 = diff1 + radius * (n_f - n_g);
 
+        let (value, row, diverged) = if let Some(setback) = self.solver.station_setback() {
+            let (target, dr_dp) = equal_setback_radius(setback, [n_f, n_g])?;
+            (
+                radius - target,
+                (
+                    -dr_dp * n_g.dot(unit_n_f_du),
+                    -dr_dp * n_g.dot(unit_n_f_dv),
+                    -dr_dp * n_f.dot(unit_n_g_du),
+                    -dr_dp * n_f.dot(unit_n_g_dv),
+                    1.0,
+                ),
+                diff1.length() > 20.0 * setback,
+            )
+        } else {
+            let value = diff1.dot(diff1) - self.distance * self.distance;
+            (
+                value,
+                (
+                    2.0 * diff1.dot(du_f),
+                    2.0 * diff1.dot(dv_f),
+                    -2.0 * diff1.dot(du_g),
+                    -2.0 * diff1.dot(dv_g),
+                    0.0,
+                ),
+                value.abs().sqrt() > 10.0 * self.distance,
+            )
+        };
+
         if let Some(j) = jacobian {
             let mut i = *num_equations;
             let last_column = add(surf2_off.max(surf1_off), 2, OP)?;
@@ -1339,13 +1386,7 @@ impl ConstantDistanceFs {
                     -dv_g.z - radius * unit_n_g_dv.z,
                     n_f.z - n_g.z,
                 ),
-                (
-                    2.0 * diff1.dot(du_f),
-                    2.0 * diff1.dot(dv_f),
-                    -2.0 * diff1.dot(du_g),
-                    -2.0 * diff1.dot(dv_g),
-                    0.0,
-                ),
+                row,
             ] {
                 set_j(j, i, surf1_off, a, OP)?;
                 set_j(j, i, s1, b, OP)?;
@@ -1358,14 +1399,13 @@ impl ConstantDistanceFs {
 
         // Compute function values - distance vector between offset points on fillet center curve
         //                           distance between points on rail curves
-        let value = diff1.dot(diff1) - self.distance * self.distance;
         for v in [diff2.x, diff2.y, diff2.z, value] {
             set_f(f, *num_equations, v, OP)?;
             *num_equations = add(*num_equations, 1, OP)?;
         }
 
         // failure: railPoints more than 10*m_Distance apart
-        if value.abs().sqrt() > 10.0 * self.distance {
+        if diverged {
             // No convergance just skip out of here
             return Err(SolidError::blend_trace(
                 OP,
