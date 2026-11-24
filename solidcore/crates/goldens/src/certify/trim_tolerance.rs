@@ -1771,6 +1771,7 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         "ROWS units with no expected file: {missing:?}"
     );
     let mut left_out: Vec<(String, String)> = Vec::new();
+    let mut moved = Vec::new();
     for (unit, want) in &main {
         let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
             .unwrap_or_else(|e| panic!("{unit}: {e}"));
@@ -1806,8 +1807,11 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
-        assert_eq!(got, *want, "{unit}: {got:016x}, main {want:016x}");
+        if got != *want {
+            moved.push(format!("{unit}: {got:016x}, main {want:016x}"));
+        }
     }
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
     let pinned: Vec<(String, String)> = LEDGER_KNOWN_FAILING
         .iter()
         .map(|&(u, c)| (u.to_string(), c.to_string()))
