@@ -291,9 +291,8 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(out)
 }
 
-/// One point on each face `faces` of `b`: the centroid of its largest triangle, dropped onto the
-/// exact face, since SMLib takes the face nearest each point and a centroid left on its chord can
-/// lie nearer a neighbour (the outer wall of a thin ring, #21721).
+/// One point on each face `faces` of `b`: its largest triangle's centroid dropped onto the face, as
+/// SMLib takes the nearest face and a chord's centroid can be nearer a neighbour (#21721).
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
     let chord = (b.size() * 1e-3).max(1e-3);
     let mesh = b.mesh(&crate::MeshTolerance::chord(chord))?;
