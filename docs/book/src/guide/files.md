@@ -418,6 +418,23 @@ cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, 
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
