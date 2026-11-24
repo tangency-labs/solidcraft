@@ -28,6 +28,8 @@ struct View {
     // out the placements it hides, 2: the depth buffer is 1 at the near plane).
     prev_vp: mat4x4<f32>,
     hiz: vec4<u32>,
+    // x: the whole-body hovered placement index, y: its hover palette entry, z: 1 when set.
+    hover: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -315,6 +317,12 @@ fn place(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) 
         let slot = atomicLoad(&args[tri * 5u + 4u]) + picks[i * 4u + 1u];
         for (var w = 0u; w < PLACEMENT_WORDS; w = w + 1u) {
             out[slot * PLACEMENT_WORDS + w] = scene[at + w];
+        }
+        // A whole-body hover is the model's own draw in the hover palette entry: one word of
+        // this placement's row, so there is no second copy of the geometry and the model's own
+        // lighting and ambient occlusion apply.
+        if view.hover.z != 0u && i == view.hover.x {
+            out[slot * PLACEMENT_WORDS + 12u] = view.hover.y;
         }
     }
     let edge = picks[i * 4u + 2u];

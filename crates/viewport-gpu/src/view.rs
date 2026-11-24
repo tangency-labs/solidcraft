@@ -2903,6 +2903,7 @@ impl Batches {
         motions: &Motions,
         edge_px: f32,
         hidden: Option<(&hiz::Hiz, bool)>,
+        hover: Option<(u32, u32, u32)>,
     ) {
         self.cull_blocks(vp, motions);
         if std::mem::take(&mut self.gpu_cull_stale) {
@@ -2935,8 +2936,21 @@ impl Batches {
             }
         }
         let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
+        // The whole-body hover as an index into the cull's scene: the placements are concatenated
+        // in `instanced` order, so it is the counts before the draw plus the row. A draw or row
+        // that does not resolve returns None: the frame then draws today's highlight, never a
+        // wrong body tinted.
+        let hover = hover.and_then(|(draw, row, entry)| {
+            let d = self.instanced.get(usize::try_from(draw).ok()?)?;
+            let count = u32::try_from(d.placements.len() / INSTANCE_SIZE).unwrap_or(0);
+            if row >= count {
+                return None;
+            }
+            let at: u32 = self.instanced.iter().take(usize::try_from(draw).ok()?).map(|d| u32::try_from(d.placements.len() / INSTANCE_SIZE).unwrap_or(0)).sum();
+            Some((at.saturating_add(row), entry))
+        });
         if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
-            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut());
+            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
         if changed && let Some(indirect) = self.indirect.as_mut() {
@@ -5217,7 +5231,7 @@ impl Renderer {
             .as_ref()
             .filter(|h| cb.occlusion && own.is_some() && h.vp.is_some() && h.built_in == res.frames && res.hiz_slot == res.pic_slot)
             .map(|h| (h, reversed));
-        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden);
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden, cb.hover_place);
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
         let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));

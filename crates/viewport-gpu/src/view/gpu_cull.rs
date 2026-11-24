@@ -34,7 +34,7 @@ const LEVEL_WORDS: usize = 4;
 const TRI_ARGS_WORDS: usize = 5;
 const EDGE_ARGS_WORDS: usize = 4;
 /// Bytes of the shader's `View` uniform.
-const VIEW_SIZE: usize = 192;
+const VIEW_SIZE: usize = 208;
 /// Placements a workgroup of `pick` and `place` takes.
 const GROUP: u32 = 64;
 
@@ -396,6 +396,7 @@ impl GpuCull {
         draws: &[InstancedDraw],
         indirect: &mut indirect::Indirect,
         edges: Option<&mut edges::Edges>,
+        hover: Option<(u32, u32)>,
     ) {
         self.collect(indirect, edges);
         // Against a pyramid, each frame (it changes with every frame drawn); without one, again
@@ -459,6 +460,10 @@ impl GpuCull {
         }
         let words = pyramid.map_or([1, 1, 1, 0], |(h, _, reversed)| [h.frame[0], h.frame[1], h.levels, 1 | if reversed { 2 } else { 0 }]);
         view.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        // x: the whole-body hovered placement's index in the scene, y: the palette entry it is
+        // drawn in, z: 1 when there is one (0: no substitution).
+        let hover_words = hover.map_or([0, 0, 0, 0], |(index, entry)| [index, entry, 1, 0]);
+        view.extend(hover_words.iter().flat_map(|w| w.to_le_bytes()));
         queue.write_buffer(&self.view, 0, &view);
 
         let n = self.words[0];
