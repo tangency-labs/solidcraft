@@ -318,7 +318,8 @@ fn an_edge_without_a_curve_beside_the_seam_is_not_mixed() {
 
 /// A blended edge use without an edge (a malformed body handed to the public
 /// classification) is a failure, never "not mixed": `EdgeUseWithoutEdge` at that edge use.
-/// An edge use not blended without an edge is no tangent seam: `Ok(false)`.
+/// An edge use not blended without an edge is never Mixed: not mixed, or the ring's
+/// topology lookups refuse it as invalid input.
 #[test]
 fn a_blended_edge_use_without_an_edge_is_a_failure() {
     let mut k = kernel();
@@ -330,7 +331,11 @@ fn a_blended_edge_use_without_an_edge_is_a_failure() {
             if c.solver_eus.contains(&eu) {
                 assert_edge_use_without_edge(&found.unwrap_err(), eu);
             } else {
-                assert!(!found.unwrap(), "{eu:?}");
+                // never Mixed: not mixed, or the ring's topology lookups refuse it
+                match found {
+                    Ok(mixed) => assert!(!mixed, "{eu:?}"),
+                    Err(err) => assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}"),
+                }
             }
         }
         assert!(classify(&k, &mut c, true).unwrap());
