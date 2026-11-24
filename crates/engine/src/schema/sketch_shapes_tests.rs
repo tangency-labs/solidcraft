@@ -319,14 +319,14 @@ fn rectangles_and_polygons_reply_with_their_types() {
     let keys = |r: &Value| r.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
     let mut off = session(ParamCheck::Off);
     let r = run(&mut off, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [110, 10]}));
-    assert_eq!(keys(&r), ["constraints", "corners", "created", "curves", "sides", "sketch"]);
+    assert_eq!(keys(&r), ["constraints", "corners", "created", "curves", "figure", "sides", "sketch"]);
     assert!(r["sides"]["bottom"].is_string() && r["corners"]["top_left"].is_string(), "{r}");
     let r = run(&mut off, "sketch.rectangle.rounded", json!({"p0": [170, 0], "p1": [190, 10], "radius": 2}));
-    assert_eq!(keys(&r), ["arcs", "centre", "constraints", "created", "curves", "diagonal", "param", "sides", "sketch"]);
+    assert_eq!(keys(&r), ["arcs", "centre", "constraints", "created", "curves", "diagonal", "figure", "param", "sides", "sketch"]);
     assert_eq!((r["curves"].as_array().map(Vec::len), r["arcs"].as_array().map(Vec::len)), (Some(8), Some(4)), "{r}");
     assert!(r["param"].as_str().is_some_and(|name| !name.is_empty()), "{r}");
     let r = run(&mut off, "sketch.polygon.inscribed", json!({"center": [210, 5], "radius": 4}));
-    assert_eq!(keys(&r), ["constraints", "created", "curves", "sketch", "support_circle"]);
+    assert_eq!(keys(&r), ["constraints", "created", "curves", "figure", "sketch", "support_circle"]);
     assert_eq!(r["curves"].as_array().map(Vec::len), Some(6), "six sides by default: {r}");
     // The same calls give the same JSON with the check off and in strict.
     let (mut off, mut strict) = (session(ParamCheck::Off), session(ParamCheck::Strict));
@@ -373,14 +373,14 @@ fn slot_replies_include_their_construction_middle() {
         let o = r.as_object().unwrap_or_else(|| panic!("{id}: {r}"));
         let mut keys: Vec<&str> = o.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["centre_line", "constraints", "created", "curves", "middle", "sketch"], "{id}: {r}");
+        assert_eq!(keys, ["centre_line", "constraints", "created", "curves", "figure", "middle", "sketch"], "{id}: {r}");
         for k in ["curves", "constraints"] {
             let list = o[k].as_array().unwrap_or_else(|| panic!("{id} {k}: {r}"));
             assert!(!list.is_empty() && list.iter().all(Value::is_string), "{id} {k}: {r}");
         }
         assert_eq!(o["curves"].as_array().map(Vec::len), Some(4), "{id}: {r}");
         assert_eq!(sorted_keys(&o["sketch"]), Some(vec!["dof", "solved"]), "{id}: {r}");
-        assert_eq!(sorted_keys(&o["created"]), Some(vec!["constraints", "curves", "dimensions", "points"]), "{id}: {r}");
+        assert_eq!(sorted_keys(&o["created"]), Some(vec!["constraints", "curves", "dimensions", "figures", "points"]), "{id}: {r}");
         assert!(o["centre_line"].is_string() && o["middle"].is_string(), "{id}: {r}");
         let mut expected = o["curves"].as_array().cloned().unwrap_or_default();
         expected.push(o["centre_line"].clone());

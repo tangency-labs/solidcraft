@@ -121,6 +121,9 @@ macro_rules! sketch_preferences {
             sketch_conflict_colour: bool = true, PAGE_SKETCH;
             /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
             sketch_construction_lines: bool = true, PAGE_SKETCH;
+            /// Show a sketch's current contents below its browser row. Off: the row's fold shows the
+            /// sketch's pattern list, as it did before (#7917).
+            sketch_contents: bool = true, PAGE_SKETCH;
             /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
             /// Off: only a sketch tool shows them, while it places a point, as before.
             sketch_cursor_coordinates: bool = true, PAGE_SKETCH;

@@ -32,7 +32,13 @@ fn read(app: &mut SolveApp, sketch: Option<u64>) -> Result<Value, String> {
 
 /// Open the report on the active sketch.
 pub fn open(app: &mut SolveApp) {
-    let sketch = app.session.active_sketch;
+    open_for(app, None);
+}
+
+/// Open the report on `sketch` (None: the active sketch), so a browser contents row can read a
+/// finished sketch's report by id.
+pub fn open_for(app: &mut SolveApp, sketch: Option<u64>) {
+    let sketch = sketch.or(app.session.active_sketch);
     let result = read(app, sketch);
     app.sketch_report = Some(SketchReport { revision: app.session.revision, sketch, result });
 }
@@ -165,5 +171,23 @@ mod tests {
         h.step(&json!({"click": [at.x, at.y]})).unwrap();
         h.frames(2);
         assert!(h.app.sketch_report.is_some(), "clicking the ribbon button opens the report");
+    }
+
+    /// A finished sketch's report can be read by id, as a browser contents row asks for its
+    /// Properties; the window follows that sketch, not the one being edited.
+    #[test]
+    fn a_finished_sketch_report_opens_by_id() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let finished = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+        h.app.finish_sketch();
+        h.app.run("sketch.create", json!({"plane": "YZ"})).unwrap();
+        super::open_for(&mut h.app, Some(finished));
+        let r = h.app.sketch_report.as_ref().expect("the report opens on the named sketch");
+        assert_eq!(r.sketch, Some(finished), "not the sketch being edited");
+        let v = r.result.as_ref().expect("a finished sketch is inspected");
+        assert_eq!(v["curves"].as_array().map(Vec::len), Some(1));
     }
 }
