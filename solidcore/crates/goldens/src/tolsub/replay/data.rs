@@ -3626,17 +3626,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f0_rebuild",
-        0xc06c78171c27cc18,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f1",
         0x405d41ec54756fcc,
         1,
@@ -3675,17 +3664,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f10_rebuild",
-        0x285f1807418e2ad0,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f11",
         0xd501370bd4c02fc3,
         1,
@@ -3701,28 +3679,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f11_rebuild",
-        0xb0d87884af486924,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f1_rebuild",
-        0x9bf80f40fae1c543,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3746,17 +3702,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f2_rebuild",
-        0xaafe2826d275b1fb,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f3",
         0xb155434b38aaf670,
         1,
@@ -3772,17 +3717,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f3_rebuild",
-        0xab5e6a69b6a9156c,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3806,17 +3740,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f4_rebuild",
-        0xb13e8b8c2ed8175e,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f5",
         0x19d4ef8f2fa1fd36,
         1,
@@ -3832,17 +3755,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f5_rebuild",
-        0xe6369a58135f5b47,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3866,17 +3778,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f6_rebuild",
-        0xb6ca2358bbad6ab6,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f7",
         0xd24c4dae142512d2,
         1,
@@ -3892,17 +3793,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f7_rebuild",
-        0x8d6d0b81ccd05a0d,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
     (
@@ -3926,17 +3816,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f8_rebuild",
-        0xd1f4f25b02d4635a,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
-        ],
-    ),
-    (
-        "topology.face_p3",
         "own_reader_open_shell_uv_trim_f9",
         0xbe697d11a37d1c9e,
         1,
@@ -3952,17 +3831,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 6, 0x3f0ec492ac6b2c44, 0x3f0986654a325208),
             (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
             (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
-        ],
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_open_shell_uv_trim_f9_rebuild",
-        0x717a742fb7348ca2,
-        1,
-        &[
-            (0, false, 17, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3efa4fff2e7e0c33),
-            (0, true, 14, 0x3f1169496d69328f, 0x3f0fb68913522a08),
         ],
     ),
 ];

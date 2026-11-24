@@ -53,6 +53,7 @@ mod face;
 mod loops;
 mod seams;
 mod shell;
+mod tangent_sections;
 mod vertex;
 
 use std::borrow::Cow;
@@ -412,6 +413,10 @@ fn check_brep_counted(
 /// `CheckFace`'s loop checks, so on the same body the second pass would report nothing,
 /// succeed and write nothing.
 ///
+/// (not upstream, #21105) Where a face of `b` lacks its UV trim curves, the whole check runs
+/// on a copy standing for `b` (`standing_where_trims_lack`), so the trims it builds and the
+/// tolerances their attaching raises stay off `b`.
+///
 /// # Errors
 ///
 /// Those of [`validate_pointers`](super::validate_pointers) and [`assert_valid`], including
@@ -449,6 +454,8 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
@@ -498,7 +505,8 @@ fn check_with_keys_counted(
 /// classes, `ValidatePointers` at level 0, the validate-only tolerance pass, Brep
 /// tests 0-21; not upstream's `ContainsCoincidentTopology`, see `brep`) and, with `walk`,
 /// `AssertValid` of every region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
-/// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
+/// in native order. (not upstream, #21105) Where a face of `b` lacks its UV trim curves, it
+/// runs on a copy standing for `b`, as [`check_brep_with_keys`] does. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
 /// geometry owners' identities (as for [`validate_pointers`](super::validate_pointers)). Returns `false` when a
 /// check failed (at once when `ValidatePointers` does not succeed).
 ///
@@ -532,7 +540,42 @@ pub fn assert_valid_scoped(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<bool> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut standing = standing_where_trims_lack(b)?;
+    let b = standing.as_mut().unwrap_or(b);
     assert_valid_with(k, b, reports, level, walk, keys, scope, true)
+}
+
+/// (not upstream, #21105) The B-rep a check runs on in place of `b`: a copy standing for it,
+/// its faces' definitions kept ([`Brep::clone_standing_for_self_keeping_definitions`]), where
+/// one of its faces lacks UV trim curves
+/// ([`face_uv_curves_present`](crate::topology::trimming_tools::face_uv_curves_present)),
+/// else `None`, and the check runs on `b`. The walk builds a face's missing trims (`CheckFace`,
+/// a vertex use's UV point), and attaching a trim raises the tolerances of its edge and
+/// vertices by an amount that depends on the trims the edge already has, so a check run on
+/// `b` would leave those trims and raises, in the walk's order, on the body it was asked
+/// about. On the copy the check builds and reads the same trims and reports the same, and `b`
+/// keeps none of it: no trims, no raised tolerances, and none of the gaps or repairs the check
+/// stores. A body that has its trims, the one a caller makes once
+/// ([`create_missing_uv_trim_curves`](crate::topology::brep::p2::create_missing_uv_trim_curves)),
+/// is checked on itself and builds none. A face whose trims cannot be looked up (a broken
+/// loop link) counts as lacking them: the check, on the copy, is what reports the link.
+///
+/// # Errors
+///
+/// Those of the copy's geometry copies.
+fn standing_where_trims_lack(b: &Brep) -> Result<Option<Brep>> {
+    for &f in b.face_list() {
+        if !matches!(
+            crate::topology::trimming_tools::face_uv_curves_present(b, f),
+            Ok(true)
+        ) {
+            return Ok(Some(b.clone_standing_for_self_keeping_definitions()?));
+        }
+    }
+    Ok(None)
 }
 
 /// [`assert_valid_scoped`]; without `pointers`, its `ValidatePointers` pass is taken as
@@ -951,6 +994,74 @@ mod tests {
         assert_eq!(printed(&skipped), printed(&full));
     }
 
+    /// What attaching a UV trim writes, entity by entity: each edge use's own trim slot and
+    /// drop record, and the edge and vertex tolerances an attached trim raises. Not the gaps
+    /// ([`written_fields`]): #21105 keeps a check's stored gaps as derived values.
+    fn trims_and_tolerances(b: &Brep) -> Vec<String> {
+        let mut out = Vec::new();
+        for &e in b.edge_list() {
+            let edge = b.edge(e).unwrap();
+            out.push(format!("{e:?} {:x}", edge.tolerance.to_bits()));
+            for &eu in &edge.edgeuses {
+                let u = b.edgeuse(eu).unwrap();
+                out.push(format!(
+                    "{eu:?} {:?} {:?}",
+                    u.uv_trim_curve, u.drop_curve_fail
+                ));
+            }
+        }
+        for &v in b.vertex_list() {
+            let tolerance = b.vertex(v).unwrap().tolerance;
+            out.push(format!("{v:?} {:x}", tolerance.to_bits()));
+        }
+        out
+    }
+
+    /// #21105 step 1: a check never creates a UV trim on the body it was given. A body whose
+    /// faces lack trims keeps its trims and tolerances through `check_brep` at levels 2 and 0
+    /// and through `assert_valid` with the walk, and a second check reports what the first
+    /// did (invariant 11 of `docs/validity-and-tolerances.md`).
+    #[test]
+    fn a_check_of_faces_without_trims_leaves_their_trims_and_tolerances() {
+        for level in [CheckLevel::Level2, CheckLevel::Level0] {
+            let (mut k, mut b) = box_and_cylinder(true);
+            let lacking = b
+                .face_list()
+                .iter()
+                .filter(|&&f| {
+                    !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()
+                })
+                .count();
+            assert!(lacking > 0, "the united body already has every trim");
+            let before = trims_and_tolerances(&b);
+            let first = check_brep(&mut k, &mut b, level).unwrap();
+            assert!(first.is_valid(), "{level:?}: {:?}", first.lines());
+            assert_eq!(
+                trims_and_tolerances(&b),
+                before,
+                "{level:?}: the check wrote trims or tolerances on the body"
+            );
+            let second = check_brep(&mut k, &mut b, level).unwrap();
+            assert_eq!(printed(&second), printed(&first), "{level:?}");
+            assert_eq!(trims_and_tolerances(&b), before, "{level:?}: second check");
+        }
+        let (mut k, mut b) = box_and_cylinder(true);
+        let before = trims_and_tolerances(&b);
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        assert!(assert_valid(&mut k, &mut b, None, 2, true, &keys).unwrap());
+        assert_eq!(
+            trims_and_tolerances(&b),
+            before,
+            "AssertValid with the walk wrote trims or tolerances on the body"
+        );
+        // a level past 4 is refused before any copy is made
+        let err = assert_valid(&mut k, &mut b, None, 5, true, &keys).unwrap_err();
+        assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
+    }
+
     /// Replaces the curve of the box's first edge by a cubic B-spline along the same line
     /// whose second control point lies 0.01 behind its start: `ValidatePointers` takes the
     /// polygon for a reversal and straightens it, a write to the body.
@@ -1032,11 +1143,11 @@ mod tests {
     }
 
     /// A face without UV trims is checked on a copy standing for the body, which the first
-    /// pass shares between faces. The pass says so (`faces_whole`), and the second pass, on a
-    /// copy of its own, still runs. (Here the first pass also makes the stripped face's trims
-    /// on the body itself, so its write stamps move too.)
+    /// pass shares between faces. A second pass would make its own copy from the same body
+    /// and check the same faces the same way, so the copy leaves the pass whole (#21131);
+    /// the check says what the full check says.
     #[test]
-    fn a_face_checked_on_a_standing_copy_is_checked_again() {
+    fn a_face_checked_on_a_standing_copy_leaves_the_pass_whole() {
         let strip = |b: &mut Brep| {
             let f = b.face_list()[0];
             for l in crate::topology::face::p2::loops(b, f, false, None).unwrap() {
@@ -1049,49 +1160,131 @@ mod tests {
         let (mut k, mut b) = checked_box(true);
         check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         strip(&mut b);
-        // the pass's own account, on copies so the body below is checked as stripped
-        let naming = b.naming();
-        let recorded = b.geometry_owner_keys().clone();
-        let keys =
-            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
-        let whole = |k: &Kernel, b: &Brep| {
-            let mut copy = b.clone_standing_for_self().unwrap();
-            let mut whole = true;
-            let mut reports = AssertArray::new();
-            validate_pointers_traced(
-                k,
-                &mut copy,
-                Some(&mut reports),
-                2,
-                false,
-                &keys,
-                &mut whole,
-            )
-            .unwrap();
-            whole
-        };
         assert!(
-            !whole(&k, &b),
-            "a face checked on the standing copy left the pass whole"
+            !crate::topology::trimming_tools::face_uv_curves_present(&b, b.face_list()[0]).unwrap()
         );
-        let (_, mut clean) = checked_box(true);
-        check_brep(&mut k, &mut clean, CheckLevel::Level2).unwrap();
         assert!(
-            whole(&k, &clean),
-            "a box with every trim was not checked whole"
+            pass_whole(&k, &b),
+            "a face checked on the standing copy left the pass not whole"
         );
-        let (standing, passes) = check_counting(&mut k, &mut b);
+        let (standing, _) = check_counting(&mut k, &mut b);
         assert!(standing.assert_valid.is_some(), "{:?}", standing.lines());
-        assert_eq!(
-            passes, 1,
-            "the second pointer pass was skipped after a standing copy"
-        );
 
         let (mut k, mut b) = checked_box(false);
         check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         strip(&mut b);
         let (full, _) = check_counting(&mut k, &mut b);
         assert_eq!(printed(&standing), printed(&full));
+    }
+
+    /// Whether the first pointer pass of `b`'s check (on a copy, so `b` is left as it is)
+    /// checks every face to the end (`faces_whole`).
+    fn pass_whole(k: &Kernel, b: &Brep) -> bool {
+        let naming = b.naming();
+        let recorded = b.geometry_owner_keys().clone();
+        let keys =
+            |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+        let mut copy = b.clone_standing_for_self().unwrap();
+        let mut whole = true;
+        let mut reports = AssertArray::new();
+        let _ = validate_pointers_traced(
+            k,
+            &mut copy,
+            Some(&mut reports),
+            2,
+            false,
+            &keys,
+            &mut whole,
+        );
+        whole
+    }
+
+    /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face: a
+    /// boolean result whose new faces have no UV trim curves yet.
+    fn box_and_cylinder(memoize: bool) -> (Kernel, Brep) {
+        let mut k = Kernel {
+            memoize_curve_caches: memoize,
+            ..Kernel::default()
+        };
+        let bx = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let cyl = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::new(10.0, 5.0, 0.0),
+            4.0,
+            10.0,
+        )
+        .unwrap();
+        let b = crate::boolean::api_brep::boolean_union(&mut k, bx, cyl).unwrap();
+        (k, b)
+    }
+
+    /// The fields a check may write, entity by entity: edge use trims and gaps, edge and
+    /// vertex tolerances, vertex use gaps and UV points.
+    fn written_fields(b: &Brep) -> Vec<String> {
+        let mut out = Vec::new();
+        for &e in b.edge_list() {
+            let edge = b.edge(e).unwrap();
+            out.push(format!(
+                "{e:?} {:x} {:?}",
+                edge.tolerance.to_bits(),
+                edge.interval
+            ));
+            for &eu in &edge.edgeuses {
+                let u = b.edgeuse(eu).unwrap();
+                out.push(format!(
+                    "{eu:?} {:?} {:?} {:?} {:?}",
+                    u.uv_trim_curve, u.max_edge_face_gap, u.edge_ccw_edge_gap, u.drop_curve_fail
+                ));
+                if let Some(vu) = u.vertexuse {
+                    let v = b.vertexuse(vu).unwrap();
+                    out.push(format!(
+                        "{vu:?} {:?} {:?} {:?}",
+                        v.vertex_edge_gap, v.vertex_face_gap, v.uv_point
+                    ));
+                }
+            }
+        }
+        for &v in b.vertex_list() {
+            out.push(format!(
+                "{v:?} {:x}",
+                b.vertex(v).unwrap().tolerance.to_bits()
+            ));
+        }
+        out
+    }
+
+    /// #21131: the first check of a body whose faces have no UV trims yet checks those faces
+    /// on a copy standing for the body and writes nothing to the body in its first pointer
+    /// pass, so the second pass is skipped. The check, and the body after it, are those of the
+    /// full check.
+    #[test]
+    fn a_first_check_on_faces_without_trims_runs_one_pointer_pass() {
+        let (mut k, mut b) = box_and_cylinder(true);
+        assert!(
+            b.face_list()
+                .iter()
+                .any(|&f| !crate::topology::trimming_tools::face_uv_curves_present(&b, f).unwrap()),
+            "the united body already has every trim"
+        );
+        let (once, passes) = check_counting(&mut k, &mut b);
+        assert!(once.is_valid(), "{:?}", once.lines());
+        assert_eq!(
+            passes, 0,
+            "the second pointer pass ran after a first pass that wrote nothing"
+        );
+
+        let (mut k, mut full_b) = box_and_cylinder(false);
+        let (full, passes) = check_counting(&mut k, &mut full_b);
+        assert_eq!(passes, 1, "without the shortcut the second pass runs");
+        assert_eq!(printed(&once), printed(&full));
+        assert_eq!(written_fields(&b), written_fields(&full_b));
     }
 
     /// #18212: the two edges of face 9 of the `blend.feature_executive` case

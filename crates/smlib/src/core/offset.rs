@@ -687,11 +687,25 @@ pub(crate) fn draft(
             }
             surfaces.push(tilted);
         }
+        // A drafted cone that would reach a cavity's wall closes the wall: refused with the largest
+        // angle that keeps it (#20767), before anything changes.
+        let (n, p) = ([normal.x, normal.y, normal.z], [along.x, along.y, along.z]);
+        if let Err(e) = called(solidcore_ops::offset::refuse_draft_closing_wall(k, &w, &picked, neutral_origin, n, p, angle))? {
+            return Ok(Err(e));
+        }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
+        // A face the drafted faces would cut through (a hole's wall within the draft of the side,
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses. Best
+        // effort: a check that fails itself only leaves the kernel's own refusal, and never
+        // refuses a draft the kernel builds.
+        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces).ok().flatten();
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
-            return Ok(Err(e));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough { at: [t.at.x, t.at.y, t.at.z], depth: t.depth },
+                None => e,
+            }));
         }
         if !moved_faces(&mut w)? {
             return Ok(Err(Error::NoEffect));

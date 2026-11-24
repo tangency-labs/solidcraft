@@ -253,6 +253,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
@@ -284,6 +287,14 @@ fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::Text::Hint("export_name"),
             );
         }
+        // GLB export's node tree (#5296); off writes the flat file of SolidCraft 0.40.
+        ui.horizontal_wrapped(|ui| {
+            let response = setting::glb_export_hierarchy(app, ui);
+            crate::scenario::publish_target("prefs:glb_export_hierarchy", response.rect);
+            if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                ui_kit::help_icon(ui, app.tr("ui.glb_export_hierarchy_help"));
+            }
+        });
     });
 }
 
