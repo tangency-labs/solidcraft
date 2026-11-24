@@ -1725,8 +1725,7 @@ fn a_host_keeps_a_design_with_its_canvas_image_in_a_container() {
     let mut h = Harness::new();
     h.app.embed_editor = true;
     let mut png = std::io::Cursor::new(Vec::new());
-    image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]))
-        .write_to(&mut png, image::ImageFormat::Png).unwrap();
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
     let path = crate::scenario::image_file(png.get_ref());
     h.app.run("canvas.insert", json!({"path": path, "plane": "XY", "width": 80})).unwrap();
     let canvas = h.app.session.doc.canvases[0].clone();
