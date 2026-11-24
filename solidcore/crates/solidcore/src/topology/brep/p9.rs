@@ -1947,6 +1947,15 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         input.curve_zone_tol_3d
     };
     b.edge_mut(edge_id)?.tolerance = crate::math::max3(distance, curve_tolerance, b.tolerance());
+    // A moved trim's bound raises the edge's tolerance above the one the setters below
+    // cascade, so each end vertex covers it here, before anything is notified. A trim
+    // that did not move leaves the vertices to those setters, as before.
+    if trim_moved_by > 0.0 {
+        let edge_tolerance = b.edge(edge_id)?.tolerance;
+        for v in [start_vertex, end_vertex] {
+            vertex::set_tolerance(b, v, edge_tolerance, true, true)?;
+        }
+    }
     face_notify(b, face, env, NotifyOperation::PreEdit)?;
     insert_brep_entity(b, EntityRef::Edge(edge_id))?;
     let mut output = EdgeInFaceOutput {
@@ -2219,14 +2228,6 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
-    // A moved trim's bound raised the edge's tolerance above the one its setters
-    // cascade; each end vertex covers the edge's tolerance too.
-    if trim_moved_by > 0.0 {
-        let edge_tolerance = b.edge(edge_id)?.tolerance;
-        for v in [start_vertex, end_vertex] {
-            vertex::set_tolerance(b, v, edge_tolerance, true, true)?;
-        }
-    }
     // Not upstream (WR-469): each vertex's tolerance grows to twice the farthest edge end
     // at it (the new edge's and every other edge's), so each end lies within half of it
     // (`AssertValid`).
@@ -4189,6 +4190,167 @@ mod tests {
             vertex::tolerance(&b, vertex_of(&b, far)).unwrap(),
             gap,
         ))
+    }
+
+    /// An edge across a half torus's face (major radius 2, minor 0.5, 0 to 180 degrees)
+    /// from the vertex at one end of its tube seam once round the tube to the vertex at
+    /// the other end, imprinted with a given cubic trim whose second control point is
+    /// `dip` before the domain's v start, and its curve on the surface as its curve.
+    /// The curve's tolerance is the vertices' own. Gives the end vertices' tolerances
+    /// before and after, the new edge's tolerance and the curve's tolerance.
+    fn wind_once_round_a_half_torus(dip: f64) -> Option<([f64; 2], [f64; 2], f64, f64)> {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::topology::edgeuse::p1 as eu1;
+        let k = &mut Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_partial_torus(
+            k,
+            Point3::ZERO,
+            2.0,
+            0.5,
+            0.0,
+            180.0,
+        )
+        .unwrap();
+        b.set_editing_enabled(true);
+        let side = brep_faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                !matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    crate::surface::surface::SurfaceKind::Plane(_)
+                )
+            })
+            .unwrap();
+        let surface = b
+            .face(side)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+        let (u, v) = (domain.u_interval(), domain.v_interval());
+        // the torus face's two seam vertices, each with its use on one side of the face
+        let mut ends = Vec::<(VertexuseId, VertexId)>::new();
+        let mut side_use = None;
+        for eu in b.edgeuses().ids().collect::<Vec<_>>() {
+            if eu1::face(&b, eu).unwrap() != Some(side) {
+                continue;
+            }
+            let vu = eu1::vertexuse(&b, eu).unwrap().unwrap();
+            let fu = vertexuse::faceuse(&b, vu).unwrap();
+            if *side_use.get_or_insert(fu) != fu {
+                continue;
+            }
+            let vertex = b.vertexuse(vu).unwrap().vertex.unwrap();
+            if ends.iter().all(|&(_, seen)| seen != vertex) {
+                ends.push((vu, vertex));
+            }
+        }
+        assert_eq!(ends.len(), 2, "a half torus's face has two vertices");
+        let corner = surface
+            .evaluate_point(k, crate::geom::vector2d::Point2::new(u.min(), v.min()))
+            .unwrap();
+        let at_start = |vertex: VertexId| vertex::point(&b, vertex).unwrap().distance(corner);
+        ends.sort_by(|a, c| at_start(a.1).total_cmp(&at_start(c.1)));
+        let [(start, first), (end, last)] = [ends[0], ends[1]];
+        let before = [first, last].map(|x| vertex::tolerance(&b, x).unwrap());
+        let tolerance = before[0].max(before[1]);
+        let points = [
+            (u.min(), v.min()),
+            (u.min() + u.length() / 3.0, v.min() - dip),
+            (
+                u.min() + u.length() * 2.0 / 3.0,
+                v.min() + v.length() * 2.0 / 3.0,
+            ),
+            (u.max(), v.max()),
+        ];
+        let trim = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+            NurbCurve::new(
+                points.map(|(x, y)| CPoint::new(x, y, 0.0, NOW)).to_vec(),
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        ));
+        let curve = Curve::from(CrvOnSurf::new(k, trim.clone(), surface, None, 2).unwrap());
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let key_of = |e: EntityRef| crate::topology::loopuse::notify_ref(e);
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let curve_ref = |e: EdgeId, type_code: i64| crate::geom::object::ObjectRef {
+            key: crate::geom::attribute::ObjectKey(1000 + u64::from(e.index())),
+            type_code,
+        };
+        let made = make_edge_in_face_with_vu(
+            k,
+            &mut b,
+            EdgeInFaceInput {
+                face: Some(side),
+                vertices: [Some(start), Some(end)],
+                curve: Some(curve),
+                uv_trim: Some(trim),
+                drop_fail: None,
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                orientation: OrientType::Same,
+                curve_zone_tol_3d: tolerance,
+            },
+            &mut env,
+            &curve_ref,
+        );
+        let made = match made {
+            Ok(made) => made,
+            // A dependency the success path needs may still be unported.
+            Err(SolidError::Unported { .. }) => return None,
+            Err(e) => panic!("{e:?}"),
+        };
+        Some((
+            before,
+            [first, last].map(|x| vertex::tolerance(&b, x).unwrap()),
+            b.edge(made.edge).unwrap().tolerance,
+            tolerance,
+        ))
+    }
+
+    /// #20537 (review of #20998): a trim clamped across the seam raises its edge's
+    /// tolerance by the move's bound, and its end vertices with it, so each vertex's
+    /// tolerance covers the edge's. A trim inside the domain moves nothing and leaves
+    /// both vertices as they were.
+    #[test]
+    fn a_trim_moved_onto_a_seam_raises_its_end_vertices_with_its_edge() {
+        let Some((before, after, edge, curve)) = wind_once_round_a_half_torus(1e-9) else {
+            return;
+        };
+        assert!(
+            edge > curve,
+            "the move raised the edge: {edge} over {curve}"
+        );
+        for (b, a) in before.iter().zip(&after) {
+            assert!(
+                *b < edge,
+                "the vertex started below the edge: {b} against {edge}"
+            );
+            assert!(*a >= edge, "the vertex covers the edge: {a} against {edge}");
+        }
+        let Some((before, after, edge, curve)) = wind_once_round_a_half_torus(-1e-9) else {
+            return;
+        };
+        assert!(edge >= curve);
+        assert_eq!(
+            after, before,
+            "a trim that did not move leaves its vertices"
+        );
     }
 
     /// WR-469: a new edge that ends `gap` from its vertex, above half the vertex's
