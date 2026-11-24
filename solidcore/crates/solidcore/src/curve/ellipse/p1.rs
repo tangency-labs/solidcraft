@@ -2100,7 +2100,8 @@ impl Ellipse {
         // a zero-length interval is below
         let step_gap = step_t1 - step_t0;
         let angle_rounding = gamma(8) * (end0.angle_scale + end1.angle_scale);
-        if step_gap > 0.0 && !(step_gap > angle_rounding) {
+        // (a rounding bound that is not a number resolves nothing: refused too)
+        if step_gap > 0.0 && (step_gap <= angle_rounding || angle_rounding.is_nan()) {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
                 "STEP interval is no longer than the rounding of converting its ends",
@@ -2110,7 +2111,7 @@ impl Ellipse {
         let param_rounding = gamma(8) * (end0.param_scale + end1.param_scale);
         if new_nurbs_ivl.length().is_finite()
             && new_nurbs_ivl.length() > 0.0
-            && !(new_nurbs_ivl.length() > param_rounding)
+            && (new_nurbs_ivl.length() <= param_rounding || param_rounding.is_nan())
         {
             return Err(SolidError::invalid_input(
                 OP_ADJUST,
