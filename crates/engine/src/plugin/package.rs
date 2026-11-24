@@ -116,6 +116,8 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
         return Err(invalid("installed package must be a directory, not a symlink"));
     }
     check_remove_tree(&path)?;
+    // The delete and the approvals' update are one write: none overlaps an install's.
+    let _write = install::write_lock();
     s.plugin_state.refresh_stored();
     // The approvals go first: a store that cannot be written leaves the package installed, with
     // nothing granted in this session, and the error is reported. A record left behind could
