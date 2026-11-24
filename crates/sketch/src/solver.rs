@@ -18,10 +18,11 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve};
+use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
+use crate::sparse::Pattern;
 use crate::union_find::{find, union};
 
 #[path = "cursor.rs"]
@@ -33,6 +34,9 @@ mod redundancy;
 pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
 
 const MAX_ITERS: usize = 500;
+/// Components of at least this many unknowns solve LM's steps with the sparse factorisation
+/// ([`Pattern`]); smaller ones with the dense elimination, which costs little at their size.
+const SPARSE_MIN_VARS: usize = 64;
 /// Variables in one connected component. Each component is solved as a dense system: an n by n
 /// matrix for the Levenberg-Marquardt step, rows by n for the Jacobian. 4,000 variables is a
 /// 128 MB matrix; past that the request grows to gigabytes and an allocation failure aborts the
@@ -1472,6 +1476,13 @@ fn lm_run(
     let n = vars.len();
     #[cfg(test)]
     lm_vars::add(n);
+    // A large component's steps are solved on the sparse structure of its normal equations
+    // (see `sparse`): the unknowns each block reads are where the matrix can have entries.
+    let pattern = (n >= SPARSE_MIN_VARS).then(|| {
+        let groups: Vec<Vec<usize>> =
+            blocks.iter().map(|(_, bv)| bv.iter().filter_map(|v| col.get(*v).copied().filter(|c| *c < n)).collect()).collect();
+        Pattern::new(n, &groups)
+    });
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
     let mut f = norm2(&r);
@@ -1480,6 +1491,11 @@ fn lm_run(
     // The sum of squares at the start of each iteration, while giving up is allowed.
     let mut costs = Vec::new();
     for it in 0..max_iters {
+        if cancelled() {
+            #[cfg(feature = "solver-profiling")]
+            profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+            return Some((it, max_abs(&r)));
+        }
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
@@ -1551,16 +1567,30 @@ fn lm_run(
                 profiling::finish_run(run, StopReason::WorkBudget, max_abs(&r));
                 return Some((it, max_abs(&r)));
             }
-            let mut m = a.clone();
-            for (i, w) in weight.iter().enumerate() {
-                m.add(i, i, lambda * w + 1e-12);
-            }
+            let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = lin_solve(m, rhs);
+            let dense = || {
+                let mut m = a.clone();
+                for (i, s) in shift.iter().enumerate() {
+                    m.add(i, i, *s);
+                }
+                solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
+            // is left to the dense elimination, as every step was before.
+            let step = match &pattern {
+                Some(p) => p.solve(&|i, k| a.get(i, k), &shift, &rhs, &cancelled).or_else(|| if cancelled() { None } else { dense() }),
+                None => dense(),
+            };
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
+            if cancelled() {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
             let Some(step) = step else {
                 #[cfg(feature = "solver-profiling")]
                 profiling::record_trial(run, it, _attempt, lambda, f, None, &g, &j, None, Decision::LinearFailure);
@@ -1610,6 +1640,11 @@ fn lm_run(
     #[cfg(feature = "solver-profiling")]
     profiling::finish_run(run, StopReason::IterationLimit, max_abs(&r));
     Some((max_iters, max_abs(&r)))
+}
+
+/// Whether the work this solve runs for was cancelled ([`crate::cancel`]).
+fn cancelled() -> bool {
+    crate::cancel::is_cancelled()
 }
 
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
@@ -3385,6 +3420,25 @@ fn solve_inner(
     let _timer = profiling::timer(Phase::Solve);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
+    // Cancelled: the work this solve was for is no longer wanted. Nothing is solved, and the
+    // geometry stays as it was. (An edit's continuation and its retries each solve again, and
+    // each would otherwise still construct its start.)
+    if cancelled() {
+        return SolveReport {
+            status: SolveStatus::Failed,
+            dof: 0,
+            iterations: 0,
+            max_residual: f64::MAX,
+            failing: Vec::new(),
+            folded: Vec::new(),
+            continuations: 0,
+            point_determined: Vec::new(),
+            curve_determined: Vec::new(),
+            redundant: Vec::new(),
+            oversized: None,
+            wires: None,
+        };
+    }
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
@@ -3634,6 +3688,8 @@ fn solve_inner(
         }
     }
 
+    // A cancelled solve's report is not shown: it only says whether it solved.
+    let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]

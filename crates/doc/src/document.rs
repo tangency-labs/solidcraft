@@ -5936,6 +5936,21 @@ impl Document {
         moved_from: Option<&Sketch>,
         analysis: solidcraft_sketch::Analysis,
     ) -> Result<solidcraft_sketch::SolveReport> {
+        // The solve stops with the evaluation it runs for: the app's Cancel, a design that closed.
+        match solidcraft_kernel::stop_token() {
+            Some(token) => solidcraft_sketch::cancel::within(&token, || self.solve_sketch_now(vals, sk, stored, moved_from, analysis)),
+            None => self.solve_sketch_now(vals, sk, stored, moved_from, analysis),
+        }
+    }
+
+    fn solve_sketch_now(
+        &self,
+        vals: &std::collections::BTreeMap<String, expr::Value>,
+        sk: &mut Sketch,
+        stored: &solidcraft_sketch::DrivingValues,
+        moved_from: Option<&Sketch>,
+        analysis: solidcraft_sketch::Analysis,
+    ) -> Result<solidcraft_sketch::SolveReport> {
         self.apply_dimension_values(vals, sk)?;
         // A text built anew since it was stored (an expression gave it other words) has other
         // outline entities: the stored sketch is taken with this sketch's, so the points still
