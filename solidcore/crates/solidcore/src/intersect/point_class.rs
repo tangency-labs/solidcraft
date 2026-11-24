@@ -1769,12 +1769,13 @@ impl<O: ClassObject> PointClassification<O> {
         set_point(b, env, merged.position)?;
         vertex::set_tolerance(b, vertex_id, merged.zone_tol_3d, true, true)?;
         // Not upstream (#21340): the merged neighbourhood is a ball of radius
-        // `zone_tol_3d` around the merged position, which holds the edge ends at the old
-        // point (a split's ends lie at the split point, the centre of the merged vertex
-        // ball). `AssertValid` takes an edge end within half the vertex tolerance, so a
+        // `zone_tol_3d` around the merged position, and it holds the edge ends at the old
+        // point (a split's ends lie at the split point, which the merge may move within
+        // the ball). `AssertValid` takes an edge end within half the vertex tolerance, so a
         // vertex whose ends all lie inside that ball is raised to twice the farthest
-        // end's bound ([`vertex::edge_end_reach`]; doubling is exact): the same
-        // neighbourhood, stated as AssertValid measures it. Ends outside the ball (the
+        // end's bound ([`vertex::edge_end_reach`]; doubling is exact). This is grow-only
+        // and at most doubles the tolerance, and later merges and classifications read the
+        // larger radius (a later point within it joins this vertex). Ends outside the ball (the
         // `sss_point` move can carry a vertex off its edges) are not the merge's
         // neighbourhood and stay as upstream leaves them (#21511).
         let tol = vertex::tolerance(b, vertex_id)?;
