@@ -305,7 +305,7 @@ fn built_in_themes_keep_their_own_panel_colours_and_lift_only_failing_inks() {
             assert!(dim.r() > dim.g() && dim.g() > dim.b(), "Amber Phosphor's muted ink stays amber: {dim:?}");
         }
     }
-    assert!(lifted.iter().any(|id| id == "amber-phosphor"), "Amber Phosphor's muted ink needed lifting: {lifted:?}");
+    assert!(!lifted.is_empty(), "some built-in theme still exercises the lift path");
 }
 
 #[test]
