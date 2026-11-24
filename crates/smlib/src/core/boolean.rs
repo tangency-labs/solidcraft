@@ -110,10 +110,13 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     }
 }
 
-/// Not upstream: the same bodies united one at a time, each into the result so far. A body whose
-/// union fails is put aside until the others are in (a later union may classify the pair that
-/// failed now); one that still fails then fails the retry. Each union works on a copy of the
-/// result so far and a copy of the body, so a failed union leaves both ready to try again.
+/// Not upstream: the same bodies united one at a time, each into the result so far. A pair that
+/// fails the classification's typed refusal ([`Error::NotOneFoot`]) is put aside until the
+/// others are in (a later union may classify the pair that failed now); one that still fails
+/// then fails the retry. Any other failure — a deliberate refusal, an unported step — fails the
+/// retry with its own error at once, so it is neither deferred nor masked by the level scheme's
+/// refusal. Each union works on a copy of the result so far and a copy of the body, so a failed
+/// union leaves both ready to try again.
 fn union_one_by_one(bodies: Vec<Body>) -> Result<Body> {
     let mut bodies = bodies.into_iter();
     let Some(mut acc) = bodies.next() else { return Err(Error::Argument) };
@@ -122,8 +125,8 @@ fn union_one_by_one(bodies: Vec<Body>) -> Result<Body> {
         match boolean_pair(&acc, &b) {
             Ok(Some(u)) => acc = u,
             Ok(None) => return Err(Error::Empty),
-            Err(e) if matches!(e, Error::Cancelled(_)) => return Err(e),
-            Err(_) => deferred.push(b),
+            Err(Error::NotOneFoot { .. }) => deferred.push(b),
+            Err(e) => return Err(e),
         }
     }
     for b in deferred {
