@@ -4248,7 +4248,8 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             assert!(report.is_valid(), "{}", report.text);
             assert!(r.is_manifold_solid().unwrap());
             let got = volume(&r);
-            let slack = 1e-7 * (vb + vi);
+            // each of the three volumes is computed to `1e-8` relative accuracy (`volume`)
+            let slack = 1e-8 * (vb + vi + got);
             assert!(
                 got >= vb + vi - share - slack && got <= vb + vi + slack,
                 "volume {got} outside [{}, {}]",

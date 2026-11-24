@@ -261,8 +261,7 @@ const OP_ABSORBED_PAIR: &str = "boolean::topology_intersector::p1::absorbed_pair
 /// How many times `imprint_body` imprints the vertex definitions added while vertex
 /// definitions were being imprinted (each pass imprints those the previous one added).
 /// A split adds at most one definition, at a point where an edge was already split, so
-/// a pass adds definitions only where the previous one split an edge; fixtures need one
-/// pass, rarely two.
+/// a pass adds definitions only where the previous one split an edge.
 const LATE_VERTEX_PASSES: usize = 64;
 
 /// A dereference of a null pointer or a deleted object upstream (undefined

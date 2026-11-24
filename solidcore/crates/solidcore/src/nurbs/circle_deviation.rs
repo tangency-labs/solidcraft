@@ -66,7 +66,9 @@
 //! **Rounding** (docs/definitions-and-certificates.md §4.4). Knot insertion carries
 //! `γ_(12 (I + 1))` of twice the largest homogeneous coordinate (as in
 //! [`crate::nurbs::crv_deviation`]), and moving a point into the frame `γ_5` of its terms'
-//! sum; with `W̃` the smallest weight, a homogeneous error `e` moves the curve by at most
+//! sum; with `W̃` a lower bound on the exact smallest weight (the computed one less `e`, rounded
+//! down; refused unless `e` is under half the computed one), a homogeneous error `e` moves
+//! the curve by at most
 //! `√3 e (1 + P) / W̃` (`P` its largest coordinate), counted as `2 e (1 + P) / W̃`. Each
 //! `N_k` (`V_k`) carries `γ_(2p + 12)` of `S`, the largest sum of its (their) terms'
 //! magnitudes over the piece (at most `p + 8` roundings: the binomial ratio, the products,
@@ -313,6 +315,9 @@ impl Near {
                 }
                 w_min = w_min.min(w);
                 let (q, e) = frame.map(h);
+                if !(q.iter().all(|x| x.is_finite()) && e.is_finite()) {
+                    return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
+                }
                 e_frame = e_frame.max(e);
                 pts.push(q);
             }
@@ -321,7 +326,14 @@ impl Near {
         if !(w_min > 0.0 && w_min.is_finite()) {
             return Err(SolidError::invalid_input(OP, "a weight not positive"));
         }
-        let real_moved = 2.0 * e_ref * (1.0 + largest) / w_min * (1.0 + gamma(4));
+        // the computed weights are within `e_ref` of the exact ones, so the exact
+        // smallest is at least `w_min - e_ref`, taken rounded down
+        if !(e_ref < 0.5 * w_min) {
+            return Err(unbounded());
+        }
+        let w_low = (w_min - e_ref) * (1.0 - gamma(1));
+        // multiplied by the frame's stretch where it is summed (`hausdorff_about_circle`)
+        let real_moved = 2.0 * e_ref * (1.0 + largest) / w_low * (1.0 + gamma(4));
         let frame_moved = 2.0 * e_frame / w_min * (1.0 + gamma(2));
 
         // the ends' directions, ordered
@@ -332,6 +344,9 @@ impl Near {
         };
         let (mut u0, mut u1) = ([x0, y0], [x1, y1]);
         let (turn, e) = cross(u0, u1);
+        if !(turn.is_finite() && e.is_finite()) {
+            return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
+        }
         if turn.abs() <= e {
             return Err(unbounded());
         }
@@ -532,6 +547,9 @@ fn f_bounds(pieces: &[Vec<[f64; 4]>], r: f64) -> Result<(f64, f64)> {
                     *mk += beta * a;
                 }
             }
+        }
+        if !n.iter().chain(&v).chain(&mag).all(|x| x.is_finite()) {
+            return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
         }
         let k0 = 2 * p + 12;
         let s_n = mag.iter().fold(0.0_f64, |m, &x| m.max(x)) * (1.0 + gamma(k0));

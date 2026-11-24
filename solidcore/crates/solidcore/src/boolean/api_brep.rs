@@ -1222,7 +1222,7 @@ mod tests {
     /// cubic along it, raised by 1e-6, parameterised apart (as a section curve along a fillet
     /// is): the pair has a certified bound, at least the cubic's sampled distance from the
     /// circle (a lower bound of the Hausdorff distance) and within three times it; before
-    /// the fix an ellipse against a B-spline had none. A cubic a quarter turn away has none.
+    /// the fix an ellipse against a B-spline had none. A cubic half a turn away has none.
     #[test]
     fn an_arc_and_a_cubic_along_it_have_a_bound() {
         use crate::curve::curve::p2::{Curve, CurveKind};
