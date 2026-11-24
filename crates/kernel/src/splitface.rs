@@ -880,7 +880,8 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
     // SMLib's face `i` is the record's `order.faces[i]` (the same where none is given).
     let k = if order.faces.is_empty() { Some(at) } else { order.faces.iter().position(|f| *f == at) };
     let k = k.ok_or_else(|| failed(SPLIT_BODY, "the tool face has no SMLib face"))?;
-    sliced(body, !sheet.face_forward(face), |sb| sb.split_body_by_sheet(&tool, k))
+    // SMLib's import gives each tool face its record's side in its surface.
+    sliced(body, false, |sb| sb.split_body_by_sheet(&tool, k))
 }
 #[cfg(test)]
 mod tests {
@@ -1280,6 +1281,41 @@ mod tests {
         let pl = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
         assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
+    }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) turned over with Reverse Normal
+    /// splits at x = 5 into two halves of 50 (#13640), each facing as the turned wall did: the
+    /// other way from the wall.
+    #[test]
+    fn a_turned_wall_splits_and_its_pieces_keep_its_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let normal = |b: &Body| b.faces(0.01).unwrap().iter().map(|f| f.plane_normal.unwrap()).collect::<Vec<_>>();
+        let [n] = normal(&turned)[..] else { panic!("one face") };
+        let [m] = normal(&wall)[..] else { panic!("one face") };
+        assert!(n.dot(m) < -1.0 + 1e-9, "{n:?} vs {m:?}");
+        let pl = Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let s = split_faces(&turned, &[0], &SplitTool::Plane(pl)).unwrap();
+        assert_eq!(s.face_count(), 2);
+        assert!(s.faces(0.01).unwrap().iter().all(|f| rel(f.area, 50.0) < 1e-9));
+        assert!(normal(&s).iter().all(|k| k.dot(n) > 1.0 - 1e-9), "{:?} vs {n:?}", normal(&s));
+    }
+
+    /// A box 10 × 20 × 30 split by a wall at x = 4 (a sheet past the box on every side) comes
+    /// apart into 2400 and 3600, the part behind the wall's face first; split by the same wall
+    /// turned over with Reverse Normal, the parts come in the other order (#13640).
+    #[test]
+    fn a_turned_tool_sheet_splits_a_body_with_its_sides_swapped() {
+        let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let line = vec![Seg2::Line { a: Vec2::new(4.0, -5.0), b: Vec2::new(4.0, 25.0) }];
+        let wall = crate::extrude_sheet(&Plane::XY, &[line], -5.0, 35.0).unwrap();
+        let turned = crate::reverse_faces(&wall, &[]).unwrap();
+        let v = |tool: &Body| split_body_by_faces(&b, tool, 0, &[0]).unwrap().iter().map(|p| measure(p).unwrap().volume).collect::<Vec<_>>();
+        let (a, z) = (v(&wall), v(&turned));
+        assert!(a.len() == 2 && z.len() == 2, "{a:?} {z:?}");
+        assert!(rel(a[0] + a[1], 6000.0) < 1e-9 && (rel(a[0], 2400.0) < 1e-9 || rel(a[0], 3600.0) < 1e-9), "{a:?}");
+        assert!(rel(z[0], a[1]) < 1e-9 && rel(z[1], a[0]) < 1e-9, "{a:?} then {z:?}");
     }
 
     /// #20389: a bar run along the travel up to a quarter of a cylinder (axis z through (30, 20),
