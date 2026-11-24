@@ -107,7 +107,7 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
     // command would refuse with its parameter names (#13502). Say it in the dialog's words.
     if p.get("axes").is_some() && ["from_face", "to_face", "from_plane", "to_plane", "from_frame", "to_frame"].iter().any(|k| p.get(*k).is_some()) {
         return Err(
-            "X, Y and Z limit a move between points: with a face, plane or frame pick, tick all three, or pick a vertex, an edge or a Center snap"
+            "X, Y and Z limit a move between points: tick all three for a face, round edge, plane or frame; or pick vertices, lines or Center faces"
                 .into(),
         );
     }
