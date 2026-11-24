@@ -246,7 +246,6 @@ fn default_kernel_builds_the_depths_below_the_floor() {
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;

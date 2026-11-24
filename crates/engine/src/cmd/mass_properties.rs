@@ -175,7 +175,7 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
-        let mut doc = (*self.doc).clone();
+        let mut doc = self.doc.active_assembly().into_owned();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
                 occurrence.transform = *transform;

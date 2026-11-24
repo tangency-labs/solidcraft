@@ -39,7 +39,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_cleanup_keeps_target_faces",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
-    "curve_loop_normal_from_area",
     "offset_extension_as_itself",
     "simple_coincidence_crossing_is_point",
     "ssi_proto_topology_statuses_pass_on",
