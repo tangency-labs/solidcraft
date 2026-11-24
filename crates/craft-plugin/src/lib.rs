@@ -82,6 +82,7 @@ mod schema_refs;
 pub mod swatches;
 pub mod ui;
 pub use input::check_input;
+pub use input::check_input_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 

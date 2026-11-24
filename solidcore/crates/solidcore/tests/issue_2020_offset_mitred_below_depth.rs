@@ -244,7 +244,6 @@ fn default_kernel_builds_the_depths_below_the_floor() {
 
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
-    k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;

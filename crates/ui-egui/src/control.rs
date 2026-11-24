@@ -999,6 +999,7 @@ fn ui_edit_folder(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_selection(app: &SolveApp) -> Outcome {
     ok(json!({
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
         "hover": app.viewport.hover,
         "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
@@ -1069,6 +1070,7 @@ fn ui_browser(app: &SolveApp) -> Outcome {
         "occurrences": crate::browser::drawn_occurrences().iter().map(|(path, label, r, open)| json!({"path": path, "label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "rows": crate::browser::drawn_rows().iter().map(|(label, r, _, open)| json!({"label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "picked_components": app.tree.picked_components,
     }))
 }
@@ -2916,7 +2918,7 @@ pub(crate) mod tests {
         h.frames(3);
         assert_eq!(h.app.cam, after);
         assert!(h.ctx.input(|i| i.modifiers.is_none()));
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
         assert!(h.app.viewport.boxsel.is_none());
     }
 

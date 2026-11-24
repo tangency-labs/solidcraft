@@ -92,6 +92,9 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# A container part's CRC-32, to check a part copied on save holds what it is saved for; already in
+# the tree through zip.
+crc32fast = "1.5"
 # Provenance: the CBOR manifest encoding (RFC 8949), COSE_Sign1 records (RFC 9052) and Ed25519
 # (RFC 8032). All pure Rust and permissive (Apache-2.0; BSD-3-Clause), so the browser build and
 # `cargo xtask licences --check` keep working.
