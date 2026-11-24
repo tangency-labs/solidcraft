@@ -330,7 +330,9 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
 /// and a drive path matches its `\\?\` spelling (`\\?\C:\parts` is `C:\parts`), the form
 /// `canonicalize` and some folder pickers return.
 fn folder_within(folder: &Path, allowed: &Path) -> bool {
-    let (folder, allowed) = (&drive_path(folder), lexical(&drive_path(allowed)));
+    // Both sides are normalised after the `\\?\` comes off: inside a verbatim path only `\`
+    // separates names, outside it `/` does too, so a `..` written with `/` resolves here.
+    let (folder, allowed) = (lexical(&drive_path(folder)), lexical(&drive_path(allowed)));
     if allowed.as_os_str().is_empty() || !allowed.is_absolute() {
         return false;
     }
@@ -1137,6 +1139,10 @@ mod tests {
         assert!(within(r"\\?\UNC\server\share\parts", r"\\?\UNC\server\share"));
         assert!(!within(r"\\?\Volume{0123}\other", r"\\?\Volume{0123}\parts"));
         assert!(!within(r"C:\work\parts-old", r"\\?\C:\work\parts"));
+        // Once the prefix is off, `/` separates names too, and a `..` written with it resolves.
+        assert!(!within(r"\\?\C:\work\parts/../other", r"C:\work\parts"));
+        assert!(!within(r"\\?\C:\work\parts/..", r"C:\work\parts"));
+        assert!(within(r"\\?\C:\work\parts/gears", r"C:\work\parts"));
     }
 
     /// A folder the user allowed (or one below it) loads as it opens, with no question.
