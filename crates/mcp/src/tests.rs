@@ -902,6 +902,13 @@ fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
     let empty = tool(&mut s, "measure", json!({"within":within,"body":"Outside"}));
     assert_eq!(empty["body_count"], 0, "{empty}");
     assert_eq!(tool(&mut s, "measure", json!({})), full);
+    for args in [json!({"within":null}), json!({"within":within,"mode":null})] {
+        let direct = raw_tool(&mut s, "measure", args.clone());
+        assert_eq!(direct["result"]["isError"], true, "{direct}");
+        let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        assert_eq!(batch["completed"], 0, "{batch}");
+        assert!(batch["failed"].is_object(), "{batch}");
+    }
 }
 
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
