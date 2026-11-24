@@ -1886,7 +1886,7 @@ pub(super) mod round_definition_proof {
     /// golden's accuracy and at the integrator's finest, where it converges.
     pub(in super::super) struct Estimates {
         /// At [`MASS_ACCURACY`], as the golden measures.
-        golden: MassProperties,
+        pub(in super::super) golden: MassProperties,
         /// At [`ESTIMATE_ACCURACY_FINEST`].
         converged: MassProperties,
     }
