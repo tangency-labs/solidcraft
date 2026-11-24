@@ -1481,7 +1481,7 @@ fn a_mirrored_sheet_copy_keeps_its_hardware() {
         // The flat is turned over about its y axis: x becomes -x, y stays.
         assert!((at(a, 0) + at(b, 0)).abs() < 1e-9 && (at(a, 1) - at(b, 1)).abs() < 1e-9, "{a} against {b}");
     }
-    let dxf = run(&mut s, "sheet.export_dxf", json!({"body": copy}))["dxf"].as_str().unwrap_or("").to_string();
+    let dxf = run(&mut s, "sheet.export_dxf", json!({"body": copy, "hardware_notes": true}))["dxf"].as_str().unwrap_or("").to_string();
     assert!(dxf.contains("M3 nut") && dxf.contains("M4 stud 10 mm"), "the copy's DXF names its hardware");
 }
 
@@ -1506,7 +1506,7 @@ fn hardware_in_a_sheet_drawn_at_an_angle_is_found_through_every_rebuild() {
     assert!(warning(&near).starts_with("The hole at"), "the edge warning in a turned frame: {}", warning(&near));
     let found = |s: &mut Session, body: &str| run(s, "sheet.flat_pattern", json!({"body": body}))["hardware"].as_array().map_or(0, Vec::len);
     let noted = |s: &mut Session, body: &str| {
-        let dxf = run(s, "sheet.export_dxf", json!({"body": body}))["dxf"].as_str().unwrap_or("").to_string();
+        let dxf = run(s, "sheet.export_dxf", json!({"body": body, "hardware_notes": true}))["dxf"].as_str().unwrap_or("").to_string();
         ["M3 nut", "M4 stud 10 mm"].iter().all(|note| dxf.contains(note))
     };
     let body = s.model.state().surface_sheets[0].body.clone();
@@ -1533,7 +1533,9 @@ fn hardware_survives_later_sheet_features_and_unfolding() {
     let mut s = plate();
     run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, T]}));
     let list = |s: &mut Session| run(s, "sheet.flat_pattern", json!({"body": "Plate"}))["hardware"].as_array().cloned().unwrap_or_default();
-    let noted = |s: &mut Session| run(s, "sheet.export_dxf", json!({"body": "Plate"}))["dxf"].as_str().unwrap_or("").contains("M3 nut");
+    let noted = |s: &mut Session| {
+        run(s, "sheet.export_dxf", json!({"body": "Plate", "hardware_notes": true}))["dxf"].as_str().unwrap_or("").contains("M3 nut")
+    };
     let first = list(&mut s);
     assert_eq!(first.len(), 1);
     assert!(noted(&mut s));
