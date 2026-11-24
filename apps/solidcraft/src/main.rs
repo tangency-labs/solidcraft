@@ -2312,6 +2312,20 @@ fn startup_step(step: &'static str, detail: &str) {
     solidcraft_engine::crash::startup_step(step);
 }
 
+/// Swapchain surface settings for the desktop window.
+///
+/// Windows and Linux use `LOW_LATENCY` (`desired_maximum_frame_latency = 1`, eframe's own default)
+/// so orbiting, panning and dragging follow the pointer a frame sooner (#13993). On macOS, Metal's
+/// `CAMetalLayer` maps `desired_maximum_frame_latency = 1` to `maximumDrawableCount = 2` (double
+/// buffering instead of Apple's default three drawables): in full-screen direct-to-display scanout
+/// on Apple Silicon — and in windowed mode when GPU work approaches a 120 Hz frame budget —
+/// `nextDrawable()` blocks until vblank, dropping ProMotion displays to 60 or 40 FPS. Using
+/// `HIGH_THROUGHPUT` (`desired_maximum_frame_latency = 2`, three drawables) keeps Metal aligned
+/// with Apple's default and `egui-wgpu`'s iOS rule.
+fn surface_config(macos: bool) -> eframe::egui_wgpu::SurfaceConfig {
+    if macos { eframe::egui_wgpu::SurfaceConfig::HIGH_THROUGHPUT } else { eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY }
+}
+
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
 /// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`. `skipped`: the APIs that
@@ -2323,10 +2337,7 @@ fn wgpu_options(
     skipped: startup::SkippedBackends,
     guard: Option<&startup::BackendGuard>,
 ) -> eframe::egui_wgpu::WgpuConfiguration {
-    // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
-    // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
-    // of input-to-display latency to every pan, orbit and drag.
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(surface_config(cfg!(target_os = "macos")));
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
@@ -2370,11 +2381,11 @@ fn wgpu_options(
 /// choice, as v0.1.0 had, with no API order, no retries, no adapter preference and no float depth.
 /// After a failure, the API the failed launch used is left out (`failed`, [`startup::safe_backends`]),
 /// and so is every API that crashed while starting (`crashed`), the software renderer's included.
-/// Kept: one frame in flight (eframe's own default), the D3D12 shader compiler that never loads a
-/// `dxcompiler.dll` from PATH (#6756), and the Intel Mac validation fix (#3080); with `cpu`, the
-/// software adapter.
+/// Kept: [`surface_config`] (one frame in flight on Windows and Linux; three Metal drawables on
+/// macOS), the D3D12 shader compiler that never loads a `dxcompiler.dll` from PATH (#6756), and
+/// the Intel Mac validation fix (#3080); with `cpu`, the software adapter.
 fn safe_wgpu_options(cpu: bool, failed: Option<&str>, crashed: eframe::wgpu::Backends) -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(surface_config(cfg!(target_os = "macos")));
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
         let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
@@ -3132,6 +3143,26 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    /// macOS Metal uses three drawables (frame latency 2) so full-screen direct-to-display on
+    /// ProMotion displays does not stall `nextDrawable()` down to 60 or 40 FPS; other platforms
+    /// keep `LOW_LATENCY` (frame latency 1).
+    #[test]
+    fn surface_config_uses_three_drawables_on_macos() {
+        let macos = super::surface_config(true);
+        assert_eq!(macos.desired_maximum_frame_latency, Some(2));
+        assert_eq!(macos.present_mode, eframe::wgpu::PresentMode::AutoVsync);
+
+        let other = super::surface_config(false);
+        assert_eq!(other.desired_maximum_frame_latency, Some(1));
+        assert_eq!(other.present_mode, eframe::wgpu::PresentMode::AutoVsync);
+
+        let expected = super::surface_config(cfg!(target_os = "macos")).desired_maximum_frame_latency;
+        let normal = super::wgpu_options(true, None, super::startup::SkippedBackends::default(), None);
+        let safe = super::safe_wgpu_options(true, None, eframe::wgpu::Backends::empty());
+        assert_eq!(normal.surface.desired_maximum_frame_latency, expected);
+        assert_eq!(safe.surface.desired_maximum_frame_latency, expected);
+    }
+
     /// Safe graphics mode leaves the backend and adapter to wgpu (no API order, no adapter
     /// preference, no float depth feature); its software fallback still picks the CPU adapter.
     #[test]
