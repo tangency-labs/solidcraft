@@ -123,6 +123,45 @@ fn a_planar_cap_on_a_cylinder_fillet_s_loop_is_refused_as_not_planar() {
     assert_eq!(l, DefeatureFailure::LoopNotPlanar);
 }
 
+/// The not-planar refusal keeps, as its cause, the error the base patch's construction failed
+/// with: the construction's own `LoopNotPlanar` refusal, which in turn keeps the planar cap's.
+#[test]
+fn a_not_planar_refusal_keeps_its_construction_failure() {
+    let mut k = Kernel::default();
+    let Some(mut b) = read(&mut k, "box_with_large_fillet.smb") else {
+        return;
+    };
+    let faces = bp1::faces(&b, None).unwrap();
+    let error = {
+        let mut ex = FeatureExecutive::new(&mut k, &mut b).unwrap();
+        ex.add_feature(
+            &mut k,
+            &[faces[6]],
+            RebuildBrepType::PlanarCap,
+            RebuildBrepType::ExtendSurface,
+        )
+        .unwrap()
+        .unwrap();
+        ex.do_defeature(&mut k).unwrap_err()
+    };
+    assert!(
+        matches!(
+            error.failure().map(|f| &f.reason),
+            Some(Reason::Defeature(DefeatureFailure::LoopNotPlanar))
+        ),
+        "{error:?}"
+    );
+    let cause = error.cause().expect("the construction's error is kept");
+    assert!(
+        matches!(
+            cause.failure().map(|f| &f.reason),
+            Some(Reason::Defeature(DefeatureFailure::LoopNotPlanar))
+        ),
+        "{cause:?}"
+    );
+    assert!(cause.cause().is_some(), "{cause:?}");
+}
+
 #[test]
 fn an_extension_by_nothing_is_refused_as_the_extension_s() {
     let Some(l) = limit(
