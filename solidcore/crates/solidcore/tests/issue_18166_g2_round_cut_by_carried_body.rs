@@ -30,7 +30,6 @@ use solidcore::Kernel;
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
-    "proto_vertex_miss_is_false",
     "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
@@ -43,7 +42,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_trace_reaches_rails",
     "offset_extension_as_itself",
     "simple_coincidence_crossing_is_point",
-    "ssi_proto_topology_statuses_pass_on",
     "fillet_exact_round_classes",
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
