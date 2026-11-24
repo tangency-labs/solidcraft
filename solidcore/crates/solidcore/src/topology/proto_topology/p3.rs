@@ -8,6 +8,7 @@
 //! |------|----------|
 //! | [`ProtoTopologyManager::find_or_create_proto_vertex_pcs`] | `SmProtoTopologyManager::FindOrCreateProtoVertex(PC, PC, ..)` |
 //! | [`ProtoTopologyManager::find_or_create_proto_edge`] | `SmProtoTopologyManager::FindOrCreateProtoEdge` |
+//! | [`ProtoTopologyManager::find_or_create_needed_proto_edge`] | `SmProtoTopologyManager::FindOrCreateProtoEdge`, a failed step passed on (#18927) |
 //! | [`ProtoTopologyManager::edge_definition_split`] | `SmEdgeDefinition::Split` |
 //! | [`ProtoTopologyManager::proto_edge_split`] | `SmProtoEdge::Split` |
 //! | [`ProtoTopologyManager::split_intersecting_proto_edges`] | `SmProtoTopologyManager::SplitIntersectingProtoEdges` |
@@ -111,6 +112,11 @@
 //! - When `CreateProtoEdge` fails at `NER(pBrep1Topo)`, upstream returns the already
 //!   allocated `rpNewPE` through the out-parameter; the port returns `None` there (the
 //!   failing paths are not reachable from the callers ported so far).
+//! - **Needed edges** (not upstream, #18927): `FindOrCreateProtoEdge` drops the statuses of
+//!   its end proto vertices and of `CreateProtoEdge`, leaving the interval without its edge.
+//!   [`ProtoTopologyManager::find_or_create_needed_proto_edge`], used where the result needs
+//!   the edge (an overlap group's replacement, the Boolean's face-pair intervals), passes
+//!   that failure on; geometric quits still make no edge.
 //! - The `SM_DEBUG_CODE` blocks are not ported.
 //! - **Circles in contact** (not upstream): `FindOrCreateProtoVertex(PC, PC)` with no curve
 //!   takes a point classified onto an edge of each B-rep, where the two edges are circles in
@@ -213,15 +219,21 @@ const fn dangling(reason: &'static str) -> SolidError {
 /// The outcome of a status upstream ignores: the value, `None` for a failure other than
 /// the errors that cannot be ignored here (unported callees, undefined behaviour).
 fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
+    Ok(split_soft(r)?.ok())
+}
+
+/// [`ignore_soft`] that keeps the status it would ignore: the errors that cannot be
+/// ignored propagate, any other comes back as the inner `Err`.
+fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, SolidError>> {
     match r {
-        Ok(v) => Ok(Some(v)),
+        Ok(v) => Ok(Ok(v)),
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
-        Err(_) => Ok(None),
+        Err(e) => Ok(Err(e)),
     }
 }
 
@@ -252,6 +264,30 @@ fn as_topology<O: ClassObject>(o: Option<O>) -> Option<O> {
 fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| geometry.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
+}
+
+/// `FindOrCreateProtoEdge`'s quits once both end proto vertices are made: the interval's
+/// middle does not classify to imprintable topology in both B-reps, or classifies to a
+/// vertex in either (the source faces meet at a single vertex), or the interval is
+/// degenerate within `tol` ([B488]). Such an interval makes no proto edge.
+fn interval_makes_no_edge<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    cc_curve: Option<O>,
+    tol: f64,
+    this_ivl: &Extent1d,
+    ci1: &CurveInterval<O>,
+    ci2: &CurveInterval<O>,
+) -> Result<bool> {
+    if !can_imprint(ci1.mid.point_class()) || !can_imprint(ci2.mid.point_class()) {
+        return Ok(true);
+    }
+    if ci1.mid.point_class() == PointClassType::Vertex
+        || ci2.mid.point_class() == PointClassType::Vertex
+    {
+        return Ok(true);
+    }
+    curve_of(geometry, cc_curve)?.is_degenerate(k, tol, Some(this_ivl))
 }
 
 // ---- callees not ported yet ----------------------------------------------------------
@@ -534,6 +570,66 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         classification2: &CurveClassification<O>,
         ci2: &mut CurveInterval<O>,
     ) -> Result<(Option<ProtoEdgeId>, bool)> {
+        self.find_or_create_proto_edge_in(
+            k,
+            geometry,
+            ti_approx_tol_3d,
+            classification1,
+            ci1,
+            classification2,
+            ci2,
+            false,
+        )
+    }
+
+    /// Not upstream (#18927): [`Self::find_or_create_proto_edge`] for an interval whose
+    /// edge the result needs. A failed step that leaves the interval without the edge it
+    /// would otherwise have (an end proto vertex whose making failed, or a failed
+    /// `CreateProtoEdge`, e.g. a uv curve whose trim refuses the interval) is returned as
+    /// its error, where upstream drops the status and the interval with it: the
+    /// intersection then lacks one of its curves, and a body built from it a real edge.
+    /// An interval that makes no edge for a geometric reason (an end or its middle that
+    /// classifies to no imprintable topology, a middle on a vertex, a degenerate interval)
+    /// still gives `(None, false)`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::find_or_create_proto_edge`], and the failed step's.
+    pub fn find_or_create_needed_proto_edge(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        ti_approx_tol_3d: f64,
+        classification1: &CurveClassification<O>,
+        ci1: &mut CurveInterval<O>,
+        classification2: &CurveClassification<O>,
+        ci2: &mut CurveInterval<O>,
+    ) -> Result<(Option<ProtoEdgeId>, bool)> {
+        self.find_or_create_proto_edge_in(
+            k,
+            geometry,
+            ti_approx_tol_3d,
+            classification1,
+            ci1,
+            classification2,
+            ci2,
+            true,
+        )
+    }
+
+    /// [`Self::find_or_create_proto_edge`], passing a failed step on when `needed`
+    /// ([`Self::find_or_create_needed_proto_edge`]).
+    fn find_or_create_proto_edge_in(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        ti_approx_tol_3d: f64,
+        classification1: &CurveClassification<O>,
+        ci1: &mut CurveInterval<O>,
+        classification2: &CurveClassification<O>,
+        ci2: &mut CurveInterval<O>,
+        needed: bool,
+    ) -> Result<(Option<ProtoEdgeId>, bool)> {
         let cc_curve = classification1.curve();
         let this_ivl = ci1.interval;
         let tol = ti_approx_tol_3d;
@@ -559,9 +655,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             return Ok((None, false));
         }
 
-        // NonDegen CrvIntervals: find or create PVs for the ends (statuses ignored)
+        // NonDegen CrvIntervals: find or create PVs for the ends (statuses ignored, kept
+        // for an interval whose edge is `needed`)
         let mut start_pv = None;
         let mut end_pv = None;
+        let mut start_failed: Option<SolidError> = None;
+        let mut end_failed: Option<SolidError> = None;
         if can_imprint(ci1.start.point_class()) && can_imprint(ci2.start.point_class()) {
             // (the curve the interval lies on, and its parameter at this end)
             let crossing = classification1.curve().map(|c| (c, ci1.interval.min()));
@@ -569,15 +668,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 runs_along_seam(geometry, &ci1.start, &ci1.mid, &ci2.mid)?,
                 runs_along_seam(geometry, &ci2.start, &ci2.mid, &ci1.mid)?,
             ];
-            start_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
+            match split_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.start,
                 &mut ci2.start,
                 crossing,
                 along,
-            ))?
-            .and_then(|r| r.0);
+            ))? {
+                Ok(r) => start_pv = r.0,
+                Err(e) => start_failed = Some(e),
+            }
             // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
             // moves the vertex only where certified (`add_crossing`)
             if let Some(pv) = start_pv {
@@ -600,15 +701,17 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 runs_along_seam(geometry, &ci1.end, &ci1.mid, &ci2.mid)?,
                 runs_along_seam(geometry, &ci2.end, &ci2.mid, &ci1.mid)?,
             ];
-            end_pv = ignore_soft(self.find_or_create_proto_vertex_crossing(
+            match split_soft(self.find_or_create_proto_vertex_crossing(
                 k,
                 geometry,
                 &mut ci1.end,
                 &mut ci2.end,
                 crossing,
                 along,
-            ))?
-            .and_then(|r| r.0);
+            ))? {
+                Ok(r) => end_pv = r.0,
+                Err(e) => end_failed = Some(e),
+            }
             // not upstream (WR-410, #1059): a later crossing with a smaller gap over sine
             // moves the vertex only where certified (`add_crossing`)
             if let Some(pv) = end_pv {
@@ -627,23 +730,26 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         // Can't create a ProtoEdge without both PVs.
         let (Some(start_pv), Some(end_pv)) = (start_pv, end_pv) else {
+            // Not upstream (#18927): where each end has its proto vertex or failed to make
+            // it, and the interval makes no edge by the checks below only for lack of it,
+            // a `needed` edge is refused with that failure.
+            let start_held = start_pv.is_some() || start_failed.is_some();
+            let end_held = end_pv.is_some() || end_failed.is_some();
+            if let Some(cause) = start_failed.or(end_failed) {
+                if needed
+                    && start_held
+                    && end_held
+                    && !interval_makes_no_edge(k, &*geometry, cc_curve, tol, &this_ivl, ci1, ci2)?
+                {
+                    return Err(cause);
+                }
+            }
             return Ok((None, false));
         };
 
-        // quit - IntervalMid does not classify to topology in both SrcBreps
-        if !can_imprint(ci1.mid.point_class()) || !can_imprint(ci2.mid.point_class()) {
-            return Ok((None, false));
-        }
-
-        // quit - SrcFaces intersect at a single Vertex
-        if ci1.mid.point_class() == PointClassType::Vertex
-            || ci2.mid.point_class() == PointClassType::Vertex
-        {
-            return Ok((None, false));
-        }
-
-        // quit - degenerate interval. [B488]
-        if curve_of(geometry, cc_curve)?.is_degenerate(k, tol, Some(&this_ivl))? {
+        // quit - IntervalMid does not classify to topology in both SrcBreps; quit - SrcFaces
+        // intersect at a single Vertex; quit - degenerate interval. [B488]
+        if interval_makes_no_edge(k, &*geometry, cc_curve, tol, &this_ivl, ci1, ci2)? {
             return Ok((None, false));
         }
 
@@ -662,9 +768,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut new_pe = found;
         if new_pe.is_none() {
             // create new Protoedge and EdgeDefinition
-            // The status is kept, not propagated: upstream returns SM_SUCCESS with the
-            // out-parameter whatever it was (`Unported` still propagates).
-            let created = ignore_soft(self.create_proto_edge(
+            // Upstream returns SM_SUCCESS with the out-parameter whatever it was, and the
+            // interval is left without its edge. Not upstream (#18927): a `needed` edge
+            // passes the failure on.
+            let made = self.create_proto_edge(
                 k,
                 &mut *geometry,
                 Some(start_pv),
@@ -673,7 +780,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 ci1,
                 classification2,
                 ci2,
-            ))?;
+            );
+            let created = if needed { Some(made?) } else { ignore_soft(made)? };
             if let Some(pe) = created {
                 was_created = true;
                 let mut ids = Vec::with_capacity(overlapping.len());
@@ -2107,8 +2215,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             for kk in 0..cc1.size() {
                 let mut ci1 = *cc1.at(kk)?;
                 let mut ci2 = *cc2.at(kk)?;
-                // the status is ignored upstream; passed on as the fork does (bcc6f01)
-                let result = self.find_or_create_proto_edge(
+                // the status is ignored upstream; passed on as the fork does (bcc6f01).
+                // Not upstream (#18927): the group's proto edges are deleted, so an
+                // interval the replacement leaves without its edge refuses the group
+                // (`refuse_unreplaced_group`).
+                let result = self.find_or_create_needed_proto_edge(
                     k,
                     &mut *geometry,
                     ti_approx_tol_3d,
@@ -3360,6 +3471,71 @@ mod tests {
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "{e}");
+    }
+
+    /// An interval whose end proto vertices exist but whose `CreateProtoEdge` fails (its
+    /// uv curve, over `5..6`, refuses the interval's trim) makes no edge. The helper drops
+    /// the failure as upstream does, `(None, false)`; where the result needs the edge (an
+    /// overlap group's replacement, a Boolean's interval) it is passed on, so the caller
+    /// refuses rather than build a body without the interval (#18927).
+    #[test]
+    fn a_needed_edge_passes_on_the_failure_that_left_it_unmade() {
+        use crate::error::nurbs::{BSplineFailure, NurbsFailure};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        let mut pool = Pool::new();
+        let mut uv =
+            Curve::from(BSplineCurve::create_line_segment(3, Vec3::X, Vec3::Y).unwrap());
+        assert!(uv.reparam_bspline_to(&Extent1d::from_min_max(5.0, 6.0)).unwrap());
+        pool.curves.push(uv);
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let curve = H(0, ClassObjectKind::Curve);
+        let ivl = pool.curves[0].natural_interval();
+        let at = |class: PointClassType, o: H| {
+            let mut pc = PointClassification::new(1e-5);
+            pc.set_class_object(class, Some(o));
+            pc
+        };
+        let classification = |uv: Option<H>| {
+            let mut cc = CurveClassification::with_curve_interval(&k, curve, ivl, 1e-5);
+            cc.set_uv_curve1(uv);
+            cc
+        };
+        let interval = |v: usize, ed: usize| CurveInterval {
+            interval: ivl,
+            start: at(PointClassType::Vertex, vtx(v)),
+            mid: at(PointClassType::Edge, edg(ed)),
+            end: at(PointClassType::Vertex, vtx(v)),
+        };
+        let cc1 = classification(Some(H(1, ClassObjectKind::Curve)));
+        let cc2 = classification(None);
+        for needed in [false, true] {
+            let mut m =
+                ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+            let (mut ci1, mut ci2) = (interval(4, 0), interval(5, 1));
+            let r = if needed {
+                m.find_or_create_needed_proto_edge(
+                    &k, &mut pool, 1e-6, &cc1, &mut ci1, &cc2, &mut ci2,
+                )
+            } else {
+                m.find_or_create_proto_edge(&k, &mut pool, 1e-6, &cc1, &mut ci1, &cc2, &mut ci2)
+            };
+            assert_eq!(m.proto_vertices().len(), 1, "{needed}");
+            assert!(m.proto_edges().is_empty(), "{needed}");
+            if needed {
+                let e = r.unwrap_err();
+                assert!(
+                    matches!(
+                        e.nurbs_failure(),
+                        Some(NurbsFailure::BSpline(BSplineFailure::ParameterOutside { .. }))
+                    ),
+                    "{e}"
+                );
+            } else {
+                assert_eq!(r.unwrap(), (None, false));
+            }
+        }
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.

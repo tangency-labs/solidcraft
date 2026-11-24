@@ -1756,16 +1756,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for ll in 0..num_ivls {
                     let mut ci1 = *cc1.at(ll)?;
                     let mut ci2 = *cc2.at(ll)?;
-                    // (status unchecked)
-                    let found = ignore_soft(mgr.find_or_create_proto_edge(
+                    // (status unchecked upstream). Not upstream (#18927): an interval
+                    // left without its edge by a failed step refuses the Boolean, which
+                    // would otherwise build a body lacking that edge.
+                    let (found, _was_created) = mgr.find_or_create_needed_proto_edge(
                         k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                    ))?;
+                    )?;
                     *cc1.at_mut(ll)? = ci1;
                     *cc2.at_mut(ll)? = ci2;
 
                     // remember pNewPE is part of the trim boundary of this
                     // coincident face pair
-                    if let Some((Some(pe), _was_created)) = found {
+                    if let Some(pe) = found {
                         if are_coincident {
                             add_unique(&mut coinc_pes, pe);
                         }
