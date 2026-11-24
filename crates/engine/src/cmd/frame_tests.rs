@@ -1127,6 +1127,37 @@ fn coped_fits_a_tee_to_the_through_tubes_shape() {
 }
 
 #[test]
+fn a_tee_on_an_open_section_reaches_across_its_open_side_to_the_far_face() {
+    // v ends on h's middle at (200, 0), in 50 x 50 x 6 angle and in 60 x 45 channel (web 5). Fitted to h, as Butt
+    // and Coped frames fit a T, v's end reaches across h's open side to the face beyond h's line: the angle's far
+    // leg (its inner face at y = -19; Coped follows the leg's rounded toe, to -22) and the channel's web (its inner
+    // face at y = -17.5), not stopping at h's line (y = 0). Neither overlaps h, its root fillet included.
+    let sections = [
+        (json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}), [-19.0, -22.0]),
+        (json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}), [-17.5, -17.5]),
+    ];
+    for (profile, lowest) in sections {
+        for (coped, want) in [false, true].into_iter().zip(lowest) {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [200, 100]], "ids": ["v"]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped, "names": {"h": "H", "v": "V"}});
+            run(&mut s, "frame.member", p);
+            let v = measured(&mut s, "V");
+            let o = overlap_all(&mut s);
+            assert!(
+                (v.2[1] - want).abs() < 1e-3 && o < 1e-3,
+                "{} coped {coped}: v from y = {}, not {want}; overlap {o} mm³",
+                profile["kind"],
+                v.2[1]
+            );
+        }
+    }
+}
+
+#[test]
 fn coped_cuts_a_crossing_and_an_overlap_to_the_tubes_shape() {
     // v crosses h and is cut there into `V` and `V · H`, each fitted to h: under Coped to h's real shape, each
     // keeping what lies in h's outer radii, 6 nearer h's line.

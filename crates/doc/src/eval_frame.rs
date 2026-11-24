@@ -634,7 +634,7 @@ fn corner_ends(
         if let Some(e) = out.0.get_mut(f.member).and_then(|e| e.get_mut(usize::from(!f.at_start)))
             && e.is_none()
         {
-            *e = Some((None, 0.0, false));
+            *e = Some((None, fit_reach(segments, regions, placed, f), false));
         }
     }
     Ok((out, fits))
@@ -1403,6 +1403,32 @@ fn along(plane: Plane, regions: &[Region2], d: Vec3) -> (Plane, Cow<'_, [Region2
     (Plane { x: plane.x * -1.0, ..plane }, Cow::Owned(regions.iter().map(frame::mirrored).collect()))
 }
 
+/// How far past its line's end fitted end `f` is built: on an open section (an angle, a channel), out to the far side of
+/// the members it fits against (the rectangle round each one's section, where the end's line meets theirs), so the fit
+/// leaves the end reaching across their open side to the face beyond, not stopping at their lines. A tube's or a bar's
+/// fit fills its whole side, so their ends (and their faces' names) stay as they were: built to the line's end.
+fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dyn Fn(usize, Vec3) -> Plane, f: &Fit) -> f64 {
+    if !frame_multi_trim::is_open(regions) {
+        return 0.0;
+    }
+    let Some((_, a, b)) = segments.get(f.member) else { return 0.0 };
+    let (end, toward) = if f.at_start { (*a, *a - *b) } else { (*b, *b - *a) };
+    let (Some(toward), length) = (toward.normalized(), a.dist(*b)) else { return 0.0 };
+    let corners = frame_multi_trim::box_corners(regions);
+    let reach = f
+        .against
+        .iter()
+        .filter_map(|&t| {
+            let (_, c, d) = segments.get(t)?;
+            let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
+            let plane = placed(t, at);
+            corners.iter().map(|&q| (plane.to_world(q) - end).dot(toward)).reduce(f64::max)
+        })
+        .fold(0.0, f64::max);
+    // Never more than the member's own length: a far side that far off is no joint this end makes.
+    if reach.is_finite() { reach.clamp(0.0, length) } else { 0.0 }
+}
+
 /// Auto's ends (#4003 spec A4-A6), as [`corner_ends`] gives stage 1's, and the ends cut to fit, in laying order:
 /// [`frame_layout::plan`]'s corners jointed by the table (an angled butt, a mitre, or a butt whose short tube is
 /// fitted to the long one) or by their override; its chained corners as stage 1 finishes them; its fits. A fitted
@@ -1475,7 +1501,7 @@ fn auto_ends(
         if let Some(e) = out.0.get_mut(f.member).and_then(|e| e.get_mut(usize::from(!f.at_start)))
             && e.is_none()
         {
-            *e = Some((None, 0.0, false));
+            *e = Some((None, fit_reach(segments, regions, placed, f), false));
         }
     }
     Ok((out, fits))

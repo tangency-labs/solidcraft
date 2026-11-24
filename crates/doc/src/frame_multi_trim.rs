@@ -20,8 +20,8 @@ pub fn filled_outline(regions: &[Region2]) -> Vec<Region2> {
     regions.iter().map(|r| Region2 { outer: r.outer.clone(), holes: Vec::new() }).collect()
 }
 
-/// The section's outer outlines with every corner arc that sits between two straight sides replaced by the
-/// corner they meet at; holes dropped. A round section (no straight sides) keeps its arcs.
+/// The section's outer outlines with every outside corner arc that sits between two straight sides replaced by the
+/// corner they meet at (an inside corner's fillet kept); holes dropped. A round section (no straight sides) keeps its arcs.
 pub fn squared_outline(regions: &[Region2]) -> Vec<Region2> {
     regions.iter().map(|r| Region2 { outer: squared(&r.outer), holes: Vec::new() }).collect()
 }
@@ -37,10 +37,17 @@ fn squared(outline: &Loop2) -> Loop2 {
         Some(Seg2::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
-    // The corner replacing segment k, when it is an arc between two lines that meet near it.
+    // The loop's winding (shoelace over its segments' ends): an outside corner's arc turns the same way, an inside
+    // corner's (an angle's or a channel's root fillet) the other, and only an outside one is squared. Squaring an
+    // inside one would cut into the member's material.
+    let winding: f64 = segs.iter().map(|g| g.start().cross(g.end())).sum();
+    // The corner replacing segment k, when it is an outside corner's arc between two lines that meet near it.
     let corner = |k: usize| {
         let arc = segs.get(k.checked_rem(n)?)?;
-        let Seg2::Arc { radius, .. } = *arc else { return None };
+        let Seg2::Arc { radius, sweep, .. } = *arc else { return None };
+        if sweep * radius.signum() * winding < 0.0 {
+            return None;
+        }
         let at = meet(line(k + n - 1)?, line(k + 1)?)?;
         (at.dist(arc.start()).max(at.dist(arc.end())) <= 2.0 * radius.abs()).then_some(at)
     };
@@ -64,6 +71,52 @@ fn meet((a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)) -> Option<Vec2> {
         return None;
     }
     Some(a + u * ((c - a).cross(v) / across))
+}
+
+/// Whether the section is open, like an angle, a channel or a beam: some corner of an outer outline turns inward
+/// (a line meeting the next at an inside corner, or an inside corner's fillet). A tube's or a bar's never does.
+pub fn is_open(regions: &[Region2]) -> bool {
+    regions.iter().any(|r| {
+        let segs = &r.outer.segs;
+        let winding: f64 = segs.iter().map(|g| g.start().cross(g.end())).sum();
+        let inward_arc = segs.iter().any(|g| matches!(*g, Seg2::Arc { radius, sweep, .. } if sweep * radius.signum() * winding < 0.0));
+        let inward_turn = segs.iter().zip(segs.iter().cycle().skip(1)).any(|(g, h)| match (*g, *h) {
+            (Seg2::Line { a, b }, Seg2::Line { a: c, b: d }) => (b - a).cross(d - c) * winding < -1e-9,
+            _ => false,
+        });
+        inward_arc || inward_turn
+    })
+}
+
+/// The corners of the rectangle round each of the section's outer outlines (an arc's whole circle's box, a curve's
+/// control points'): what bounds the section, however open.
+pub fn box_corners(regions: &[Region2]) -> Vec<Vec2> {
+    regions
+        .iter()
+        .flat_map(|r| {
+            let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+            let mut add = |p: Vec2| {
+                if p.x.is_finite() && p.y.is_finite() {
+                    lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+                    hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+                }
+            };
+            for g in &r.outer.segs {
+                match *g {
+                    Seg2::Arc { center, radius, .. } => {
+                        let r = radius.abs();
+                        add(Vec2::new(center.x - r, center.y - r));
+                        add(Vec2::new(center.x + r, center.y + r));
+                    }
+                    _ => {
+                        add(g.start());
+                        add(g.end());
+                    }
+                }
+            }
+            if lo.x > hi.x { Vec::new() } else { vec![lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)] }
+        })
+        .collect()
 }
 
 /// A tube's cutting tool: the squared outline extruded on `plane` from `start` to `end` (as the tube is), then
