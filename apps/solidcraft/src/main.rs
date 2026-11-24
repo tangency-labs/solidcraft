@@ -1062,6 +1062,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let folder_parent = parent.clone();
     let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
     Services {
+        // Desktop saves use persistent filesystem paths; only web hosts require a guard.
+        can_persist_design: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
             #[cfg(target_os = "linux")]
