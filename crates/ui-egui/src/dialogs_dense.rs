@@ -33,6 +33,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Measure { .. } => Some("inspect.measure"),
         Kind::Section { .. } => Some("inspect.section"),
         Kind::Rename { .. } => Some("timeline.rename"),
+        Kind::RenameGroup { .. } => Some("timeline.rename_group"),
         Kind::ConfirmDelete { .. } => Some("timeline.delete"),
         Kind::Extrude { .. } => Some("solid.extrude"),
         Kind::Fillet { chamfer, .. } => Some(if *chamfer { "solid.chamfer" } else { "solid.fillet" }),
@@ -1365,7 +1366,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }
-        Kind::Rename { name, .. } => {
+        Kind::Rename { name, .. } | Kind::RenameGroup { name, .. } => {
             form_row(ui, "Name", |ui| {
                 enter |= ui_kit::focused_text_field(ui, name, "");
             });

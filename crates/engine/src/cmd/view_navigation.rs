@@ -77,11 +77,12 @@ CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser",
     .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
     .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
-    .icon("fit").key("F6").noundo().doc_only().any_part()
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
-    .icon("home").noundo().doc_only().any_part()
+    .icon("home").key("Home").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))

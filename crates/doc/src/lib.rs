@@ -194,6 +194,7 @@ pub use eval::edge_names_for;
 pub use eval::edge_refs;
 pub use eval::face_point_names;
 pub use eval::face_point_state;
+pub use eval::feature_operation;
 pub use eval::from_slope_height;
 pub use eval::hole_direction_at;
 pub use eval::hole_on_surface;

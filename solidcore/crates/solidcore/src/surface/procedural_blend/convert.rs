@@ -1122,6 +1122,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
                 tol: fill.tol,
                 convex: fill.convex,
                 containment: fill.containment,
+                certified: fill.certified,
                 patch: to_u32(d.patch)?,
                 net: surface_record(&form)?,
             })
@@ -1232,6 +1233,7 @@ pub fn corner_from_record(k: &Kernel, rec: &CornerRecord) -> Result<Surface> {
                 r.tol,
                 r.convex,
                 r.containment,
+                r.certified,
             )?;
             let mut net = Surface::from(surface_of(&r.net)?);
             net.set_corner_definition(CornerDefinition::setback(

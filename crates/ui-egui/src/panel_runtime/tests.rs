@@ -3263,6 +3263,37 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
     }
 }
 
+/// Float lifts a listed panel (the 2D Timeline) off where it shows, at its shown size and a
+/// step up and in; any other panel floats at the free area's top-left corner at its saved size.
+#[test]
+fn raw_host_float_puts_a_listed_panel_where_it_showed_and_others_at_the_corner() {
+    for in_place in [true, false] {
+        let mut h = PanelMountHarness::new(false).unwrap();
+        open_editor(&mut h);
+        let mut raw = RawPanelHost::new(h, 1.0);
+        raw.host.set_float_in_place(if in_place { vec![id("editor")] } else { Vec::new() });
+        raw.frame(Vec::new(), false);
+        let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let frame = raw.host.frame().unwrap();
+        let shown = frame.layout.sections.iter().find(|card| card.section == docked.id).unwrap().outer;
+        let capacity = frame.layout.capacity;
+        raw.menu(id("editor"));
+        raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Floating) }, true);
+        raw.frame(Vec::new(), false);
+        let floated = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let step = solidcraft_theme::Tokens::get().space_24;
+        if in_place {
+            let origin = Point { x: shown.origin.x + step, y: shown.origin.y - step };
+            assert_eq!(floated.location, SectionLocation::Floating { origin });
+            let width = shown.size.width.min(capacity.size.width - 2.0 * step);
+            assert_eq!(floated.size, Size { width, height: shown.size.height });
+        } else {
+            assert_eq!(floated.location, SectionLocation::Floating { origin: capacity.origin });
+            assert_eq!(floated.size, docked.size);
+        }
+    }
+}
+
 #[test]
 fn raw_host_move_entries_say_they_move_only_the_tab_in_a_section_with_tabs() {
     // History joined with the Browser: "Bottom" read as moving both tabs (#17217).
@@ -13670,6 +13701,55 @@ fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
     panel.data.merge_frame();
     let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
     assert!(crate::test_support::text_shapes(&output).any(|shape| shape.galley.job.text == "Posted operation"));
+}
+
+#[test]
+fn plugin_panels_table_rows_support_optional_indent_level() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let ctx = crate::fonts::test_context();
+
+    // Set row 0 with no indent, row 1 with indent 2, and row 2 with an oversized indent 20 (clamped to MAX_TABLE_ROW_INDENT = 8)
+    panel
+        .data
+        .set_data(&[
+            Datum { path: "/tools/0/name".into(), value: UiValue::Text("Root Setup".into()) },
+            Datum { path: "/tools/1/name".into(), value: UiValue::Text("Pocket Operation".into()) },
+            Datum { path: "/tools/1/indent".into(), value: UiValue::Integer(2) },
+            Datum { path: "/tools/2/name".into(), value: UiValue::Text("Deep Nested Item".into()) },
+            Datum { path: "/tools/2/indent".into(), value: UiValue::Integer(20) },
+        ])
+        .unwrap();
+    panel.data.merge_frame();
+
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+
+    let Some(shape_root) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Root Setup") else {
+        panic!("root setup shape missing")
+    };
+    let Some(shape_indented) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Pocket Operation") else {
+        panic!("indented shape missing")
+    };
+    let Some(shape_clamped) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Deep Nested Item") else {
+        panic!("clamped shape missing")
+    };
+
+    let base_x = shape_root.pos.x;
+    let expected_indent_2 = base_x + 2.0 * super::plugin::TABLE_ROW_INDENT;
+    let expected_clamped_8 = base_x + (MAX_TABLE_ROW_INDENT as f32) * super::plugin::TABLE_ROW_INDENT;
+
+    assert!(
+        (shape_indented.pos.x - expected_indent_2).abs() < 1e-3,
+        "indent level 2 shifts first cell by 28.0 pt: got {}, expected {}",
+        shape_indented.pos.x,
+        expected_indent_2
+    );
+    assert!(
+        (shape_clamped.pos.x - expected_clamped_8).abs() < 1e-3,
+        "indent level 20 clamped to 8 shifts first cell by 112.0 pt: got {}, expected {}",
+        shape_clamped.pos.x,
+        expected_clamped_8
+    );
 }
 
 #[test]

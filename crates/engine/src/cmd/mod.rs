@@ -155,6 +155,7 @@ pub use sketch_modify::break_shared_end;
 pub use sketch_modify::extend_arc_preview;
 pub use sketch_modify::extend_end_at;
 pub use sketch_modify::extend_preview;
+pub use sketch_modify::offset_leaves_out;
 pub use sketch_modify::trim_hover;
 pub use sketch_modify::trim_piece;
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
