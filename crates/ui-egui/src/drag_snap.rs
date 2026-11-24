@@ -135,14 +135,6 @@ fn already_on_curve(sk: &Sketch, mi: usize, ci: usize) -> bool {
     })
 }
 
-fn already_tangent(sk: &Sketch, c1: usize, c2: usize) -> bool {
-    c1 == c2
-        || sk
-            .constraints
-            .iter()
-            .any(|c| !c.driven && matches!(c.kind, ConstraintKind::Tangent { a, b } if (a == c1 && b == c2) || (a == c2 && b == c1)))
-}
-
 /// Returns `(x_constrained, y_constrained)` for point `mi` against non-moving geometry so `Align`
 /// does not fight an existing constraint and cause drag flickering.
 fn point_axis_constrained(sk: &Sketch, mi: usize, moving: &[(usize, Vec2)], exclude: &[usize]) -> (bool, bool) {
@@ -218,148 +210,6 @@ fn already_aligned_with(sk: &Sketch, mi: usize, ti: usize, horizontal: bool) -> 
     })
 }
 
-fn point_on_segment_within(a: Vec2, b: Vec2, p: Vec2, margin: f64) -> bool {
-    let Some(dir) = (b - a).normalized() else { return false };
-    let len = a.dist(b);
-    let s = (p - a).dot(dir);
-    s >= -margin && s <= len + margin
-}
-
-fn find_tangent_drag(sk: &Sketch, dragged_entity: &str, cursor: Vec2, delta: Vec2, exclude: &[usize], mm_px: f64) -> Option<(f64, Snap)> {
-    let dragged_ci = sk.curve_index(dragged_entity)?;
-    let dragged_curve = sk.curves.get(dragged_ci)?;
-    let curve_tol = CURVE_PX * mm_px;
-    let cursor_tol = CURSOR_PX * mm_px;
-    let mut best: Option<(f64, Snap)> = None;
-    let mut offer = |d: f64, s: Snap| {
-        if best.as_ref().is_none_or(|b| d < b.0) {
-            best = Some((d, s));
-        }
-    };
-    match dragged_curve.kind {
-        CurveKind::Line { a, b } => {
-            let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return None };
-            let (a_m, b_m) = (pa + delta, pb + delta);
-            let dir = (b_m - a_m).normalized()?;
-            let n = dir.perp();
-            for (c_idx, cu) in sk.curves.iter().enumerate() {
-                if c_idx == dragged_ci
-                    || !matches!(cu.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. })
-                    || exclude.iter().any(|&p| cu.kind.uses(p))
-                    || already_tangent(sk, dragged_ci, c_idx)
-                {
-                    continue;
-                }
-                let (Some(o), Some(r)) = (sk.center(c_idx), sk.radius(c_idx)) else { continue };
-                if r <= 1e-6 {
-                    continue;
-                }
-                let sd = (o - a_m).dot(n);
-                if sd.abs() <= 1e-6 {
-                    continue;
-                }
-                let gap = (sd.abs() - r).abs();
-                if gap >= curve_tol {
-                    continue;
-                }
-                let tan_pt = o - n * (sd.signum() * r);
-                let foot = o - n * sd;
-                let on_arc = sk.shape(c_idx).is_none_or(|sh| sh.dist(tan_pt) < 1e-4);
-                if !on_arc || tan_pt.dist(cursor) > cursor_tol {
-                    continue;
-                }
-                let offset = tan_pt - foot;
-                if !point_on_segment_within(a_m + offset, b_m + offset, tan_pt, curve_tol) {
-                    continue;
-                }
-                offer(
-                    gap,
-                    Snap {
-                        point: dragged_entity.to_string(),
-                        at: tan_pt,
-                        offset,
-                        target: Target::Tangent { dragged: dragged_entity.to_string(), target: cu.id.clone() },
-                        guides: Vec::new(),
-                    },
-                );
-            }
-        }
-        CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
-            let o = sk.center(dragged_ci)?;
-            let r_new = cursor.dist(o);
-            let radial = (cursor - o).normalized()?;
-            for (c_idx, cu) in sk.curves.iter().enumerate() {
-                if c_idx == dragged_ci || exclude.iter().any(|&p| cu.kind.uses(p)) || already_tangent(sk, dragged_ci, c_idx) {
-                    continue;
-                }
-                match cu.kind {
-                    CurveKind::Line { a, b } => {
-                        let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { continue };
-                        let Some(dir) = (pb - pa).normalized() else { continue };
-                        let n = dir.perp();
-                        let sd = (o - pa).dot(n);
-                        let r_tan = sd.abs();
-                        let gap = (r_new - r_tan).abs();
-                        if r_tan <= 1e-6 || gap >= curve_tol {
-                            continue;
-                        }
-                        let foot = o - n * sd;
-                        if !point_on_segment_within(pa, pb, foot, curve_tol) || foot.dist(cursor) > cursor_tol {
-                            continue;
-                        }
-                        let offset = radial * (r_tan - r_new);
-                        offer(
-                            gap,
-                            Snap {
-                                point: dragged_entity.to_string(),
-                                at: foot,
-                                offset,
-                                target: Target::Tangent { dragged: dragged_entity.to_string(), target: cu.id.clone() },
-                                guides: Vec::new(),
-                            },
-                        );
-                    }
-                    CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
-                        let (Some(o2), Some(r2)) = (sk.center(c_idx), sk.radius(c_idx)) else { continue };
-                        let d_c = o.dist(o2);
-                        if r2 <= 1e-6 || d_c <= 1e-6 {
-                            continue;
-                        }
-                        let u = (o2 - o) / d_c;
-                        for (r_tan, tan_pt) in [(d_c - r2, o2 - u * r2), (d_c + r2, o2 + u * r2), (r2 - d_c, o2 - u * r2)] {
-                            if r_tan <= 1e-6 {
-                                continue;
-                            }
-                            let gap = (r_new - r_tan).abs();
-                            if gap >= curve_tol || tan_pt.dist(cursor) > cursor_tol {
-                                continue;
-                            }
-                            let on_arc = sk.shape(c_idx).is_none_or(|sh| sh.dist(tan_pt) < 1e-4);
-                            if !on_arc {
-                                continue;
-                            }
-                            let offset = radial * (r_tan - r_new);
-                            offer(
-                                gap,
-                                Snap {
-                                    point: dragged_entity.to_string(),
-                                    at: tan_pt,
-                                    offset,
-                                    target: Target::Tangent { dragged: dragged_entity.to_string(), target: cu.id.clone() },
-                                    guides: Vec::new(),
-                                },
-                            );
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        _ => {}
-    }
-    best
-}
-
 fn find_inner(
     sk: &Sketch,
     dragged_entity: Option<&str>,
@@ -380,92 +230,118 @@ fn find_inner(
         sk.points.iter().enumerate().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
     let free_curves: Vec<usize> =
         (0..sk.curves.len()).filter(|&c| sk.curves.get(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
-    let mut best: Option<(f64, Snap)> = None;
     let offer = |best: &mut Option<(f64, Snap)>, d: f64, s: Snap| {
         if best.as_ref().is_none_or(|b| d < b.0) {
             *best = Some((d, s));
         }
     };
-    // Points, then midpoints, then curve-to-curve tangents, then point-on-curve.
-    for &(mi, p) in moving {
-        if !near_cursor(p) {
-            continue;
-        }
-        for &(ti, t) in &targets {
-            if already_coincident(sk, mi, ti) {
-                continue;
-            }
-            let d = p.dist(t);
-            if d < POINT_PX * mm_px {
-                offer(&mut best, d, Snap { point: id(mi), at: t, offset: t - p, target: Target::Point(id(ti)), guides: Vec::new() });
-            }
-        }
-    }
-    if best.is_none() {
+    let snap_points = |filter_near: bool| -> Option<(f64, Snap)> {
+        let mut best: Option<(f64, Snap)> = None;
+        let matches = |pt: Vec2| if filter_near { near_cursor(pt) } else { !near_cursor(pt) };
         for &(mi, p) in moving {
-            if !near_cursor(p) {
+            if !matches(p) {
                 continue;
             }
-            for &c in &free_curves {
-                if already_midpoint(sk, mi, c) {
+            for &(ti, t) in &targets {
+                if already_coincident(sk, mi, ti) {
                     continue;
                 }
-                let Some(cu) = sk.curves.get(c) else { continue };
-                let CurveKind::Line { a, b } = cu.kind else { continue };
-                let (Some(a), Some(b)) = (sk.point(a), sk.point(b)) else { continue };
-                let m = (a + b) * 0.5;
-                let d = p.dist(m);
+                let d = p.dist(t);
                 if d < POINT_PX * mm_px {
-                    offer(&mut best, d, Snap { point: id(mi), at: m, offset: m - p, target: Target::Mid(cu.id.clone()), guides: Vec::new() });
+                    offer(&mut best, d, Snap { point: id(mi), at: t, offset: t - p, target: Target::Point(id(ti)), guides: Vec::new() });
                 }
             }
         }
-    }
-    if best.is_none()
-        && let (Some(entity), Some(c)) = (dragged_entity, cursor)
-        && let Some((d, s)) = find_tangent_drag(sk, entity, c, delta, exclude, mm_px)
-    {
-        offer(&mut best, d, s);
-    }
-    if best.is_none() {
-        for &(mi, p) in moving {
-            if !near_cursor(p) {
-                continue;
-            }
-            for &c in &free_curves {
-                if already_on_curve(sk, mi, c) {
+        if best.is_none() {
+            for &(mi, p) in moving {
+                if !matches(p) {
                     continue;
                 }
-                let (Some(cu), Some(sh)) = (sk.curves.get(c), sk.shape(c)) else { continue };
-                let d = sh.dist(p);
-                if d < CURVE_PX * mm_px {
-                    let q = sh.project(p);
-                    offer(&mut best, d, Snap { point: id(mi), at: q, offset: q - p, target: Target::On(cu.id.clone()), guides: Vec::new() });
+                for &c in &free_curves {
+                    if already_midpoint(sk, mi, c) {
+                        continue;
+                    }
+                    let Some(cu) = sk.curves.get(c) else { continue };
+                    let CurveKind::Line { a, b } = cu.kind else { continue };
+                    let (Some(a), Some(b)) = (sk.point(a), sk.point(b)) else { continue };
+                    let m = (a + b) * 0.5;
+                    let d = p.dist(m);
+                    if d < POINT_PX * mm_px {
+                        offer(&mut best, d, Snap { point: id(mi), at: m, offset: m - p, target: Target::Mid(cu.id.clone()), guides: Vec::new() });
+                    }
                 }
             }
         }
-    }
-    if let Some((_, s)) = best {
+        if filter_near
+            && best.is_none()
+            && let (Some(entity), Some(c)) = (dragged_entity, cursor)
+            && let Some(hit) = solidcraft_engine::sketch::find_tangent_drag(sk, entity, c, delta, exclude, CURVE_PX * mm_px, cursor_tol)
+        {
+            offer(
+                &mut best,
+                hit.gap,
+                Snap {
+                    point: entity.to_string(),
+                    at: hit.at,
+                    offset: hit.offset,
+                    target: Target::Tangent { dragged: entity.to_string(), target: hit.target },
+                    guides: Vec::new(),
+                },
+            );
+        }
+        if best.is_none() {
+            for &(mi, p) in moving {
+                if !matches(p) {
+                    continue;
+                }
+                for &c in &free_curves {
+                    if already_on_curve(sk, mi, c) {
+                        continue;
+                    }
+                    let (Some(cu), Some(sh)) = (sk.curves.get(c), sk.shape(c)) else { continue };
+                    let d = sh.dist(p);
+                    if d < CURVE_PX * mm_px {
+                        let q = sh.project(p);
+                        offer(&mut best, d, Snap { point: id(mi), at: q, offset: q - p, target: Target::On(cu.id.clone()), guides: Vec::new() });
+                    }
+                }
+            }
+        }
+        best
+    };
+    // Snaps near the cursor take priority (points, midpoints, curve-to-curve tangents, on-curve)
+    // so far-away endpoints never hijack a drag near the pointer; if nothing snapped near the
+    // cursor, moving points farther from the pointer still snap (e.g. a line dragged by its body).
+    if let Some((_, s)) = snap_points(true).or_else(|| cursor.and_then(|_| snap_points(false))) {
         return keep(Some(s));
     }
     // Lining up: the nearest horizontal and the nearest vertical alignment, each on its own axis,
-    // skipping axes already locked by driving constraints so existing constraints never flicker.
+    // preferring points near the cursor and skipping axes already locked by driving constraints so
+    // existing constraints never flicker.
     let tol = ALIGN_PX * mm_px;
-    let (mut hx, mut vy): (Option<(f64, usize, Vec2, Vec2)>, Option<(f64, usize, Vec2, Vec2)>) = (None, None);
-    for &(mi, p) in moving {
-        if !near_cursor(p) {
-            continue;
-        }
-        let (x_locked, y_locked) = point_axis_constrained(sk, mi, moving, exclude);
-        for &(ti, t) in &targets {
-            let (dy, dx) = ((p.y - t.y).abs(), (p.x - t.x).abs());
-            if !y_locked && !already_aligned_with(sk, mi, ti, true) && dy < tol && dx > tol && hx.is_none_or(|h| dy < h.0) {
-                hx = Some((dy, mi, p, t));
+    let align_pass = |filter_near: bool| -> (Option<(f64, usize, Vec2, Vec2)>, Option<(f64, usize, Vec2, Vec2)>) {
+        let matches = |pt: Vec2| if filter_near { near_cursor(pt) } else { !near_cursor(pt) };
+        let (mut hx, mut vy): (Option<(f64, usize, Vec2, Vec2)>, Option<(f64, usize, Vec2, Vec2)>) = (None, None);
+        for &(mi, p) in moving {
+            if !matches(p) {
+                continue;
             }
-            if !x_locked && !already_aligned_with(sk, mi, ti, false) && dx < tol && dy > tol && vy.is_none_or(|v| dx < v.0) {
-                vy = Some((dx, mi, p, t));
+            let (x_locked, y_locked) = point_axis_constrained(sk, mi, moving, exclude);
+            for &(ti, t) in &targets {
+                let (dy, dx) = ((p.y - t.y).abs(), (p.x - t.x).abs());
+                if !y_locked && !already_aligned_with(sk, mi, ti, true) && dy < tol && dx > tol && hx.is_none_or(|h| dy < h.0) {
+                    hx = Some((dy, mi, p, t));
+                }
+                if !x_locked && !already_aligned_with(sk, mi, ti, false) && dx < tol && dy > tol && vy.is_none_or(|v| dx < v.0) {
+                    vy = Some((dx, mi, p, t));
+                }
             }
         }
+        (hx, vy)
+    };
+    let (mut hx, mut vy) = align_pass(true);
+    if cursor.is_some() && hx.is_none() && vy.is_none() {
+        (hx, vy) = align_pass(false);
     }
     let mut offset = Vec2::ZERO;
     let mut guides = Vec::new();
@@ -502,31 +378,7 @@ pub fn satisfied_after_drag(sk: &Sketch, s: &Snap, mm_px: f64) -> bool {
             let Some(p) = sk.point_index(&s.point).and_then(|pi| sk.point(pi)) else { return false };
             s.guides.iter().all(|(from, to)| if (from.y - to.y).abs() < 1e-9 { (p.y - from.y).abs() <= tol } else { (p.x - from.x).abs() <= tol })
         }
-        Target::Tangent { dragged, target } => {
-            let (Some(c1), Some(c2)) = (sk.curve_index(dragged), sk.curve_index(target)) else { return false };
-            let (Some(cu1), Some(cu2)) = (sk.curves.get(c1), sk.curves.get(c2)) else { return false };
-            let line_circle_ok = |line_c: usize, circ_c: usize| -> bool {
-                let Some(CurveKind::Line { a, b }) = sk.curves.get(line_c).map(|c| &c.kind) else { return false };
-                let (Some(pa), Some(pb), Some(o), Some(r)) = (sk.point(*a), sk.point(*b), sk.center(circ_c), sk.radius(circ_c)) else {
-                    return false;
-                };
-                let Some(dir) = (pb - pa).normalized() else { return false };
-                let sd = (o - pa).dot(dir.perp()).abs();
-                (sd - r).abs() <= tol
-            };
-            match (&cu1.kind, &cu2.kind) {
-                (CurveKind::Line { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => line_circle_ok(c1, c2),
-                (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Line { .. }) => line_circle_ok(c2, c1),
-                (CurveKind::Circle { .. } | CurveKind::Arc { .. }, CurveKind::Circle { .. } | CurveKind::Arc { .. }) => {
-                    let (Some(o1), Some(r1), Some(o2), Some(r2)) = (sk.center(c1), sk.radius(c1), sk.center(c2), sk.radius(c2)) else {
-                        return false;
-                    };
-                    let d = o1.dist(o2);
-                    (d - (r1 + r2)).abs() <= tol || (d - (r1 - r2).abs()).abs() <= tol
-                }
-                _ => false,
-            }
-        }
+        Target::Tangent { dragged, target } => solidcraft_engine::sketch::curves_tangent_within(sk, dragged, target, tol),
     }
 }
 
@@ -806,10 +658,19 @@ mod tests {
         assert_eq!(released["command"], "sketch.constraint.tangent");
         assert_eq!(released["params"], json!({"a": "l1", "b": "c1"}));
 
-        // If the cursor is near the right end (x = 35, y = 10.3), far from both p_far (x = 0)
-        // and the tangent point (x = 20), neither snap should activate.
+        // If the cursor is near the right end (x = 35, y = 10.3), far from the tangent point (x = 20),
+        // the curve-to-curve tangent snap does not activate; without a near-cursor snap, the line's
+        // moving endpoint still falls back to snapping onto p_far (matching s42_drag_snap).
         let far_cursor = Vec2::new(35.0, 10.3);
-        assert!(find_for_drag(&s, "l1", far_cursor, delta, &moving, &ex, 0.1).is_none());
+        let fallback = find_for_drag(&s, "l1", far_cursor, delta, &moving, &ex, 0.1).expect("endpoint fallback snap");
+        assert_eq!(fallback.target, Target::Point("p_far".into()));
+        // With no endpoint target or alignment nearby, the far tangent point alone does not activate.
+        let mut tangent_only = Sketch::new();
+        let _ = tangent_only.add_line(Vec2::new(5.0, 10.0), Vec2::new(45.0, 10.0), None, None, Some("l1"));
+        let _ = tangent_only.add_circle(Vec2::new(25.0, 0.0), 10.0, None, Some("c1"));
+        let (own2, ex2) = moving_points(&tangent_only, ["l1"]);
+        let moving2: Vec<(usize, Vec2)> = own2.iter().filter_map(|&p| tangent_only.point(p).map(|x| (p, x + delta))).collect();
+        assert!(find_for_drag(&tangent_only, "l1", Vec2::new(40.0, 10.3), delta, &moving2, &ex2, 0.1).is_none());
         clear();
     }
 

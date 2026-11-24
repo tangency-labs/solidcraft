@@ -1597,13 +1597,15 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let on_popup = r.hovered() || ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| ui.min_rect().expand(4.0).contains(p));
-                    let left_click_outside = !on_popup && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                    let on_popup = r.hovered() || pointer_pos.is_some_and(|p| ui.min_rect().expand(4.0).contains(p));
+                    let in_viewport =
+                        pointer_pos.is_some_and(|p| app.viewport.rect.is_none_or(|view| view.contains(p)) && !crate::shell::covered(app, p));
+                    let left_click_outside = !on_popup && in_viewport && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
                     let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
-                        && ui
-                            .input(|i| i.pointer.interact_pos())
-                            .is_some_and(|p| hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
-                    let lost_or_outside_press = r.lost_focus() || (e.live.is_none() && r.has_focus() && ui.input(|i| i.pointer.primary_pressed()));
+                        && pointer_pos.is_some_and(|p| hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                    let lost_or_outside_press =
+                        r.lost_focus() || (e.live.is_none() && r.has_focus() && in_viewport && ui.input(|i| i.pointer.primary_pressed()));
                     if r.lost_focus() && enter {
                         done = Some(true);
                     } else if e.fresh > 0 || (lost_or_outside_press && press_on_reference) {

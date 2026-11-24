@@ -105,13 +105,6 @@ fn keep(i: Option<Inference>) -> Option<Inference> {
     i
 }
 
-fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
-    match sk.curves.get(c)?.kind {
-        CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
-        _ => None,
-    }
-}
-
 /// Tangent from the previous point `prev` to a circle or arc, when the cursor `lp` is near the
 /// tangent point (within `tol`). When `prev` is on the circle or arc itself (a line started at an
 /// arc's end), the curve's tangent there, when the cursor is near that direction.
@@ -207,78 +200,23 @@ pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inf
     keep(best)
 }
 
+fn from_sketch_line_inference(i: solidcraft_engine::sketch::LineInference) -> Inference {
+    let kind = match i.kind {
+        solidcraft_engine::sketch::LineInferenceKind::Parallel => Kind::Parallel,
+        solidcraft_engine::sketch::LineInferenceKind::Perpendicular => Kind::Perpendicular,
+        solidcraft_engine::sketch::LineInferenceKind::Extension => Kind::Extension,
+    };
+    Inference { kind, curve: i.curve, at: i.at, dist: i.dist, guide: i.guide, arg: None }
+}
+
 /// Line directions inferred from existing lines: parallel or perpendicular from `prev`.
 pub fn lines_directions(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
-    let mut best: Option<Inference> = None;
-    let mut offer = |i: Inference| {
-        if best.as_ref().is_none_or(|b| i.dist < b.dist) {
-            best = Some(i);
-        }
-    };
-    let v = lp - prev;
-    if v.len() < tol * 2.0 {
-        return keep(None);
-    }
-    for (i, c) in sk.curves.iter().enumerate() {
-        if c.construction && c.link.is_none() {
-            continue;
-        }
-        let Some((a, b)) = line_ends(sk, i) else { continue };
-        let Some(dir) = (b - a).normalized() else { continue };
-        // Axis-aligned directions are the H/V snaps' business.
-        let axis = dir.x.abs() < 1e-9 || dir.y.abs() < 1e-9;
-        let touches = a.dist(prev) < 1e-9 || b.dist(prev) < 1e-9;
-        for (kind, d) in [(Kind::Parallel, dir), (Kind::Perpendicular, dir.perp())] {
-            if axis || (kind == Kind::Parallel && touches) {
-                continue;
-            }
-            let t = v.dot(d);
-            let at = prev + d * t;
-            let e = at.dist(lp);
-            if e < tol {
-                offer(Inference {
-                    kind,
-                    curve: c.id.clone(),
-                    at,
-                    dist: e,
-                    guide: (prev - d * (t.signum() * tol * 6.0), at + d * (t.signum() * tol * 6.0)),
-                    arg: None,
-                });
-            }
-        }
-    }
-    keep(best)
+    keep(solidcraft_engine::sketch::infer_line_direction(sk, prev, lp, tol).map(from_sketch_line_inference))
 }
 
 /// Point locus along the infinite extension of an existing line beyond its ends.
 pub fn extension(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
-    let mut best: Option<Inference> = None;
-    let v = lp - prev;
-    if v.len() < tol * 2.0 {
-        return keep(None);
-    }
-    for (i, c) in sk.curves.iter().enumerate() {
-        if c.construction && c.link.is_none() {
-            continue;
-        }
-        let Some((a, b)) = line_ends(sk, i) else { continue };
-        let Some(dir) = (b - a).normalized() else { continue };
-        let touches = a.dist(prev) < 1e-9 || b.dist(prev) < 1e-9;
-        let s = (lp - a).dot(dir);
-        let len = a.dist(b);
-        if !(-tol..=len + tol).contains(&s) {
-            let at = a + dir * s;
-            let e = at.dist(lp);
-            if e < tol * 0.8 && !touches {
-                let from = if s < 0.0 { a } else { b };
-                let dist = e * 0.9;
-                if best.as_ref().is_none_or(|b| dist < b.dist) {
-                    best = Some(Inference { kind: Kind::Extension, curve: c.id.clone(), at, dist, guide: (from, at), arg: None });
-                }
-            }
-        }
-    }
-    keep(best)
+    keep(solidcraft_engine::sketch::infer_line_extension(sk, prev, lp, tol).map(from_sketch_line_inference))
 }
 
 /// Directions and places from lines: parallel or perpendicular to a line (from `prev`), or on

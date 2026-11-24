@@ -412,13 +412,14 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let in_row = row_state.focused || on_row;
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let left = r.lost_focus() || row_state.lost;
-                let left_click_outside = !on_window && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                let in_viewport =
+                    pointer_pos.is_some_and(|p| app.viewport.rect.is_none_or(|view| view.contains(p)) && !crate::shell::covered(app, p));
+                let left_click_outside = !on_window && in_viewport && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
                 let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
-                    && ui
-                        .input(|i| i.pointer.interact_pos())
-                        .is_some_and(|p| super::hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                    && pointer_pos.is_some_and(|p| super::hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
                 let lost_or_outside_press =
-                    left || (e.live.is_none() && (r.has_focus() || row_state.focused) && ui.input(|i| i.pointer.primary_pressed()));
+                    left || (e.live.is_none() && (r.has_focus() || row_state.focused) && in_viewport && ui.input(|i| i.pointer.primary_pressed()));
                 let field = if left && enter {
                     Some(true)
                 } else if in_row && !left_click_outside {
