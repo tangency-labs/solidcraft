@@ -2281,6 +2281,11 @@ pub enum FeatureKind {
         /// Symmetric: `angle` split evenly either side of the sketch.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         symmetric: bool,
+        /// The faces face the side the curves give them, as Surface Extrude's do: the curve's
+        /// direction crossed with the sketch normal, so out of a profile. New surface revolves
+        /// save it; designs saved before it keep each face along its surface's own normal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        faced: bool,
     },
     /// A surface body swept along a chain of sketch curves from open curve chains and the
     /// boundaries of profiles: walls only, no caps.
@@ -3008,6 +3013,10 @@ pub struct SketchPoints {
     /// the hole's `direction` (into the face it was placed on) rather than across the sketch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub single: bool,
+    /// Keep the old position-numbered face names while the original selection is intact.
+    /// Once a point is gone, those names would refer to other holes, so use point names.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub legacy_face_roles: bool,
 }
 
 /// A component: a node of the design tree that owns sketches, features and bodies. The root
@@ -3038,6 +3047,69 @@ pub struct Component {
     /// whose features only exist to rebuild the copy can carry this flag.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub history_hidden: bool,
+    /// Mass values that replace those worked out from its bodies, for robot exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_override: Option<PhysicalOverride>,
+}
+
+/// What a body looks like to a simulator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollisionShape {
+    /// The export decides.
+    #[default]
+    Auto,
+    /// `convex_hull`, which development builds wrote, reads as a mesh.
+    #[serde(alias = "convex_hull")]
+    Mesh,
+    Box,
+    Cylinder,
+    Sphere,
+    /// No collision: a screw, a cosmetic part.
+    None,
+}
+
+impl CollisionShape {
+    pub fn parse(text: &str) -> Option<CollisionShape> {
+        Some(match text {
+            "auto" => CollisionShape::Auto,
+            "mesh" => CollisionShape::Mesh,
+            "box" => CollisionShape::Box,
+            "cylinder" => CollisionShape::Cylinder,
+            "sphere" => CollisionShape::Sphere,
+            "none" => CollisionShape::None,
+            _ => return None,
+        })
+    }
+}
+
+/// Measured or catalogue mass values of a component's own bodies (a bought motor modelled as a
+/// solid block). Its nested components keep theirs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalOverride {
+    /// kg.
+    pub mass: f64,
+    /// Centre of mass: mm, in the component's frame. Default: the one worked out from its bodies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub com: Option<[f64; 3]>,
+    /// About the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: the one worked out from its bodies, scaled by the mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[f64; 6]>,
+}
+
+impl PhysicalOverride {
+    /// The largest mass one can hold (kg).
+    pub const MAX_MASS: f64 = 1e9;
+
+    /// Whether these are numbers a command accepts, unlike what a hand-edited file could hold.
+    pub fn is_sane(&self) -> bool {
+        self.mass.is_finite()
+            && self.mass > 0.0
+            && self.mass <= Self::MAX_MASS
+            && self.com.is_none_or(|c| c.iter().all(|x| x.is_finite()))
+            && self.inertia.is_none_or(|i| i.iter().all(|x| x.is_finite()) && i[..3].iter().all(|x| *x > 0.0))
+    }
 }
 
 /// One loft section: profiles of a sketch.
@@ -3465,7 +3537,8 @@ impl FeatureKind {
             FeatureKind::Extrude { sketch, .. }
             | FeatureKind::Revolve { sketch, .. }
             | FeatureKind::SurfaceExtrude { sketch, .. }
-            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            | FeatureKind::SurfaceRevolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. } => Some(sketch.0),
             _ => None,
         }
     }
@@ -3915,11 +3988,11 @@ pub struct Feature {
     /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
-    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`) built
-    /// from a profile sketch owned by another component: the rigid transform of this feature's
-    /// component relative to the lowest common ancestor of both components at feature creation
-    /// time. Later moves or joints on this component then carry the built body rigidly with it,
-    /// while moves of the sketch's own component still propagate.
+    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`,
+    /// `Sweep`) built from a profile sketch owned by another component: the rigid transform of
+    /// this feature's component relative to the lowest common ancestor of both components at
+    /// feature creation time. Later moves or joints on this component then carry the built body
+    /// rigidly with it, while moves of the sketch's own component still propagate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
@@ -4229,9 +4302,10 @@ pub struct Document {
     /// Components linked to another design file (by component id).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub links: std::collections::BTreeMap<u64, DesignLink>,
-    /// Set in a file saved without the bodies of its linked designs (`file.save`'s
-    /// `linked_bodies: false`): the Import feature of each link is saved with no STEP text and no
-    /// records, and opening the design reads those bodies from the linked files again. Only the
+    /// Set in a file saved without the bodies of its linked designs and linked STEP files
+    /// (`file.save`'s `linked_bodies: false`): the Import feature of each link is saved with no
+    /// STEP text and no records, the Mesh Import feature beside a linked design's link with no
+    /// meshes, and opening the design reads those bodies from the linked files again. Only the
     /// file carries it: the session keeps the choice, and a design in memory always holds the
     /// bodies it could read.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -4257,6 +4331,9 @@ pub struct Document {
     /// The flat face per body (by body name) that a slicer export lays on the print bed.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub print_faces: std::collections::BTreeMap<String, crate::config::ConfigFaceTarget>,
+    /// What a body looks like to a simulator, by body name; a body not listed is `Auto`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub collision_shapes: std::collections::BTreeMap<String, CollisionShape>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -4594,6 +4671,7 @@ impl Document {
             body_components: Default::default(),
             body_offsets: Default::default(),
             materials: Default::default(),
+            collision_shapes: Default::default(),
             print_faces: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
@@ -4628,6 +4706,9 @@ impl Document {
         }
         if let Some(m) = self.materials.remove(old) {
             self.materials.insert(new.to_string(), m);
+        }
+        if let Some(shape) = self.collision_shapes.remove(old) {
+            self.collision_shapes.insert(new.to_string(), shape);
         }
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();
@@ -4870,6 +4951,10 @@ impl Document {
             .and_then(|m| self.material_name(m))
             .filter(|m| self.material_density(m).is_some())
             .unwrap_or_else(|| DEFAULT_MATERIAL.into())
+    }
+
+    pub fn collision_shape(&self, body: &str) -> CollisionShape {
+        self.collision_shapes.get(body).copied().unwrap_or_default()
     }
 
     /// Density of a body's material (g/cm³): its [`Document::body_material`]'s, so the name a

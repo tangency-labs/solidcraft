@@ -547,10 +547,15 @@ which. So does a link whose part file changed since the assembly read it, and a 
 older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
 part that is a plain `.json` design is evaluated the first time it is read this way, and that
 evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
-them), so later opens read an unchanged part without building it again. The
-mesh bodies of a linked part stay in the assembly's file, and so do the bodies of a linked STEP
-file. There is no button for this yet: run
-the command from a script, the command line or an agent.
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
@@ -778,6 +783,36 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Hole stacks
+
+Parts held together by rivets, bolts or pins have holes that line up through two or more
+touching layers. **Find Hole Stacks** (`inspect.hole_stacks`) lists them:
+
+```json
+{"command": "inspect.hole_stacks", "params": {"diameters": [[4, 6.5]], "touching": 0.05}}
+```
+
+Each stack has its `axis` (a unit vector pointing from `start` into the stack: down for a
+vertical stack, so `start` is on the top face), its `start` and `end` points on that axis,
+`grip_mm` (the clamped thickness from `start` to `end`) and its `layers`, outermost first:
+the `body`, the hole's diameter `d_mm` and its extent `t: [t0, t1]` in mm from `start`. A
+layer through an obround slot carries `slot: {length_mm, along}`, the slot's overall length
+and the direction of its length. Holes in no stack are listed under `lone` with their body,
+diameter, entry point `at`, axis and `depth_mm`.
+
+A layer reaches from face to face of its body: a countersink or chamfer that opens out from a
+hole counts in its extent, so it adds to the grip and closes the gap it would leave against
+the next layer, while `d_mm` stays the narrowest opening. Holes are on one axis when their
+axes are at most `axis_tolerance` apart (default 0.1 mm), either way round; a round hole
+lines up with a slot when its axis passes through the slot's centre line. Slots that no round
+hole passes through line up when they share a centre line, and their stack's axis runs
+through the middle of the length they share. Layers belong to one stack when the gap between
+them is at most `touching` (default 0.05 mm). `bodies` limits the search to some bodies,
+`diameters` to holes and slot widths in the given ranges, and `slots: false` leaves slots
+out. Standard parts already placed (a washer's hole) are left out unless named in `bodies`.
+Walls that are not one cylinder or cone — a hole another feature has cut into, or a tapped
+hole with its threads modelled — are not found.
 
 ## Finding things in the browser
 
