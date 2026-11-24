@@ -2,4 +2,6 @@
 
 pub mod lighten;
 
-pub use lighten::{LightenConfig, ManufacturingMethod, PocketDepthSpec};
+pub use lighten::LightenConfig;
+pub use lighten::ManufacturingMethod;
+pub use lighten::PocketDepthSpec;

@@ -13,109 +13,18 @@
 
 use std::f64::consts::TAU;
 
-use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use crate::build::{extrude, extrude_tapered_between, offset_loop};
 use crate::prism::planar_regions_boolean;
-use crate::{Body, BoolOp, DraftCorner, MeshTolerance, boolean, chamfer, fillet, measure};
+use crate::{Body, BoolOp, DraftCorner, MeshTolerance, chamfer, fillet, measure};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ManufacturingMethod {
-    CncPocket,
-    LaserWaterjet,
-    AdditiveWeightReduction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PocketDepthSpec {
-    BlindDepth(f64),
-    FloorThickness(f64),
-    ThroughHole,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum FilletLocation {
-    #[default]
-    Bottom,
-    Top,
-    All,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ChamferLocation {
-    #[default]
-    Top,
-    Bottom,
-    All,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LightenConfig {
-    pub wall_offset: f64,
-    pub depth_spec: PocketDepthSpec,
-    pub corner_radius: f64,
-    pub draft_angle: f64,
-    pub auto_fillet_radius: Option<f64>,
-    pub auto_chamfer_size: Option<f64>,
-    pub method: ManufacturingMethod,
-    pub island_faces: Vec<u64>,
-}
-
-impl Default for LightenConfig {
-    fn default() -> Self {
-        Self {
-            wall_offset: 4.0,
-            depth_spec: PocketDepthSpec::BlindDepth(7.0),
-            corner_radius: 3.0,
-            draft_angle: 0.0,
-            auto_fillet_radius: None,
-            auto_chamfer_size: None,
-            method: ManufacturingMethod::CncPocket,
-            island_faces: Vec::new(),
-        }
-    }
-}
-
-impl LightenConfig {
-    /// Validate configuration parameters prior to geometry generation.
-    pub fn validate(&self) -> Result<(), String> {
-        if !self.wall_offset.is_finite() || self.wall_offset <= 0.0 {
-            return Err("wall_offset must be positive".into());
-        }
-        if !self.corner_radius.is_finite() || self.corner_radius < 0.0 {
-            return Err("corner_radius must be non-negative".into());
-        }
-        if !self.draft_angle.is_finite() || !(0.0..45.0).contains(&self.draft_angle) {
-            return Err("draft_angle must be in [0, 45) degrees".into());
-        }
-        match self.depth_spec {
-            PocketDepthSpec::BlindDepth(d) if !d.is_finite() || d <= 0.0 => {
-                return Err("blind pocket depth must be positive".into());
-            }
-            PocketDepthSpec::FloorThickness(f) if !f.is_finite() || f < 0.0 => {
-                return Err("floor thickness must be non-negative".into());
-            }
-            _ => {}
-        }
-        if let Some(r) = self.auto_fillet_radius
-            && (!r.is_finite() || r <= 0.0)
-        {
-            return Err("auto_fillet_radius must be positive".into());
-        }
-        if let Some(c) = self.auto_chamfer_size
-            && (!c.is_finite() || c <= 0.0)
-        {
-            return Err("auto_chamfer_size must be positive".into());
-        }
-        Ok(())
-    }
-}
+pub use solidcore_ops::ChamferLocation;
+pub use solidcore_ops::FilletLocation;
+pub use solidcore_ops::LightenConfig;
+pub use solidcore_ops::ManufacturingMethod;
+pub use solidcore_ops::PocketDepthSpec;
 
 /// 2D analytical circle in local plane coordinates.
 #[derive(Debug, Clone, Copy)]
@@ -1596,20 +1505,17 @@ pub fn auto_pocket_with_warnings(
     let pre_edge_mids = collect_face_edge_mids(body, face_idx);
     let faces_before = body.face_count();
 
-    let mut current = if cutters.len() > 1
-        && let Ok(Some(combined)) = crate::ops::join_pieces(cutters.clone())
-        && let Ok(Some(cut_body)) = boolean(body, &combined, BoolOp::Cut)
-    {
-        cut_body
-    } else {
-        let mut acc = body.clone();
-        for cutter in &cutters {
-            acc = boolean(&acc, cutter, BoolOp::Cut)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| "auto-pocketing boolean cut consumed the entire solid".to_string())?;
-        }
-        acc
-    };
+    let (ops_target, _) = solidcore_ops::Body::from_record(body.record(), false).map_err(|e| e.to_string())?;
+    let ops_cutters = cutters
+        .iter()
+        .map(|c| solidcore_ops::Body::from_record(c.record(), false).map(|(b, _)| b))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let cut_ops = solidcore_ops::cut_pockets(ops_target, ops_cutters)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "auto-pocketing boolean cut consumed the entire solid".to_string())?;
+    let (cut_record, _) = cut_ops.to_record().map_err(|e| e.to_string())?;
+    let mut current = Body::from_record(cut_record).map_err(|e| e.to_string())?;
 
     if current.face_count() <= faces_before {
         let vol_before = measure(body).map(|m| m.volume).unwrap_or(0.0);
@@ -1698,6 +1604,7 @@ pub fn auto_pocket_with_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::boolean;
     use crate::build::{box_solid, cylinder};
     use crate::measure;
 
