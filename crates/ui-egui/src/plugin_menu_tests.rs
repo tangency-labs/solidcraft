@@ -2158,12 +2158,9 @@ mod native {
         root
     }
 
-    #[test]
-    fn panel_row_click_runs_on_the_command_worker_and_refreshes_its_data() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        let folder = h.dir.join("sample");
-        std::fs::create_dir_all(&folder).unwrap();
+    /// Write the "sample" plugin, whose panel "jobs" lists rows that run its `make` entry, to `folder`.
+    fn write_panel_plugin(folder: &std::path::Path) {
+        std::fs::create_dir_all(folder).unwrap();
         let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
             "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
                 "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},"row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
