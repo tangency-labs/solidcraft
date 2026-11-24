@@ -269,7 +269,6 @@ prefs_layout	false
 prefs_mouse3d	false
 prefs_navigation	false
 prefs_plugins	false
-prefs_sheet_metal	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false

@@ -83,6 +83,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
+            crate::dialogs_sheet::Sm::ExportDxf { .. } => Some("sheet.export_dxf"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),

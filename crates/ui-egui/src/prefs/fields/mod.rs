@@ -15,8 +15,6 @@ mod design;
 #[macro_use]
 mod security;
 #[macro_use]
-mod sheet_metal;
-#[macro_use]
 mod sketch;
 #[macro_use]
 mod tools;
@@ -36,7 +34,7 @@ mod unpaged;
 /// The whole table: the given legacy block, then every page's fields, into `preference_settings!`.
 macro_rules! all_preferences {
     ($($legacy:tt)*) => {
-        general_preferences! { appearance_preferences, layout_preferences, graphics_preferences, design_preferences, security_preferences, sheet_metal_preferences, sketch_preferences, tools_preferences, navigation_preferences, mouse3d_preferences, shortcuts_preferences, assistant_preferences, plugins_preferences, unpaged_preferences, preference_settings ; $($legacy)* }
+        general_preferences! { appearance_preferences, layout_preferences, graphics_preferences, design_preferences, security_preferences, sketch_preferences, tools_preferences, navigation_preferences, mouse3d_preferences, shortcuts_preferences, assistant_preferences, plugins_preferences, unpaged_preferences, preference_settings ; $($legacy)* }
     };
 }
 

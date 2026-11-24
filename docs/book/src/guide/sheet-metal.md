@@ -478,7 +478,7 @@ consume an undo step.
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf"}}
 ```
 
-The DXF is an AutoCAD 2000 (`AC1015`) drawing in millimetres, made for a laser-cutting shop's
+The DXF is an AutoCAD 2000 (`AC1015`) drawing, made for a laser-cutting shop's
 nesting or CAM software: each kind of line is on a layer of its own, with a colour (AutoCAD's
 index) and, for the bends, a linetype that the file defines.
 
@@ -494,8 +494,8 @@ drawing is the same part, only its units are different; the bend table's CSV sta
 
 `"bend_lines"` (default `true`) and `"markings"` (default `true`) keep or leave out the bend
 centre lines and the letters' contours with the bend notes — for a cutter that would cut or etch
-them. Preferences > Sheet Metal sets the defaults for both, for the export units, and for the
-sheet-metal rule that new designs start with.
+them. **Export DXF…** opens these options before the save picker, from the flat-pattern panel
+or the Sheet Metal ribbon. The choices apply to that export only.
 
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
