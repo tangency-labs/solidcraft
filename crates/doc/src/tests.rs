@@ -1192,6 +1192,292 @@ fn rounds_past_the_naming_limit_are_as_in_the_design_opened_afresh() {
     same_as_opened(&m, &doc, "all undone");
 }
 
+/// splitmix64, so each run makes the same edits.
+fn next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// Random edits of a small timeline.
+struct Edits {
+    state: u64,
+    made: u64,
+}
+
+impl Edits {
+    fn below(&mut self, n: usize) -> usize {
+        (next(&mut self.state) % n.max(1) as u64) as usize
+    }
+
+    fn one<'a, T>(&mut self, of: &'a [T]) -> Option<&'a T> {
+        let i = self.below(of.len());
+        of.get(i)
+    }
+
+    fn component(&mut self, doc: &Document) -> u64 {
+        let ids: Vec<u64> = std::iter::once(0).chain(doc.components.iter().map(|c| c.id)).collect();
+        self.one(&ids).copied().unwrap_or(0)
+    }
+
+    /// The name of a body of `m`, or now and then of none.
+    fn body(&mut self, m: &Model) -> String {
+        let names: Vec<String> = m.state().bodies.iter().map(|b| b.name.clone()).collect();
+        match self.below(12) {
+            0 => "Gone".into(),
+            _ => self.one(&names).cloned().unwrap_or_else(|| "Gone".into()),
+        }
+    }
+
+    /// Names as a feature stores them: of its own, a number, one another may have, none.
+    fn names(&mut self) -> Vec<String> {
+        match self.below(6) {
+            0 => Vec::new(),
+            1 => vec![format!("Body{}", 1 + self.below(9))],
+            2 => vec![["X", "Y"][self.below(2)].into()],
+            3 => vec![String::new(), format!("Body{}", 1 + self.below(9))],
+            _ => vec![format!("P{}", self.made)],
+        }
+    }
+
+    /// A feature at the end of `doc`, on bodies of `m`.
+    fn add(&mut self, doc: &mut Document, m: &Model) {
+        use serde_json::json;
+        self.made += 1;
+        let c = self.component(doc);
+        let x = 14.0 * self.below(5) as f64;
+        let op = ["new_body", "new_body", "join", "cut", "cut", "intersect"][self.below(6)];
+        let size = ["w", "10", "12", "9 + bad"][if self.below(20) == 0 { 3 } else { self.below(3) }];
+        let name = format!("F{}", self.made);
+        let (kind, target) = match self.below(13) {
+            0..=2 => (json!({"type": "box", "corner": [x, 0.0, 0.0], "length": size, "width": "10", "height": "10", "operation": "new_body"}), false),
+            3 => (json!({"type": "box", "corner": [x + 2.0, 2.0, 4.0], "length": size, "width": "3", "height": "10", "operation": op}), true),
+            // Across a block: in two pieces.
+            4 => (json!({"type": "box", "corner": [x + 4.0, -5.0, -5.0], "length": "2", "width": "30", "height": "30", "operation": "cut"}), true),
+            5 => (
+                json!({"type": "cylinder", "base": [x + 5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "w + 2", "operation": op}),
+                true,
+            ),
+            6 => (json!({"type": "sphere", "center": [x + 5.0, 5.0, 10.0], "radius": "3", "operation": op}), true),
+            7 => (json!({"type": "move", "bodies": [self.body(m)], "translate": ["0", "0", "w / 10"], "copy": self.below(3) == 0}), false),
+            8 => {
+                let pattern = json!({"type": "rectangular", "dir1": [0, 1, 0], "count1": "n", "spacing1": "15"});
+                (json!({"type": "pattern", "features": [], "bodies": [self.body(m)], "pattern": pattern}), false)
+            }
+            9 => {
+                let op = ["join", "cut", "new_body"][self.below(3)];
+                (
+                    json!({"type": "combine", "target": self.body(m), "tools": [self.body(m)], "operation": op, "keep_tools": self.below(2) == 0}),
+                    false,
+                )
+            }
+            10 => {
+                let xy = PlaneRef::Origin { name: "XY".into() };
+                circle_extrude(doc, c, &name, xy, Vec2::new(x + 5.0, 5.0), 2.0 + self.below(3) as f64, "w", op);
+                (serde_json::Value::Null, true)
+            }
+            _ => {
+                let body = (self.below(2) == 0).then(|| self.body(m));
+                let edge = [[x + 10.0, 5.0, 10.0], [x, 5.0, 10.0], [x + 5.0, 0.0, 0.0]][self.below(3)];
+                let (ty, size) = [("fillet", "radius"), ("chamfer", "distance")][self.below(2)];
+                let mut kind = json!({"type": ty, "edges": [edge], size: "r", "tangent_chain": false});
+                if let Some(body) = body {
+                    kind["body"] = json!(body);
+                }
+                (kind, false)
+            }
+        };
+        if !kind.is_null() {
+            add_in(doc, c, &name, kind);
+        }
+        let names = self.names();
+        let to = match self.below(4) {
+            0 => vec![self.body(m)],
+            1 => vec!["*".into()],
+            _ => Vec::new(),
+        };
+        let picked = self.below(2) == 0;
+        let Some(f) = doc.features.iter_mut().find(|f| f.name == name) else { return };
+        f.body_names = names;
+        if target {
+            f.participants = to;
+        }
+        if let FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } = &f.kind
+            && picked
+        {
+            f.edge_refs = crate::edge_refs(&m.state(), body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&m.state(), body, &plain(edges));
+        }
+    }
+
+    /// One edit of `doc`, whose model is `m`: what it was.
+    fn edit(&mut self, doc: &mut Document, m: &Model) -> String {
+        let ids: Vec<u64> = doc.features.iter().map(|f| f.id).collect();
+        let at = self.below(ids.len());
+        let id = ids.get(at).copied().unwrap_or(0);
+        let kind = self.below(17);
+        match kind {
+            0..=2 => {
+                self.add(doc, m);
+                format!("add {:?}", doc.features.last().map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            // Added in the middle, where a rolled-back timeline adds.
+            3 | 4 => {
+                let before = doc.features.len();
+                self.add(doc, m);
+                let added = doc.features.len() - before;
+                if let Some(tail) = doc.features.get_mut(at..) {
+                    tail.rotate_right(added);
+                }
+                format!("add at {at} {:?}", doc.features.get(at + added - 1).map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            5 | 6 => format!("delete {id}: {:?}", doc.delete_feature(id)),
+            7 => {
+                let to = self.below(ids.len());
+                if at < doc.features.len() {
+                    let f = doc.features.remove(at);
+                    doc.features.insert(to.min(doc.features.len()), f);
+                }
+                format!("move {id} to {to}")
+            }
+            8 => {
+                if let Some(f) = doc.feature_mut(id) {
+                    f.suppressed = !f.suppressed;
+                }
+                format!("suppress {id}")
+            }
+            9 => {
+                let names = self.names();
+                if let Some(f) = doc.feature_mut(id) {
+                    f.body_names.clone_from(&names);
+                }
+                format!("names of {id}: {names:?}")
+            }
+            // The names the bodies have, stored as a session stores them.
+            10 => {
+                let made: Vec<(u64, Vec<String>)> = m
+                    .results
+                    .iter()
+                    .filter(|r| r.error.is_none() && !r.skipped)
+                    .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+                    .collect();
+                for (id, names) in made {
+                    if let Some(f) = doc.feature_mut(id).filter(|f| f.body_names.is_empty()) {
+                        f.body_names = names;
+                    }
+                }
+                "store names".into()
+            }
+            11 => {
+                let (name, value) =
+                    [("w", "10 mm"), ("w", "13 mm"), ("r", "1 mm"), ("r", "2 mm"), ("r", "40 mm"), ("n", "2"), ("n", "3")][self.below(7)];
+                format!("{name} = {value}: {:?}", doc.set_param(name, value, None, None))
+            }
+            12 => {
+                let c = self.component(doc);
+                if let Some(f) = doc.feature_mut(id) {
+                    f.component = c;
+                }
+                format!("{id} in component {c}")
+            }
+            13 => {
+                let name = format!("C{}", self.made);
+                self.made += 1;
+                let parent = self.component(doc);
+                format!("add component: {:?}", doc.add_component(Some(&name), parent))
+            }
+            14 => {
+                let c = self.component(doc);
+                format!("remove component {c}: {:?}", doc.remove_component_tree(c).map(|_| ()))
+            }
+            15 => {
+                doc.marker = (self.below(2) == 0).then_some(at);
+                format!("marker {:?}", doc.marker)
+            }
+            _ => {
+                let i = self.below(doc.occurrences.len());
+                if let Some(o) = doc.occurrences.get_mut(i) {
+                    o.transform[3][0] += 3.0;
+                }
+                format!("place {i}")
+            }
+        }
+    }
+}
+
+/// Edit a timeline at random for `steps` steps from `seed`, undoing and reopening now and then:
+/// after each the session's model is the design's opened afresh. `before`: features already there.
+fn edited_as_opened(seed: u64, steps: usize, before: usize) -> usize {
+    let mut e = Edits { state: seed, made: 0 };
+    let mut doc = Document::new("edited");
+    for (name, value) in [("w", "10 mm"), ("r", "1 mm"), ("n", "2")] {
+        doc.set_param(name, value, None, None).unwrap();
+    }
+    for c in ["A", "B"] {
+        doc.add_component(Some(c), 0).unwrap();
+    }
+    // A body moved over and over, far from the others: each step is one more in the names' depth.
+    if before > 0 {
+        boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+        for i in 1..before {
+            add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+        }
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    for _ in 0..5 {
+        e.add(&mut doc, &m);
+        m.evaluate(&doc);
+    }
+    let mut undo: Vec<Document> = Vec::new();
+    let mut done: Vec<String> = Vec::new();
+    for step in 0..steps {
+        let what = match e.below(8) {
+            0 if !undo.is_empty() => {
+                doc = undo.pop().unwrap();
+                "undo".to_string()
+            }
+            1 => match m.saved(&doc).and_then(|s| Model::adopt(&doc, &s).ok()) {
+                Some(opened) => {
+                    m = opened;
+                    "reopen".into()
+                }
+                None => continue,
+            },
+            _ => {
+                undo.push(doc.clone());
+                e.edit(&mut doc, &m)
+            }
+        };
+        done.push(what);
+        m.evaluate(&doc);
+        let what = format!("seed {seed}, step {step}:\n{}\n", done.join("\n"));
+        same_as_opened(&m, &doc, &what);
+    }
+    done.len()
+}
+
+/// Whatever is edited, in whatever order, the model a session holds is the one opening its design
+/// gives: the same bodies, names, errors and warnings, however much of it was kept.
+#[test]
+fn any_edits_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 8), env("SOLIDCRAFT_EDIT_STEPS", 25));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same across the limit of naming from history, which bodies far from it decide.
+#[test]
+fn any_edits_about_the_naming_limit_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 3), env("SOLIDCRAFT_EDIT_STEPS", 15));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 397)).sum();
+    eprintln!("{done} edits compared");
+}
+
 /// A construction plane's edit recomputes only the features that use it: a sketch on it and what
 /// is made from that sketch, wherever they are in the timeline, and nothing else.
 #[test]
