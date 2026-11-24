@@ -112,6 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                      \"{package_name}/forms\": super::bindings::{namespace}::{name}::forms,\n\
                      \"{package_name}/design-state\": super::bindings::{namespace}::{name}::design_state,\n\
                      \"{package_name}/storage\": super::bindings::{namespace}::{name}::storage,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
                  }},\n\
              }});\n\
          }}\n\

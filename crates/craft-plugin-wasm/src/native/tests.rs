@@ -284,6 +284,88 @@ fn panel_table_updates_and_actions_share_the_ordinary_entry_transaction() {
     assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("posted".into())));
     assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (2, 2, 2, 0));
 }
+// A panel run keeps the command world's user-storage rules: it needs the granted capability and,
+// like any run, stages settings in the entry's transaction.
+fn panel_user_storage_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let mut source = include_str!("../ui_fixture.wat").to_string();
+    for (from, to) in [
+        (
+            "(import \"__PACKAGE__/ui@__VERSION__\" (instance $ui (type $ui-import)))",
+            "(import \"__PACKAGE__/ui@__VERSION__\" (instance $ui (type $ui-import)))\n\
+             (type $us-type (instance (alias outer 1 $json (type $j)) (export \"json\" (type $j-export (eq $j)))\n\
+               (alias outer 1 $plugin-error (type $e)) (export \"plugin-error\" (type $e-export (eq $e)))\n\
+               (type $set-result (result (error $e-export)))\n\
+               (type $set (func (param \"key\" string) (param \"value\" $j-export) (result $set-result)))\n\
+               (export \"set\" (func (type $set)))))\n\
+             (import \"__PACKAGE__/user-storage@__VERSION__\" (instance $usi (type $us-type)))\n\
+             (alias export $usi \"set\" (func $us-set))",
+        ),
+        (
+            "(import \"ui\" \"set-data\" (func $set-data (type 0)))",
+            "(import \"ui\" \"set-data\" (func $set-data (type 0)))\n    (import \"us\" \"set\" (func $uset (type 0)))",
+        ),
+        (
+            "call $set-data\n      i32.const 0",
+            "call $set-data\n      i32.const 2200 i32.const 5 i32.const 2210 i32.const 2 i32.const 128 call $uset\n      i32.const 0",
+        ),
+        (
+            "(data (;2;) (i32.const 2048) \"app.blocked\")",
+            "(data (;2;) (i32.const 2048) \"app.blocked\")\n    (data (i32.const 2200) \"hinge\")\n    (data (i32.const 2210) \"42\")",
+        ),
+        ("2 2 funcref", "3 3 funcref"),
+        (
+            "(func $shim-run (type 0)",
+            "(func $shim-us-set (type 0) (param i32 i32 i32 i32 i32)\n      local.get 0 local.get 1 local.get 2 local.get 3 local.get 4 i32.const 2 call_indirect (type 0))\n    (func $shim-run (type 0)",
+        ),
+        ("(export \"1\" (func $shim-set-data))", "(export \"1\" (func $shim-set-data))\n    (export \"2\" (func $shim-us-set))"),
+        ("(import \"\" \"1\" (func (;1;) (type 0)))", "(import \"\" \"1\" (func (;1;) (type 0)))\n    (import \"\" \"2\" (func (;2;) (type 0)))"),
+        ("(elem (;0;) (i32.const 0) func 0 1)", "(elem (;0;) (i32.const 0) func 0 1 2)"),
+        (
+            "(core instance $ui-shim (export \"set-data\" (func $indirect-set-data)))",
+            "(core instance $ui-shim (export \"set-data\" (func $indirect-set-data)))\n  (alias core export $wit-component-shim-instance \"2\" (core func $indirect-us-set))\n  (core instance $us-shim (export \"set\" (func $indirect-us-set)))",
+        ),
+        ("(with \"ui\" (instance $ui-shim))", "(with \"ui\" (instance $ui-shim))\n      (with \"us\" (instance $us-shim))"),
+        (
+            "(core func $lower-set-data (canon lower (func $set-data) (memory $memory) (realloc $realloc)))",
+            "(core func $lower-set-data (canon lower (func $set-data) (memory $memory) (realloc $realloc)))\n  (core func $lower-us-set (canon lower (func $us-set) (memory $memory) (realloc $realloc)))",
+        ),
+        ("(export \"1\" (func $lower-set-data))", "(export \"1\" (func $lower-set-data))\n    (export \"2\" (func $lower-us-set))"),
+    ] {
+        assert!(source.contains(from), "ui fixture changed: {from}");
+        source = source.replace(from, to);
+    }
+    wat::parse_str(
+        source
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "app.write")
+            .replace("__COMMAND_LEN__", "9")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2"),
+    )
+    .unwrap()
+}
+#[test]
+fn panel_entries_reach_user_storage_only_with_the_granted_capability() {
+    let component = panel_user_storage_component();
+    let (app, result) = crate::run(App::default(), &panel_manifest(), &component, "make", &json!({}));
+    assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
+    assert!(app.user_data.is_empty());
+    let mut manifest = panel_manifest();
+    manifest.capabilities.push("user-storage@0.1".into());
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (app, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+    result.unwrap();
+    assert_eq!(app.user_data["hinge"], json!(42));
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 1, 0));
+    // A read entry may not write settings, even from a panel.
+    let mut read = manifest.clone();
+    read.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    let (app, result) = crate::run(App::default(), &read, &component, "make", &json!({}));
+    assert!(result.is_err());
+    assert!(app.user_data.is_empty());
+}
 #[test]
 fn panel_imports_require_the_declared_ui_capability() {
     let (app, result) = crate::run(App::default(), &manifest(), &panel_component(), "make", &json!({}));
