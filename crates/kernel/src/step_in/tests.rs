@@ -3854,6 +3854,35 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
     }
 }
 
+/// The last wall of a circle of radius 5 swept along a 3D spline, as SolidCraft exports it, with its
+/// two caps (#21379; `tests/step-regressions/swept_tube_last_wall.step`). The wall is a spline closed
+/// round u whose seam edge is its first control column, on the knots' start. Projecting the seam's
+/// middle put it 5.5e-8 short of the knots' end, so the wall was started anew there, a sliver off
+/// its start; its rims, whole turns from the seam, then crossed the new start, the seam completion
+/// refused the wall and the part came in as two loose caps and no volume.
+#[test]
+fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/swept_tube_last_wall.step")).unwrap();
+    assert!(
+        !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
+        "{:?}",
+        imp.warnings
+    );
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert_eq!((m.faces, m.edges, m.vertices, m.shells), (3, 3, 2, 1));
+    // The wall is straight: a cylinder of radius 5 between its rims' centres, each the middle of
+    // two opposite on-circle control points of the rim as written in the file.
+    let (a, b) = ([686.1452, 187.491, 53.9195], [682.2074, 232.5003, 70.1262]);
+    let length = ((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])).sqrt();
+    let volume = std::f64::consts::PI * 25.0 * length;
+    assert!(rel(m.volume, volume) < 1e-6, "volume {} against {volume}", m.volume);
+    assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
+    let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+}
+
 /// Containment of the positive-weight control hull proves containment of the entire stored
 /// trim, including between samples. Seam uses share an edge and its vertices, run oppositely,
 /// and lie on opposite sides of the surface's base period.
