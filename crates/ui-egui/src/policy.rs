@@ -974,11 +974,8 @@ mod tests {
         crate::prefs::reveal_preference(&mut h, "prefs:theme_follow_toggle");
         assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
         let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
-        let boxes: Vec<_> = tree
-            .nodes
-            .iter()
-            .filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Follow a theme file"))
-            .collect();
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Follow a theme file")).collect();
         assert_eq!(boxes.len(), 1);
         assert!(boxes[0].1.is_disabled(), "the follow row is locked");
         let _ = std::fs::remove_dir_all(&dir);
