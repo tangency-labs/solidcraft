@@ -1386,10 +1386,14 @@ fn live_vertex_solvers<'s>(
 ) -> Result<Vec<(FilletSolverId, &'s mut dyn FilletSolverOps)>> {
     let mut ids = Vec::new();
     for geometry in pseudo.vertex_fillet_geoms(fv)? {
-        let id = pseudo
-            .geom(geometry)?
-            .solver
-            .ok_or_else(|| SolidError::blend_missing(OP, "the geometry's fillet solver"))?;
+        let id = pseudo.geom(geometry)?.solver.ok_or_else(|| {
+            SolidError::blend_solver(
+                OP,
+                crate::error::blend::SolverFailure::FilletGeomWithoutSolver {
+                    fillet_geom: geometry,
+                },
+            )
+        })?;
         if !ids.contains(&id) {
             ids.push(id);
         }
@@ -1477,7 +1481,10 @@ impl SessionGeometryContext<'_> {
             self.executive.vertex_corner_map.get(&key)
         else {
             // upstream dereferences the NULL corner
-            return Err(SolidError::blend_missing(OP, "the vertex's corner"));
+            return Err(SolidError::blend(
+                OP,
+                crate::error::blend::BlendFailure::FilletVertexWithoutCorner,
+            ));
         };
         self.corners
             .get(id.0 as usize)
@@ -5893,11 +5900,12 @@ impl SessionObjects<'_> {
         k: &mut Kernel,
         id: crate::blend::fillet_geom::p1::FilletGeomId,
     ) -> Result<()> {
-        let sid = self
-            .pseudo
-            .geom(id)?
-            .fillet_solver()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the geometry's fillet solver"))?;
+        let sid = self.pseudo.geom(id)?.fillet_solver().ok_or_else(|| {
+            SolidError::blend_solver(
+                OP,
+                crate::error::blend::SolverFailure::FilletGeomWithoutSolver { fillet_geom: id },
+            )
+        })?;
         let solver = self
             .solvers
             .get(sid.0 as usize)
@@ -7207,7 +7215,14 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
                 if error.is_unported_or_cancelled() {
                     error
                 } else {
-                    SolidError::blend_missing(LOADER, "the edge curve's cache")
+                    crate::error::Failure::new(
+                        LOADER,
+                        crate::error::blend::BlendFailure::Solver(
+                            crate::error::blend::SolverFailure::EdgeCurveCacheNotBuilt { edge: id },
+                        ),
+                    )
+                    .caused_by(error)
+                    .into_error()
                 }
             })?;
             entry.insert(cache);
@@ -7576,8 +7591,12 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
             };
             let (start, end) = crate::topology::vertex::edge_vertex_pair(self.target, id)?;
             for v in [start, end] {
-                let v =
-                    v.ok_or_else(|| SolidError::blend_missing(OP, "an end vertex of the edge"))?;
+                let v = v.ok_or_else(|| {
+                    SolidError::blend_solver(
+                        OP,
+                        crate::error::blend::SolverFailure::EdgeWithoutVertex { edge: id },
+                    )
+                })?;
                 if !done.insert(v) {
                     continue;
                 }
@@ -8619,8 +8638,13 @@ impl SessionObjects<'_> {
             let solver = if let Some(solver) = lookup(eu)? {
                 solver
             } else {
-                let mate = crate::topology::edgeuse::p1::mate(self.target, eu)?
-                    .ok_or_else(|| SolidError::blend_missing(NATIVE, "the edge use's mate"))?;
+                let mate =
+                    crate::topology::edgeuse::p1::mate(self.target, eu)?.ok_or_else(|| {
+                        SolidError::blend_solver(
+                            NATIVE,
+                            crate::error::blend::SolverFailure::EdgeUseWithoutMate,
+                        )
+                    })?;
                 lookup(mate)?.ok_or_else(|| null_defect(NATIVE, SOLVER_OF_BLENDED_EDGEUSE))?
             };
             solver_ids.push(solver);
