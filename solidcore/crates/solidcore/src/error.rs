@@ -1019,9 +1019,7 @@ impl core::fmt::Display for Failure {
         // a reason that names no entity of its own is followed by the failure's
         let names_none = match &self.reason {
             Reason::Failed(_) | Reason::Topology(_) | Reason::Blend(_) => true,
-            Reason::Offset(o) => {
-                o.replaces_upstream_status() || matches!(o, offset::OffsetFailure::OffsetNotBuilt)
-            }
+            Reason::Offset(o) => o.names_entity_after_text(),
             _ => false,
         };
         if let (true, Some(entity)) = (names_none, self.entity) {
@@ -1772,12 +1770,11 @@ impl SolidError {
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
     /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
-    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
-    /// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+    /// [`surface::SurfaceFailure`], [`blend::BlendFailure`], or a [`sweep::SweepFailure`],
+    /// [`curve::CurveFailure`] or [`offset::OffsetFailure`] that replaced one
     /// ([`sweep::SweepFailure::replaces_upstream_status`],
     /// [`curve::CurveFailure::replaces_upstream_status`],
-    /// [`offset::OffsetFailure::replaces_upstream_status`],
-    /// [`blend::BlendFailure::replaces_upstream_status`])). The callers that branch on an
+    /// [`offset::OffsetFailure::replaces_upstream_status`])). The callers that branch on an
     /// upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
     #[must_use]
@@ -1793,11 +1790,11 @@ impl SolidError {
                 | Reason::Geom(_)
                 | Reason::Query(_)
                 | Reason::Topology(_)
-                | Reason::Surface(_) => Some(f.status),
+                | Reason::Surface(_)
+                | Reason::Blend(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
                 Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
-                Reason::Blend(b) if b.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -2022,6 +2019,10 @@ impl SolidError {
 
     /// [`SolidError::Failed`] for a stage whose failure upstream reports as a generic
     /// `SER(SM_ERR)`: status [`SM_ERR`], keeping `cause`, the stage's error (#2511).
+    ///
+    /// No library site builds it any more; the tests keep it to check a phrase cause
+    /// that keeps its stage's error.
+    #[cfg(test)]
     pub(crate) fn failed_after(
         operation: &'static str,
         what: &'static str,
@@ -2112,12 +2113,11 @@ impl SolidError {
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
 /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
-/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
-/// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+/// [`surface::SurfaceFailure`], [`blend::BlendFailure`], or a [`sweep::SweepFailure`],
+/// [`curve::CurveFailure`] or [`offset::OffsetFailure`] that replaced one
 /// ([`sweep::SweepFailure::replaces_upstream_status`],
 /// [`curve::CurveFailure::replaces_upstream_status`],
-/// [`offset::OffsetFailure::replaces_upstream_status`],
-/// [`blend::BlendFailure::replaces_upstream_status`])).
+/// [`offset::OffsetFailure::replaces_upstream_status`])).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
@@ -3513,9 +3513,7 @@ pub(crate) mod replaced_upstream_samples {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/offset/offset_executive/p2.rs", 1),
-        ];
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned("generic phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

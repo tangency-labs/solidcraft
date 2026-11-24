@@ -543,26 +543,21 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
 ///
 /// # Errors
 ///
-/// The unported or cancelled errors of [`calc_corner_from_faces`] that carry no upstream
-/// status of its own; any other failure is no best point, as upstream ignores the status.
+/// The unported or cancelled errors of [`calc_corner_from_faces`]; any other failure is no
+/// best point, as upstream ignores the status.
 pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool, FaceCorner)> {
     // look for a best vertex point position defined by the faces connected to the
     // vertex (status ignored: the outputs keep their initial values)
     let corner = match calc_corner_from_faces(k, b, v) {
         Ok(c) => c,
-        // a failure with an upstream status leaves the initial outputs; as the fork, any
-        // failure is no best point (tangency-labs/smlib 7a35f33)
-        Err(e)
-            if (e.operation() == OP && e.upstream_status().is_some())
-                || !e.is_unported_or_cancelled() =>
-        {
-            FaceCorner {
-                found_point: false,
-                max_gap_3d: -1.0,
-                max_gap_face: None,
-                best_point: Vec3::UNDEF,
-            }
-        }
+        // a failure leaves the initial outputs: as the fork, any failure but work given up
+        // is no best point (tangency-labs/smlib 7a35f33)
+        Err(e) if !e.is_unported_or_cancelled() => FaceCorner {
+            found_point: false,
+            max_gap_3d: -1.0,
+            max_gap_face: None,
+            best_point: Vec3::UNDEF,
+        },
         Err(e) => return Err(e),
     };
 

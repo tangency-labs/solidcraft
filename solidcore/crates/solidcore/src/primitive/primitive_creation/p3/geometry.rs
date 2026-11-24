@@ -352,10 +352,11 @@ pub fn prepare_curve_sweep(
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
         // Only `SM_ERR` takes the fallback; any other status keeps the normal
         // `ComputeCrvsNormal` wrote ((0, 0, 1) for a zero normal), as upstream and the
-        // fork test `== SM_ERR` here
+        // fork test `== SM_ERR` here. Its failures are B-spline curve failures and
+        // `CurveFailure::SingleLinearCurve`, so their status is the native one.
         let (written, status) = compute_crvs_normal_written(k, &as_curves)?;
         let mut normal = match status {
-            Some(e) if e.upstream_status() == Some(1001) => {
+            Some(e) if e.sm_status() == Some(crate::error::SM_ERR) => {
                 let first = profiles
                     .first()
                     .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoProfiles))?;

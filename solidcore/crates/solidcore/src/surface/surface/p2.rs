@@ -2868,9 +2868,9 @@ impl Surface {
     pub fn step_inversion_answered<T>(status: &Result<T>) -> bool {
         match status {
             Ok(_) => true,
-            // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+            // the status, not the variant: the answers come from each surface kind's inversion
             Err(e) => matches!(
-                e.upstream_status(),
+                e.sm_status(),
                 Some(SM_ERR_NOT_WITHIN_TOLERANCE | SM_ERR_OUTSIDE_OF_DOMAIN)
             ),
         }
@@ -5765,7 +5765,11 @@ fn eval_second_derivatives_with_output(
                     Err(error) => {
                         // SmCone::Evaluate leaves the inherited NURB derivatives in
                         // the caller's buffer when zero-tangent correction fails.
-                        let values = if !step && error.upstream_status() == Some(SM_ERR) {
+                        let values = if !step
+                            && matches!(
+                                error.surface_failure(),
+                                Some(SurfaceFailure::NurbEvaluationFailed)
+                            ) {
                             cone.rev().base().evaluate_with_partial_output(uv, flags).1
                         } else {
                             Vec::new()
@@ -8991,7 +8995,7 @@ mod tests {
     /// replaced an analytic inversion's `Upstream` is the same answer.
     #[test]
     fn step_inversion_answered_reads_the_status_of_a_typed_failure() {
-        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        use crate::error::replaced_upstream_samples::replaced_upstream;
         for code in [SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN] {
             let upstream: Result<()> = Err(SolidError::Upstream {
                 operation: "surface::x",
@@ -9001,9 +9005,6 @@ mod tests {
             assert!(Surface::step_inversion_answered(&upstream));
             for typed in replaced_upstream("surface::x", code, None) {
                 assert!(Surface::step_inversion_answered::<()>(&Err(typed)));
-            }
-            for native in native_failures("surface::x", code) {
-                assert!(!Surface::step_inversion_answered::<()>(&Err(native)));
             }
         }
         for other in replaced_upstream("surface::x", SM_ERR, None) {

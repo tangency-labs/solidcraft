@@ -1341,7 +1341,11 @@ fn find_sector(
         Ok(sector) => Ok(sector
             .radial_edgeuse
             .map_or(SectorFound::Empty, SectorFound::Found)),
-        Err(e) if e.upstream_status().is_some() => Ok(SectorFound::Failed(e)),
+        // `find_radial_sector_between` fails with a native status only as a typed
+        // topology failure or as a spent work budget
+        Err(e) if e.topology_failure().is_some() || e.is_not_certified() => {
+            Ok(SectorFound::Failed(e))
+        }
         Err(error) => Err(error),
     }
 }

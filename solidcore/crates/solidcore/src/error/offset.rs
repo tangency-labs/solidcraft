@@ -881,6 +881,75 @@ impl OffsetFailure {
         }
     }
 
+    /// True for a failure whose text names none of the faces or edges it is about: the
+    /// failure's own entity is said after its text ([`crate::error::Failure`]'s `Display`).
+    /// The others name theirs in the text, or have none.
+    #[must_use]
+    pub const fn names_entity_after_text(&self) -> bool {
+        matches!(
+            self,
+            Self::Failed(_)
+                | Self::Missing(_)
+                | Self::InvalidValue(_)
+                | Self::Inconsistent(_)
+                | Self::StageFailed
+                | Self::Defect { .. }
+                | Self::LoopGapPassLimit { .. }
+                | Self::LoopGapEndsAmbiguous { .. }
+                | Self::SplitAtEdgeEnd { .. }
+                | Self::OffsetBaseKindUnsupported { .. }
+                | Self::OffsetNotBuilt
+                | Self::EdgeOffsetsUnpaired { .. }
+                | Self::GapEndWithoutEdge { .. }
+                | Self::GapCornerBlendNotMade { .. }
+                | Self::FaceuseNotGiven
+                | Self::SelfIntersectionWithoutUvCurve { .. }
+                | Self::FaceuseHasNoFace { .. }
+                | Self::BrepNotGiven
+                | Self::ShellLeavesNoCavity { .. }
+                | Self::ShellWallUnresolved { .. }
+                | Self::ShellFaceNotOfBody { .. }
+                | Self::ExtendedFaceCollapses { .. }
+                | Self::TrimPastExtension
+                | Self::FaceHasNoFaceuse { .. }
+                | Self::FaceuseHasNoShell { .. }
+                | Self::ShellHasNoRegion { .. }
+                | Self::FaceuseHasNoMate { .. }
+                | Self::EdgeuseHasNoEdge { .. }
+                | Self::EdgeuseHasNoMate { .. }
+                | Self::EdgeuseHasNoRadial { .. }
+                | Self::EdgeuseHasNoFaceuse { .. }
+                | Self::FacesMoveRefused { .. }
+                | Self::BlendRailWithoutSupport { .. }
+                | Self::BlendSectionNotFound { .. }
+                | Self::FollowedBlendIncomplete
+                | Self::EdgeHasNoCurve { .. }
+                | Self::FaceHasNoSurface { .. }
+                | Self::FaceHasNoOuterFaceuse { .. }
+                | Self::MoveCollapses { .. }
+                | Self::FaceMoveEmpty { .. }
+                | Self::VertexNotGiven
+                | Self::EdgeuseNotGiven
+                | Self::CurveKindUnsupported { .. }
+                | Self::VertexCurveNotArc
+                | Self::VertexArcInPlane
+                | Self::VertexArcMissesPlane { .. }
+                | Self::FaceDomainUnresolved
+                | Self::ExtendedEdgeUntrimmed
+                | Self::LaminaEdgeOtherSide
+                | Self::TangentGapsAtConcaveEdge
+                | Self::EdgeuseHasNoUvTrim { .. }
+                | Self::RailIntervalsDiffer { .. }
+                | Self::ShellTangentCurveUncertified
+                | Self::ShellTangentUvUnmatched
+                | Self::ShellTangentVertexMoveTooFar { .. }
+                | Self::CrossingUndecided
+                | Self::LocalFaceNotListed
+                | Self::VertexArcsNotOneSphere
+                | Self::UnnamedFaceHasNoSurface
+        )
+    }
+
     /// True for a failure that replaced a bare status an offset routine returned
     /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],

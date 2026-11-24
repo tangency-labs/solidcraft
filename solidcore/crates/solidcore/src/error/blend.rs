@@ -40,8 +40,8 @@
 //! of a caller's arguments that returned a status is a cause of class
 //! [`ErrorKind::InvalidInput`] keeping that status; the other checks of a caller's arguments
 //! stay [`crate::SolidError::InvalidInput`]. Every cause stands in for the status its site
-//! returned ([`BlendFailure::replaces_upstream_status`]), so the decisions that read an
-//! upstream status read these alike. Only part of `crate::blend` uses these yet; the files
+//! returned, so the decisions that read an upstream status read these alike. Only part
+//! of `crate::blend` uses these yet; the files
 //! that still build bare statuses are listed, with their counts, in this module's ratchet
 //! test.
 
@@ -1449,12 +1449,12 @@ impl BlendFailure {
             Self::ClosedCliffWouldNotSplit { .. } => SM_ERR,
             Self::CornerCurvesDoNotMeet => SM_ERR,
             Self::CornerCurvesMeetMoreThanOnce { .. } => SM_ERR,
-            Self::CornerInputInvalid { input, .. } => input.upstream_status(),
+            Self::CornerInputInvalid { input, .. } => input.status(),
             Self::CornerPatchFaceNotFound { .. } => SM_ERR_NULL_POINTER,
-            Self::CornerPatchNotMade(miss) => miss.upstream_status(),
+            Self::CornerPatchNotMade(miss) => miss.status(),
             Self::CornerPointDropUnresolved { .. } => SM_ERR,
             Self::CornerRefused => SM_ERR,
-            Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
+            Self::CornerShapeNotBuilt(shape) => shape.status(),
             Self::CornerSurfacesNotIntersected => SM_ERR,
             Self::CornerUnbuildable(_) => SM_ERR,
             Self::CreasePieceEndUnbuildable { .. } => SM_ERR,
@@ -1782,186 +1782,6 @@ impl BlendFailure {
     #[must_use]
     pub const fn is_phrase(&self) -> bool {
         phrase_causes!(matches_phrase_cause(self))
-    }
-
-    /// True when the failure stands in for a bare status its site returned (an
-    /// [`crate::SolidError::Upstream`] before solidcore described it): the decisions that
-    /// read an upstream status ([`crate::error::upstream_status`]) treat it as that status,
-    /// and the goldens read it. Every cause does: the status stays reachable for the goldens
-    /// while the cause, not the status, decides the type. [`BlendFailure::NotCertified`]
-    /// stands for the fork's `SM_ERR` at its certificate's stop (and, past the work budget
-    /// solidcore adds, for the same stop reached sooner).
-    #[must_use]
-    #[allow(
-        clippy::match_same_arms,
-        reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
-    )]
-    pub const fn replaces_upstream_status(&self) -> bool {
-        match self {
-            Self::ArcLengthNotConverged { .. } => true,
-            Self::BadIntersections(_) => true,
-            Self::BallTriangleNotOnePatch { .. } => true,
-            Self::BallsNest { .. } => true,
-            Self::BandInputMissing(_) => true,
-            Self::BevelVertexNotFilleted => true,
-            Self::BlendingRailEndOffFace { .. } => true,
-            Self::BlendingRailOffFace { .. } => true,
-            Self::BodyEdgeWithoutCurve { .. } => true,
-            Self::BoundSurfaceRemoved => true,
-            Self::ChamferFaceNotOfEdge => true,
-            Self::ChamferSizeInvalid => true,
-            Self::CliffInputMissing { .. } => true,
-            Self::CliffRailEndsReversed { .. } => true,
-            Self::CliffSurfaceMissesEdge { .. } => true,
-            Self::ClosedCliffWouldNotSplit { .. } => true,
-            Self::CornerCurvesDoNotMeet => true,
-            Self::CornerCurvesMeetMoreThanOnce { .. } => true,
-            Self::CornerInputInvalid { .. } => true,
-            Self::CornerPatchFaceNotFound { .. } => true,
-            Self::CornerPatchNotMade(_) => true,
-            Self::CornerPointDropUnresolved { .. } => true,
-            Self::CornerRefused => true,
-            Self::CornerShapeNotBuilt(_) => true,
-            Self::CornerSurfacesNotIntersected => true,
-            Self::CornerUnbuildable(_) => true,
-            Self::CreasePieceEndUnbuildable { .. } => true,
-            Self::CreaseTrimNotBuilt(_) => true,
-            Self::CrossSectionOnOneGeometry => true,
-            Self::CrossSectionTypeUnknown => true,
-            Self::CrossingInputMissing(_) => true,
-            Self::CrossingNotFinite => true,
-            Self::CurveKindNotBuilt { .. } => true,
-            Self::CurveProjectionEmpty { .. } => true,
-            Self::CurveWithoutNet { .. } => true,
-            Self::Defect { .. } => true,
-            Self::EaseGeometryNotBSpline(_) => true,
-            Self::EaseInputMissing(_) => true,
-            Self::EaseNotBuilt(_) => true,
-            Self::EdgeNotFilletable { .. } => true,
-            Self::EdgeNotInTarget { .. } => true,
-            Self::EdgeSplitDeclined { .. } => true,
-            Self::EdgeUseWithoutEdge => true,
-            Self::EdgeWithoutCurve => true,
-            Self::EdgeWithoutVertices { .. } => true,
-            Self::EndRibNotBuilt => true,
-            Self::ExactBlendAxisCannotPlaceEdge { .. } => true,
-            Self::ExecutiveStepFailed => true,
-            Self::ExtendedEdgeFaceCount { .. } => true,
-            Self::ExtensionEndOnTwoSideLines => true,
-            Self::FaceHasNoSurface => true,
-            Self::FaceWithoutSurface { .. } => true,
-            Self::Failed(_) => true,
-            Self::FilletCrossesItself { .. } => true,
-            Self::FilletEdgeMatchesNoBrepEdge { .. } => true,
-            Self::FilletEndOffIntersectionCurve { .. } => true,
-            Self::FilletEndVertexOffSideEdge { .. } => true,
-            Self::FilletSetUpInvalid(_) => true,
-            Self::FilletVertexWithoutCorner => true,
-            Self::FilletXFilletEndsUnplaced { .. } => true,
-            Self::FilletsMeetInNoCurve { .. } => true,
-            Self::FilletsNotIntersected => true,
-            Self::GnSectionInvalid { .. } => true,
-            Self::Inconsistent(_) => true,
-            Self::InputMissing(_) => true,
-            Self::InterpolantDropsToCurves { .. } => true,
-            Self::IntersectionCurveHasNoUvCurve { .. } => true,
-            Self::IntersectionCurveNotBSpline { .. } => true,
-            Self::IntersectionEndsOffFace { .. } => true,
-            Self::InvalidValue(_) => true,
-            Self::IsoDirectionNotUOrV => true,
-            Self::JoinBlendsRollOffSection => true,
-            Self::JoinCurveNotBSpline { .. } => true,
-            Self::JoinSectionNotConverged { .. } => true,
-            Self::KeptFeatureLeavesBaseOpen => true,
-            Self::KeptFeatureNotBuilt(_) => true,
-            Self::LawCornerNotFound { .. } => true,
-            Self::LawHasNoValue => true,
-            Self::LawIntervalEmpty => true,
-            Self::LoopDoesNotSplitBody { .. } => true,
-            Self::LoopEdgesBranch { .. } => true,
-            Self::MateFaceSurfaceNotBSpline { .. } => true,
-            Self::Missing(_) => true,
-            Self::MixedCornerUnbuildable(_) => true,
-            Self::NeighbourVertexNotProcessed { .. } => true,
-            Self::NoBlendedEdgeNearExtension => true,
-            Self::NoEdgesGiven => true,
-            Self::NoFeatureMade => true,
-            Self::NoFirstBody => true,
-            Self::NoRoom(_) => true,
-            Self::NoVertexGiven => true,
-            Self::NodalArcUnavailable { .. } => true,
-            Self::NotCertified { .. } => true,
-            Self::NotConverged(_) => true,
-            Self::NotWithinTolerance(_) => true,
-            Self::OutsideDomain(_) => true,
-            Self::OverflowInputMissing(_) => true,
-            Self::OverflowPointDoesNotDrop(_) => true,
-            Self::ParameterListSizes { .. } => true,
-            Self::PassedOn { .. } => true,
-            Self::PerEdgeListLength { .. } => true,
-            Self::PlaneCurveEndOff { .. } => true,
-            Self::PlaneCurveFitCap { .. } => true,
-            Self::PlaneCurveLeavesDomain { .. } => true,
-            Self::PlaneCurveStepVanished { .. } => true,
-            Self::PlaneCurveTouches { .. } => true,
-            Self::QuadricReadbackMismatch { .. } => true,
-            Self::RadiusLawNotPositive { .. } => true,
-            Self::RadiusTypeNotForEdges { .. } => true,
-            Self::RailCrossingNotConverged { .. } => true,
-            Self::RailEndMissesSideEdge { .. } => true,
-            Self::RailEndNotDropped => true,
-            Self::RailMissesEndSurface { .. } => true,
-            Self::RailNotBlending { .. } => true,
-            Self::RationalRoundOutOfTolerance { .. } => true,
-            Self::RationalWeightsUnavailable { .. } => true,
-            Self::RemovalInputMissing(_) => true,
-            Self::RemovalRefused(_) => true,
-            Self::RemovalStopped(_) => true,
-            Self::RibFitCap { .. } => true,
-            Self::RibPointNotDropped { .. } => true,
-            Self::RibStationNotSolved { .. } => true,
-            Self::SeamCornersBothCut => true,
-            Self::SeamCutOffRib { .. } => true,
-            Self::SeamSurfaceNotClosed => true,
-            Self::SectionDegenerate(_) => true,
-            Self::SectionInputInvalid(_) => true,
-            Self::SectionNotConic { .. } => true,
-            Self::SectionNotProved(_) => true,
-            Self::SectionUnsupported(_) => true,
-            Self::SequenceCurveNotBSpline { .. } => true,
-            Self::SetBackFootNotUnique { .. } => true,
-            Self::SideEdgeChainPastBound { .. } => true,
-            Self::SideEdgeCurveNotBSpline { .. } => true,
-            Self::SideEdgeOffRailFace { .. } => true,
-            Self::SideEdgeTangentVanishes { .. } => true,
-            Self::SizeBelowResolution { .. } => true,
-            Self::SkinMeasureNotFinite { .. } => true,
-            Self::SkinPastStationCap { .. } => true,
-            Self::Solver(_) => true,
-            Self::SolverFaceIndexInvalid { .. } => true,
-            Self::SplitEndRailMissesFillet { .. } => true,
-            Self::SplitEndSupportNotPlanar { .. } => true,
-            Self::SplitFaceNotGiven => true,
-            Self::SqueezeEndNotRailEdgeuse { .. } => true,
-            Self::SrfSrfHeadingNotFollowed => true,
-            Self::SrfSrfNoCurveThroughEnds { .. } => true,
-            Self::StageFailed => true,
-            Self::StationDidNotConverge { .. } => true,
-            Self::SurfaceKindNotBuilt { .. } => true,
-            Self::SurfaceWithoutBSplineForm { .. } => true,
-            Self::TangentEndSingular { .. } => true,
-            Self::TargetNotGiven => true,
-            Self::Trace(_) => true,
-            Self::TraceMissesRailEnd { .. } => true,
-            Self::TrimLoopDoesNotSeparate => true,
-            Self::TrimLoopOpen => true,
-            Self::UvCurveEndOffSurface { .. } => true,
-            Self::UvCurveEndsUnresolved { .. } => true,
-            Self::UvCurveSurfaceNotBSpline { .. } => true,
-            Self::VariableRadiusLawMissing { .. } => true,
-            Self::VariableRadiusLawsNotGiven => true,
-            Self::WeldNotBuilt(_) => true,
-        }
     }
 }
 
@@ -2947,7 +2767,6 @@ mod tests {
                     typed.is_unported_or_cancelled(),
                     before.is_unported_or_cancelled()
                 );
-                assert!(failure.replaces_upstream_status());
                 assert_eq!(typed.blend_failure(), Some(&failure));
             }
         }
@@ -3250,7 +3069,7 @@ mod tests {
         for (input, message) in cases {
             let cause = BlendFailure::InputMissing(input);
             assert_eq!(cause.class(), ErrorKind::InvalidInput);
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), ErrorKind::InvalidInput);
             assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
@@ -3270,7 +3089,7 @@ mod tests {
             minimum_normal_dot: 0.99,
         };
         assert_eq!(cause.class(), ErrorKind::NotWithinTolerance);
-        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        assert!(!cause.is_phrase());
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
         assert_eq!(e.sm_status(), Some(SM_ERR));
@@ -3285,7 +3104,7 @@ mod tests {
 
     fn assert_rational_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
         assert_eq!(cause.class(), class);
-        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        assert!(!cause.is_phrase());
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.sm_status(), Some(SM_ERR));
@@ -3416,7 +3235,7 @@ mod tests {
         for (reason, class) in cases {
             let cause = BlendFailure::RemovalRefused(reason);
             assert_eq!(cause.class(), class, "{reason:?}");
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             let e = SolidError::blend("blend::fillet_removal", cause);
             assert_eq!(e.kind(), class, "{reason:?}");
             // the status the C++ reports stays, for the goldens
@@ -3452,7 +3271,7 @@ mod tests {
         ];
         for (shape, status) in shapes {
             let cause = BlendFailure::CornerShapeNotBuilt(shape);
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             let e = SolidError::blend("blend::fillet_corner::topology", cause);
             assert_eq!(e.kind(), ErrorKind::Unsupported, "{shape:?}");
             assert_eq!(e.upstream_status(), Some(status), "{shape:?}");
@@ -3467,7 +3286,7 @@ mod tests {
             "blend::op: unsupported: MoreThanFourEdges"
         );
         let drop = BlendFailure::CornerPointDropUnresolved { solutions: 2 };
-        assert!(!drop.is_phrase() && drop.replaces_upstream_status());
+        assert!(!drop.is_phrase());
         let e = SolidError::blend("blend::op", drop);
         assert_eq!(e.kind(), ErrorKind::NotFound);
         assert_eq!(e.upstream_status(), Some(SM_ERR));
@@ -3571,7 +3390,7 @@ mod tests {
         ];
         for (miss, kind, status) in misses {
             let cause = BlendFailure::CornerPatchNotMade(miss);
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             let e = SolidError::blend("blend::fillet_corner", cause);
             assert_eq!(e.kind(), kind, "{miss:?}");
             assert_eq!(e.upstream_status(), Some(status), "{miss:?}");
@@ -3635,7 +3454,7 @@ mod tests {
                 input,
                 entity: None,
             };
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             let e = SolidError::blend("blend::fillet_corner", cause);
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{input:?}");
             assert_eq!(e.upstream_status(), Some(status), "{input:?}");
@@ -3658,7 +3477,7 @@ mod tests {
         );
         // the links other routines read too are the fillet set-up's, with its statuses
         let link = BlendFailure::FilletSetUpInvalid(FilletSetUp::PrimaryEdgeUse);
-        assert!(!link.is_phrase() && link.replaces_upstream_status());
+        assert!(!link.is_phrase());
         let e = SolidError::blend("blend::op", link);
         assert_eq!(e.kind(), ErrorKind::InvalidInput);
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
@@ -3705,7 +3524,7 @@ mod tests {
         let why =
             "the station solve was started off its own previous station, which it never leaves";
         let defect = BlendFailure::Defect { why };
-        assert!(!defect.is_phrase() && defect.replaces_upstream_status());
+        assert!(!defect.is_phrase());
         for status in [SM_ERR, SM_ERR_NULL_POINTER] {
             let e = Failure::new("blend::op", defect)
                 .with_status(status)
@@ -3844,7 +3663,7 @@ mod tests {
         for (solver, message) in cases {
             let cause = BlendFailure::Solver(solver);
             assert_eq!(cause.class(), ErrorKind::InvalidInput, "{cause:?}");
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             assert_eq!(cause.comparison_status(), SM_ERR_NULL_POINTER);
             let e = SolidError::blend_solver("blend::op", solver);
             assert_eq!(e.kind(), ErrorKind::InvalidInput);
@@ -3943,10 +3762,7 @@ mod tests {
         ];
         for (cause, (class, status, message)) in fillet_geom_p2_causes().into_iter().zip(expected) {
             assert_eq!(cause.class(), class, "{cause:?}");
-            assert!(
-                !cause.is_phrase() && cause.replaces_upstream_status(),
-                "{cause:?}"
-            );
+            assert!(!cause.is_phrase(), "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class, "{cause:?}");
@@ -3968,7 +3784,7 @@ mod tests {
         message: &str,
     ) {
         assert_eq!(cause.class(), class);
-        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        assert!(!cause.is_phrase());
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.blend_failure(), Some(&cause));
@@ -4083,7 +3899,6 @@ mod tests {
     fn assert_plane_curve_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
         assert_eq!(cause.class(), class);
         assert!(!cause.is_phrase());
-        assert!(cause.replaces_upstream_status());
         assert_eq!(cause.comparison_status(), SM_ERR);
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
@@ -4257,7 +4072,7 @@ mod tests {
         ];
         for (cause, class, status, message) in cases {
             assert_eq!(cause.class(), class, "{cause:?}");
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            assert!(!cause.is_phrase());
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class);
@@ -4292,7 +4107,7 @@ mod tests {
         let edge = crate::topology::EdgeId::from_index(3);
         let cause = BlendFailure::SideEdgeTangentVanishes { edge, t: 0.5 };
         assert_eq!(cause.class(), ErrorKind::SideEdgeDegenerate);
-        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        assert!(!cause.is_phrase());
         let e = Failure::new("blend::op", cause)
             .at(EntityRef::Edge(edge))
             .into_error();
@@ -4313,7 +4128,7 @@ mod tests {
     /// status, neither a defect nor a refusal, and its message.
     fn assert_named_cause(cause: BlendFailure, class: ErrorKind, status: i32, message: &str) {
         assert_eq!(cause.class(), class);
-        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        assert!(!cause.is_phrase());
         let e = SolidError::blend("blend::op", cause);
         assert_eq!(e.kind(), class);
         assert_eq!(e.blend_failure(), Some(&cause));
@@ -4921,7 +4736,6 @@ mod tests {
         ];
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let text = cause.to_string();
@@ -4964,7 +4778,6 @@ mod tests {
         ];
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let text = cause.to_string();
@@ -4988,7 +4801,6 @@ mod tests {
             BlendFailure::BoundSurfaceRemoved,
         ] {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             let error = SolidError::blend("blend::op", cause);
             assert_eq!(error.kind(), ErrorKind::InvalidInput, "{error:?}");
             assert_eq!(
@@ -5085,7 +4897,6 @@ mod tests {
         ));
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let text = cause.to_string();
@@ -5267,7 +5078,6 @@ mod tests {
         }
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let text = cause.to_string();
@@ -5330,7 +5140,6 @@ mod tests {
         ));
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let text = cause.to_string();
@@ -5387,7 +5196,6 @@ mod tests {
         }
         for (cause, class) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
-            assert!(cause.replaces_upstream_status(), "{cause:?}");
             assert_eq!(cause.class(), class, "{cause:?}");
             assert_eq!(cause.comparison_status(), SM_ERR, "{cause:?}");
             let text = cause.to_string();
@@ -5478,7 +5286,6 @@ mod tests {
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert_eq!(e.blend_failure(), Some(&BlendFailure::Solver(failure)));
-        assert!(BlendFailure::Solver(failure).replaces_upstream_status());
         assert_eq!(e.cause(), Some(&inner));
         assert!(e.is_defect());
         let inner = SolidError::blend_solver("blend::inner", SolverFailure::EdgeUseWithoutMate);

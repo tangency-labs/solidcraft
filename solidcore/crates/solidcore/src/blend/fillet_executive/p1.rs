@@ -325,7 +325,7 @@ impl FilletLaw {
 
 /// The `SmStatus` upstream's `SER` returns for a failed callee.
 fn status_of(e: &SolidError) -> i32 {
-    if let Some(code) = e.upstream_status() {
+    if let Some(code) = e.sm_status() {
         return code;
     }
     match e {

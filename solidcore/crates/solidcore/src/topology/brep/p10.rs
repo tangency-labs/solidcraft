@@ -2671,18 +2671,18 @@ fn test_closure_split_region_at_faceuse(
         OP_CLOSURE,
         "edge use without face use",
     ))?;
-    match p6::test_closure_split_region(
+    let attempt = p6::test_closure_split_region_attempt(
         k,
         b,
         &mut Marks::default(),
         env,
         do_infinite_region_testing,
         fu,
-    ) {
-        Ok(v) => Ok(Some(v)),
-        Err(e) if e.upstream_status().is_some() => Ok(None),
-        Err(e) => Err(e),
-    }
+    )?;
+    Ok(attempt
+        .status
+        .ok()
+        .map(|()| (attempt.shell, attempt.region)))
 }
 
 fn find_and_set_infinite_region(

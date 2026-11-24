@@ -398,7 +398,7 @@ mod tests {
             assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
             assert_eq!(e.kind(), cause.class(), "{cause:?}");
             let b = e.blend_failure().unwrap();
-            assert!(!b.is_phrase() && b.replaces_upstream_status(), "{cause:?}");
+            assert!(!b.is_phrase(), "{cause:?}");
         }
         // A solve that stops with its numbers is a defect (failure-codes guide §6 rule 3),
         // and keeps the site's SM_ERR.
