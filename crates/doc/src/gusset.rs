@@ -102,7 +102,7 @@ fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Resu
         faces.push(loops);
     }
     let source = source.ok_or_else(|| invalid("gusset support has no material"))?;
-    geometry::support(geometry::SupportFrames { plane, source, to_source, to_author, tolerance }, &faces).map_err(geometry_error)
+    geometry::support(&geometry::SupportFrames { plane, source, to_source, to_author, tolerance }, &faces).map_err(geometry_error)
 }
 
 /// Bound geometry inputs; signed offsets share the size limit but need no positive minimum.

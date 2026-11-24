@@ -502,7 +502,7 @@ pub fn plan([a, b]: [&Face; 2], d: Dimensions, placement: Placement) -> Result<P
 
 #[cfg(test)]
 pub(crate) fn conic_share(w: f64) -> Result<f64> {
-    super::profile::conic_factor(w)
+    profile::conic_factor(w)
         .map(|(value, _)| value)
         .ok_or_else(|| invalid("gusset support edge has a conic weight that isn't positive"))
 }

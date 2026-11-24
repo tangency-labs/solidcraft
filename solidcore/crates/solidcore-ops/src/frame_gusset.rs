@@ -78,7 +78,7 @@ pub fn support_plane(
 ///
 /// # Errors
 /// Malformed, open or over-budget loops; empty material; the planar Boolean's error.
-pub fn support(frames: SupportFrames, faces: &[Vec<Vec<Seg2>>]) -> Result<Support> {
+pub fn support(frames: &SupportFrames, faces: &[Vec<Vec<Seg2>>]) -> Result<Support> {
     if faces.len() > 4096 {
         return Err(refused("gusset support exceeds the 4096-face limit"));
     }
