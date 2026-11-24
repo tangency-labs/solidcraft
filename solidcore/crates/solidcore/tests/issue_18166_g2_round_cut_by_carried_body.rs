@@ -38,7 +38,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "offset_extension_from_base",
     "fillet_cleanup_keeps_target_faces",
-    "shell_edges_on_analytics_exact",
     "fillet_patch_keeps_fillet_edges",
     "fillet_refuse_overlapping_bands",
     "fillet_knife_edge_rounds",

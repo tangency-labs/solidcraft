@@ -80,6 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "start_offset?: expr (along the sketch normal, also with direction: negative); ",
             "symmetric_offset?: bool (with direction: symmetric and start_offset: offset both sides symmetrically away from the sketch plane, leaving a clearance gap); ",
             "to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); ",
+            "to_body_apart?: bool (Join To Object: keep the body the To Object pick is on apart, so the join changes only the bodies in `targets`; a call that names its targets keeps that body apart, and `false` takes it too); ",
             "from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); ",
             "operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
@@ -1393,7 +1394,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
             None => (feature_sketch(s, p, cmd)?, None, None),
         }
     };
-    let extent = extent_param(s, p, cmd)?;
+    let mut extent = extent_param(s, p, cmd)?;
     let thin = match bool_(p, "thin") {
         Some(true) => {
             if face_profile.is_some() || p.get("profiles").is_some() {
@@ -1417,6 +1418,16 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         operation(p, cmd)?
     };
     let mut targets = string_list(cmd, p, "targets")?;
+    // Only a Join takes the body it runs to, so only a Join can keep it apart (#19671).
+    if extent.to_body_apart && (operation != Operation::Join || extent.to.is_none()) {
+        return Err(bad(cmd, "`to_body_apart: true` needs a Join that runs to an object (`to`)"));
+    }
+    // A Join To Object joins the bodies named in Target Bodies, and no other: the body it runs
+    // to stays its own body, unless the call names no targets at all (then it is the scope the
+    // app picks, as it was since 0.24.1, #6424) or asks for it (#19671).
+    if extent.to.is_some() && operation == Operation::Join && p.get("to_body_apart").is_none() {
+        extent.to_body_apart = named;
+    }
     let mut p = std::borrow::Cow::Borrowed(p);
     if operation == Operation::Join && targets.is_empty() && string_list(cmd, &p, "participants")?.is_empty() {
         // A face's outward extension joins that body, and so does a profile sketched on a body's
@@ -1807,6 +1818,13 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         check_expr(s, d, Kind::Length, cmd, "start_offset")?;
     }
     let symmetric_offset = bool_(p, "symmetric_offset").unwrap_or(false);
+    // A Join To Object can leave the body it runs to apart (#19671): the extent says so, and the
+    // command refuses it where no body would be taken.
+    let to_body_apart = match p.get("to_body_apart") {
+        None => false,
+        Some(Value::Bool(apart)) => *apart,
+        Some(_) => return Err(bad(cmd, "`to_body_apart` must be true or false")),
+    };
     // A symmetric distance the call doesn't qualify is the total, split evenly around the start
     // plane, for solid and surface extrudes alike.
     let convention = match p.get("convention") {
@@ -1827,7 +1845,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to: p.get("to").and_then(vec3).map(FacePick),
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
-        to_body_apart: false,
+        to_body_apart,
         from_level: false,
         picked_placements: Vec::new(),
         one_sided_direction: None,
