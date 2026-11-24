@@ -154,7 +154,7 @@ fn a_record_with_axes_off_square_comes_in_squared() {
         for f in &mut r.bodies[0].brep.as_mut().unwrap().faces {
             let (a, b) = match &mut f.surface {
                 brep::Surface::Plane { u_axis, v_axis, .. } => (*u_axis, v_axis),
-                brep::Surface::Cylinder { frame, .. } => (frame.x_axis, &mut frame.y_axis),
+                brep::Surface::Cylinder { frame, .. } if f.nurbs.is_none() => (frame.x_axis, &mut frame.y_axis),
                 _ => continue,
             };
             for (b, a) in b.iter_mut().zip(a) {

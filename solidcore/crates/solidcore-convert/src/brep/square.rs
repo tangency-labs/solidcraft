@@ -5,7 +5,10 @@
 //! they were.
 //!
 //! Only what a reader would refuse is touched ([`square::frame_is_square`],
-//! [`square::plane_is_square`]): any other record is read to the bit as before. Axes that cannot
+//! [`square::plane_is_square`]): an edge's circle or ellipse, a plane, and a cylinder, cone,
+//! sphere or torus face without a NURBS form (with one, its label is taken as stored and kept
+//! only where the form proves it, so it opens already). Any other record is read to the bit as
+//! before. Axes that cannot
 //! be squared (of no length, not finite, parallel) are left for the reader to refuse with its
 //! reason.
 
@@ -67,14 +70,16 @@ fn plane_axes(s: &r::Surface) -> Option<([f64; 3], [f64; 3])> {
     }
 }
 
-fn surface_needs(s: &r::Surface) -> bool {
-    match s {
+/// A face's label read through its own numbers: a cylinder, cone, sphere or torus without a
+/// NURBS form (with one, the label is taken as stored and only kept where the form proves it),
+/// or a plane.
+fn surface_needs(f: &r::Face) -> bool {
+    match &f.surface {
         r::Surface::Cylinder { frame, .. }
         | r::Surface::Cone { frame, .. }
         | r::Surface::Sphere { frame, .. }
-        | r::Surface::Torus { frame, .. } => frame_needs(frame),
-        r::Surface::PlacedRevolution { profile, .. } => curve_needs(profile),
-        _ => plane_axes(s).is_some_and(|(du, dv)| {
+        | r::Surface::Torus { frame, .. } => f.nurbs.is_none() && frame_needs(frame),
+        s => plane_axes(s).is_some_and(|(du, dv)| {
             !square::plane_is_square(du, dv) && square::square_plane(du, dv).is_some()
         }),
     }
@@ -87,7 +92,7 @@ pub fn needs_squaring(b: &r::Brep) -> bool {
     b.edges
         .iter()
         .any(|e| curve_needs(&e.curve) || e.nurbs.as_ref().is_some_and(curve_needs))
-        || b.faces.iter().any(|f| surface_needs(&f.surface))
+        || b.faces.iter().any(surface_needs)
 }
 
 /// `frame` squared, with how far off it was; `None` when it needs nothing or cannot be squared.
@@ -175,12 +180,18 @@ pub fn square_axes(b: &mut r::Brep) -> Vec<Squared> {
         }
     }
     for (i, f) in b.faces.iter_mut().enumerate() {
+        let form = f.nurbs.is_some();
         let deviation = match &mut f.surface {
             r::Surface::Cylinder { frame, .. }
             | r::Surface::Cone { frame, .. }
             | r::Surface::Sphere { frame, .. }
-            | r::Surface::Torus { frame, .. } => square_frame(frame),
-            r::Surface::PlacedRevolution { profile, .. } => square_curve(profile),
+            | r::Surface::Torus { frame, .. } => {
+                if form {
+                    None
+                } else {
+                    square_frame(frame)
+                }
+            }
             _ => square_plane_face(f),
         };
         if let Some(deviation) = deviation {

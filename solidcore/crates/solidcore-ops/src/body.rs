@@ -1077,7 +1077,9 @@ mod tests {
         for f in &mut record.faces {
             match &mut f.surface {
                 S::Plane { u_axis, v_axis, .. } => tilt(*u_axis, v_axis),
-                S::Cylinder { frame, .. } => tilt(frame.x_axis, &mut frame.y_axis),
+                S::Cylinder { frame, .. } if f.nurbs.is_none() => {
+                    tilt(frame.x_axis, &mut frame.y_axis)
+                }
                 _ => continue,
             }
             touched += 1;
