@@ -34,6 +34,7 @@
 
 pub mod affine;
 pub mod axial_section;
+pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -150,6 +151,7 @@ pub use body::TurnedOver;
 pub use boolean::BooleanOp;
 pub use check::CheckLevel;
 pub use check::CheckReport;
+pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
 pub use error::FailureCode;
