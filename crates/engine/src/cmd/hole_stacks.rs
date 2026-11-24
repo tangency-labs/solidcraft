@@ -58,10 +58,7 @@ impl Options {
             None | Some(Value::Null) => {}
             Some(Value::Array(ranges)) if ranges.len() <= MAX_RANGES => {
                 for r in ranges {
-                    let pair = r
-                        .as_array()
-                        .filter(|a| a.len() == 2)
-                        .map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
+                    let pair = r.as_array().filter(|a| a.len() == 2).map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
                     match pair {
                         Some((Some(lo), Some(hi))) if lo.is_finite() && hi.is_finite() && lo <= hi => diameters.push((lo, hi)),
                         _ => return Err(bad(cmd, "`diameters` must be [[min, max], …] in mm, min ≤ max")),

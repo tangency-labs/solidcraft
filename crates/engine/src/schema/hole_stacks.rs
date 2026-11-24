@@ -48,10 +48,7 @@ fn diameters<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<(f64, f64)>>,
         Value::Array(ranges) if ranges.len() <= MAX_RANGES => {
             let mut out = Vec::new();
             for r in &ranges {
-                let pair = r
-                    .as_array()
-                    .filter(|a| a.len() == 2)
-                    .map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
+                let pair = r.as_array().filter(|a| a.len() == 2).map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
                 match pair {
                     Some((Some(lo), Some(hi))) if lo.is_finite() && hi.is_finite() && lo <= hi => out.push((lo, hi)),
                     _ => return Err(D::Error::custom("`diameters` must be [[min, max], …] in mm, min ≤ max")),
