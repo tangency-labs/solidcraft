@@ -45,6 +45,10 @@ path = "tests/issue_3045_round_at_plate_arc_end.rs"
 name = "round_between_crossing_cylinders"
 path = "tests/round_between_crossing_cylinders.rs"
 
+[[test]]
+name = "surface_chart"
+path = "tests/surface_chart.rs"
+
 # Layers §3: ops sits on the kernel, the record and the conversion only.
 [dependencies]
 solidcore = { path = "../solidcore" }

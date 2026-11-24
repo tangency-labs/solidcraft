@@ -87,6 +87,7 @@ pub mod split;
 pub mod step_assembly;
 pub mod stitch;
 pub mod surface;
+pub mod surface_chart;
 pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;

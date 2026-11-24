@@ -156,6 +156,13 @@ impl FaceSurface {
         fe::face_domain(&self.face)
     }
 
+    /// Whether the face's (u, v) are the record's own (its NURBS form or a plane's), so that
+    /// its pcurves are its trims; false where the kernel's parameters are its own.
+    #[must_use]
+    pub fn trims(&self) -> bool {
+        self.face.trims
+    }
+
     /// The point at the face's (u, v).
     ///
     /// # Errors
