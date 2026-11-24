@@ -3543,6 +3543,12 @@ mod g5_blend_corner_certificates {
 #[path = "wr613_certificates.rs"]
 mod wr613_certificates;
 
+/// WR-646 (#18917): the variable-radius rows whose rounds now follow their law, each
+/// certified on its finished body.
+#[cfg(test)]
+#[path = "wr646_certificates.rs"]
+mod wr646_certificates;
+
 #[cfg(test)]
 mod wr664_near_knot_trims {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
