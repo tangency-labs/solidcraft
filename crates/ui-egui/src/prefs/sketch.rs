@@ -453,6 +453,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_form(ui, label_width, |ui| {
             setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
         });
+        check(ui, "sketch_contents", "prefs.sketch.contents", None, &mut app.preferences.sketch_contents);
     });
 }
 

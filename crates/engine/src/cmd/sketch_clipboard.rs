@@ -471,6 +471,8 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         fresh.freeform_offsets.clear();
         fresh.wires.clear();
         fresh.equations.clear();
+        // Figures name the old contents' curves and points, which are gone.
+        fresh.figures.clear();
         // The old contents' own dimension parameters go with them; one something else uses stays.
         sketch_store::write(doc, target, fresh.clone())?;
         for name in &old {

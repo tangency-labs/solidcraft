@@ -552,6 +552,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         profiles,
         profiles_3d,
         links: serde_json::to_value(&sk.links).unwrap_or_default(),
+        figures: serde_json::to_value(&sk.figures).unwrap_or_default(),
         wires,
         visible: crate::view::sketch_shown(s, id),
         param_warnings: Vec::new(),

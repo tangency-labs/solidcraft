@@ -2704,6 +2704,9 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             cons.extend(c);
             arcs.push(sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default());
         }
+        // Fillet does not carry figure membership yet: a figure that lost a member goes, as it
+        // does when one of its members is deleted.
+        sk.prune_figures();
         Ok((arcs, cons, pname, kept_json(kept), released))
     })?;
     let (curves, constraints, param, (virtual_corners, moved_to_virtual_corner), offset_released) = out;
@@ -2947,6 +2950,9 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
             lines.push(l);
             kept.push(k);
         }
+        // Chamfer does not carry figure membership yet: a figure that lost a member goes, as it
+        // does when one of its members is deleted.
+        sk.prune_figures();
         Ok((ids_of(sk, &lines), kept_json(kept), released))
     })?;
     let (curves, (virtual_corners, moved_to_virtual_corner), offset_released) = out;

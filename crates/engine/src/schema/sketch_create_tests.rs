@@ -646,7 +646,7 @@ fn creation_replies_match_the_output_schema() {
         let slot = id == "sketch.slot.center_point";
         matches(if slot { output_schema_for::<crate::schema::sketch_shapes::SlotResult>() } else { output_schema_for::<DrawResult>() }, &r);
         let expected: std::collections::BTreeSet<String> = if slot {
-            ["centre_line", "constraints", "created", "curves", "middle", "sketch"].map(String::from).into()
+            ["centre_line", "constraints", "created", "curves", "figure", "middle", "sketch"].map(String::from).into()
         } else {
             ["constraints", "created", "curves", "sketch"].map(String::from).into()
         };

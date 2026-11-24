@@ -6,6 +6,7 @@
 //! renaming it, hovering a body row lights it up in the viewport, a double-click on a sketch
 //! edits it, and a right-click opens the item's menu ([`crate::context_menu`]).
 
+use crate::sketch_contents::{ContentsRow, GroupKind, RowKind, SketchContents};
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 
@@ -1068,7 +1069,7 @@ fn placement_drag(dragged: &Dragged) -> Option<&PlacementDrag> {
 /// rows from the anchor (Shift), added with Ctrl.
 fn click_select(app: &mut SolveApp, how: Option<&How>, sel: Option<Sel>) {
     if let Some(How::Range(ids) | How::RangeAdd(ids)) = how {
-        let items: Vec<Sel> = ids.iter().filter_map(|id| app.tree.node_keys.get(id)).filter_map(|key| sel_of_key(key)).collect();
+        let items: Vec<Sel> = ids.iter().filter_map(|id| app.tree.node_keys.get(id)).flat_map(|key| sels_of_key(app, key)).collect();
         // Move/Copy (and any open command whose active input takes bodies) gets every body
         // in the range. Otherwise the range is an ordinary selection.
         let names: Vec<String> = items
@@ -1096,6 +1097,44 @@ fn click_select(app: &mut SolveApp, how: Option<&How>, sel: Option<Sel>) {
         app.tree.picked_components.clear();
         app.tree.picked_joints.clear();
         let _ = app.run("select.set", json!({ "items": [sel] }));
+    }
+}
+
+/// A click on a contents row, which may stand for several selections (an inactive constraint
+/// row stands for the geometry it ties together).
+fn click_select_sels(app: &mut SolveApp, how: Option<&How>, sels: &[Sel]) {
+    if let Some(How::Range(ids) | How::RangeAdd(ids)) = how {
+        let items: Vec<Sel> = ids.iter().filter_map(|id| app.tree.node_keys.get(id)).flat_map(|key| sels_of_key(app, key)).collect();
+        // Move/Copy (and any open command whose active input takes bodies) gets every body
+        // in the range. Otherwise the range is an ordinary selection.
+        let names: Vec<String> = items
+            .iter()
+            .filter_map(|s| match s {
+                Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        if offer_bodies(app, &names, Take::Add) {
+            return;
+        }
+        let _ = app.run("select.set", json!({ "items": items, "add": matches!(how, Some(How::RangeAdd(_))) }));
+        return;
+    }
+    if sels.is_empty() {
+        return;
+    }
+    if matches!(how, Some(How::Toggle)) {
+        let all_in = sels.iter().all(|sel| app.session.selection.contains(sel));
+        if all_in {
+            let rest: Vec<Sel> = app.session.selection.iter().filter(|x| !sels.contains(x)).cloned().collect();
+            let _ = app.run("select.set", json!({ "items": rest }));
+        } else {
+            let _ = app.run("select.set", json!({ "items": sels, "add": true }));
+        }
+    } else {
+        app.tree.picked_components.clear();
+        app.tree.picked_joints.clear();
+        let _ = app.run("select.set", json!({ "items": sels }));
     }
 }
 
@@ -1130,6 +1169,52 @@ fn sel_of_key(k: &str) -> Option<Sel> {
         return s.parse().ok().map(|id| Sel::Feature { id });
     }
     None
+}
+
+/// What a row key stands for: a feature, occurrence, body, or a sketch contents row (which may
+/// stand for several selections when it is a constraint of a sketch that is not being edited).
+fn sels_of_key(app: &SolveApp, k: &str) -> Vec<Sel> {
+    if let Some(sels) = contents_key_sels(app, k) {
+        return sels;
+    }
+    sel_of_key(k).into_iter().collect()
+}
+
+/// A contents row key (`s:7/contents/lines/l1`, or with a placement prefix): the sketch, group
+/// and entity it names. `None` when the key is not a contents row's.
+fn contents_key_sels(app: &SolveApp, key: &str) -> Option<Vec<Sel>> {
+    let (head, id) = key.rsplit_once('/')?;
+    let (scope, slug) = head.rsplit_once('/')?;
+    let sketch_of = |scope: &str| -> Option<u64> { scope.rsplit_once("/s:").map(|(_, id)| id).or_else(|| scope.strip_prefix("s:"))?.parse().ok() };
+    // A figure member's key has one more segment: `…/contents/figures/<figure>/<member>`.
+    if let Some((parent, group)) = scope.rsplit_once('/')
+        && let Some(parent) = parent.strip_suffix("/contents")
+        && let Some(sketch) = sketch_of(parent)
+        && group == "figures"
+    {
+        return Some(member_targets(app, sketch, id, app.session.active_sketch == Some(sketch)));
+    }
+    let scope = scope.strip_suffix("/contents")?;
+    let sketch = sketch_of(scope)?;
+    let editable = app.session.active_sketch == Some(sketch);
+    let kind = match slug {
+        "figures" => RowKind::Figure,
+        "points" => RowKind::Point,
+        "curve-points" => RowKind::Point,
+        "lines" => RowKind::Line,
+        "arcs" => RowKind::Arc,
+        "circles" => RowKind::Circle,
+        "splines" => RowKind::Spline,
+        "conics" => RowKind::Conic,
+        "constraints" => RowKind::Constraint,
+        "dimensions" => RowKind::Dimension,
+        "links" => RowKind::Link,
+        "text" => RowKind::Text,
+        // Patterns, offsets and 3D curves have no entity selection of their own: their row
+        // stands for the sketch, as it did before they got a key.
+        _ => return Some(vec![Sel::Feature { id: sketch }]),
+    };
+    Some(contents_target(app, kind, id, sketch, editable, true))
 }
 
 /// The body a selection item is on: a body, or a face or edge of one (by its name in the
@@ -1733,12 +1818,12 @@ fn active_bodies_origin(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Action
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     let bodies = cache.folder(app, component, path.as_deref(), "bodies");
-    app.tree.cache = Some(cache);
     // In the History's own layout, with no scroll area of their own.
     present(app, ui, acts, (false, true), |app, rows, acts| {
-        folder_rows_at(app, rows, component, path.as_deref(), "bodies", 0, acts, &bodies);
+        folder_rows_at(app, rows, component, path.as_deref(), "bodies", 0, acts, &mut cache, &bodies);
         origin_rows(app, rows, 0, acts);
     });
+    app.tree.cache = Some(cache);
 }
 
 pub(crate) fn apply_content_actions(app: &mut SolveApp, acts: Actions) {
@@ -1834,7 +1919,7 @@ fn component_rows_inner(
     if id == 0 && crate::render_workspace::active(app) {
         let Some(slot) = root.folders.first_mut() else { return };
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, "bodies"));
-        folder_rows_at(app, rows, id, None, "bodies", depth.saturating_sub(1), acts, data);
+        folder_rows_at(app, rows, id, None, "bodies", depth.saturating_sub(1), acts, cache, data);
         for path in &root.children {
             occurrence_rows(app, rows, path, depth, acts, cache);
         }
@@ -1958,7 +2043,7 @@ fn component_rows_inner(
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, folder));
-        folder_rows_at(app, rows, id, None, folder, d, acts, data);
+        folder_rows_at(app, rows, id, None, folder, d, acts, cache, data);
     }
     if !render {
         features::rows(app, rows, id, &[], d, acts);
@@ -2180,7 +2265,7 @@ fn occurrence_rows_inner(
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, placement.component, Some(path), folder));
-        folder_rows_at(app, rows, placement.component, Some(path), folder, depth + 1, acts, data);
+        folder_rows_at(app, rows, placement.component, Some(path), folder, depth + 1, acts, cache, data);
     }
     if !render {
         features::rows(app, rows, placement.component, path, depth + 1, acts);
@@ -3161,6 +3246,7 @@ fn folder_rows_at(
     folder: &str,
     depth: usize,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
     data: &cache::Folder,
 ) {
     if data.key.is_empty() {
@@ -3255,7 +3341,7 @@ fn folder_rows_at(
             return;
         }
     }
-    folder_level(app, rows, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts);
+    folder_level(app, rows, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts, cache);
 }
 
 /// The rows of a folder's top level, or of one group (`holder`), at `depth`; groups draw their
@@ -3274,6 +3360,7 @@ fn folder_level(
     top: &[BrowserEntry],
     faded: bool,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
 ) {
     let render = crate::render_workspace::active(app);
     let start_open = rows_start_open(app);
@@ -3289,7 +3376,7 @@ fn folder_level(
         let group = match row {
             cache::Row::Item(e) => {
                 if app.tree.search.hits().is_none_or(|h| h.row(at, fstatic, &e.key)) {
-                    entry_row(app, rows, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                    entry_row(app, rows, comp, path, fstatic, e, depth, holder, top, faded, acts, cache);
                 }
                 continue;
             }
@@ -3397,7 +3484,7 @@ fn folder_level(
             );
         }
         if gopen {
-            folder_level(app, rows, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts);
+            folder_level(app, rows, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts, cache);
         }
     }
 }
@@ -3456,6 +3543,482 @@ pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: NameAt, 
     }
 }
 
+/// How many rows of one contents group are drawn before a "Show all" row. Geometry groups of a
+/// large sketch can hold thousands of rows; the rest wait behind the row instead of being walked
+/// every frame.
+const CONTENTS_CAP: usize = 200;
+
+/// The rows below one expanded sketch: a group row per non-empty [`GroupKind`], geometry open by
+/// default, and the rows of each open group. Pattern rows keep their own editor and selection
+/// behaviour by drawing through [`crate::sketch_pattern_tree`].
+#[allow(clippy::too_many_arguments)]
+fn sketch_contents_rows(
+    app: &mut SolveApp,
+    rows: &mut Rows<'_>,
+    cache: &mut cache::Cache,
+    e: &Entry,
+    sketch: u64,
+    contents_key: &str,
+    depth: usize,
+    occurrence: Option<(u64, &[u64])>,
+    dim: bool,
+    acts: &mut Actions,
+) {
+    let contents = cache.sketch_contents(app, sketch);
+    let editable = contents.editable;
+    let dim = dim || !contents.evaluated;
+    let scope = &e.row_key;
+    for group in &contents.groups {
+        let kind = group.kind;
+        let slug = group_slug(kind);
+        let key = format!("{contents_key}/{slug}");
+        let default = group_default_open(kind);
+        let open = is_open(app, &key, default);
+        let count = group.rows.len().to_string();
+        let r = node_row(
+            rows,
+            Spec { key: &key, ..Default::default() },
+            Row {
+                depth,
+                fold: Some(open),
+                icon: group_icon(kind),
+                label: solidcraft_ui_text::tr(group_title(kind)),
+                dim,
+                count: &count,
+                ..Default::default()
+            },
+        );
+        if let Some(rect) = r.rect {
+            crate::scenario::publish_handle(&format!("browser:sketch-contents-group:{scope}:{slug}"), rect.center());
+        }
+        if let Some(at) = r.fold_at {
+            crate::scenario::publish_handle(&format!("browser:sketch-contents-fold:{scope}:{slug}"), at);
+        }
+        if r.fold {
+            toggle(app, &key, default);
+        }
+        if !open {
+            continue;
+        }
+        if kind == GroupKind::Patterns {
+            crate::sketch_pattern_tree::browser_rows(app, rows, sketch, depth + 1, occurrence, dim);
+            continue;
+        }
+        let all_key = format!("{key}/all");
+        let all = is_open(app, &all_key, false);
+        let total = group.rows.len();
+        let shown = if all { total } else { total.min(CONTENTS_CAP) };
+        crate::scenario::publish_count(&format!("browser:sketch-contents-shown:{scope}:{slug}"), shown as f64);
+        for row in group.rows.iter().take(shown) {
+            let row_key = format!("{key}/{}", row.id);
+            app.tree.remember(&row_key);
+            let selected = contents_row_selected(app, row, sketch, editable);
+            let has_children = !row.children.is_empty();
+            let figure_open = has_children && is_open(app, &row_key, false);
+            let rr = node_row(
+                rows,
+                Spec { key: &row_key, item: true, ..Default::default() },
+                Row {
+                    depth: depth + 1,
+                    fold: has_children.then_some(figure_open),
+                    icon: row_icon(row.kind),
+                    label: &row.label,
+                    name: true,
+                    selected,
+                    dim,
+                    count: &row.summary,
+                    ..Default::default()
+                },
+            );
+            let handle = format!("browser:sketch-contents-row:{scope}:{slug}:{}", row.id);
+            if let Some(rect) = rr.rect {
+                crate::scenario::publish_handle(&handle, rect.center());
+            }
+            if let Some(at) = rr.fold_at {
+                crate::scenario::publish_handle(&format!("browser:sketch-contents-fold:{scope}:{slug}:{}", row.id), at);
+            }
+            if rr.fold {
+                toggle(app, &row_key, false);
+            }
+            if rr.clicked {
+                let mut targets = contents_row_targets(app, row, sketch, editable, true);
+                if targets.is_empty() {
+                    targets.push(Sel::Feature { id: sketch });
+                }
+                click_select_sels(app, rr.how.as_ref(), &targets);
+            }
+            if let Some(at) = rr.secondary {
+                // A row already in a multi-selection keeps it; any other row is selected first,
+                // so the menu always speaks about the rows the click names.
+                let targets = contents_row_targets(app, row, sketch, editable, true);
+                let picked = !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel));
+                if !picked {
+                    app.tree.picked_components.clear();
+                    app.tree.picked_joints.clear();
+                    if targets.is_empty() {
+                        let _ = app.run("select.set", json!({ "items": [Sel::Feature { id: sketch }] }));
+                    } else {
+                        let _ = app.run("select.set", json!({ "items": targets }));
+                    }
+                }
+                let mut rows = selected_contents_rows(app, contents, sketch, editable);
+                // Rows that select the sketch (an offset or equation curve) must not lend
+                // their curve id to the menu: `ui.delete` would act on the sketch instead.
+                // A figure row names its members, never the figure id.
+                let names_entity = !targets.is_empty() && !matches!(row.kind, RowKind::Link | RowKind::Text | RowKind::Figure);
+                if names_entity && !rows.iter().any(|id| id == &row.id) {
+                    rows.push(row.id.clone());
+                }
+                acts.menu = Some((at, Target::SketchContents { sketch, rows, editable }));
+            }
+            if !figure_open {
+                continue;
+            }
+            for child in row.children.iter().take(CONTENTS_CAP) {
+                let child_key = format!("{row_key}/{}", child.id);
+                app.tree.remember(&child_key);
+                let selected = contents_row_selected(app, child, sketch, editable);
+                let cr = node_row(
+                    rows,
+                    Spec { key: &child_key, item: true, ..Default::default() },
+                    Row {
+                        depth: depth + 2,
+                        icon: row_icon(child.kind),
+                        label: &child.label,
+                        name: true,
+                        selected,
+                        dim,
+                        count: &child.summary,
+                        ..Default::default()
+                    },
+                );
+                let handle = format!("browser:sketch-contents-row:{scope}:{slug}:{}:{}", row.id, child.id);
+                if let Some(rect) = cr.rect {
+                    crate::scenario::publish_handle(&handle, rect.center());
+                }
+                if cr.clicked {
+                    let mut targets = contents_row_targets(app, child, sketch, editable, true);
+                    if targets.is_empty() {
+                        targets.push(Sel::Feature { id: sketch });
+                    }
+                    click_select_sels(app, cr.how.as_ref(), &targets);
+                }
+                if let Some(at) = cr.secondary {
+                    let targets = contents_row_targets(app, child, sketch, editable, true);
+                    let picked = !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel));
+                    if !picked {
+                        app.tree.picked_components.clear();
+                        app.tree.picked_joints.clear();
+                        if targets.is_empty() {
+                            let _ = app.run("select.set", json!({ "items": [Sel::Feature { id: sketch }] }));
+                        } else {
+                            let _ = app.run("select.set", json!({ "items": targets }));
+                        }
+                    }
+                    let mut rows = selected_contents_rows(app, contents, sketch, editable);
+                    if !rows.iter().any(|id| id == &child.id) {
+                        rows.push(child.id.clone());
+                    }
+                    acts.menu = Some((at, Target::SketchContents { sketch, rows, editable }));
+                }
+            }
+        }
+        if shown < total {
+            let show_all = solidcraft_ui_text::format("ui.details_show_all", &[("count", &total.to_string())]);
+            let rr = node_row(
+                rows,
+                Spec { key: &all_key, ..Default::default() },
+                Row { depth: depth + 1, label: &show_all, name: true, dim, ..Default::default() },
+            );
+            let handle = format!("browser:sketch-contents-all:{scope}:{slug}");
+            if let Some(rect) = rr.rect {
+                crate::scenario::publish_handle(&handle, rect.center());
+            }
+            if rr.clicked {
+                toggle(app, &all_key, false);
+            }
+        }
+    }
+}
+
+/// What clicking one contents row selects. Only the active sketch can select its own entities;
+/// an inactive sketch's curves and points are external picks, and a constraint of an inactive
+/// sketch stands for the geometry it ties together (there is no constraint selection outside the
+/// sketch being edited).
+fn contents_row_targets(app: &SolveApp, row: &ContentsRow, sketch: u64, editable: bool, expand: bool) -> Vec<Sel> {
+    contents_target(app, row.kind, &row.id, sketch, editable, expand)
+}
+
+/// [`contents_row_targets`] by kind and id, for a row key the next frame no longer has.
+fn contents_target(app: &SolveApp, kind: RowKind, id: &str, sketch: u64, editable: bool, expand: bool) -> Vec<Sel> {
+    let id = id.to_string();
+    match kind {
+        RowKind::Point if editable => vec![Sel::SketchPoint { id }],
+        RowKind::Point => vec![Sel::ExternalSketchPoint { sketch, id }],
+        RowKind::Line | RowKind::Arc | RowKind::Circle | RowKind::Spline | RowKind::Conic if editable => {
+            vec![Sel::SketchCurve { id, sketch: None }]
+        }
+        RowKind::Line | RowKind::Arc | RowKind::Circle | RowKind::Spline | RowKind::Conic => vec![Sel::ExternalSketchCurve { sketch, id }],
+        RowKind::Constraint | RowKind::Dimension if editable => vec![Sel::SketchConstraint { id }],
+        RowKind::Constraint | RowKind::Dimension if expand || has_external_selection(app, sketch) => external_constraint_targets(app, sketch, &id),
+        RowKind::Link | RowKind::Text => link_targets(app, sketch, &id, editable),
+        RowKind::Figure => figure_targets(app, sketch, &id, editable),
+        // An equation curve's id is a curve id; a 3D curve has no selectable sketch curve.
+        RowKind::Other => {
+            let world = crate::open_meshing::session_world(&app.session);
+            let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+            let stored = app.session.doc.sketch(sketch).ok();
+            let Some(sk) = solved.or(stored) else { return Vec::new() };
+            if sk.curve_index(&id).is_some() {
+                if editable { vec![Sel::SketchCurve { id, sketch: None }] } else { vec![Sel::ExternalSketchCurve { sketch, id }] }
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The geometry a link generated (a projected edge, the outlines of one text): selecting the
+/// link's row lights its curves, or its points when it made only points.
+fn link_targets(app: &SolveApp, sketch: u64, link: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    let mut curves = Vec::new();
+    for curve in &sk.curves {
+        if curve.link.as_deref() != Some(link) {
+            continue;
+        }
+        curves.push(if editable {
+            Sel::SketchCurve { id: curve.id.clone(), sketch: None }
+        } else {
+            Sel::ExternalSketchCurve { sketch, id: curve.id.clone() }
+        });
+    }
+    if !curves.is_empty() {
+        return curves;
+    }
+    sk.points
+        .iter()
+        .filter(|point| point.link.as_deref() == Some(link))
+        .map(|point| if editable { Sel::SketchPoint { id: point.id.clone() } } else { Sel::ExternalSketchPoint { sketch, id: point.id.clone() } })
+        .collect()
+}
+
+/// The entities a figure made: selecting the figure row lights the whole shape.
+fn figure_targets(app: &SolveApp, sketch: u64, figure: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    let Some(record) = sk.figures.iter().find(|record| record.id == figure) else { return Vec::new() };
+    let mut sels = Vec::new();
+    for id in record.curve_ids() {
+        sels.push(if editable { Sel::SketchCurve { id: id.clone(), sketch: None } } else { Sel::ExternalSketchCurve { sketch, id: id.clone() } });
+    }
+    for id in record.point_ids() {
+        sels.push(if editable { Sel::SketchPoint { id: id.clone() } } else { Sel::ExternalSketchPoint { sketch, id: id.clone() } });
+    }
+    sels
+}
+
+/// A figure's member row, by its entity id: a curve or a point.
+fn member_targets(app: &SolveApp, sketch: u64, id: &str, editable: bool) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    if sk.curve_index(id).is_some() {
+        return vec![if editable {
+            Sel::SketchCurve { id: id.to_string(), sketch: None }
+        } else {
+            Sel::ExternalSketchCurve { sketch, id: id.to_string() }
+        }];
+    }
+    if sk.point_index(id).is_some() {
+        return vec![if editable { Sel::SketchPoint { id: id.to_string() } } else { Sel::ExternalSketchPoint { sketch, id: id.to_string() } }];
+    }
+    Vec::new()
+}
+
+/// Is any geometry of `sketch` selected as an external pick? Only then can an inactive constraint
+/// row be lit by it, so the expansion is not worked out for every row of every frame otherwise.
+fn has_external_selection(app: &SolveApp, sketch: u64) -> bool {
+    app.session
+        .selection
+        .iter()
+        .any(|sel| matches!(sel, Sel::ExternalSketchCurve { sketch: s, .. } | Sel::ExternalSketchPoint { sketch: s, .. } if *s == sketch))
+}
+
+/// The curves and points an inactive sketch's constraint ties together, as external picks: the
+/// viewport lights those, since a constraint selection belongs to the sketch being edited. The
+/// glyph groups shared midpoint constraints first, as the viewport's glyphs do.
+fn external_constraint_targets(app: &SolveApp, sketch: u64, id: &str) -> Vec<Sel> {
+    let world = crate::open_meshing::session_world(&app.session);
+    let solved = world.sketch(sketch).map(|solved| &solved.sketch);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = solved.or(stored) else { return Vec::new() };
+    let mut out: Vec<Sel> = Vec::new();
+    for group_id in crate::sketch_tools::glyph_group(sk, id) {
+        let Some(constraint) = sk.constraints.iter().find(|constraint| constraint.id == group_id) else { continue };
+        let (points, curves) = constraint.kind.indices();
+        for index in curves {
+            if let Some(curve) = sk.curves.get(index) {
+                let sel = Sel::ExternalSketchCurve { sketch, id: curve.id.clone() };
+                if !out.contains(&sel) {
+                    out.push(sel);
+                }
+            }
+        }
+        for index in points {
+            if let Some(point) = sk.points.get(index) {
+                let sel = Sel::ExternalSketchPoint { sketch, id: point.id.clone() };
+                if !out.contains(&sel) {
+                    out.push(sel);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Is this contents row part of the selection? A row stands for one selection, or for the several
+/// an inactive constraint's geometry takes.
+fn contents_row_selected(app: &SolveApp, row: &ContentsRow, sketch: u64, editable: bool) -> bool {
+    let targets = contents_row_targets(app, row, sketch, editable, false);
+    !targets.is_empty() && targets.iter().all(|sel| app.session.selection.contains(sel))
+}
+
+/// The contents rows currently selected, in display order: a row whose selection is (all) in the
+/// session's selection. Rows with no selection of their own (patterns, links, text) are left out.
+fn selected_contents_rows(app: &SolveApp, contents: &SketchContents, sketch: u64, editable: bool) -> Vec<String> {
+    let mut rows = Vec::new();
+    for group in &contents.groups {
+        for row in &group.rows {
+            if !contents_row_selected(app, row, sketch, editable) {
+                continue;
+            }
+            // A link, text or figure row stands for the geometry it made: the menu resolves ids
+            // as curves and points, and cannot resolve the link's or figure's own id.
+            let ids: Vec<String> = if matches!(row.kind, RowKind::Link | RowKind::Text | RowKind::Figure) {
+                contents_row_targets(app, row, sketch, editable, true)
+                    .into_iter()
+                    .filter_map(|sel| match sel {
+                        Sel::SketchCurve { id, .. }
+                        | Sel::SketchPoint { id }
+                        | Sel::ExternalSketchCurve { id, .. }
+                        | Sel::ExternalSketchPoint { id, .. } => Some(id),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                vec![row.id.clone()]
+            };
+            for id in ids {
+                if !rows.iter().any(|seen| seen == &id) {
+                    rows.push(id);
+                }
+            }
+            for child in &row.children {
+                if contents_row_selected(app, child, sketch, editable) && !rows.iter().any(|seen| seen == &child.id) {
+                    rows.push(child.id.clone());
+                }
+            }
+        }
+    }
+    rows
+}
+
+/// The stable key fragment of a group (`s:1/contents/lines`).
+fn group_slug(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Figures => "figures",
+        GroupKind::Points => "points",
+        GroupKind::CurvePoints => "curve-points",
+        GroupKind::Lines => "lines",
+        GroupKind::Arcs => "arcs",
+        GroupKind::Circles => "circles",
+        GroupKind::Splines => "splines",
+        GroupKind::Conics => "conics",
+        GroupKind::Constraints => "constraints",
+        GroupKind::Dimensions => "dimensions",
+        GroupKind::Patterns => "patterns",
+        GroupKind::Offsets => "offsets",
+        GroupKind::Links => "links",
+        GroupKind::Text => "text",
+        GroupKind::Other => "other",
+    }
+}
+
+/// The group's translated title; [`Row::name`] is false so the label is looked up as a message.
+fn group_title(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Figures => "sketch.contents.figures",
+        GroupKind::Points => "sketch.contents.points",
+        GroupKind::CurvePoints => "sketch.contents.curve_points",
+        GroupKind::Lines => "sketch.contents.lines",
+        GroupKind::Arcs => "sketch.contents.arcs",
+        GroupKind::Circles => "sketch.contents.circles",
+        GroupKind::Splines => "sketch.contents.splines",
+        GroupKind::Conics => "sketch.contents.conics",
+        GroupKind::Constraints => "sketch.contents.constraints",
+        GroupKind::Dimensions => "sketch.contents.dimensions",
+        GroupKind::Patterns => "sketch.contents.patterns",
+        GroupKind::Offsets => "sketch.contents.offsets",
+        GroupKind::Links => "sketch.contents.links",
+        GroupKind::Text => "sketch.contents.text",
+        GroupKind::Other => "sketch.contents.other",
+    }
+}
+
+/// Figures and geometry groups start open; the constraint, dimension and derived groups start closed.
+fn group_default_open(kind: GroupKind) -> bool {
+    matches!(kind, GroupKind::Figures | GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
+}
+
+/// The icon of a group row: an existing command icon, as the tree uses elsewhere.
+fn group_icon(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Figures => "rect",
+        GroupKind::Points => "point",
+        GroupKind::CurvePoints => "point",
+        GroupKind::Lines => "line",
+        GroupKind::Arcs => "arc3",
+        GroupKind::Circles => "circle",
+        GroupKind::Splines => "spline",
+        GroupKind::Conics => "conic",
+        GroupKind::Constraints => "constrainer",
+        GroupKind::Dimensions => "dimension",
+        GroupKind::Patterns => "pattern",
+        GroupKind::Offsets => "offset",
+        GroupKind::Links => "project",
+        GroupKind::Text => "text",
+        GroupKind::Other => "sketch",
+    }
+}
+
+/// The icon of one contents row.
+fn row_icon(kind: RowKind) -> &'static str {
+    match kind {
+        RowKind::Figure => "rect",
+        RowKind::Point => "point",
+        RowKind::Line => "line",
+        RowKind::Arc => "arc3",
+        RowKind::Circle => "circle",
+        RowKind::Spline => "spline",
+        RowKind::Conic => "conic",
+        RowKind::Constraint => "constrainer",
+        RowKind::Dimension => "dimension",
+        RowKind::Pattern => "pattern",
+        RowKind::Offset => "offset",
+        RowKind::Link => "project",
+        RowKind::Text => "text",
+        RowKind::Other => "sketch",
+    }
+}
+
 /// One item row of a folder.
 #[allow(clippy::too_many_arguments)]
 fn entry_row(
@@ -3471,6 +4034,7 @@ fn entry_row(
     // A placement or folder above is hidden: the row fades, its eye stays its own.
     parent_hidden: bool,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
 ) {
     let appearance = crate::render_workspace::scene::decoration(app, &e.bodies);
     if crate::render_workspace::active(app) && !crate::render_workspace::scene::matches_query(app, &e.label, &appearance.name) {
@@ -3484,6 +4048,14 @@ fn entry_row(
     let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
+    // Every sketch folds its contents; the key follows the row's placement prefix
+    // (`o:1/s:7/contents`), so two placements of one sketch keep separate fold state.
+    let contents_key = (folder == "sketches" && unsearched && app.preferences.sketch_contents).then(|| format!("{}/contents", e.row_key));
+    let contents_open = contents_key.as_deref().is_some_and(|key| is_open(app, key, false));
+    // The old pattern list is the folded sketch's quick view; expanding the contents replaces it
+    // with the organised Patterns group, so the two never show the same rows twice.
+    let patterns_visible = patterns_open && !contents_open;
+    let fold = contents_key.as_deref().map(|_| contents_open).or_else(|| pattern_key.map(|_| patterns_open));
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
@@ -3493,7 +4065,7 @@ fn entry_row(
         && matches!(e.sel, Some(Sel::Body { .. })))
     .then(|| format!("{}/features", e.row_key));
     let built_open = built_key.as_deref().is_some_and(|key| is_open(app, key, false));
-    if !rows.next_visible() && !patterns_open && !revealed && !built_open {
+    if !rows.next_visible() && !patterns_visible && !contents_open && !revealed && !built_open {
         rows.skip(node_id(&e.row_key), Selectable::Yes(0));
         return;
     }
@@ -3547,7 +4119,7 @@ fn entry_row(
         },
         Row {
             depth,
-            fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),
+            fold: fold.or(built_key.as_ref().map(|_| built_open)),
             eye: Some(visible),
             icon: e.icon,
             kind_tip: e.tip,
@@ -3585,14 +4157,14 @@ fn entry_row(
     {
         crate::refused_part::ring(app, name, face);
     }
-    if r.fold
-        && let Some(key) = pattern_key
-    {
-        toggle(app, key, start_open);
-    } else if r.fold
-        && let Some(key) = &built_key
-    {
-        toggle(app, key, false);
+    if r.fold {
+        if let Some(key) = contents_key.as_deref() {
+            toggle(app, key, false);
+        } else if let Some(key) = pattern_key {
+            toggle(app, key, start_open);
+        } else if let Some(key) = &built_key {
+            toggle(app, key, false);
+        }
     }
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
@@ -3668,7 +4240,13 @@ fn entry_row(
         }
         acts.menu = Some((p, t));
     }
-    if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
+    if contents_open && folder == "sketches" {
+        if let Ok(sketch) = e.key.parse::<u64>()
+            && let Some(key) = contents_key.as_deref()
+        {
+            sketch_contents_rows(app, rows, cache, e, sketch, key, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden, acts);
+        }
+    } else if patterns_visible && let Some(Sel::Feature { id }) = &e.sel {
         crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden);
     }
     if built_open && built_key.is_some() {
