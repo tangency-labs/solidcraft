@@ -665,6 +665,13 @@ fn off_standard(family: &str, size: &str) -> bool {
     family == "button_head_cap_screw" && ["M2", "M2.5"].iter().any(|s| s.eq_ignore_ascii_case(size.trim()))
 }
 
+/// The size Insert Part opens a family on, when it is not the family's first: the button head,
+/// countersunk and set screws opened on M3 before M2 and M2.5 were added, and still do.
+/// `parts.library` marks its row `default_size`.
+fn default_size(family: &str) -> Option<&'static str> {
+    matches!(family, "button_head_cap_screw" | "countersunk_socket_screw" | "set_screw").then_some("M3")
+}
+
 fn default_length(d: f64) -> f64 {
     LENGTHS.iter().copied().find(|l| *l >= 2.5 * d).unwrap_or(100.0)
 }
@@ -1045,6 +1052,15 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
                 let Some(l) = shape(id, &size, None).ok().as_ref().and_then(shape_len) else { continue };
                 if let Value::Object(m) = row {
                     m.insert("default_length".into(), json!(l));
+                }
+            }
+        }
+        if let Some(opens) = default_size(id) {
+            for row in &mut sizes {
+                if row.get("size").and_then(Value::as_str) == Some(opens)
+                    && let Value::Object(m) = row
+                {
+                    m.insert("default_size".into(), json!(true));
                 }
             }
         }
@@ -2007,6 +2023,20 @@ mod tests {
             .map(|a| a.iter().filter(|x| x["in_standard"] == false).filter_map(|x| x["size"].as_str()).collect())
             .unwrap_or_default();
         assert_eq!(off, ["M2", "M2.5"]);
+        // Insert Part still opens the button head, countersunk and set screws on M3, as before
+        // the smaller sizes came first; every other family opens on its first size.
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let opening: Vec<(String, String)> = all["families"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|f| {
+                let id = f["family"].as_str().unwrap_or_default().to_string();
+                f["sizes"].as_array().into_iter().flatten().filter(|x| x["default_size"] == true).map(move |x| (id.clone(), x["size"].to_string()))
+            })
+            .collect();
+        let want = [("button_head_cap_screw", "\"M3\""), ("countersunk_socket_screw", "\"M3\""), ("set_screw", "\"M3\"")];
+        assert_eq!(opening, want.map(|(a, b)| (a.to_string(), b.to_string())));
         // An M2 x 5: head Ø3.5, 1.3 high, and a part number that names no standard.
         let mut small = Session::default();
         run(&mut small, "parts.insert", json!({"family": "button_head_cap_screw", "size": "M2", "length": 5}));
