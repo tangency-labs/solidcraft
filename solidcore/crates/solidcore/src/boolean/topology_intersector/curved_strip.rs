@@ -1959,9 +1959,10 @@ mod tests {
     /// The drop decided on the fixture's real intersection list (the kernel's test seam
     /// runs [`drop_strip_crossings`] on a copy of it where the union's topology intersector
     /// calls it): the dropped curve C goes at the intersector's tolerance 5e-6 (one
-    /// interval), and stays (none) when any one check refuses:
-    /// - at 1e-7 (below C's certified gap, MEASURED 4.22e-7): C's gap and other checks
-    ///   refuse (no single revert lets it through);
+    /// interval), and at 1e-7, above every certified quantity (C's interval starts where
+    /// C leaves E, on E: MEASURED the strip's enclosure 9.8e-11, C's gap 2.7e-11 and N's
+    /// piece's gap 1.38e-8, each plus the net's bound `ε` 1.21e-8, all below 2.6e-8), and
+    /// stays (none) when any one check refuses:
     /// - at 1e-8 (below the net's bound `ε`, MEASURED 1.21e-8): the strip's enclosure and
     ///   other checks refuse (likewise);
     /// - at 5e-6 with 1 added to the strip's enclosure ([`strip_within`]), to C's gap or
@@ -1995,7 +1996,7 @@ mod tests {
         k.strip_probe.lock().unwrap().runs = runs;
         boolean_union(&mut k, body, kept).unwrap();
         let dropped = core::mem::take(&mut k.strip_probe.lock().unwrap().dropped);
-        assert_eq!(dropped, [1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(dropped, [1, 1, 0, 0, 0, 0, 0]);
     }
 
     /// [`net_of`]'s bound is the bound of the definition a B-spline surface keeps (a screw
