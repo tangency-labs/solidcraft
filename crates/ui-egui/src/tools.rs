@@ -231,16 +231,31 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
 /// in a drawing sheet's sketch, where the commands take no snap yet.
 fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
-    let stands = |id: &str| {
-        if app.session.sheet_sketching() {
-            return false;
-        }
-        let st = crate::open_meshing::session_world(&app.session);
-        app.session.active_sketch.and_then(|sid| st.sketch(sid)).is_some_and(|ss| crate::sketch_line_arc::chain_point(&ss.sketch, id, p.0).is_some())
-    };
     match &p.1 {
-        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && stands(id) => json!(id),
+        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && snap_stands(app, id, p.0) == Some(true) => json!(id),
         _ => xy(p),
+    }
+}
+
+/// Whether the snap `id` of a click at `at` still names a point, curve or crossing of the sketch
+/// being edited. None when there is no such sketch to look in, as in a drawing sheet's sketch.
+fn snap_stands(app: &SolveApp, id: &str, at: Vec2) -> Option<bool> {
+    if app.session.sheet_sketching() {
+        return None;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = app.session.active_sketch.and_then(|sid| st.sketch(sid))?;
+    Some(crate::sketch_line_arc::chain_point(&ss.sketch, id, at).is_some())
+}
+
+/// A stored click as a shape sends it: a snap whose point or curve the Undo button took away
+/// after the click (it leaves the tool on) goes as the place clicked, so the command does not
+/// refuse click after click (#21835), as the Line's chain re-checks its point (#10016). It is
+/// checked when the shape is sent, so a Redo that brings the curve back brings the snap back.
+fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
+    match &p.1 {
+        Some(id) if snap_stands(app, id, p.0) == Some(false) => (p.0, None),
+        _ => p.clone(),
     }
 }
 
@@ -746,7 +761,8 @@ pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value,
 }
 
 fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
-    let p = &t.pts;
+    let pts: Vec<_> = t.pts.iter().map(|p| standing(app, p)).collect();
+    let p = &pts;
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
     let params = match t.cmd {
