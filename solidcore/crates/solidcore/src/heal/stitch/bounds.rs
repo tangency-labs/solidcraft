@@ -164,6 +164,15 @@ fn checked_range(range: [f64; 2]) -> Result<Ivl> {
     Ok(Ivl::new(range[0].min(range[1]), range[0].max(range[1])))
 }
 
+/// A control point's Euclidean box: its homogeneous coordinates over its weight.
+fn control_point_box(c: CPoint) -> Result<Box3> {
+    let h = homogeneous(c)?;
+    let w = at(&h, 3)?;
+    Ok(core::array::from_fn(|i| {
+        h.get(i).copied().unwrap_or(Ivl::whole()) / w
+    }))
+}
+
 fn homogeneous(c: CPoint) -> Result<Box4> {
     let coordinates = [
         c.x,
@@ -261,6 +270,19 @@ fn piece(n: &Nurbs, span: usize, t: Ivl) -> Result<Box3> {
 fn spline_box(n: &Nurbs, range: Ivl) -> Result<Box3> {
     validate(n, range)?;
     let mut result: Option<Box3> = None;
+    // A B-spline curve evaluation's end shortcut returns the end control point on a
+    // natural end: the end piece's value there only on a clamped end (equal to it
+    // otherwise), so it is hulled in.
+    let count = n.cpts().len();
+    for (end, index) in [
+        (at(n.knots(), n.degree())?, 0),
+        (at(n.knots(), count)?, count - 1),
+    ] {
+        if range.lo <= end && end <= range.hi {
+            let point = control_point_box(at(n.cpts(), index)?)?;
+            result = Some(result.map_or(point, |old| hull3(old, point)));
+        }
+    }
     for (span, pair) in n.knots().windows(2).enumerate() {
         let [a, b] = pair else {
             continue;
@@ -750,19 +772,37 @@ fn end_span(knots: &[f64], p: usize, n: usize, end: bool) -> Result<usize> {
 /// each: past either end of the knots (and on it) the end span `find_span` picks, so
 /// the evaluation's extrapolation is enclosed; inside, every piece whose closed span
 /// meets `t` ([`knot_cuts`], both pieces at a knot). A knot line where the surface is
-/// discontinuous is refused there.
+/// discontinuous is refused inside `t`; at `t`'s upper end the piece right of it, which
+/// the evaluation takes there, is added. On an end knot itself the evaluation takes the end control row
+/// (`KnotVector::basis_eval_into`), which is that piece's value only when the end is
+/// clamped and its span is the one `find_span` picks; otherwise a box reaching the end
+/// is refused.
 fn surface_parts(knots: &[f64], p: usize, n: usize, t: Ivl) -> Result<Vec<(f64, f64, usize)>> {
     let first = at(knots, p)?;
     let last = at(knots, n)?;
     if first.partial_cmp(&last) != Some(core::cmp::Ordering::Less) || !finite(t) {
         return Err(invalid("invalid surface knots or parameter enclosure"));
     }
+    let multiplicity = |k: f64| knots.iter().filter(|&&x| x == k).count();
     let mut parts = Vec::new();
     if t.lo <= first {
-        parts.push((t.lo, t.hi.min(first), end_span(knots, p, n, false)?));
+        let span = end_span(knots, p, n, false)?;
+        if span != p || multiplicity(first) <= p {
+            return Err(unsupported());
+        }
+        parts.push((t.lo, t.hi.min(first), span));
     }
     if t.hi >= last {
-        parts.push((t.lo.max(last), t.hi, end_span(knots, p, n, true)?));
+        let span = end_span(knots, p, n, true)?;
+        if span + 1 != n || multiplicity(last) <= p {
+            return Err(unsupported());
+        }
+        parts.push((t.lo.max(last), t.hi, span));
+    }
+    // The piece right of a jump at the box's upper end (on a point, `knot_cuts` already
+    // returns both pieces).
+    if first < t.hi && t.hi < last && t.lo < t.hi && multiplicity(t.hi) > p {
+        parts.extend(knot_cuts(knots, p, n, t.hi, t.hi, 0)?);
     }
     let (lo, hi) = (t.lo.max(first), t.hi.min(last));
     if lo <= hi {
@@ -787,6 +827,13 @@ fn surface_jet(surface: &Surface, u: Ivl, v: Ivl, partials: bool) -> Result<Opti
         SurfaceKind::BSpline(s) => {
             if s.form() == BSplineSurfaceForm::Polynomial {
                 return Err(unsupported());
+            }
+            // The evaluation takes the net's rationality from its first point and a
+            // surface's points are 3D: refuse other storage outright.
+            let (_, _, cps) = s.control_points()?;
+            let rational = cps.first().is_some_and(|c| c.w != NOW);
+            if cps.iter().any(|c| (c.w != NOW) != rational || c.z == NOZ) {
+                return Err(invalid("mixed homogeneous coordinate storage"));
             }
             let net = SurfaceNet::of(s).map_err(|_| invalid("invalid surface data"))?;
             let us = surface_parts(&net.u, net.p, net.nu, u)?;
@@ -903,32 +950,39 @@ fn uv_box(c: &CrvOnSurf, t: Ivl, depth: usize) -> Result<[Ivl; 2]> {
 /// Encloses a curve on a surface over `t`: the surface over the box of its parameter
 /// curve there (`CrvOnSurf::evaluate_point`).
 fn on_surface_box(c: &CrvOnSurf, t: Ivl, depth: usize) -> Result<Box3> {
-    split_surface_box(t, |t| {
+    split_surface_box(t, depth, |t| {
         let [u, v] = uv_box(c, t, depth)?;
         Ok(surface_jet(c.surface(), u, v, false)?.map(|j| j.value))
     })
 }
 
 /// The most halvings of a parameter range [`split_surface_box`] makes.
-const SURFACE_SPLITS: u32 = 6;
+const SURFACE_SPLITS: usize = 6;
 
 /// The hull of `enclose` over `t`, or over halves of `t` where a box is not enclosed
 /// (a rational surface's weight not proved positive over it), at most
-/// [`SURFACE_SPLITS`] halvings deep, from an explicit stack in a fixed order.
-fn split_surface_box(t: Ivl, enclose: impl Fn(Ivl) -> Result<Option<Box3>>) -> Result<Box3> {
-    let mut stack = vec![(t, 0_u32)];
+/// [`SURFACE_SPLITS`] halvings deep, from an explicit stack in a fixed order. Only an
+/// outermost curve (`depth` 0) is split, so nested surface curves cannot multiply the
+/// work: the calls stay at most `2^(SURFACE_SPLITS+1)` times the nesting depth.
+fn split_surface_box(
+    t: Ivl,
+    depth: usize,
+    enclose: impl Fn(Ivl) -> Result<Option<Box3>>,
+) -> Result<Box3> {
+    let limit = if depth == 0 { SURFACE_SPLITS } else { 0 };
+    let mut stack = vec![(t, 0_usize)];
     let mut out: Option<Box3> = None;
-    while let Some((t, depth)) = stack.pop() {
+    while let Some((t, level)) = stack.pop() {
         if let Some(b) = enclose(t)? {
             out = Some(out.map_or(b, |h| hull3(h, b)));
             continue;
         }
         let m = 0.5 * (t.lo + t.hi);
-        if depth >= SURFACE_SPLITS || !(t.lo < m && m < t.hi) {
+        if level >= limit || !(t.lo < m && m < t.hi) {
             return Err(invalid("surface weights not proved positive"));
         }
-        stack.push((Ivl::new(m, t.hi), depth + 1));
-        stack.push((Ivl::new(t.lo, m), depth + 1));
+        stack.push((Ivl::new(m, t.hi), level + 1));
+        stack.push((Ivl::new(t.lo, m), level + 1));
     }
     out.ok_or_else(|| invalid("no surface box encloses the curve"))
 }
@@ -948,8 +1002,8 @@ fn iso_uv(c: &IsoCurve, t: Ivl) -> Result<[Ivl; 2]> {
 
 /// Encloses an iso curve over `t`: its surface over the iso line's uv box
 /// (`IsoCurve::evaluate_point`).
-fn iso_box(c: &IsoCurve, t: Ivl) -> Result<Box3> {
-    split_surface_box(t, |t| {
+fn iso_box(c: &IsoCurve, t: Ivl, depth: usize) -> Result<Box3> {
+    split_surface_box(t, depth, |t| {
         let [u, v] = iso_uv(c, t)?;
         Ok(surface_jet(c.surface(), u, v, false)?.map(|j| j.value))
     })
@@ -976,31 +1030,52 @@ fn tangent_field_box(c: &TangentFieldCurve, t: Ivl) -> Result<Box3> {
     // The comparisons `field_point` makes, in the same floating-point operations.
     let below = natural.min() + PARAM_TOL + EFF_ZERO;
     let above = natural.max() - PARAM_TOL - EFF_ZERO;
-    if t.hi < below {
-        return Ok(s);
+    // `field_point` takes `s` for t < below, else `e` for t > above, else the projection.
+    let starts = t.lo < below;
+    let ends = t.hi >= below && t.hi > above;
+    let between = t.lo.max(below) <= t.hi.min(above);
+    let mut out: Option<Box3> = None;
+    for (taken, b) in [(starts, s), (ends, e)] {
+        if taken {
+            out = Some(out.map_or(b, |o| hull3(o, b)));
+        }
     }
-    if t.lo > above {
-        return Ok(e);
+    if between {
+        out = Some(match out {
+            Some(o) => hull3(o, projection_box(c, s, e)?),
+            None => projection_box(c, s, e)?,
+        });
     }
-    let radius = Ivl::from(norm(s)?.max(norm(e)?));
-    let reach = radius / Ivl::from(2.0) + radius * Ivl::from(1.0e-12);
-    let half = Ivl::from(0.5);
-    let mut out: Box3 = core::array::from_fn(|i| {
-        let (a, b) = (axis(s, i) * half, axis(e, i) * half);
-        let lo = a.hull(b) - reach;
-        let hi = a.hull(b) + reach;
-        Ivl::new(lo.lo, hi.hi)
-    });
-    if t.lo < below {
-        out = hull3(out, s);
-    }
-    if t.hi > above {
-        out = hull3(out, e);
-    }
+    let out = out.ok_or_else(|| invalid("empty tangent field parameter enclosure"))?;
     if !out.into_iter().all(finite) {
         return Err(invalid("tangent field enclosure overflows"));
     }
     Ok(out)
+}
+
+/// The Thales box of a tangent field's projections (see [`tangent_field_box`]), for a
+/// surface whose `evaluate_normal` is proved at most `1 + 4e-13` long: a B-spline
+/// surface's (`base_evaluate_normal` divides every candidate by its length, or returns
+/// zero) or a plane's stored axis, checked here. Other kinds are refused.
+fn projection_box(c: &TangentFieldCurve, s: Box3, e: Box3) -> Result<Box3> {
+    match c.base().surface().kind() {
+        SurfaceKind::Plane(plane) => {
+            if norm(point_box(plane.evaluate_normal())?)? > 1.0 + 4.0e-13 {
+                return Err(invalid("plane normal not of unit length"));
+            }
+        }
+        SurfaceKind::BSpline(_) => {}
+        _ => return Err(unsupported()),
+    }
+    let radius = Ivl::from(norm(s)?.max(norm(e)?));
+    let reach = radius / Ivl::from(2.0) + radius * Ivl::from(1.0e-12);
+    let half = Ivl::from(0.5);
+    Ok(core::array::from_fn(|i| {
+        let (a, b) = (axis(s, i) * half, axis(e, i) * half);
+        let lo = a.hull(b) - reach;
+        let hi = a.hull(b) + reach;
+        Ivl::new(lo.lo, hi.hi)
+    }))
 }
 
 /// The rate `dP/dt` of a line over `t` (the slope of [`line_box`]'s map), after its
@@ -1045,9 +1120,16 @@ fn spline_rate(n: &Nurbs, t: Ivl) -> Result<Option<Box3>> {
     validate(n, t)?;
     let p = n.degree();
     let knots = n.knots();
+    let (first, last) = (at(knots, p)?, at(knots, n.cpts().len())?);
+    let multiplicity = |k: f64| knots.iter().filter(|&&x| x == k).count();
+    // Discontinuous where a knot inside the range, or at its upper end (the evaluation
+    // takes the next piece there), has multiplicity above the degree; and on an
+    // unclamped natural end, where the evaluation fails or is the end control point.
     if knots
         .iter()
-        .any(|&k| k > t.lo && k < t.hi && knots.iter().filter(|&&x| x == k).count() > p)
+        .any(|&k| k > t.lo && k <= t.hi && k < last && multiplicity(k) > p)
+        || (t.lo <= first && multiplicity(first) <= p)
+        || (t.hi >= last && multiplicity(last) <= p)
     {
         return Ok(None);
     }
@@ -1131,7 +1213,7 @@ fn curve_box_at(curve: &Curve, range: Ivl, depth: usize) -> Result<Box3> {
         CurveKind::Hermite(h) => return hermite_box(h, range),
         CurveKind::Composite(c) => return composite_box(c, range, depth),
         CurveKind::CrvOnSurf(c) => return on_surface_box(c, range, depth),
-        CurveKind::Iso(c) => return iso_box(c, range),
+        CurveKind::Iso(c) => return iso_box(c, range, depth),
         CurveKind::TangentField(c) => return tangent_field_box(c, range),
         _ => {}
     }
@@ -2302,6 +2384,120 @@ mod tests {
         // Read against the line run the other way, the ends are 1 apart.
         let crossed = curves(&on, [0.0, 1.0], &reversed, back).unwrap();
         assert!(crossed >= 1.0, "{crossed}");
+    }
+
+    /// A bilinear surface over `u_knots` (degree 1 in v over [0, 1]) whose rows step in
+    /// z, so every u knot of multiplicity two is a jump.
+    fn stepped(u_knots: Vec<f64>, degree: usize) -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let rows = u32::try_from(u_knots.len() - degree - 1).unwrap();
+        let net = (0..rows)
+            .map(|i| {
+                let x = f64::from(i) / f64::from(rows - 1);
+                let z = if 2 * i < rows { 0.0 } else { 0.5 };
+                vec![
+                    CPoint::new(x, 0.0, z, NOW),
+                    CPoint::new(x, 1.0, z + 0.1, NOW),
+                ]
+            })
+            .collect();
+        let nurb = NurbSurface::new(net, degree, 1, u_knots, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    #[test]
+    fn unclamped_ends_are_held_or_refused() {
+        let k = Kernel::default();
+        // A quadratic parameter curve on unclamped knots.
+        let uv = uv_spline(
+            &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)],
+            2,
+            vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
+        );
+        // `basis_eval` fails on its natural ends; the box there holds both the end
+        // control point and the end piece's value.
+        assert!(uv.evaluate_point(&k, 0.2).is_err() && uv.evaluate_point(&k, 0.8).is_err());
+        let end = curve_box(&uv, Ivl::from(0.2)).unwrap();
+        assert!(contains(end, Vec3::new(0.1, 0.2, 0.0)), "{end:?}");
+        for range in [[0.21, 0.79], [0.3, 0.6]] {
+            holds_samples(&k, &uv, range);
+        }
+        let on: Curve = CrvOnSurf::new(&k, uv, flat(), None, 0).unwrap().into();
+        for range in [[0.21, 0.79], [0.3, 0.6]] {
+            holds_samples(&k, &on, range);
+        }
+        // Its mean-value rate would be the end piece's: refused on an unclamped end.
+        let uv = uv_spline(
+            &[(0.1, 0.2), (0.5, 0.9), (0.9, 0.3), (0.6, 0.1)],
+            2,
+            vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
+        );
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.5), 0).unwrap().is_none());
+        assert!(curve_rate(&uv, Ivl::new(0.3, 0.6), 0).unwrap().is_some());
+        // An iso curve reaching an unclamped surface end is refused; inside it is held.
+        let surface = stepped(vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0], 2);
+        let iso: Curve = IsoCurve::from_surface(&k, surface, SurfParamType::V, 0.5, true, false)
+            .unwrap()
+            .into();
+        assert!(curve_box(&iso, Ivl::new(0.2, 0.5)).is_err());
+        assert!(curve_box(&iso, Ivl::new(0.6, 0.8)).is_err());
+        holds_samples(&k, &iso, [0.3, 0.6]);
+    }
+
+    #[test]
+    fn a_jump_at_a_range_end_holds_the_piece_after_it() {
+        let k = Kernel::default();
+        // The evaluation takes the piece right of a jump on it: z = 0.5 at u = 0.5,
+        // while the left piece ends at z = 0.
+        let surface = stepped(vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], 1);
+        let iso: Curve = IsoCurve::from_surface(&k, surface, SurfParamType::V, 0.5, true, false)
+            .unwrap()
+            .into();
+        holds_samples(&k, &iso, [0.2, 0.5]);
+        holds_samples(&k, &iso, [0.2, 0.45]);
+        holds_samples(&k, &iso, [0.5, 0.8]);
+        let uv = uv_spline(
+            &[(0.1, 0.1), (0.3, 0.3), (0.7, 0.2), (0.9, 0.9)],
+            1,
+            vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+        );
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.5), 0).unwrap().is_none());
+        assert!(curve_rate(&uv, Ivl::new(0.2, 0.45), 0).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_short_tangent_field_holds_both_stored_tangents() {
+        use crate::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        let k = Kernel::default();
+        // Shorter than its two end zones: `s` below 1e-8 + EFF_ZERO, `e` from there.
+        let uv = uv_spline(&[(0.1, 0.2), (0.9, 0.3)], 1, vec![0.0, 0.0, 1e-8, 1e-8]);
+        let (s, e) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.2, 1.0, 0.5));
+        let field: Curve =
+            TangentFieldCurve::new(&k, uv, patch(), TangentDirType::Interpolate, s, e, None)
+                .unwrap()
+                .into();
+        let b = curve_box(&field, Ivl::new(0.5e-8, 1.5e-8)).unwrap();
+        assert!(contains(b, s) && contains(b, e), "{b:?}");
+        for t in [0.5e-8, 1e-8, 1.5e-8] {
+            assert!(contains(b, field.evaluate_point(&k, t).unwrap()), "{t}");
+        }
+    }
+
+    #[test]
+    fn nested_surface_curves_are_not_split() {
+        use core::cell::Cell;
+        let calls = Cell::new(0_usize);
+        let refuse = |_| {
+            calls.set(calls.get() + 1);
+            Ok(None)
+        };
+        assert!(split_surface_box(Ivl::new(0.0, 1.0), 0, refuse).is_err());
+        // The first box splits depth-first down one side, SURFACE_SPLITS deep.
+        assert_eq!(calls.get(), SURFACE_SPLITS + 1);
+        calls.set(0);
+        assert!(split_surface_box(Ivl::new(0.0, 1.0), 1, refuse).is_err());
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]
