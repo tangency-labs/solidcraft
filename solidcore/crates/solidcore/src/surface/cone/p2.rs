@@ -1963,12 +1963,25 @@ impl Cone {
                 };
                 // Both axes square to the centre line (the end circle's x axis is square
                 // to its normal, not to the centre line), so the placement's z axis is
-                // the centre line itself
+                // the centre line itself; the x axis moves by O(t) for a tilt `t`, which
+                // shifts the angle origin of the recorded arc by O(t) and the net's
+                // distance from the cylinder only by O(t^2)
                 let refit_y = centre_z.cross(frame.x_axis());
                 let refit = Axis2Placement::new(frame.origin(), refit_y.cross(centre_z), refit_y);
                 match self.net_on_axis(frame, height, radii, bot.radius, keep_if_on) {
                     Ok(net) => net,
-                    Err(off) if refit != *frame => {
+                    // only a net off the end circle's axis retries on the centre line;
+                    // any other failure is not about the axis and stands
+                    Err(off)
+                        if refit != *frame
+                            && matches!(
+                                off.surface_failure(),
+                                Some(SurfaceFailure::NurbNotAnalytic {
+                                    check: AnalyticCheck::NetOffCylinder
+                                        | AnalyticCheck::NetRadiusNotPositive
+                                })
+                            ) =>
+                    {
                         match self.net_on_axis(&refit, height, radii, bot.radius, keep_if_on) {
                             Ok(net) => {
                                 refit_position = Some(refit);

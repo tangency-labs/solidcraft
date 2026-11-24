@@ -2043,15 +2043,19 @@ impl Ellipse {
     /// difference, in degrees or as converted, is no more than the rounding the
     /// conversion makes of the two ends (nothing changed; #17062): each end's
     /// conversion adds and subtracts at most `Θ = |s| + |a0| + 360 (|n| + 1)` degrees
-    /// (`s` the end, `a0` the old STEP start, `n` the whole turns it is taken back) and
-    /// `P = A + (|m| + 1) L` in NURBS parameter (`A` the old NURBS interval's largest
-    /// magnitude, `L` its length, `m` the turns or the fraction of the arc it is
-    /// continued by, `0` inside the arc). Those few (at most five) rounded additions
-    /// and subtractions each err by up to `u` of their magnitude, absolutely, so a
-    /// difference no greater than `gamma_8 (Θ0 + Θ1)` (or `gamma_8 (P0 + P1)`) may be
-    /// rounding alone: zero in exact arithmetic, or unresolved, and the next
-    /// reparameterisation would divide by it. Products and quotients err relatively and
-    /// only scale a difference. A NaN bound refuses. Those of
+    /// (`s` the end, `a0` the old STEP start, `n` the whole turns it is taken back; the
+    /// `+ 360` also covers the polar converter's angle table inside the arc, whose
+    /// angles reach `|a0| + 360`) and `P = A + (|m| + 1) L` in NURBS parameter (`A` the
+    /// old NURBS interval's largest magnitude, `L` its length, `m` the turns or the
+    /// fraction of the arc it is continued by, `0` inside the arc). The few (at most
+    /// five) rounded additions and subtractions of the affine steps each err by up to
+    /// `u` of their magnitude, absolutely, so a difference no greater than
+    /// `gamma_8 (Θ0 + Θ1)` (or `gamma_8 (P0 + P1)`) may be rounding alone: zero in
+    /// exact arithmetic, or unresolved, and the next reparameterisation would divide by
+    /// it. Products and quotients err relatively and only scale a difference. This is a
+    /// floor, not a bound on the whole conversion: inside the arc the converter's
+    /// trigonometric span map and Newton refinement add an error this does not bound.
+    /// A NaN bound refuses. Those of
     /// [`PolarConversion::convert_to_nurbs_parameter`] (nothing changed) and
     /// [`Self::make_nurb_owned`] (the new domain is kept).
     pub fn adjust_step_interval(

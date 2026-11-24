@@ -24,8 +24,9 @@
 //! coordinate within a few ulps of `|B|, |T| <= sqrt(r^2 + h^2)`, `h` = 2) and checks the
 //! measured gap agrees with the closed form within `gamma(8)` of that size, and exceeds
 //! a hundred times that rounding: the net is off the cylinder by far more than the
-//! rounding of its stored points (ARGUED: `implicit::lies_on`'s bound is of that order,
-//! `gamma(64)` of the patch size squared, so it refuses). Rigid moves whose turn is a
+//! rounding of its stored points. That margin is against `gamma(8)` of the size, not
+//! against `implicit::lies_on`'s own allowance (`gamma(64)` of the patch size squared),
+//! which the gap exceeds by roughly ten times, so it refuses (ARGUED). Rigid moves whose turn is a
 //! rounding-level twist (`gen0291`, `gen1190`) are recorded on the centre-line cylinder
 //! instead and keep their status.
 //!
@@ -235,9 +236,11 @@ const ACCEPTED: &[(&str, f64, f64)] = &[("gen0152", 1001.0, 1000.0)];
 /// the bottom circle's normal by far more than rounding, and the rebuild refused it since
 /// #16982; but the two circles are still coaxial about the centre line through their
 /// centres, each tilted `t` from it, so the net is on that cylinder within `r t^2 / 2`
-/// plus the twist's `2 r sin^2(a / 4)` (PROVEN, closed form; both measured below from
-/// the recorded axis). Both are far below an ulp of the net's coordinates, so the rebuild
-/// records that cylinder (status `1000`), the net moved by no more than a few ulps
+/// plus the twist's `2 r sin^2(a / 4)` (closed form, evaluated with a MEASURED tilt: `t`
+/// from the cross product of the recorded axes before and after the edit). That gap,
+/// not the acceptance threshold (which is `implicit::lies_on`'s allowance), is below one
+/// ulp of the net's coordinates, so the rebuild records that cylinder (status `1000`),
+/// the net moved by no more than a few ulps
 /// (MEASURED: the largest control point move, gated at 4 ulps of the largest
 /// coordinate).
 #[test]
