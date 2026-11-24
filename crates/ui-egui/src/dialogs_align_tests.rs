@@ -267,3 +267,34 @@ fn a_remembered_flip_is_sent_off_where_neither_side_faces_a_way_and_comes_back()
     let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
     assert_eq!(p["flip"], json!(true), "{p}");
 }
+
+/// Components mode says it moves the component, and a snap Components does not list (Auto, from
+/// a remembered bodies run) is As Picked there.
+#[test]
+fn components_mode_says_component_and_takes_auto_as_picked() {
+    let mut h = Harness::new();
+    let comp = h.app.run("component.create", json!({"name": "Extrusion"})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 60, "body_name": "Beam"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let second = h.app.run("occurrence.copy", json!({"component": comp, "translate": [40, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let bodies = crate::dialogs::Dialog::for_command(&h.app, "solid.align").unwrap();
+    assert!(solidcraft_ui_text::tr(bodies.inputs[0].tip.unwrap()).contains("the body"));
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![second] }];
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.align").unwrap();
+    let tip = solidcraft_ui_text::tr(d.inputs[0].tip.unwrap());
+    assert!(tip.contains("the component") && !tip.contains("body"), "{tip}");
+    d.inputs[1].items = vec![crate::dialogs::face_sel(&h.app.session, Vec3::new(45.0, 5.0, 0.0)).unwrap()];
+    d.inputs[2].items = vec![crate::dialogs::face_sel(&h.app.session, Vec3::new(10.0, 5.0, 30.0)).unwrap()];
+    // The dialog's extra values ride along as parameters; the rest is the command proper.
+    let command = |d: &crate::dialogs::Dialog| {
+        let mut p = apply_commands(&h.app, d).unwrap().remove(0).1;
+        if let Some(m) = p.as_object_mut() {
+            m.retain(|k, _| !k.ends_with("_snap"));
+        }
+        p
+    };
+    let picked = command(&d);
+    d.extra.insert("from_snap".into(), json!("auto"));
+    d.extra.insert("to_snap".into(), json!("auto"));
+    assert_eq!(command(&d), picked);
+}
