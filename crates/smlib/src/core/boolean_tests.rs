@@ -246,6 +246,20 @@ fn boolean2d_combines_overlapping_squares() {
     assert!(boolean2d(&a, &far, BooleanOp::Intersect).unwrap().is_none(), "disjoint squares intersected");
 }
 
+/// The classification refusal keeps its type through smlib's error mapping, so the `union_all`
+/// retry fires on it and on nothing else. No input is known that reaches it through a boolean
+/// (see the review of #16552: 300 random pairs, symmetric and tiny-feature joins all build
+/// level by level), so the plumbing is checked by its mappings, not by a join that fails
+/// without the retry; the kernel-to-ops mapping has its own test in solidcore-ops.
+#[test]
+fn not_one_foot_travels_by_its_type() {
+    let typed = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::NotOneFoot { found: 3 }, None);
+    assert_eq!(typed, Error::NotOneFoot { found: 3 });
+    // a deliberate refusal of its own kind is not the classification's, and is not retried
+    let other = super::call::error("smlib_boolean_union_all", solidcore_ops::Error::Exception, None);
+    assert_ne!(other, Error::NotOneFoot { found: 3 }, "a deliberate refusal is not the classification's");
+}
+
 /// Two 10 mm cubes touching along one edge, joined: a closed body whose two solids meet along
 /// that edge (four edgeuses round it), 2000 mm³.
 #[test]

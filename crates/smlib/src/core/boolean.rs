@@ -81,14 +81,15 @@ pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidRe
 /// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
 /// level as it is): at least one body and at most [`crate::MAX_UNION_BREPS`].
 ///
-/// Not upstream: when the level-by-level union fails with a retriable kernel failure (a
-/// classification that found no single nearest point on a face's surface, a refused gap, ...),
-/// the same bodies are united once more on fresh copies, one at a time against the result so far
-/// ([`union_one_by_one`]). The union of solids is the same set whichever pairing computes it, and
-/// a pair the level scheme cannot classify may classify fine against the accumulated body, so a
-/// join of many bodies that fails one pairing is built instead of refused
-/// (SolidCraft issue #16552). An unported or cancelled failure keeps its own error; so does a
-/// failure of the retry.
+/// Not upstream: when the level-by-level union fails with the classification's own typed
+/// refusal ([`Error::NotOneFoot`], `compute_point_parameters` finding no single nearest point
+/// on a face's surface), the same bodies are united once more on fresh copies, one at a time
+/// against the result so far ([`union_one_by_one`]). The union of solids is the same set
+/// whichever pairing computes it, and a pair the level scheme cannot classify may classify fine
+/// against the accumulated body, so a join of many bodies that fails one pairing is built
+/// instead of refused (SolidCraft issue #16552). Any other failure — a deliberate refusal such
+/// as the solid leak, an unported step, a cancellation — keeps its own error; so does a failure
+/// of the retry.
 pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
         return Err(Error::Argument);
@@ -97,8 +98,7 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
     let c = copies(bodies)?;
     match call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(c)) {
         Ok(b) => Ok(b),
-        Err(first) if matches!(first, Error::Unported(_) | Error::Cancelled(_)) => Err(first),
-        Err(first) => {
+        Err(first @ Error::NotOneFoot { .. }) => {
             let fresh = copies(bodies)?;
             match union_one_by_one(fresh) {
                 Ok(b) => Ok(b),
@@ -106,6 +106,7 @@ pub(crate) fn union_all(bodies: &[&Body]) -> Result<Body> {
                 Err(_) => Err(first),
             }
         }
+        Err(first) => Err(first),
     }
 }
 
