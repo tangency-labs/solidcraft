@@ -1262,6 +1262,7 @@ fn hostile_params_never_panic() {
         "fixed",
         "format",
         "from",
+        "gap",
         "head",
         "head_gap",
         "height",

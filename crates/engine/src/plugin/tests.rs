@@ -525,6 +525,58 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// A granted `file` command names a file by its grant's name; the reply names the real file.
+/// A read-only grant serves only input readers; a name the command may not use is refused first.
+#[test]
+fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-grant-paths-{}", std::process::id()));
+    let (outbox, input) = (root.join("outbox"), root.join("input"));
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::create_dir_all(&input).unwrap();
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: vec![outbox.clone()],
+        file_read_folders: vec![outbox.clone(), input.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    host.session.plugin_state.file_grants = vec![
+        FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write: true },
+        FileGrant { name: "input".into(), folder: input.clone(), read: true, write: false },
+    ];
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let exported = host.run_command("file.export_step", &json!({"path":"grant:outbox/part.step"})).unwrap();
+    assert!(outbox.join("part.step").is_file());
+    assert_eq!(exported["path"], json!(outbox.join("part.step").to_string_lossy()), "the reply names the file where it is");
+    std::fs::copy(outbox.join("part.step"), input.join("part.step")).unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":"grant:input/part.step"}));
+    assert!(inserted.is_ok(), "an input reader uses a read-only grant: {inserted:?}");
+    for path in ["grant:input/copy.step", "grant:elsewhere/copy.step", "grant:outbox/../copy.step"] {
+        let refused = host.run_command("file.export_step", &json!({"path": path}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.starts_with(path)), "{path}: {refused:?}");
+    }
+    // The rewritten path is then judged by the command's scope like any other (here Windows' rules
+    // for device names and streams), so the grant form reaches nothing a full path could not.
+    if cfg!(windows) {
+        for path in ["grant:outbox/nul.step", "grant:outbox/part.step:stream"] {
+            let refused = host.run_command("file.export_step", &json!({"path": path}));
+            assert!(
+                matches!(&refused, Err(HostError::CommandFailed { reason, .. }) if reason.contains("not allowed for this agent")),
+                "{path}: {refused:?}"
+            );
+        }
+    }
+    assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
@@ -1961,6 +2013,52 @@ mod native {
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
+            }
+        }
+    }
+
+    /// A plugin saves into its folder by the grant's name; under a read-only grant nothing is written.
+    #[test]
+    fn a_plugin_saves_into_its_granted_folder_by_the_grants_name() {
+        for write in [true, false] {
+            let f = Fixture::new("call $box");
+            let outbox = f.0.join("outbox");
+            std::fs::create_dir_all(&outbox).unwrap();
+            let (command, args) = ("file.save_as", r#"{"path":"grant:outbox/part.sc"}"#);
+            let call = format!("      i32.const 2048 i32.const {} i32.const 3072 i32.const {} i32.const 0 call $run\n", command.len(), args.len());
+            let source = component_template()
+                .replace("      call $box\n      call $box\n", &call)
+                .replace("\"file.export\"", &format!("\"{command}\")\n    (data (i32.const 3072) \"{}\"", args.replace('"', "\\22")));
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([command]);
+            m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"outbox","read":true,"write":write}]});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            s.plugin_state.grants.insert(
+                "sample".into(),
+                Grants {
+                    package_hash: Some(read_package(&f.path()).unwrap().approval),
+                    command_groups: BTreeSet::from(["file".into()]),
+                    folders: vec![FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write }],
+                    fuel: None,
+                    memory_mib: None,
+                    input_folder: false,
+                },
+            );
+            let saved = outbox.join("part.sc");
+            let result = f.run(&mut s);
+            if write {
+                result.unwrap();
+                assert!(saved.is_file(), "the design is saved in the granted folder");
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`outbox` is not a folder this command may use")),
+                    "{error}"
+                );
+                assert!(!saved.exists(), "a read-only grant writes nothing");
             }
         }
     }
