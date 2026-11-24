@@ -7207,7 +7207,9 @@ fn continuous_member_keeps_one_identity_through_reversal_edit_reopen_and_undo() 
     );
     let bs = bodies(&mut s);
     assert_eq!(bs[0].0, "Main hoop");
-    assert_eq!(s.model.state().body("Main hoop").unwrap().frame_member_line.as_deref(), Some("$path"));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let member = saved.records["model_bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Main hoop").unwrap();
+    assert_eq!(member["frame_member_line"].as_str(), Some("$path"));
     let kind = &s.doc.feature(fid.as_u64().unwrap()).unwrap().kind;
     assert_eq!(solidcraft_doc::frame::member_line_ids(&s.model.state(), kind).unwrap(), ["$path"]);
     let solidcraft_doc::FeatureKind::FrameMember { names, .. } = kind else { panic!("not a member") };
