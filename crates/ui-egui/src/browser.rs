@@ -2115,9 +2115,9 @@ fn occurrence_rows_inner(
         if isolate {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [path], "isolate": true}));
         } else {
-        let paths = selected_occurrence_paths(app, path);
-        let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
-        let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
+            let paths = selected_occurrence_paths(app, path);
+            let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
+            let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
         }
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());
