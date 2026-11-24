@@ -388,7 +388,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file (no C++ export reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
             Ok(b) => b,
@@ -437,7 +437,7 @@ pub(crate) fn result_breps(case: &Case) -> (Brep, Bodies, Vec<Option<Bodies>>) {
         (raw, b)
     };
     let i: Inputs = case.parse().unwrap();
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = crate::own_reader::read_file_rebuild(&mut k, &path(&i).unwrap(), i.rebuild)
         .unwrap()
         .unwrap();

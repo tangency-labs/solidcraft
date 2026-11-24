@@ -589,7 +589,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -783,7 +783,7 @@ fn rust_err(e: &SolidError) -> Output {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     if let OpIn::ProtoVertex {
         approx,
         capture,

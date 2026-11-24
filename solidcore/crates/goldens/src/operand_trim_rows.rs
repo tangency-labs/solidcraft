@@ -1185,7 +1185,10 @@ mod feature_executive {
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
-            let out = Runner.run_rust(&case).unwrap();
+            let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                Runner.run_rust(&case)
+            })
+            .unwrap();
             assert_eq!(
                 plain_digest(&out, row.moved, false),
                 row.new,
@@ -1198,7 +1201,10 @@ mod feature_executive {
                 "{}: more than the listed values moved",
                 row.case
             );
-            let (mut input, mut base, features) = result_breps(&case);
+            let (mut input, mut base, features) =
+                crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                    result_breps(&case)
+                });
             // the input model's own level 2: a trim this branch copies carries its warnings
             let operand = solidcore::topology::brep::validation::soundness(
                 &mut solidcore::kernel::Kernel::default(),
@@ -1338,7 +1344,11 @@ mod trim_blocks {
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
                     sink.borrow_mut().extend(c);
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(
@@ -1346,7 +1356,12 @@ mod trim_blocks {
                 row.new,
                 "{name}: not the row"
             );
-            let blind = with_hook(Box::new(clear_trims), || runner.run_rust(&case)).unwrap();
+            let blind = with_hook(Box::new(clear_trims), || {
+                crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                    runner.run_rust(&case)
+                })
+            })
+            .unwrap();
             assert_eq!(
                 digest(&blind.values, &blind.ints),
                 row.main,
@@ -1456,7 +1471,11 @@ mod trim_blocks {
                         sink.borrow_mut().push(c);
                     }
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(

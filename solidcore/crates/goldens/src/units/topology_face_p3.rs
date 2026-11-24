@@ -1707,14 +1707,13 @@ mod tests {
     use super::*;
     use solidcore::curve::line::Line;
     use solidcore::geom::extent1d::Extent1d;
-    use solidcore::kernel::Kernel;
     use solidcore::math::{Point3, Vec3};
     use solidcore::nurbs::b_spline_curve::BSplineCurve;
     use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 
     #[test]
     fn own_uv_trim_copy_slices_line_to_its_b_spline_base() {
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut nurb = allocate_nurb_curve(1, 1, 3).unwrap();
         for (point, x) in nurb.cpts_mut().iter_mut().zip([-5.0, 5.0]) {
             point.x = x;
