@@ -978,8 +978,9 @@ fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
 
 /// The sheet `r` swept from `pieces` that start on `start`, each face turned where it faces away
 /// from the side the curves give it: the curve's direction crossed with `start`'s normal, as
-/// [`extrude_sheet`]'s faces face. A face is judged at the middles of its edges lying on the
-/// curves; one with no such edge keeps its side, and a closed shell (a solid) is left as it is.
+/// [`extrude_sheet`]'s faces face. Each curve is sampled at its middle and solidcore judges the
+/// faces through it (`Query::faces_against`); a face no sample lies on keeps its side, and a
+/// closed shell (a solid) is left as it is.
 fn faced_by_curves(r: Brep, start: &Plane, pieces: &[Numbered]) -> Result<Brep> {
     if r.edges.iter().all(|e| e.uses.len() >= 2) {
         return Ok(r);
