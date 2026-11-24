@@ -407,6 +407,42 @@ fn a_saved_model_with_a_long_warning_is_adopted() {
     assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
 }
 
+/// A sketch a design file puts on a face by its point alone (no face name, no attachment)
+/// follows the nearest flat face that faces its way. When no face is at its point any more, it
+/// still opens on that face's plane, but with a warning (#20518): the `sketch.create` command
+/// refuses the same point, and the file said nothing. A face that only moved along its normal
+/// (the point still on it, seen square to it) gives no warning.
+#[test]
+fn a_sketch_whose_face_point_is_on_no_face_warns() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: None, anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let z = m.state().sketches.iter().find(|s| s.feature == id).unwrap().plane.origin.z;
+        (result.warning.clone(), z)
+    };
+    let (warning, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a point on the top face: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(15.0, Vec3::new(10.0, 10.0, 15.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a top face that moved up 5 mm still holds the point: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0));
+    let warning = warning.unwrap_or_default();
+    assert!(warning.contains("no face is at the point the sketch was placed on, [60, 60, 20]"), "{warning}");
+    assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
+}
+
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
 /// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
 #[test]

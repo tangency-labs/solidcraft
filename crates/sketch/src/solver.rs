@@ -22,6 +22,7 @@ use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
+use crate::sparse::Pattern;
 use crate::union_find::{find, union};
 
 #[path = "cursor.rs"]
@@ -33,6 +34,9 @@ mod redundancy;
 pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
 
 const MAX_ITERS: usize = 500;
+/// Components of at least this many unknowns solve LM's steps with the sparse factorisation
+/// ([`Pattern`]); smaller ones with the dense elimination, which costs little at their size.
+const SPARSE_MIN_VARS: usize = 64;
 /// Variables in one connected component. Each component is solved as a dense system: an n by n
 /// matrix for the Levenberg-Marquardt step, rows by n for the Jacobian. 4,000 variables is a
 /// 128 MB matrix; past that the request grows to gigabytes and an allocation failure aborts the
@@ -1472,6 +1476,13 @@ fn lm_run(
     let n = vars.len();
     #[cfg(test)]
     lm_vars::add(n);
+    // A large component's steps are solved on the sparse structure of its normal equations
+    // (see `sparse`): the unknowns each block reads are where the matrix can have entries.
+    let pattern = (n >= SPARSE_MIN_VARS).then(|| {
+        let groups: Vec<Vec<usize>> =
+            blocks.iter().map(|(_, bv)| bv.iter().filter_map(|v| col.get(*v).copied().filter(|c| *c < n)).collect()).collect();
+        Pattern::new(n, &groups)
+    });
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
     let mut f = norm2(&r);
@@ -1556,14 +1567,23 @@ fn lm_run(
                 profiling::finish_run(run, StopReason::WorkBudget, max_abs(&r));
                 return Some((it, max_abs(&r)));
             }
-            let mut m = a.clone();
-            for (i, w) in weight.iter().enumerate() {
-                m.add(i, i, lambda * w + 1e-12);
-            }
+            let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = solve_unless(m, rhs, &mut 0.0, &cancelled);
+            let dense = || {
+                let mut m = a.clone();
+                for (i, s) in shift.iter().enumerate() {
+                    m.add(i, i, *s);
+                }
+                solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
+            // is left to the dense elimination, as every step was before.
+            let step = match &pattern {
+                Some(p) => p.solve(&|i, k| a.get(i, k), &shift, &rhs, &cancelled).or_else(|| if cancelled() { None } else { dense() }),
+                None => dense(),
+            };
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
             if cancelled() {

@@ -333,6 +333,38 @@ pub fn edge_bounds_material(target: &Brep, edge_id: EdgeId) -> Result<bool> {
     Ok(material_use(target, edge_id)?.is_some())
 }
 
+/// [`edge_bounds_material`], but a loop edge use without a shell, or in a shell without a
+/// region, is refused rather than taken for "no material" when no use bounds material: a
+/// sheet's edges (loop uses in void regions) and a wire edge (no loop uses) bound none, a
+/// broken ownership link is a failure. It refuses exactly the edges [`is_concave_edge`] refuses
+/// and a sheet does not explain (#19829).
+///
+/// # Errors
+///
+/// [`SolverFailure::EdgeBoundsNoMaterial`] (as [`is_concave_edge`]) for an edge with no
+/// material use and a loop use without a shell or region; those of the topology queries.
+pub fn edge_bounds_material_linked(target: &Brep, edge_id: EdgeId) -> Result<bool> {
+    if material_use(target, edge_id)?.is_some() {
+        return Ok(true);
+    }
+    for use_ in edge::edgeuses(target, edge_id, None, None)? {
+        if !eu::is_loop_edgeuse(target, use_)? {
+            continue;
+        }
+        let linked = match eu::shell(target, use_)? {
+            Some(shell) => crate::topology::shell::shell_region(target, shell)?.is_some(),
+            None => false,
+        };
+        if !linked {
+            return Err(SolidError::blend_solver(
+                OP,
+                SolverFailure::EdgeBoundsNoMaterial { edge: edge_id },
+            ));
+        }
+    }
+    Ok(false)
+}
+
 /// The first use of the edge in a loop of a shell of a region that is not a void.
 fn material_use(target: &Brep, edge_id: EdgeId) -> Result<Option<crate::topology::EdgeuseId>> {
     for use_ in edge::edgeuses(target, edge_id, None, None)? {
