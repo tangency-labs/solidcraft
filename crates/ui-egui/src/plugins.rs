@@ -720,6 +720,20 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
+        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
+        if plugins.is_empty() {
+            // First-time users need the package format and a way to find the guide before
+            // global host resource limits, which are rarely useful without a plugin (#18764).
+            let intro =
+                crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
+            crate::scenario::publish_rect("prefs:plugins:get_started", intro.rect);
+            let guide = ui.hyperlink_to(
+                RichText::new(solidcraft_ui_text::tr("prefs.plugins_guide")),
+                "https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md",
+            );
+            crate::scenario::publish_target("prefs:plugins:guide", guide.rect);
+            ui.add_space(8.0);
+        }
         // Install plugin…: pick a .zip, review what it asks for, install it.
         let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
         crate::scenario::publish_target("prefs:plugins:install", install.rect);
@@ -740,7 +754,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             );
             ui.add_space(8.0);
         }
-        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         let skipped = crate::plugin_slots::skipped(app).to_vec();
         let query = app.prefs_window.plugin_query.clone();
         crate::ui_kit::settings_list_section(
@@ -789,7 +802,17 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             }
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
+        let was_expanded = app.preferences.plugin_limits_expanded;
+        let advanced =
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
+        crate::scenario::publish_target("prefs:plugins:advanced_limits", advanced.rect);
+        if was_expanded && !app.preferences.plugin_limits_expanded {
+            // Do not leave a hidden, unfinished fuel or memory change pending for Apply.
+            app.prefs_window.plugin_limit_inputs = None;
+        }
+        if app.preferences.plugin_limits_expanded {
+            resource_controls(app, ui);
+        }
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
@@ -1462,6 +1485,38 @@ mod tests {
             assert!(!dir.exists(), "production layout does not create the plugin folder");
         }
         solidcraft_theme::set_dark(previous);
+    }
+
+    /// A new user's Plugins page leads with installation help. Resource controls remain
+    /// available under Advanced, and the saved preference restores their earlier layout (#18764).
+    #[test]
+    fn empty_plugins_page_leads_with_install_help_and_folds_advanced_limits() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("no-plugins");
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let help = crate::scenario::rect_of("prefs:plugins:get_started").expect("how to install a plugin");
+        let guide = crate::scenario::rect_of("prefs:plugins:guide").expect("link to plugin guide");
+        let install = crate::scenario::rect_of("prefs:plugins:install").expect("Install plugin button");
+        assert!(help.bottom() < guide.top(), "help comes before documentation");
+        assert!(guide.bottom() < install.top(), "the page leads with how to get plugins");
+        assert!(!h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "global resource fields start folded");
+        assert!(!dir.exists(), "looking at an empty page creates no plugin folder");
+
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_some(), "Advanced shows the old resource fields");
+
+        let mut reopened = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(reopened.preferences.plugin_limits_expanded, "the old layout remains a saved preference");
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(!h.app.preferences.plugin_limits_expanded, "the controls can be folded again");
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "folding clears hidden draft edits");
+        capture_page(&mut h.app, &dir, "plugins-get-started.png");
     }
 
     #[test]

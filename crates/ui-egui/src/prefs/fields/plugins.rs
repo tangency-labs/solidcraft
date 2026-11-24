@@ -10,6 +10,9 @@ macro_rules! plugins_preferences {
         $next! { $($rest),* ; $($fields)*
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+            /// Show the global fuel and memory controls on Preferences > Plugins (#18764).
+            /// Off keeps advanced controls folded; on exposes the prior always-visible controls.
+            plugin_limits_expanded: bool = false, PAGE_PLUGINS;
             /// User ceilings, not automatic increases to a package's approved execution budget.
             plugin_max_deadline_ms: u64 = solidcraft_engine::plugin::HostLimits::default().max_deadline_ms, PAGE_PLUGINS;
             plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;

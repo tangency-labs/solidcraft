@@ -1740,6 +1740,70 @@ fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
     assert_eq!(work.tight_boxes, 0, "{work:?}");
 }
 
+/// The first edit after a design opens from its saved model evaluates only what the edit
+/// changes, as every later edit does: a block changed leaves the other block and its round as
+/// they were. The saved model gave only each feature's whole result, so the first edit after
+/// opening evaluated every feature after it, the features of other bodies and parts included.
+#[test]
+fn the_first_edit_after_opening_keeps_the_features_of_other_bodies() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 25.0, 10.0))],
+        radius: "2".into(),
+        body: Some("B".into()),
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let rounded = volume(&model, "B");
+    assert!(rounded < 2000.0 - 1.0, "{rounded}");
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    // The same file with the round's body keyed otherwise (saved by a version that keyed it
+    // another way): what the round changed is not taken back, the round is evaluated again.
+    let mut other_key = model.saved(&doc).unwrap();
+    // B as the round left it: the deepest of its records (a body keeps the feature that made it).
+    let rounded_b = other_key.records["model_bodies"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|b| b["name"] == "B")
+        .max_by_key(|b| b["depth"].as_u64())
+        .unwrap();
+    assert_eq!(rounded_b["depth"], 3, "{rounded_b}");
+    rounded_b["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &other_key).unwrap();
+    let a = doc.features.first().unwrap().id;
+    if let FeatureKind::Box { length, .. } = &mut doc.feature_mut(a).unwrap().kind {
+        *length = "25".into();
+    }
+    let bodies = |model: &Model| {
+        let st = model.state();
+        st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>()
+    };
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let rebuilt = bodies(&fresh);
+    for (what, mut model, evaluated) in [("in the session", model, 1), ("opened", reopened, 1), ("opened, keyed otherwise", rekeyed, 2)] {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, evaluated, "{what}: {work:?}");
+        assert_eq!(work.blends, evaluated - 1, "{what}: {work:?}");
+        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{what}: {}", volume(&model, "A"));
+        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{what}: {} then {rounded}", volume(&model, "B"));
+        assert_eq!(bodies(&model), rebuilt, "{what}: the same bodies, keys and face names as the design evaluated afresh");
+    }
+}
+
 /// A join into the only body there is takes it without asking whether the tool meets it: the
 /// contact test meshes the body finely, and on a part of a few hundred faces it took longer than
 /// the join. With two bodies the tool picks the one it meets, as before.
@@ -4229,18 +4293,109 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert_eq!(work.fit_searches, 1, "{work:?}");
 }
 
-/// A pattern's copies are probed with the kernel's point classifications, to know whether they
-/// take material without intersecting them with the body (#11257). The points of a line are
-/// classified in one call, not one call a point: the kernel makes the body's copy and its
-/// search structures once for all the points of a call, and again for every call a point makes
-/// on its own.
+/// Whether a pattern's copies take material is read from the cut's own history first (#18396):
+/// a copy whose tool leaves a wall in the body, on a surface the body did not have, took
+/// material, and is neither probed with the kernel's point classifications (#11257) nor
+/// intersected with the body.
 #[test]
-fn a_pattern_probes_its_copies_with_one_classification_a_line() {
-    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
-    // bore's surface, where they are not inside the ring, so the probe tries every line it
-    // has before it finds the ring's material. It asked the kernel for 370 classifications,
-    // one a point, and asks for 36.
+fn a_pattern_knows_its_copies_took_material_from_the_cut() {
+    // The ten grooves of the pattern notch the same round bore. Each leaves its own round wall
+    // (4 mm about its own axis, a surface the ring did not have) in the ring: none is probed.
+    // The probe asked the kernel for 36 classifications here, batched a line to a call.
     let (faces, work) = grooved_ring_faces();
     assert_eq!(faces, 24, "the ring comes out as it did");
-    assert_eq!(work.classifications, 36, "{work:?}");
+    assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// A pattern's copies the cut's history cannot place are probed with the kernel's point
+/// classifications (#11257), the points of a line in one call, not one call a point: the kernel
+/// makes the body's copy and its search structures once for all the points of a call.
+#[test]
+fn a_pattern_probes_the_copies_the_cut_does_not_place_with_one_classification_a_line() {
+    let mut doc = Document::new("in the bore");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: crate::dir_expr(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    doc.add_feature(cylinder(Vec3::new(0.0, 0.0, -1.0), "16", "57", Operation::Cut), Some("Bore")).unwrap();
+    // Sixteen pegs 2 mm round on a 10 mm circle, all in the empty bore (out to 12 mm of its 16):
+    // each 3.9 mm from the next, so their 4 mm boxes meet and the cut can't place them.
+    let peg = doc.add_feature(cylinder(Vec3::new(10.0, 0.0, 10.0), "2", "20", Operation::Cut), Some("Peg")).unwrap();
+    let pattern = hole_pattern(&mut doc, peg, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("15 of 15 cut copies remove no material")), "{result:?}");
+    // Each of the 15 copies is probed along 4 lines (its round side's axis and the three lines
+    // through the middle of its box), each line with one call for the peg's points and one for
+    // the ring's points among them (none in the ring): 15 x 4 x 2.
+    assert_eq!(work.classifications, 120, "{work:?}");
+}
+
+/// A body of two pieces can lose a whole piece to a copy that leaves none of its faces: that copy
+/// took material, and the cut's history does not count it a miss.
+#[test]
+fn a_copy_that_takes_a_whole_piece_of_a_body_is_not_a_miss() {
+    let block = |corner: Vec3, size: f64, operation: Operation| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: size.to_string().into(),
+        width: size.to_string().into(),
+        height: size.to_string().into(),
+        operation,
+        centred: false,
+    };
+    let mut doc = Document::new("two pieces");
+    doc.add_feature(block(Vec3::ZERO, 10.0, Operation::NewBody), Some("A")).unwrap();
+    // A second piece of A, 4 mm across at x 30: the join meets nothing and keeps it apart.
+    doc.add_feature(block(Vec3::new(30.0, 0.0, 0.0), 4.0, Operation::Join), Some("Piece")).unwrap();
+    // A 6 mm cutter at x 18 to 24, clear of both pieces; its copy 11 mm on, x 29 to 35, holds the
+    // whole second piece.
+    let cutter = doc.add_feature(block(Vec3::new(18.0, -1.0, -1.0), 6.0, Operation::Cut), Some("Cutter")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [cutter],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "11"},
+    }))
+    .unwrap();
+    let pattern = doc.add_feature(pattern, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(!result.warning.as_deref().is_some_and(|w| w.contains("cut copies remove no material")), "{:?}", result.warning);
+    let st = model.state();
+    let v: f64 = st.bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((v - 1000.0).abs() < 1e-6, "{v}");
+}
+
+/// A pattern's copies that leave no face in the body, each clear of the others, took no
+/// material: the cut's history says so, and the count of the copies that remove no material is
+/// the one the kernel's tests gave, without asking it (#18396).
+#[test]
+fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
+    let mut doc = Document::new("beside the ring");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: crate::dir_expr(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    // Every copy stands 60 mm from the axis: 4 mm round, 31 mm or more from the ring, and about
+    // 38 mm from the next copy.
+    let peg = doc.add_feature(cylinder(Vec3::new(60.0, 0.0, -1.0), "4", "57", Operation::Cut), Some("Peg")).unwrap();
+    let pattern = hole_pattern(&mut doc, peg, 10);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("9 of 9 cut copies remove no material")), "{result:?}");
+    assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
 }
