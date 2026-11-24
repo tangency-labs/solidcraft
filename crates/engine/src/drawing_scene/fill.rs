@@ -58,7 +58,7 @@ pub fn paper_group(drawing: &Drawing, resolved: &ResolvedSketchFill) -> Result<G
     drawing.validate().map_err(|e| error(e.to_string()))?;
     if drawing.id != resolved.drawing
         || !drawing.sheet_fill(resolved.id).is_some_and(|fill| fill.sketch == resolved.sketch && fill.paint == resolved.paint)
-        || !drawing.sheet_sketch(resolved.sketch).is_some_and(|sketch| sketch.sheet == resolved.sheet)
+        || !drawing.sheet_sketch(resolved.sketch).is_some_and(|sketch| drawing.sketch_sheet(sketch) == Some(resolved.sheet))
     {
         return Err(error("resolved fill owner or paint differs from its drawing record".into()));
     }

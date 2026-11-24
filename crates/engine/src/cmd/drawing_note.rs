@@ -31,7 +31,7 @@ const INSPECT: &str = "drawing.note.inspect";
 const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new(ADD, "Add Note", crate::checked!("drawing.note.add", add))
+    CommandSpec::new(ADD, "Add Note", crate::checked!("drawing.note.add", add)).begins_edit()
         .icon("new")
         .in_drawing()
         .doc_only()
@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Note", crate::checked!("drawing.note.edit", edit))
+    CommandSpec::new(EDIT, "Edit Note", crate::checked!("drawing.note.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
         .doc_only()

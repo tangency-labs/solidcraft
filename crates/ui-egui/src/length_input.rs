@@ -169,13 +169,14 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             lengths
         }
         D::Shell { thickness } => vec![thickness],
-        D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
+        D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],
         D::MeshSectionStack { from, to, spacing, .. } => vec![spacing, from, to],
         D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],

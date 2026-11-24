@@ -85,6 +85,7 @@
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -573,9 +574,9 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::vector3d::Vec3::solve_two_linear_equations",
-            "the system is singular",
+            GeomFailure::Singular { measure: denom },
         ))
     }
 
@@ -601,9 +602,9 @@ impl Vec3 {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(SolidError::geom_failed(
+            _ => Err(SolidError::geom(
                 "geom::vector3d::Vec3::component_mut",
-                "the component index is out of range",
+                GeomFailure::IndexOutOfRange { index, len: 3 },
             )),
         }
     }
@@ -683,9 +684,11 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::geom_failed(
+                // reached when `self` overflows: unitizing a vector whose squared
+                // length is infinite gives a zero vector
+                return Err(SolidError::geom(
                     "geom::vector3d::Vec3::make_unit_ortho_vectors",
-                    "no perpendicular vector found",
+                    GeomFailure::NoPerpendicular,
                 ));
             }
         }

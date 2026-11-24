@@ -14,10 +14,24 @@ use egui::{Color32, Painter, Rect, TextureHandle, TextureOptions, pos2};
 pub mod glyphs;
 mod svg;
 
-pub use svg::{
-    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ADDED, MAX_ADDED_BYTES, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render,
-    render_tinted, set_theme_palette, theme_palette, theme_palette_state,
-};
+pub use svg::Doc;
+pub use svg::IconData;
+pub use svg::IconExtension;
+pub use svg::IconSet;
+pub use svg::Look;
+pub use svg::MAX_ACCENTS;
+pub use svg::MAX_ADDED;
+pub use svg::MAX_ADDED_BYTES;
+pub use svg::MAX_ROLES;
+pub use svg::PLACEHOLDER;
+pub use svg::Palette;
+pub use svg::Resolved;
+pub use svg::audit;
+pub use svg::render;
+pub use svg::render_tinted;
+pub use svg::set_theme_palette;
+pub use svg::theme_palette;
+pub use svg::theme_palette_state;
 
 static INSTALLED: OnceLock<&'static IconSet> = OnceLock::new();
 
