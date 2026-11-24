@@ -55,6 +55,18 @@ pub(crate) struct WindowState {
 
     pub dragging: bool,
 
+    /// SolidCraft: the latest position of a pure move in the modal move/size loop, sent as
+    /// `Moved` at `WM_EXITSIZEMOVE`.
+    pub pending_moved: Option<PhysicalPosition<i32>>,
+
+    /// SolidCraft: the window changed size during the current modal move/size loop (a resize,
+    /// a snap, a DPI change). Until it does, the loop is a pure move and paints are deferred.
+    pub size_changed_in_loop: bool,
+
+    /// SolidCraft: a paint was deferred during a pure move; one is requested at
+    /// `WM_EXITSIZEMOVE` so the app catches up with whatever it asked to draw meanwhile.
+    pub paint_deferred_in_loop: bool,
+
     pub skip_taskbar: bool,
 }
 
@@ -175,6 +187,12 @@ impl WindowState {
             redraw_requested: false,
 
             dragging: false,
+
+            pending_moved: None,
+
+            size_changed_in_loop: false,
+
+            paint_deferred_in_loop: false,
 
             skip_taskbar: false,
         }

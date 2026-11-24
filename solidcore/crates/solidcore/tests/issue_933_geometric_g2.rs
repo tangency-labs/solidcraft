@@ -1,8 +1,7 @@
 //! tangency-labs/solidcore#933, #838 (WR-380): upstream's G2 test of
 //! `smgu_EvaluateCurveContinuity` compares the first normal with itself and the raw
-//! second-derivative lengths. `Kernel::fixes.geometric_g2_continuity` compares the Frenet
-//! curvatures and the two normals instead. These go through `Curve::evaluate_continuity`,
-//! which reads the field from the `Kernel`.
+//! second-derivative lengths. solidcore compares the Frenet curvatures and the two normals
+//! instead. These go through `Curve::evaluate_continuity`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -52,29 +51,10 @@ fn issue_933_opposite_normals_are_not_g2() {
         Point3::new(1.0, 0.0, 0.0),
         Point3::new(2.0, -1.0, 0.0),
     ]);
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
-    assert_eq!(continuity(&k, &up, &down), ContinuityType::C1);
-    // the same curve is still G2 with the fix on
-    assert_eq!(continuity(&k, &up, &up), ContinuityType::C1C2C3);
-}
-
-/// Without the field the result is SMLib's.
-#[test]
-fn geometric_g2_continuity_is_off_by_default() {
-    let up = quadratic([
-        Point3::new(0.0, 0.0, 0.0),
-        Point3::new(1.0, 0.0, 0.0),
-        Point3::new(2.0, 1.0, 0.0),
-    ]);
-    let down = quadratic([
-        Point3::new(0.0, 0.0, 0.0),
-        Point3::new(1.0, 0.0, 0.0),
-        Point3::new(2.0, -1.0, 0.0),
-    ]);
     let k = Kernel::default();
-    assert!(!k.fixes.geometric_g2_continuity);
-    assert_eq!(continuity(&k, &up, &down), ContinuityType::C1G2G3);
+    assert_eq!(continuity(&k, &up, &down), ContinuityType::C1);
+    // the same curve is G2
+    assert_eq!(continuity(&k, &up, &up), ContinuityType::C1C2C3);
 }
 
 /// #838: the same parabola at twice the parameter speed is geometrically G2; upstream
@@ -92,9 +72,6 @@ fn issue_838_reparametrised_curve_is_geometrically_g2() {
         Point3::new(2.0, 0.0, 0.0),
         Point3::new(4.0, 4.0, 0.0),
     ]);
-    let default = Kernel::default();
-    let mut fixed = Kernel::default();
-    fixed.fixes.geometric_g2_continuity = true;
-    assert_eq!(continuity(&default, &slow, &fast), ContinuityType::G1);
-    assert_eq!(continuity(&fixed, &slow, &fast), ContinuityType::G1G2G3);
+    let k = Kernel::default();
+    assert_eq!(continuity(&k, &slow, &fast), ContinuityType::G1G2G3);
 }

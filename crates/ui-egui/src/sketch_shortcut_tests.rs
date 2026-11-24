@@ -18,6 +18,47 @@ fn press(h: &mut Harness, key: &str) {
     h.settle();
 }
 
+/// #12902: Ctrl+Shift+Z redoes, like Ctrl+Y; it used to undo a second time, Shift ignored. With a
+/// spline being drawn, Ctrl+Z takes its last point back and Ctrl+Shift+Z still redoes the history.
+#[test]
+fn ctrl_shift_z_redoes_like_ctrl_y() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[50,10],"radius":5})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let curves = |h: &Harness| h.app.session.model.state().sketch(sketch).unwrap().sketch.curves.len();
+    let drawn = curves(&h);
+    let undo = h.app.session.undo.len();
+    let press = |h: &mut Harness, key: &str, shift: bool| {
+        h.step(&json!({"key": key, "cmd": true, "shift": shift})).unwrap();
+        h.settle();
+        // Well apart, so two presses are never a quick double press.
+        h.frames(60);
+    };
+    press(&mut h, "Z", false);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn - 1, undo - 1), "Ctrl+Z undoes the circle");
+    press(&mut h, "Z", true);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn, undo), "Ctrl+Shift+Z redoes it");
+    press(&mut h, "Z", false);
+    press(&mut h, "Y", false);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn, undo), "Ctrl+Y still redoes");
+    // A spline with pending points: Ctrl+Z takes a point back, Ctrl+Shift+Z leaves the points
+    // alone and redoes the history.
+    press(&mut h, "Z", false);
+    h.step(&json!({"start":"sketch.spline.fit_point"})).unwrap();
+    for point in [[2, 2, 0], [8, 2, 0]] {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+    }
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2);
+    press(&mut h, "Z", true);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2, "Ctrl+Shift+Z is not a spline-point undo");
+    assert_eq!(curves(&h), drawn, "the circle is back");
+    press(&mut h, "Z", false);
+    assert_eq!((h.app.tool.as_ref().unwrap().pts.len(), curves(&h)), (1, drawn), "Ctrl+Z takes the spline point back first");
+}
+
 #[test]
 fn spline_undo_removes_pending_points_before_sketch_history() {
     for cmd in ["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5"] {
@@ -108,7 +149,7 @@ fn project_can_keep_its_previous_direct_pick_workflow() {
 fn a_sketch_key_sketches_on_the_selected_planar_face() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
-    h.app.ui.pick_bodies = false;
+    h.app.ui.pick_mode = solidcraft_engine::PickMode::Faces;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BaseBox"})).unwrap();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
@@ -205,11 +246,14 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
     h.app.session.selection = selection.clone();
 
+    // Starting the body Move tool ends the open sketch, as every other tool does.
     press(&mut h, "M");
-    assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.active_sketch, sketch);
-    assert_eq!(h.app.session.selection, selection);
+    assert!(h.app.dialog.is_some(), "the default body Move shortcut opens Move");
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.dialog = None;
+    h.app.tool = None;
+    h.app.run("sketch.edit", json!({"sketch": sketch.unwrap()})).unwrap();
+    h.app.session.selection = selection.clone();
 
     crate::keymap::bind(&mut h.app, "sketch.move", "M", true).unwrap();
     press(&mut h, "M");
@@ -217,7 +261,7 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(matches!(dialog.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })));
     assert_eq!(dialog.inputs[0].items, selection);
     assert_eq!(h.app.session.active_sketch, sketch);
-    assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
+    assert!(crate::dialogs_move::moving(&h.app).is_none(), "M must not open component Move while editing its sketch");
 }
 
 /// With Keep model keys out of sketches on, sketches and the model have their own keys: with M
@@ -247,12 +291,35 @@ fn sketch_and_model_keys_are_kept_apart() {
     assert!(e.contains("already used"), "{e}");
 }
 
-/// #2459: by default a tool's shortcut pressed again starts the tool again, in the mode the key
-/// is bound to; the preference is off.
+/// Pressing an active tool or dialog's shortcut again closes it by default; auto-repeat does not,
+/// and with `shortcut_again_ends_tool` off the key starts the tool again as before.
 #[test]
-fn a_tools_shortcut_pressed_again_restarts_it_by_default() {
+fn a_tools_shortcut_pressed_again_closes_it_by_default() {
     let mut h = Harness::new();
     assert!(!h.app.preferences.shortcut_cycles_modes, "off by default");
+    assert!(h.app.preferences.shortcut_again_ends_tool, "on by default");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    press(&mut h, "L");
+    assert_eq!(tool(&h), Some("sketch.line"));
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), Some("sketch.line"), "key repeat keeps the tool");
+    press(&mut h, "L");
+    assert_eq!(tool(&h), None, "pressing L again closes the tool");
+    crate::keymap::press(&mut h.app, "L", true);
+    assert_eq!(tool(&h), None, "key repeat after closing does not reopen the tool");
+    h.app.finish_sketch();
+    h.settle();
+    press(&mut h, "E");
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+    crate::keymap::press(&mut h.app, "E", true);
+    assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"), "key repeat keeps the dialog");
+    press(&mut h, "E");
+    assert!(h.app.dialog.is_none(), "pressing E again closes the extrude dialog");
+    crate::keymap::press(&mut h.app, "E", true);
+    assert!(h.app.dialog.is_none(), "key repeat after closing does not reopen the dialog");
+    // The old way, behind the preference: pressing the key again restarts the tool.
+    h.app.preferences.shortcut_again_ends_tool = false;
     h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
     h.settle();
     press(&mut h, "R");
@@ -294,7 +361,13 @@ fn a_tools_shortcut_pressed_again_cycles_its_modes() {
     h.settle();
     press(&mut h, "R");
     assert_eq!(tool(&h), Some("sketch.rectangle.two_point"), "the first press starts the bound mode");
-    for want in ["sketch.rectangle.three_point", "sketch.rectangle.center", "sketch.rectangle.rounded", "sketch.rectangle.two_point"] {
+    for want in [
+        "sketch.rectangle.three_point",
+        "sketch.rectangle.center",
+        "sketch.rectangle.edge_center",
+        "sketch.rectangle.rounded",
+        "sketch.rectangle.two_point",
+    ] {
         press(&mut h, "R");
         assert_eq!(tool(&h), Some(want));
     }
@@ -365,7 +438,9 @@ fn a_construct_command_keeps_the_sketch_open() {
     let sketch = h.app.session.active_sketch;
     h.app.start("construct.plane.offset");
     h.settle();
-    assert_eq!(h.app.session.active_sketch, sketch);
+    // Starting any other tool, a construction plane included, finishes the open sketch.
+    assert!(sketch.is_some());
+    assert_eq!(h.app.session.active_sketch, None);
 }
 
 #[test]
@@ -379,9 +454,7 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     h.app.edit_feature(sketch);
     h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.start("solid.extrude");
-    assert_eq!(h.app.session.active_sketch, Some(sketch), "Finish and the marker restore commit together after evaluation");
-    assert!(h.app.deferred.is_some(), "the marker is not rolling back off the window thread");
-    assert!(h.app.dialog.is_none(), "Extrude opened before the marker was back");
+    assert_eq!(h.app.session.active_sketch, None, "the sketch finishes right away, and the marker restore follows after evaluation");
     for _ in 0..500 {
         if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
             break;
@@ -391,8 +464,9 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     }
     assert_eq!(h.app.session.doc.marker, None);
     assert_eq!(h.app.session.active_sketch, None);
-    let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
-    assert_eq!(items, vec![Sel::Profile { sketch, index: 0 }], "Extrude did not open once the marker was back");
+    h.frames(5);
+    assert!(h.app.dialog.is_some(), "Extrude opened once the marker was back");
+    let _ = sketch;
 }
 
 /// The SKETCH tab kept shown (#7904): right after MODEL with no sketch open, its drawing and

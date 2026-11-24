@@ -49,6 +49,7 @@
 //! recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::sweep::SweepFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::kernel::Kernel;
@@ -140,9 +141,9 @@ fn copy_in(k: &mut Kernel, piece: &mut Brep, b: &mut Brep) -> Result<()> {
     let this_face = |f: FaceId| key_of(EntityRef::Face(f));
     let (_, copied) = copy_faces(k, piece, &faces, b, false, &this_face, &mut env)?;
     if !copied {
-        return Err(SolidError::sweep_failed(
+        return Err(SolidError::sweep_defect(
             "CopyFaces",
-            "the corner pieces' faces could not be copied",
+            "copy_faces copies the corner pieces' faces the kernel just built, each a face of one closed piece with its surface and loops",
         ));
     }
     Ok(())
@@ -335,9 +336,9 @@ pub fn cornered_sweep(
     stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
     b.refresh_cached_topology();
     if !is_manifold_solid(&b)? {
-        return Err(SolidError::sweep_failed(
+        return Err(SolidError::sweep(
             OP,
-            "the cornered sweep is not a manifold solid",
+            SweepFailure::SweptBodyNotManifoldSolid,
         ));
     }
     Ok(b)

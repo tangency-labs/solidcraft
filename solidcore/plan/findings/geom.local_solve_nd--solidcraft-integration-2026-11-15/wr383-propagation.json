@@ -1,0 +1,1101 @@
+{
+  "scope": "Independent measurement audit only; no production, index, golden bless, branch, Cargo or public writes",
+  "baseline_revision": "be6ecb06420d501a8362d6de3d0de7ef324dafb9",
+  "phases": {
+    "main": "baseline default, old N-D=false and WR383=false",
+    "nd-only": "baseline N-D=true and WR383=false",
+    "after": "paired current default, both unconditional"
+  },
+  "inputs_identical": {
+    "surface.plane_p2--gen0599": true,
+    "topology.brep_mirror--mat0076": true
+  },
+  "main_equals_nd_only": {
+    "surface.plane_p2--gen0599": true,
+    "topology.brep_mirror--mat0076": true
+  },
+  "surface.plane_p2/gen0599": {
+    "decision": "New measured expectation independently supported by the tolerance contract; no tolerance change",
+    "certificate": {
+      "operation": "Plane::trim_curve_to_plane_domain",
+      "case": "gen0599",
+      "inputs_identical": true,
+      "main_equals_nd_only": true,
+      "arithmetic": "exact Fraction(binary64) dyadics; no curve samples",
+      "tolerance": 0.5,
+      "source_plane_max_residual_upper": 2.2073784383315977e-15,
+      "projected_source_exact_rectangle_intervals": [
+        [
+          0.0347076336502816,
+          0.20171281084005982
+        ],
+        [
+          0.7732852165276186,
+          1.0
+        ]
+      ],
+      "phases": {
+        "main": {
+          "curve_count": 4,
+          "curves": [
+            {
+              "type": "polyline",
+              "interval": [
+                0.02789009945413375,
+                0.03470763365028185
+              ],
+              "source_residual_upper": 1.308589680428319e-15,
+              "rectangle_distance_witness_upper": 0.03233586920973153
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.03470763365028185,
+                0.140625
+              ],
+              "source_residual_upper": 2.0866637524513927e-15,
+              "rectangle_distance_witness_upper": 2.0982588787335817e-15
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.140625,
+                0.20173595590037774
+              ],
+              "source_residual_upper": 6.115966546072321e-15,
+              "rectangle_distance_witness_upper": 0.002154082892391532
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.4856981795830564,
+                1.0
+              ],
+              "source_residual_upper": 3.8721530437799444e-15,
+              "rectangle_distance_witness_upper": 0.49230242729914614
+            }
+          ],
+          "all_returned_spans_rectangle_distance_upper": 0.49230242729914614,
+          "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+          "exact_rectangle_clip_uncovered_endpoint_distance_upper": 0.0,
+          "uncovered_parameter_intervals": []
+        },
+        "nd-only": {
+          "curve_count": 4,
+          "curves": [
+            {
+              "type": "polyline",
+              "interval": [
+                0.02789009945413375,
+                0.03470763365028185
+              ],
+              "source_residual_upper": 1.308589680428319e-15,
+              "rectangle_distance_witness_upper": 0.03233586920973153
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.03470763365028185,
+                0.140625
+              ],
+              "source_residual_upper": 2.0866637524513927e-15,
+              "rectangle_distance_witness_upper": 2.0982588787335817e-15
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.140625,
+                0.20173595590037774
+              ],
+              "source_residual_upper": 6.115966546072321e-15,
+              "rectangle_distance_witness_upper": 0.002154082892391532
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.4856981795830564,
+                1.0
+              ],
+              "source_residual_upper": 3.8721530437799444e-15,
+              "rectangle_distance_witness_upper": 0.49230242729914614
+            }
+          ],
+          "all_returned_spans_rectangle_distance_upper": 0.49230242729914614,
+          "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+          "exact_rectangle_clip_uncovered_endpoint_distance_upper": 0.0,
+          "uncovered_parameter_intervals": []
+        },
+        "after": {
+          "curve_count": 6,
+          "curves": [
+            {
+              "type": "polyline",
+              "interval": [
+                0.02789009945413375,
+                0.03470763365028185
+              ],
+              "source_residual_upper": 1.308589680428319e-15,
+              "rectangle_distance_witness_upper": 0.03233586920973153
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.03470763365028185,
+                0.140625
+              ],
+              "source_residual_upper": 2.0866637524513927e-15,
+              "rectangle_distance_witness_upper": 2.0982588787335817e-15
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.140625,
+                0.20173595590037774
+              ],
+              "source_residual_upper": 6.115966546072321e-15,
+              "rectangle_distance_witness_upper": 0.002154082892391532
+            },
+            {
+              "type": "approximate_contact_point",
+              "source_t": 0.4856981795830564,
+              "source_residual_upper": 1.121363000781991e-15,
+              "rectangle_distance_witness_upper": 0.49230242729914814
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.773285216527619,
+                0.859375
+              ],
+              "source_residual_upper": 2.0687495385737943e-15,
+              "rectangle_distance_witness_upper": 2.2677556733679087e-15
+            },
+            {
+              "type": "polyline",
+              "interval": [
+                0.859375,
+                1.0
+              ],
+              "source_residual_upper": 2.0687495385737943e-15,
+              "rectangle_distance_witness_upper": 2.2677556733679087e-15
+            }
+          ],
+          "all_returned_spans_rectangle_distance_upper": 0.49230242729914814,
+          "all_returned_spans_source_distance_upper": 6.115966546072321e-15,
+          "exact_rectangle_clip_uncovered_endpoint_distance_upper": 8.2740383433019e-15,
+          "uncovered_parameter_intervals": [
+            [
+              0.7732852165276186,
+              0.773285216527619
+            ]
+          ]
+        }
+      },
+      "conservative_binary64_rectangle_evaluation_error_bound": 3.341522978729647e-12,
+      "after_distance_upper_with_evaluation_envelope": 0.4923024273024897
+    },
+    "pictures": {
+      "before": "plane0599-before.png",
+      "after": "plane0599-after.png"
+    },
+    "limitation": "Approximate contact point is not an exact intersection. The old output also stays within the broad requested tolerance, so these invariants alone do not prove all old geometry wrong."
+  },
+  "topology.brep_mirror/mat0076": {
+    "decision": "Do not bless as a correct body. Keep executed and classify as a precisely tracked known failure, with input-valid/success-implies-output-valid guard.",
+    "input": {
+      "editing": true,
+      "file": "Solids/revolution.smb",
+      "matrix": [
+        [
+          0.8058680190465212,
+          -0.29026436029085756,
+          0.0,
+          0.0
+        ],
+        [
+          -0.10430573503780678,
+          0.141964763216248,
+          0.9843608686062126,
+          0.0
+        ],
+        [
+          5.828353536945563e-11,
+          -7.932649432106016e-11,
+          1.7616378843798325e-11,
+          0.0
+        ],
+        [
+          43.871017221482376,
+          4.321056959395637,
+          5.973499327348293,
+          1.0
+        ]
+      ],
+      "origin": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rebuild": false,
+      "scale_tol": true,
+      "x": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "y": [
+        0.0,
+        1.0,
+        0.0
+      ]
+    },
+    "input_level2": {
+      "main": {
+        "valid": true,
+        "failure_count": 0
+      },
+      "nd-only": {
+        "valid": true,
+        "failure_count": 0
+      },
+      "after": {
+        "valid": true,
+        "failure_count": 0
+      }
+    },
+    "operation_status": {
+      "main": "Ok(())",
+      "nd-only": "Ok(())",
+      "after": "Ok(())"
+    },
+    "output_level2": {
+      "main": {
+        "valid": false,
+        "failure_count": 16,
+        "failures": [
+          {
+            "name": "Edge/Edge Gap",
+            "message": "Gap between edge endPoints exceeds tolerance",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 2.1633192809335735e-05,
+            "value": 3.419267465560401,
+            "list_index": 3,
+            "test_index": 0
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 1.0000000000000002,
+            "value": 3.991909817225893,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 8,
+            "threshold": 1.931370849898476,
+            "value": 19.31370849898476,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 0,
+            "threshold": 0.01,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 1,
+            "threshold": 0.01,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 2,
+            "threshold": 0.01,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 12,
+            "threshold": 0.01,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 14,
+            "threshold": 0.01,
+            "value": 3.349868850652827,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 0,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 1,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 2,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 3,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 4,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 5,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 8,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 9,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          }
+        ],
+        "failure_line_count": 17
+      },
+      "nd-only": {
+        "valid": false,
+        "failure_count": 16,
+        "failures": [
+          {
+            "name": "Edge/Edge Gap",
+            "message": "Gap between edge endPoints exceeds tolerance",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 2.1633192809335735e-05,
+            "value": 3.419267465560401,
+            "list_index": 3,
+            "test_index": 0
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 1.0000000000000002,
+            "value": 3.991909817225893,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 8,
+            "threshold": 1.931370849898476,
+            "value": 19.31370849898476,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 0,
+            "threshold": 0.01,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 1,
+            "threshold": 0.01,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 2,
+            "threshold": 0.01,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 12,
+            "threshold": 0.01,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 14,
+            "threshold": 0.01,
+            "value": 3.349868850652827,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 0,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 1,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 2,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 3,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 4,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 5,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 8,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 9,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          }
+        ],
+        "failure_line_count": 17
+      },
+      "after": {
+        "valid": false,
+        "failure_count": 17,
+        "failures": [
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large V Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 3,
+            "threshold": 3.4474062940770893,
+            "value": 4.309257867596689,
+            "list_index": 3,
+            "test_index": 2
+          },
+          {
+            "name": "Edge/Edge Gap",
+            "message": "Gap between edge endPoints exceeds tolerance",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 2.1633192809335735e-05,
+            "value": 3.419267465560401,
+            "list_index": 3,
+            "test_index": 0
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 5,
+            "threshold": 1.0000000000000002,
+            "value": 3.991909817225893,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "UVEdge/UVEdge Gap",
+            "message": "too large U Dir gap between loop Edge endPoints that are not on a singularity",
+            "owner_type": "SmLoop",
+            "owner_index": 8,
+            "threshold": 1.931370849898476,
+            "value": 19.31370849898476,
+            "list_index": 3,
+            "test_index": 1
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 0,
+            "threshold": 0.01,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 1,
+            "threshold": 0.01,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 2,
+            "threshold": 0.01,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 12,
+            "threshold": 0.01,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Edge tolerance relative to brep tolerance",
+            "owner_type": "SmEdge",
+            "owner_index": 14,
+            "threshold": 0.01,
+            "value": 3.349868850652827,
+            "list_index": 1,
+            "test_index": 59
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 0,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 1,
+            "threshold": 0.02,
+            "value": 1.1951670514644068,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 2,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 3,
+            "threshold": 0.02,
+            "value": 1.0841157326229656,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 4,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 5,
+            "threshold": 0.02,
+            "value": 0.18099110331624244,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 8,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          },
+          {
+            "name": "Tolerance",
+            "message": "Vertex tolerance is too wide to excuse by clearance",
+            "owner_type": "SmVertex",
+            "owner_index": 9,
+            "threshold": 0.02,
+            "value": 18.00000000000001,
+            "list_index": 1,
+            "test_index": 82
+          }
+        ],
+        "failure_line_count": 18
+      }
+    },
+    "new_failure": {
+      "name": "UVEdge/UVEdge Gap",
+      "message": "too large V Dir gap between loop Edge endPoints that are not on a singularity",
+      "owner_type": "SmLoop",
+      "owner_index": 3,
+      "threshold": 3.4474062940770893,
+      "value": 4.309257867596689,
+      "list_index": 3,
+      "test_index": 2
+    },
+    "vertices_identical": true,
+    "surfaces_identical": true,
+    "all_3d_curve_supports_identical": true,
+    "max_vertex_affine_error": 1.0695084443661336e-14,
+    "edge2": {
+      "intervals": {
+        "main": [
+          0.0,
+          34.47406294077089
+        ],
+        "nd-only": [
+          0.0,
+          34.47406294077089
+        ],
+        "after": [
+          4.3092578675963615,
+          34.47406294077089
+        ]
+      },
+      "endpoint_vertices": [
+        {
+          "id": 4,
+          "point": [
+            49.27490402347648,
+            3.4185897092312554,
+            15.817108013410422
+          ],
+          "tolerance": 0.18099110331624244
+        },
+        {
+          "id": 5,
+          "point": [
+            48.75337534857886,
+            4.128413524915863,
+            20.738912356529568
+          ],
+          "tolerance": 0.18099110331624244
+        }
+      ],
+      "new_start_point": [
+        49.26619729443704,
+        3.4304399562576973,
+        15.899275723659056
+      ],
+      "new_start_vertex_gap": 0.08347315791712485,
+      "trims": {
+        "main": [
+          {
+            "edge": 2,
+            "edge_interval": [
+              0.0,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "gap": 0.0,
+                "surface": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "t": 0.0,
+                "uv": [
+                  27.35315137074856,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 1.5987211554602254e-14,
+                "surface": "Ok(Vec3 { x: 48.75337534857888, y: 4.12841352491586, z: 20.738912356529582 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.35315137074856,
+                  34.47406294077088,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 18,
+            "face": 2,
+            "uv_interval": [
+              0.0,
+              34.47406294077089
+            ]
+          },
+          {
+            "edge": 2,
+            "edge_interval": [
+              0.0,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "gap": 0.0,
+                "surface": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "t": 0.0,
+                "uv": [
+                  27.35315137074856,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 1.020439314654103e-14,
+                "surface": "Ok(Vec3 { x: 48.75337534857887, y: 4.12841352491586, z: 20.738912356529568 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.353151370748567,
+                  34.47406294077089,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 31,
+            "face": 3,
+            "uv_interval": [
+              0.0,
+              34.47406294077089
+            ]
+          }
+        ],
+        "nd-only": [
+          {
+            "edge": 2,
+            "edge_interval": [
+              0.0,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "gap": 0.0,
+                "surface": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "t": 0.0,
+                "uv": [
+                  27.35315137074856,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 1.5987211554602254e-14,
+                "surface": "Ok(Vec3 { x: 48.75337534857888, y: 4.12841352491586, z: 20.738912356529582 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.35315137074856,
+                  34.47406294077088,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 18,
+            "face": 2,
+            "uv_interval": [
+              0.0,
+              34.47406294077089
+            ]
+          },
+          {
+            "edge": 2,
+            "edge_interval": [
+              0.0,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "gap": 0.0,
+                "surface": "Ok(Vec3 { x: 49.27490402347648, y: 3.4185897092312523, z: 15.81710801341042 })",
+                "t": 0.0,
+                "uv": [
+                  27.35315137074856,
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 1.020439314654103e-14,
+                "surface": "Ok(Vec3 { x: 48.75337534857887, y: 4.12841352491586, z: 20.738912356529568 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.353151370748567,
+                  34.47406294077089,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 31,
+            "face": 3,
+            "uv_interval": [
+              0.0,
+              34.47406294077089
+            ]
+          }
+        ],
+        "after": [
+          {
+            "edge": 2,
+            "edge_interval": [
+              4.3092578675963615,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.26619729443704, y: 3.4304399562576973, z: 15.899275723659056 })",
+                "gap": 0.05003135184253591,
+                "surface": "Ok(Vec3 { x: 49.271415851346525, y: 3.4233372672663585, z: 15.850026818695936 })",
+                "t": 4.3092578675963615,
+                "uv": [
+                  27.35315137074856,
+                  2.757925035261671,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 1.5987211554602254e-14,
+                "surface": "Ok(Vec3 { x: 48.75337534857888, y: 4.12841352491586, z: 20.738912356529582 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.35315137074856,
+                  34.47406294077088,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 18,
+            "face": 2,
+            "uv_interval": [
+              4.3092578675963615,
+              34.47406294077089
+            ]
+          },
+          {
+            "edge": 2,
+            "edge_interval": [
+              4.3092578675963615,
+              34.47406294077089
+            ],
+            "edge_tolerance": 0.18099110331624244,
+            "endpoints": [
+              {
+                "edge": "Ok(Vec3 { x: 49.26619729443704, y: 3.4304399562576973, z: 15.899275723659056 })",
+                "gap": 1.6110097386971715e-14,
+                "surface": "Ok(Vec3 { x: 49.266197294437035, y: 3.4304399562577, z: 15.89927572365907 })",
+                "t": 4.3092578675963615,
+                "uv": [
+                  27.353151370748563,
+                  4.309257867596689,
+                  0.0
+                ]
+              },
+              {
+                "edge": "Ok(Vec3 { x: 48.753375348578864, y: 4.1284135249158584, z: 20.738912356529575 })",
+                "gap": 4.361887533681084e-13,
+                "surface": "Ok(Vec3 { x: 48.753375348578906, y: 4.128413524915798, z: 20.738912356529145 })",
+                "t": 34.47406294077089,
+                "uv": [
+                  27.353151370748563,
+                  34.4740629407688,
+                  0.0
+                ]
+              }
+            ],
+            "eu": 31,
+            "face": 3,
+            "uv_interval": [
+              4.3092578675963615,
+              34.47406294077089
+            ]
+          }
+        ]
+      }
+    },
+    "pcurve_interval_mismatch": false,
+    "limitations": [
+      "No claim of valid transformed solid or correct sheet is supported.",
+      "No attribution to SVD, rank deficiency, converter #13634, or a particular healing construction is proved.",
+      "Near-singular input matrix is finite; operation returned success. The exact cause of its invalid output remains separate follow-up work."
+    ],
+    "render": {
+      "provenance": "mat0076-render-provenance.json",
+      "pictures": [
+        "mat0076-main-ci-off-off.png",
+        "mat0076-main-ci-both-old-options-on-on.png"
+      ],
+      "equivalence_all_exact": true,
+      "does_not_prove_validity": true
+    },
+    "issue": "https://github.com/tangency-labs/solidcraft/issues/17271"
+  },
+  "unbundled_run_artifact_sha256": {
+    "unbundled-validation/nov15/paired/golden-review/tools/propagation.rs": "825a2c8b6c15951ab1f26d70ba61c1b4cf16101d1962877416f3027fa8fa6e19",
+    "plane0599-certificate.json": "375aeb074c9c1298c52583bbdd248fc69dcf3c0f2fb7be7d7c52180aa7f18a39",
+    "unbundled-validation/nov15/paired/golden-review/main-typed.json": "86938ebd7fc53bdfd4237dc384159f8685747afd8bcc2dbb32853c3ddf038500",
+    "unbundled-validation/nov15/paired/golden-review/nd-only-typed.json": "86938ebd7fc53bdfd4237dc384159f8685747afd8bcc2dbb32853c3ddf038500",
+    "unbundled-validation/nov15/paired/golden-review/after-typed.json": "f97477abbc852315ed92a8e1cf99c3240c4992e5cd778686702b8322ace14c30"
+  },
+  "archive_notes": "Full UV-support Debug strings and private helper paths omitted; numeric endpoints, domains, matrix and report values preserved. Historical unbundled artifact hashes are identifiers, not bundled files."
+}

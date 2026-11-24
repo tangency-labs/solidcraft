@@ -1,0 +1,435 @@
+{
+  "unit": "curve.curve_p3",
+  "case": "gen0607",
+  "seed": 7577097223519259670,
+  "baseline_commit": "f9ed9a90b453517d83e787169887c180e17656fd",
+  "reviewed_commit": "94ae5e1806a59af4322ec50fd81af232161a363f",
+  "operation": "LocalCurveSolve / ProjectedMinimize (solver operation14)",
+  "inputs": {
+    "c1": {
+      "line": {
+        "domain": [
+          2.1025034730843366,
+          8.750317844859742
+        ],
+        "inside_out": false,
+        "p": [
+          -8.356294646946175,
+          6.073670570583197,
+          5.375145477937098
+        ],
+        "scale": 1.0,
+        "v": [
+          -1.800624803138434,
+          1.3741364024479923,
+          -0.9374112670063575
+        ]
+      }
+    },
+    "c2": {
+      "hermite": {
+        "d1": [
+          5.578578538812096,
+          -47.67176355732562,
+          -37.71126899304132
+        ],
+        "d2": [
+          31.792444943596635,
+          -1.9192989195836532,
+          34.77829660609257
+        ],
+        "dim": 3,
+        "p1": [
+          8.804484894900554,
+          14.25998311991414,
+          -16.541438669985098
+        ],
+        "p2": [
+          -43.00198945413962,
+          -36.00493518410791,
+          -11.211768672934085
+        ]
+      }
+    },
+    "g": [
+      2.1025034730843366,
+      0.6837768800876959
+    ],
+    "ivl1": [
+      1.3597372198696087,
+      2.391218787861883
+    ],
+    "ivl2": [
+      0.0,
+      1.0
+    ],
+    "op": "curve_solve",
+    "sop": 14,
+    "target": 3.784714362911953,
+    "tol": 0.001,
+    "vecs": [
+      [
+        0.6139417578811035,
+        -0.713668622995308,
+        0.6394295041361375
+      ]
+    ]
+  },
+  "before": {
+    "ints": {
+      "status": [
+        0
+      ]
+    },
+    "values": {
+      "out": [
+        0.0,
+        1.0,
+        0.0,
+        2.0,
+        0.0,
+        1.0,
+        74.5731723699363,
+        2.391218787861883,
+        0.933952927910277
+      ]
+    },
+    "nd": {
+      "equations": [
+        -30.332654840990234,
+        3.5490511909357103
+      ],
+      "evaluator_found": false,
+      "iterations": 6,
+      "line_unit_direction": [
+        -0.7345365965050684,
+        0.5605573545519283,
+        -0.3824021974995622
+      ],
+      "parameters": [
+        2.391218787861883,
+        0.933952927910277
+      ],
+      "raw_found": false,
+      "termination": "UnableToConverge"
+    }
+  },
+  "after": {
+    "ints": {
+      "status": [
+        0
+      ]
+    },
+    "values": {
+      "out": [
+        1.0,
+        1.0,
+        0.0,
+        2.0,
+        0.0,
+        1.0,
+        37.30470092694143,
+        1.3597372198696087,
+        0.0332576668152633
+      ]
+    },
+    "nd": {
+      "equations": [
+        36.98538247541774,
+        -8.527790731124293
+      ],
+      "evaluator_found": false,
+      "iterations": 5,
+      "line_unit_direction": [
+        -0.7345365965050684,
+        0.5605573545519283,
+        -0.3824021974995622
+      ],
+      "parameters": [
+        1.3597372198696087,
+        0.0332576668152633
+      ],
+      "raw_found": false,
+      "termination": "OutOfBounds"
+    }
+  },
+  "definitions": {
+    "line": "L(u)=p+u*d; d is the unitized input vector, scale1, inside_outfalse. The query intentionally extends below the line natural interval; analytic line evaluation permits it.",
+    "hermite": "H(v)=(2v^3-3v^2+1)p1+(v^3-2v^2+v)d1+(-2v^3+3v^2)p2+(v^3-v^2)d2",
+    "projection": "Q(x)=n cross x cross n=(n dot n)x-n(n dot x); stored distance=norm(Q(L-H)). Q is norm(n)^2 times the physical orthogonal projection.",
+    "objective": "D(u,v)=norm(Q(L(u)-H(v)))^2",
+    "normal_squared": 1.2951174762779452,
+    "line_unit_direction": [
+      -0.7345365965050684,
+      0.5605573545519283,
+      -0.3824021974995622
+    ],
+    "hermite_power_coefficients": [
+      [
+        8.804484894900554,
+        14.25998311991414,
+        -16.541438669985098
+      ],
+      [
+        5.578578538812096,
+        -47.67176355732562,
+        -37.71126899304132
+      ],
+      [
+        -198.36902506834133,
+        -53.53192887783125,
+        56.63325137114312
+      ],
+      [
+        140.98397218048908,
+        50.93877413113482,
+        -13.592312381050782
+      ]
+    ]
+  },
+  "points": {
+    "before": {
+      "parameters": [
+        2.391218787861883,
+        0.933952927910277
+      ],
+      "line_point": [
+        -10.112732356881217,
+        7.414085848461923,
+        4.460738158756474
+      ],
+      "hermite_point": [
+        -44.16272744954218,
+        -35.459747217246104,
+        -13.43568857010973
+      ],
+      "scaled_projection_distance": 74.57317236993632,
+      "physical_projection_distance": 57.58023788255342,
+      "squared_distance": 5561.158037316232,
+      "squared_distance_gradient": [
+        -21.27058581778425,
+        -186.93268572501015
+      ]
+    },
+    "after": {
+      "parameters": [
+        1.3597372198696087,
+        0.0332576668152633
+      ],
+      "line_point": [
+        -9.35507139657046,
+        6.835881269439098,
+        4.855178977037014
+      ],
+      "hermite_point": [
+        8.77579104724493,
+        12.617195104412328,
+        -17.733487011436424
+      ],
+      "scaled_projection_distance": 37.304700926941436,
+      "physical_projection_distance": 28.80410589018681,
+      "squared_distance": 1391.6407112485451,
+      "squared_distance_gradient": [
+        25.935769752795686,
+        1349.3486076139557
+      ]
+    },
+    "nearby_witness": {
+      "parameters": [
+        1.3597372198696087,
+        0.03
+      ],
+      "line_point": [
+        -9.35507139657046,
+        6.835881269439098,
+        4.855178977037014
+      ],
+      "hermite_point": [
+        8.797116695752283,
+        12.783026824105864,
+        -17.622173805976598
+      ],
+      "scaled_projection_distance": 37.24417446150419,
+      "physical_projection_distance": 28.75737154635632,
+      "squared_distance": 1387.1285313189608,
+      "squared_distance_gradient": [
+        25.915977846240477,
+        1421.040200696263
+      ]
+    },
+    "endpoint_witness": {
+      "parameters": [
+        1.3597372198696087,
+        0.0
+      ],
+      "line_point": [
+        -9.35507139657046,
+        6.835881269439098,
+        4.855178977037014
+      ],
+      "hermite_point": [
+        8.804484894900554,
+        14.25998311991414,
+        -16.541438669985098
+      ],
+      "scaled_projection_distance": 36.52485311516648,
+      "physical_projection_distance": 28.201961431433794,
+      "squared_distance": 1334.0648950844864,
+      "squared_distance_gradient": [
+        25.560402332319217,
+        2129.8656928663677
+      ]
+    }
+  },
+  "certificate": {
+    "arithmetic": "Python Fraction, exact rational arithmetic on binary64 input values and the kernel-constructed binary64 line direction. No sampling or root finding in the proof.",
+    "fixed_line_parameter": {
+      "numerator": "1530928009181641",
+      "denominator": "1125899906842624",
+      "decimal": 1.3597372198696087
+    },
+    "v_interval": [
+      {
+        "numerator": "1080863910568919",
+        "denominator": "36028797018963968",
+        "decimal": 0.03
+      },
+      {
+        "numerator": "4792934908045821",
+        "denominator": "144115188075855872",
+        "decimal": 0.0332576668152633
+      }
+    ],
+    "squared_distance_power_coefficients": [
+      {
+        "numerator": "225764239782178930569135868207965320546674942498098201896958479060529756682104685557006501275152425745829414718279032293887651897",
+        "denominator": "169230328010303641331690318856389386196071598838855992136870091590247882556495704531248437872567112920983350278405979725889536",
+        "decimal": 1334.0648950844864
+      },
+      {
+        "numerator": "1250520068821439695767915412739665977647549454839280017224324145803610948269540990585188439249720024901571099405",
+        "denominator": "587135645693458306972370149197334256843920637227079967676822742883052256278652110865924749596192175757983744",
+        "decimal": 2129.8656928663677
+      },
+      {
+        "numerator": "-3647388673523832469157830782763492431016078461128283918230118533514616776348765844226011280187550535417983608675",
+        "denominator": "293567822846729153486185074598667128421960318613539983838411371441526128139326055432962374798096087878991872",
+        "decimal": -12424.347594212062
+      },
+      {
+        "numerator": "6455519550242376926614794127404943227525106227005538933350029325942873957296582905701946129403401031065983566197",
+        "denominator": "587135645693458306972370149197334256843920637227079967676822742883052256278652110865924749596192175757983744",
+        "decimal": 10994.937196527808
+      },
+      {
+        "numerator": "277288275540601677965636800586204179857413730590201659007011377306622872232145279454917876485869",
+        "denominator": "4074071952668972172536891376818756322102936787331872501272280898708762599526673412366794752",
+        "decimal": 68061.70307300215
+      },
+      {
+        "numerator": "-204632144824133931649465206325632714595077303929385834300227868581456968150013695219290254031627",
+        "denominator": "2037035976334486086268445688409378161051468393665936250636140449354381299763336706183397376",
+        "decimal": -100455.83249460139
+      },
+      {
+        "numerator": "291457750187484195081402858486809509810366120344137825139064992311390066703611813835924610780689",
+        "denominator": "8148143905337944345073782753637512644205873574663745002544561797417525199053346824733589504",
+        "decimal": 35769.833421393894
+      }
+    ],
+    "derivative_bernstein_coefficients": [
+      {
+        "numerator": "351466443347627734246398717573602922674365067081508160483110029436606441851707790643436132196762520679111298608339406986797175460874747891610760207985170424431385756946252712565",
+        "denominator": "247330401473104534060502521019647190035131349101211839914063056092897225106531867170316401061243044989597671426016139339351365034306751209967546155101893167916606772148699136",
+        "decimal": 1421.040200696263
+      },
+      {
+        "numerator": "1391563973842136169216171262050291503028721602322550908699270489324571250569528519717659754850012423689415550174810137971158436106535901106453711697112119580996729132204848705095",
+        "denominator": "989321605892418136242010084078588760140525396404847359656252224371588900426127468681265604244972179958390685704064557357405460137227004839870184620407572671666427088594796544",
+        "decimal": 1406.5840324864582
+      },
+      {
+        "numerator": "5509278973962372576481250582396949417023837540661452921707433375001870046779225254647453957429538280267414121165030130632124409133945561576780059845621250318400469871748902656205",
+        "denominator": "3957286423569672544968040336314355040562101585619389438625008897486355601704509874725062416979888719833562742816258229429621840548908019359480738481630290686665708354379186176",
+        "decimal": 1392.186054855419
+      },
+      {
+        "numerator": "21810141023095100372538479269023691823463402646159664532130893606651662616590050612124945962199572419529045802161073223685036260795965515103747749667813028413674046791786518213135",
+        "denominator": "15829145694278690179872161345257420162248406342477557754500035589945422406818039498900249667919554879334250971265032917718487362195632077437922953926521162746662833417516744704",
+        "decimal": 1377.8470073074247
+      },
+      {
+        "numerator": "86336442005300645155174254271948075584334786109170643933111578676237339146292219137500068642854043043579796509017143281253751304505918252910960136664726649972672011779822742365285",
+        "denominator": "63316582777114760719488645381029680648993625369910231018000142359781689627272157995600998671678219517337003885060131670873949448782528309751691815706084650986651333670066978816",
+        "decimal": 1363.5676187582603
+      },
+      {
+        "numerator": "341744571236694265672864265882333928550341735316950045209934709898387066863411979800292850005376027064457167185161886802848307439856508603322194904470912405473861032641156677642135",
+        "denominator": "253266331108459042877954581524118722595974501479640924072000569439126758509088631982403994686712878069348015540240526683495797795130113239006767262824338603946605334680267915264",
+        "decimal": 1349.3486076139557
+      }
+    ],
+    "verified_exact_inequalities": {
+      "all_derivative_bernstein_coefficients_strictly_between1300_and1500": true,
+      "D_after_minus_D_nearby_witness_greater_than4": true
+    },
+    "conclusion": "D strictly increases with v over the complete interval from the admissible witness0.03 to accepted v. Thus moving v downward by arbitrarily small positive amounts is feasible and lowers D: the accepted point is not a local minimum."
+  },
+  "limits": [
+    "No global minimum or root completeness is claimed.",
+    "No C++ was built or run.",
+    "The before result is no solution; its output pair is only an unaccepted candidate.",
+    "The new false acceptance comes from the existing curve caller boundary override, not a true success from LocalSolveNd.",
+    "The incorrect gen0607 golden is removed and the case remains executed as a known failure; no wrong result is blessed, and the separate tracking issue awaits publication approval."
+  ],
+  "literature": [
+    {
+      "title": "NEOS Guide: Bound-Constrained Optimization, Optimality Conditions",
+      "url": "https://neos-guide.org/guide/types/bound/"
+    },
+    {
+      "title": "NEOS Guide: Gradient Projection Methods",
+      "url": "https://neos-guide.org/guide/algorithms/gradient-projection/"
+    }
+  ],
+  "historical_opt_in_control": {
+    "base_commit": "f9ed9a90b453517d83e787169887c180e17656fd",
+    "only_kernel_flag_changed": "Kernel.fixes.oscillating_skips_failed_guesses=true; direct N-D probe mirrors caller forwarding through set_skips_failed_evaluations(true)",
+    "raw": {
+      "caller_found": true,
+      "caller_metric": 37.30470092694143,
+      "caller_parameters": [
+        1.3597372198696087,
+        0.0332576668152633
+      ],
+      "equations": [
+        36.98538247541774,
+        -8.527790731124293
+      ],
+      "evaluator_found": false,
+      "historical_opt_in": true,
+      "iterations": 5,
+      "line_unit_direction": [
+        -0.7345365965050684,
+        0.5605573545519283,
+        -0.3824021974995622
+      ],
+      "parameters": [
+        1.3597372198696087,
+        0.0332576668152633
+      ],
+      "raw_found": false,
+      "termination": "OutOfBounds"
+    },
+    "caller_output_identical_to_current": true,
+    "scope": "Attribution only: the existing opt-in path already exposes the caller acceptance defect. Raw main default still refuses, so retirement newly exposes this wrong default result."
+  },
+  "classification": {
+    "case": "gen0607",
+    "wrong_golden_removed": true,
+    "retained_execution": "expected/known_failing.json",
+    "tracking": "FOLLOWUP_PENDING_PUBLICATION",
+    "public_issue_creation": "pending user approval",
+    "production_solver_or_caller_fix": false
+  }
+}

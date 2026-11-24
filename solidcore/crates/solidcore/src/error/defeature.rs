@@ -10,10 +10,11 @@
 //!
 //! | Rust                                         | Status difftest compares |
 //! |----------------------------------------------|--------------------------|
-//! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::ExtensionRefused`]       | `SM_ERR` (WR-656)        |
-//! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
+//! | [`DefeatureFailure::ExtensionWithinTolerance`] | `SM_ERR` (WR-656)      |
+//! | [`DefeatureFailure::LoopNotPlanar`]          | `SM_ERR` (WR-656)        |
 //! | [`DefeatureFailure::NotEnclosed`]            | `SM_ERR` (WR-656)        |
+//! | [`DefeatureFailure::TangentNeighbours`]      | `SM_ERR` (WR-656)        |
 //!
 //! Deviations: not upstream. The failure's entity is the base loop edge of the hole the
 //! kept feature would have left open.
@@ -24,14 +25,36 @@ use super::{ErrorKind, SM_ERR};
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum DefeatureFailure {
-    /// A planar cap was asked for a loop whose curves no plane holds (the planar face's own
-    /// refusal is the cause).
-    LoopNotPlanar,
     /// A face along the loop could not be extended by `distance` (the extension's refusal
     /// is the cause).
     ExtensionRefused {
         /// The distance asked.
         distance: f64,
+    },
+    /// The faces along the loop, extended by `extended_by`, do not enclose it, and the
+    /// extension is no longer than `identity_radius`: the distance within which a vertex of
+    /// the loop and a vertex of the patch are one point (their zone tolerances summed, the
+    /// largest over the loop's vertices). The extended boundary is then the same point set
+    /// as the face's own to the kernel, so the extension is no feature it can resolve: an
+    /// extension longer than `identity_radius` is needed (argued from the identity radius,
+    /// not proved for every input; not sufficient either). The refusal is named so only after
+    /// the patch failed to enclose its loop.
+    ExtensionWithinTolerance {
+        /// How far the faces were extended.
+        extended_by: f64,
+        /// The identity radius at the loop's vertices: extend by more than this.
+        identity_radius: f64,
+    },
+    /// A planar cap was asked for a loop whose curves no plane holds (the planar face's own
+    /// refusal is the cause).
+    LoopNotPlanar,
+    /// The faces along the loop, extended by `extended_by`, do not enclose it: a piece of the
+    /// patch on the loop runs on to the end of its extension with nothing to bound it. A
+    /// wall of a box (its neighbours run past it), a feature whose loops are patched one at
+    /// a time from one face each, or one whose sides run past faces not along its loop.
+    NotEnclosed {
+        /// How far the faces were extended, when the patch was built in this call.
+        extended_by: Option<f64>,
     },
     /// The faces along the loop, extended, meet only tangentially where the cap would need a
     /// bound: a piece of the patch on the loop is cut from its neighbour only along an edge
@@ -42,14 +65,6 @@ pub enum DefeatureFailure {
         /// The angle the smooth edge was proved within, degrees (the kernel's `ang_tol_deg`).
         within_deg: f64,
     },
-    /// The faces along the loop, extended by `extended_by`, do not enclose it: a piece of the
-    /// patch on the loop runs on to the end of its extension with nothing to bound it. A
-    /// wall of a box (its neighbours run past it), a feature whose loops are patched one at
-    /// a time from one face each, or one whose sides run past faces not along its loop.
-    NotEnclosed {
-        /// How far the faces were extended, when the patch was built in this call.
-        extended_by: Option<f64>,
-    },
 }
 
 impl DefeatureFailure {
@@ -57,10 +72,11 @@ impl DefeatureFailure {
     /// refusal's.
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::LoopNotPlanar
-            | Self::ExtensionRefused { .. }
-            | Self::TangentNeighbours { .. }
-            | Self::NotEnclosed { .. } => SM_ERR,
+            Self::ExtensionRefused { .. }
+            | Self::ExtensionWithinTolerance { .. }
+            | Self::LoopNotPlanar
+            | Self::NotEnclosed { .. }
+            | Self::TangentNeighbours { .. } => SM_ERR,
         }
     }
 
@@ -68,10 +84,11 @@ impl DefeatureFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::LoopNotPlanar
-            | Self::ExtensionRefused { .. }
-            | Self::TangentNeighbours { .. }
-            | Self::NotEnclosed { .. } => ErrorKind::Unsupported,
+            Self::ExtensionRefused { .. }
+            | Self::ExtensionWithinTolerance { .. }
+            | Self::LoopNotPlanar
+            | Self::NotEnclosed { .. }
+            | Self::TangentNeighbours { .. } => ErrorKind::Unsupported,
         }
     }
 }
@@ -97,6 +114,15 @@ impl core::fmt::Display for DefeatureFailure {
             Self::NotEnclosed { extended_by: None } => {
                 f.write_str("the faces along the loop, extended, do not enclose it")
             }
+            Self::ExtensionWithinTolerance {
+                extended_by,
+                identity_radius,
+            } => write!(
+                f,
+                "the faces along the loop, extended by {extended_by}, do not enclose it: the \
+                 extension is within {identity_radius}, where the loop's vertices are one point \
+                 with the patch's; extend by more than {identity_radius}"
+            ),
         }
     }
 }

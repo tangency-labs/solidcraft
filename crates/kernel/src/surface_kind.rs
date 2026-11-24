@@ -1,6 +1,8 @@
 //! What surface a face lies on (plane, cylinder, cone, sphere, torus), for construction
 //! geometry: axes through round faces, centres of spheres and tori.
 
+pub use solidcore_ops::axial_section::AxialPiece;
+use solidcore_ops::axial_section::Revolved;
 use solidcore_ops::face_surface::{Exact, FaceSurface as ExactSurface};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Curve, Surface};
@@ -8,8 +10,8 @@ use solidcraft_geom::UnitVec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::prelude::*;
 
-use crate::Body;
 use crate::offset::{Surf, surf_of};
+use crate::{Body, KernelError, Result};
 
 /// A face's analytic surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -144,6 +146,57 @@ pub(crate) fn surface_of(b: &Brep, face: usize) -> Option<FaceSurface> {
         Surf::Sphere { c, r, .. } => FaceSurface::Sphere { center: c, radius: r },
         Surf::Torus { o, a, big, h, r, .. } => FaceSurface::Torus { center: o + a * h, axis: a.unit()?, major: big, minor: r },
     })
+}
+
+/// The section of face `face` of `b` by `plane` when the face's surface is one of revolution
+/// as the record holds it (an analytic cylinder, cone, sphere or torus, not a spline that only
+/// follows one) and the plane holds its axis wherever the axis passes the body's exact box
+/// ([`solidcore_ops::axial_section::holds_axis`]): the surface's meridians in closed form
+/// (lines, arcs and circles), cut where the face's edges cross the plane
+/// ([`solidcore_ops::curve::plane_crossings`]) and kept where they lie on the face
+/// ([`Body::point_lies_on_face`]), all at the body's model tolerance
+/// ([`solidcore_ops::axial_section::axial_section`]). `Ok(None)` for any other face or plane, a
+/// face with an edge held as the intersection of two surfaces (whose crossings are not exact),
+/// a mesh body or an index out of range; `Ok(Some(vec![]))` when the plane misses the face.
+///
+/// # Errors
+///
+/// The kernel's failure to box the body, to cross an edge with the plane or to place a point on
+/// the face.
+pub fn axial_face_section(b: &Body, face: usize, plane: &solidcore_record::Plane) -> Result<Option<Vec<AxialPiece>>> {
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    if b.is_mesh() {
+        return Ok(None);
+    }
+    let record = b.record();
+    let on = match surface_of(record, face) {
+        Some(FaceSurface::Cylinder { origin, axis, radius }) => Revolved::Cylinder { origin: arr(origin), axis: arr(axis.vec()), radius },
+        Some(FaceSurface::Cone { apex, axis, half_angle }) => Revolved::Cone { apex: arr(apex), axis: arr(axis.vec()), half_angle },
+        Some(FaceSurface::Sphere { center, radius }) => Revolved::Sphere { centre: arr(center), radius },
+        Some(FaceSurface::Torus { center, axis, major, minor }) => Revolved::Torus { centre: arr(center), axis: arr(axis.vec()), major, minor },
+        Some(FaceSurface::Plane { .. }) | None => return Ok(None),
+    };
+    let tol = record.tolerance;
+    let (origin, normal) = (arr(plane.origin), arr(plane.normal()));
+    let bounds = b.exact_bounds()?;
+    let (lo, hi) = (bounds.min, bounds.max);
+    let corners: Vec<[f64; 3]> =
+        [lo.x, hi.x].into_iter().flat_map(|x| [lo.y, hi.y].into_iter().flat_map(move |y| [lo.z, hi.z].into_iter().map(move |z| [x, y, z]))).collect();
+    if !solidcore_ops::axial_section::holds_axis(&on, origin, normal, &corners, tol) {
+        return Ok(None);
+    }
+    let edges: Vec<&solidcore_record::brep::Edge> = face_edge_indices(b, face).into_iter().filter_map(|e| record.edges.get(e)).collect();
+    if edges.iter().any(|edge| matches!(edge.curve, Curve::SurfaceIntersection { .. })) {
+        return Ok(None);
+    }
+    let mut cuts = Vec::new();
+    for edge in edges {
+        let hits = solidcore_ops::curve::plane_crossings(edge.parameters(), edge.interval, plane)
+            .map_err(|err| KernelError::Failed(format!("where an edge of face {face} crosses the sketch plane: {err}")))?;
+        cuts.extend(hits.into_iter().map(|p| arr(plane.to_world(p))));
+    }
+    let on_face = |[x, y, z]: [f64; 3]| b.point_lies_on_face(face, Vec3::new(x, y, z), tol).map(|found| found.is_some());
+    solidcore_ops::axial_section::axial_section(&on, origin, normal, &corners, tol, &cuts, on_face)
 }
 
 /// The circle (or arc of one) an edge's curve lies on, from its exact curve.

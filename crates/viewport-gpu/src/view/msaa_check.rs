@@ -61,14 +61,14 @@ impl Renderer {
         let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
         let result = self.probe_pixels(device, queue, blank_samples);
         // Discard the probe's uploads and picture even on errors, before the real scene arrives.
-        self.model = Batches::default();
-        self.sketch = Batches::default();
-        self.highlight = Batches::default();
+        self.pic.model = Batches::default();
+        self.pic.sketch = Batches::default();
+        self.pic.highlight = Batches::default();
         self.preview = Batches::default();
-        self.ss = None;
-        self.ss_key = None;
-        self.ss_ready = false;
-        self.cached = None;
+        self.pic.ss = None;
+        self.pic.ss_key = None;
+        self.pic.ss_ready = false;
+        self.pic.cached = None;
         let mut error = None;
         for scope in scopes.into_iter().rev() {
             if let Some(e) = crate::popped(scope.pop()) {
@@ -112,7 +112,8 @@ impl Renderer {
             turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip: [[0.0; 4]; super::MAX_SECTION_PLANES],
+            clip_hatch: [0; super::MAX_SECTION_PLANES],
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
@@ -123,12 +124,15 @@ impl Renderer {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
         let size = wgpu::Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 };
         let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -147,7 +151,7 @@ impl Renderer {
         // Tests reproduce a driver returning a blank resolve, without changing production draws.
         #[cfg(test)]
         if (blank_samples == 1 || blank_samples == self.target.samples)
-            && let Some(resolve) = self.ss.as_ref().map(|ss| ss.resolve.as_ref().unwrap_or(&ss.color))
+            && let Some(resolve) = self.pic.ss.as_ref().map(|ss| ss.resolve.as_ref().unwrap_or(&ss.color))
         {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {

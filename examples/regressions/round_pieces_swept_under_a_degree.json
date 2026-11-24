@@ -1,0 +1,846 @@
+{
+  "description": "Reproduction for #17004 (from the design in #16948): a 45 mm cylinder with an arm joined to its side, a 7.5 mm chamfer round the cylinder's bottom, a 30 degree chamfer on the arm's end, two 13 mm rounds where the arm meets the chamfer cone, and a 2 mm round on the bottom arc and its neighbours. Two pieces of that 2 mm round are plane-to-cone rounds swept 0.45 degrees, stored as surfaces of revolution. Reading the body back into the kernel derived one of them about an axis 4e-11 mm off and refused it, so every later operation on Body1 failed with 'an exact net's NURBS form is not a surface of revolution's parametrisation'.",
+  "commands": [
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "id": 1,
+          "name": "Sketch1",
+          "plane": {
+            "name": "XY",
+            "type": "origin"
+          },
+          "sketch": {
+            "constraints": [
+              {
+                "id": "k1",
+                "p": 0,
+                "q": 1,
+                "type": "coincident"
+              },
+              {
+                "c": 0,
+                "id": "k2",
+                "param": "d1",
+                "text": [
+                  -10.0,
+                  35.0
+                ],
+                "type": "diameter",
+                "value": 45.0
+              }
+            ],
+            "counters": {
+              "c": 1,
+              "k": 2
+            },
+            "curves": [
+              {
+                "c": 1,
+                "construction": false,
+                "id": "c1",
+                "r": 22.5,
+                "type": "circle"
+              }
+            ],
+            "points": [
+              {
+                "fixed": true,
+                "id": "origin",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "c1.center",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              }
+            ]
+          },
+          "suppressed": false,
+          "type": "sketch"
+        },
+        "params": [
+          {
+            "expression": "45",
+            "name": "d1",
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body_names": [
+            "Body1"
+          ],
+          "extent": {
+            "convention": "total_distance",
+            "direction": "positive",
+            "distance": "30"
+          },
+          "id": 2,
+          "name": "Extrude1",
+          "operation": "new_body",
+          "param_names": [
+            "d2"
+          ],
+          "profiles": {
+            "loops": [
+              [
+                "c1"
+              ]
+            ],
+            "type": "curves"
+          },
+          "sketch": 1,
+          "suppressed": false,
+          "type": "extrude"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "id": 3,
+          "name": "Sketch2",
+          "plane": {
+            "anchor": {
+              "author_path": [],
+              "component": 0,
+              "coordinates": [
+                0.0,
+                0.0
+              ],
+              "path": [],
+              "target": {
+                "body": "Body1",
+                "certificate": {
+                  "high": false,
+                  "holes": [],
+                  "kind": "extrude_cap",
+                  "outer": [
+                    "c1"
+                  ],
+                  "sketch": 1
+                },
+                "name": "F2:cap:low:7413f52a973aff7f96f4640d0279843de057931afd8c2eb678e06607c9d37214",
+                "origin_feature": 2,
+                "point": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              "x_axis": [
+                1.0,
+                0.0
+              ]
+            },
+            "at": [
+              -5.4972354969070825,
+              4.027755502883034,
+              5.684341886080802e-14
+            ],
+            "name": "F2:start",
+            "plane": {
+              "origin": [
+                -0.0,
+                -0.0,
+                0.0
+              ],
+              "x_dir": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "y_dir": [
+                0.0,
+                -1.0,
+                0.0
+              ]
+            },
+            "type": "face"
+          },
+          "sketch": {
+            "constraints": [
+              {
+                "id": "k1",
+                "l": 2,
+                "type": "vertical"
+              },
+              {
+                "id": "k2",
+                "l": 2,
+                "param": "d3",
+                "text": [
+                  0.2999999999999991,
+                  11.600000000000001
+                ],
+                "type": "length",
+                "value": 9.0
+              },
+              {
+                "id": "k3",
+                "l": 3,
+                "type": "horizontal"
+              },
+              {
+                "id": "k4",
+                "l": 5,
+                "type": "horizontal"
+              },
+              {
+                "id": "k5",
+                "l": 4,
+                "type": "vertical"
+              },
+              {
+                "id": "k6",
+                "l": 6,
+                "type": "vertical"
+              },
+              {
+                "id": "k7",
+                "p": 4,
+                "q": 8,
+                "type": "coincident"
+              },
+              {
+                "id": "k8",
+                "l": 5,
+                "param": "d4",
+                "text": [
+                  -2.3999999999999986,
+                  -10.0
+                ],
+                "type": "length",
+                "value": 110.0
+              },
+              {
+                "id": "k9",
+                "l": 6,
+                "param": "d5",
+                "text": [
+                  5.1,
+                  -34.0
+                ],
+                "type": "length",
+                "value": 18.0
+              }
+            ],
+            "counters": {
+              "a": 2,
+              "j": 1,
+              "k": 9,
+              "l": 5,
+              "p": 7
+            },
+            "curves": [
+              {
+                "a": 2,
+                "b": 3,
+                "c": 1,
+                "construction": false,
+                "id": "a1",
+                "link": "j1",
+                "type": "arc"
+              },
+              {
+                "a": 3,
+                "b": 2,
+                "c": 1,
+                "construction": false,
+                "id": "a2",
+                "link": "j1",
+                "type": "arc"
+              },
+              {
+                "a": 0,
+                "b": 4,
+                "centerline": true,
+                "construction": false,
+                "id": "l1",
+                "type": "line"
+              },
+              {
+                "a": 5,
+                "b": 6,
+                "construction": false,
+                "id": "l2",
+                "type": "line"
+              },
+              {
+                "a": 6,
+                "b": 7,
+                "construction": false,
+                "id": "l3",
+                "type": "line"
+              },
+              {
+                "a": 7,
+                "b": 8,
+                "construction": false,
+                "id": "l4",
+                "type": "line"
+              },
+              {
+                "a": 8,
+                "b": 5,
+                "construction": false,
+                "id": "l5",
+                "type": "line"
+              }
+            ],
+            "links": [
+              {
+                "auto_face": true,
+                "face_name": "F2:cap:low:7413f52a973aff7f96f4640d0279843de057931afd8c2eb678e06607c9d37214",
+                "id": "j1",
+                "kind": "project",
+                "source": {
+                  "at": [
+                    19.072024953512393,
+                    1.1338262079551003,
+                    0.0
+                  ],
+                  "body": "Body1",
+                  "type": "face"
+                }
+              }
+            ],
+            "points": [
+              {
+                "fixed": true,
+                "id": "origin",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "fixed": true,
+                "id": "p1",
+                "link": "j1",
+                "pos": [
+                  -1.4509241502730593e-30,
+                  -5.64930324613432e-15
+                ]
+              },
+              {
+                "fixed": true,
+                "id": "p2",
+                "link": "j1",
+                "pos": [
+                  -22.5,
+                  -1.8396765765842276e-14
+                ]
+              },
+              {
+                "fixed": true,
+                "id": "p3",
+                "link": "j1",
+                "pos": [
+                  22.5,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l1.end",
+                "pos": [
+                  0.0,
+                  9.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p4",
+                "pos": [
+                  0.0,
+                  -9.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p5",
+                "pos": [
+                  110.0,
+                  -9.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p6",
+                "pos": [
+                  110.0,
+                  9.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p7",
+                "pos": [
+                  0.0,
+                  9.0
+                ]
+              }
+            ]
+          },
+          "suppressed": false,
+          "type": "sketch"
+        },
+        "params": [
+          {
+            "expression": "9",
+            "name": "d3",
+            "unit": "mm"
+          },
+          {
+            "expression": "110",
+            "name": "d4",
+            "unit": "mm"
+          },
+          {
+            "expression": "18",
+            "name": "d5",
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "extent": {
+            "convention": "total_distance",
+            "direction": "negative",
+            "distance": "7.5"
+          },
+          "id": 4,
+          "name": "Extrude2",
+          "operation": "join",
+          "param_names": [
+            "d6"
+          ],
+          "profiles": {
+            "loops": [
+              [
+                "a1",
+                "l2",
+                "l3",
+                "l4",
+                "a2"
+              ]
+            ],
+            "type": "curves"
+          },
+          "sketch": 3,
+          "suppressed": false,
+          "targets": [
+            "Body1"
+          ],
+          "type": "extrude"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body": "Body1",
+          "distance": "7.5 mm",
+          "edge_names": [
+            "F2:side:c1|F2:start"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                0.0
+              ]
+            }
+          ],
+          "edges": [
+            [
+              -22.5,
+              -8.43769498715119e-15,
+              0.0
+            ]
+          ],
+          "id": 5,
+          "name": "Chamfer1",
+          "param_names": [
+            "d7"
+          ],
+          "suppressed": false,
+          "type": "chamfer"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "angle": "30 deg",
+          "body": "Body1",
+          "distance": "7.5 mm",
+          "edge_names": [
+            "F2:start|F4:side:l4",
+            "F2:start|F4:side:l2"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                -1.0,
+                -3.6252180395923476e-17,
+                -5.190005418620127e-17
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -1.1070313355546894e-14
+              ]
+            },
+            {
+              "dir": [
+                1.0,
+                0.0,
+                -4.8023393247361695e-17
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -1.1070313355546894e-14
+              ]
+            }
+          ],
+          "edges": [
+            [
+              61.0,
+              -9.000000000000002,
+              -2.5431026551238624e-15
+            ],
+            [
+              61.00000000000001,
+              9.0,
+              2.3531462691207225e-15
+            ]
+          ],
+          "id": 6,
+          "name": "Chamfer2",
+          "param_names": [
+            "d8",
+            "d9"
+          ],
+          "suppressed": false,
+          "type": "chamfer"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body": "Body1",
+          "edge_names": [
+            "F5:blend(F2:side:c1|F2:start)|F6:blend(F2:start|F4:side:l4)"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                -0.5923423585819669,
+                0.4028431860629994,
+                -0.6977448657440369
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -1.2163411105568908e-14
+              ]
+            }
+          ],
+          "edges": [
+            [
+              17.452210762518504,
+              -6.829739030601956,
+              3.7409977353188983
+            ]
+          ],
+          "id": 7,
+          "name": "Fillet1",
+          "param_names": [
+            "d10"
+          ],
+          "radius": "13mm",
+          "suppressed": false,
+          "type": "fillet"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body": "Body1",
+          "edge_names": [
+            "F5:blend(F2:side:c1|F2:start)|F6:blend(F2:start|F4:side:l2)"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                0.5923423585819672,
+                0.40284318606299907,
+                0.697744865744037
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -4.903880279060351e-12
+              ]
+            }
+          ],
+          "edges": [
+            [
+              17.452210762034532,
+              6.829739030778981,
+              3.740997735625518
+            ]
+          ],
+          "id": 8,
+          "name": "Fillet2",
+          "param_names": [
+            "d11"
+          ],
+          "radius": "13 mm",
+          "suppressed": false,
+          "type": "fillet"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body": "Body1",
+          "edge_names": [
+            "F2:start|F5:blend(F2:side:c1|F2:start)~2",
+            "F2:start|F5:blend(F2:side:c1|F2:start)~1",
+            "F2:start|F5:blend(F2:side:c1|F2:start)~3",
+            "F2:start|F8:blend(F5:blend(F2:side:c1|F2:start)|F6:blend(F2:start|F4:side:l2))",
+            "F2:start|F7:blend(F5:blend(F2:side:c1|F2:start)|F6:blend(F2:start|F4:side:l4))",
+            "F2:start|F6:blend(F2:start|F4:side:l2)",
+            "F2:start|F6:blend(F2:start|F4:side:l4)"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                -0.5970756368870193,
+                -0.8021849436607248,
+                -4.026595211033563e-15
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                0.5970756463389428,
+                -0.8021849366255475,
+                -1.0765069933480633e-14
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            },
+            {
+              "dir": [
+                -1.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                110.0,
+                22.5,
+                30.000000000000004
+              ],
+              "min": [
+                -22.5,
+                -22.5,
+                -5.400486882992481e-12
+              ]
+            }
+          ],
+          "edges": [
+            [
+              -15.0,
+              -6.661338147750939e-15,
+              2.4923203506470957e-15
+            ],
+            [
+              12.03269250335236,
+              -8.956076879938365,
+              5.149250369056297e-12
+            ],
+            [
+              12.032692503351333,
+              8.956076879929775,
+              4.329242142459988e-15
+            ],
+            [
+              16.34350796036283,
+              5.651295532750559,
+              -1.3807425102103033e-16
+            ],
+            [
+              16.34350395281025,
+              -5.651280271448266,
+              9.962336145700011e-16
+            ],
+            [
+              65.82916824066751,
+              4.669872981076245,
+              -2.69535846018789e-12
+            ],
+            [
+              65.82916824066828,
+              -4.669872981076391,
+              -2.4519401395301757e-12
+            ]
+          ],
+          "id": 9,
+          "name": "Fillet3",
+          "param_names": [
+            "d12"
+          ],
+          "radius": "2 mm",
+          "suppressed": false,
+          "type": "fillet"
+        }
+      }
+    }
+  ]
+}
