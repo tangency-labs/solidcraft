@@ -3763,6 +3763,7 @@ mod wr459_sphere_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::round_definition_rows::inputs;
     use super::*;
+    use solidcore::geom::extent1d::Extent1d;
     use solidcore::math::EFF_ZERO;
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -3951,6 +3952,96 @@ mod wr459_sphere_rows {
         out
     }
 
+    /// The edges of `b` between two distinct sphere faces, each with its 3D curve's
+    /// interval, its tolerance and its end points.
+    fn sphere_seams(b: &Brep) -> Vec<(EdgeId, Extent1d, f64, [Vec3; 2])> {
+        let mut out = Vec::new();
+        for e in p1::edges(b, None).unwrap() {
+            let mut faces = edge::faces(b, e, None).unwrap();
+            faces.sort();
+            faces.dedup();
+            if faces.len() == 2 && faces.iter().all(|&f| is_sphere(b, f)) {
+                let (s, t) = edge::start_end_vertices(b, e).unwrap();
+                let ends = [s.unwrap(), t.unwrap()].map(|v| vertex::point(b, v).unwrap());
+                out.push((e, edge::interval(b, e).unwrap(), edge::tolerance(b, e).unwrap(), ends));
+            }
+        }
+        out
+    }
+
+    /// The result's boundary between the two sphere patches is the target's: the target's
+    /// sphere patches meet along arcs of one great circle of the sphere (each sampled
+    /// point within its edge's tolerance of the circle); the result keeps at least one
+    /// edge between its two sphere patches, and every point sampled on every such edge
+    /// lies on that circle within the edge's tolerance and inside the span of one of the
+    /// target's arcs (by angle, the round shortening an arc at its end); and every target
+    /// arc keeps an edge that starts at one of the arc's own end points, bit for bit.
+    /// Compared by geometry, not by arena ids, so a boundary split into more edges over
+    /// the same span passes too.
+    fn shares_the_target_boundary(name: &str, target: &Brep, body: &Brep) {
+        const SAMPLES: usize = 32;
+        let k = Kernel::default();
+        let sample = |b: &Brep, e: EdgeId, iv: &Extent1d| -> Vec<Vec3> {
+            let curve = edge::curve(b, e).unwrap().unwrap();
+            (0..=SAMPLES)
+                .map(|i| {
+                    let t = iv.min() + (iv.max() - iv.min()) * (i as f64 / SAMPLES as f64);
+                    curve.evaluate_point(&k, t).unwrap()
+                })
+                .collect()
+        };
+        let sphere_face = p1::faces(target, None).unwrap().into_iter().find(|&f| is_sphere(target, f)).unwrap();
+        let surface = target.face(sphere_face).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else { unreachable!() };
+        let c = sphere.base().position().origin();
+        let arcs = sphere_seams(target);
+        assert!(!arcs.is_empty(), "{name}: the target's sphere patches share no edge");
+        // the circle's plane, through the centre and the first arc's ends
+        let [a0, b0] = arcs[0].3;
+        let n = (a0 - c).cross(b0 - c);
+        let n = n * (1.0 / n.length());
+        let radius = (a0 - c).length();
+        let off_circle = |p: Vec3| {
+            let d = p - c;
+            let h = d.dot(n);
+            let r = (d - n * h).length();
+            (h * h + (r - radius) * (r - radius)).sqrt()
+        };
+        let angle = |p: Vec3, q: Vec3| (p - c).cross(q - c).length().atan2((p - c).dot(q - c));
+        for (e, iv, tol, _) in &arcs {
+            for p in sample(target, *e, iv) {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: target edge {e:?} is {d:e} off its circle, past {tol:e}");
+            }
+        }
+        let seams = sphere_seams(body);
+        assert!(!seams.is_empty(), "{name}: the result's sphere patches share no edge");
+        let within = |p: Vec3, tol: f64, (_, _, atol, [s, t]): &(EdgeId, Extent1d, f64, [Vec3; 2])| {
+            let excess = angle(*s, p) + angle(p, *t) - angle(*s, *t);
+            excess * radius <= tol + atol
+        };
+        // each result edge lies on the circle and inside one target arc
+        let mut on_arc = vec![Vec::new(); arcs.len()];
+        for (e, iv, tol, ends) in &seams {
+            let points = sample(body, *e, iv);
+            for &p in &points {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: edge {e:?} is {d:e} off the target's circle, past {tol:e}");
+            }
+            let arc = arcs.iter().position(|a| points.iter().all(|&p| within(p, *tol, a)));
+            let arc = arc.unwrap_or_else(|| panic!("{name}: edge {e:?} leaves the target's arcs"));
+            on_arc[arc].push(*ends);
+        }
+        // and every target arc keeps an edge that starts at one of its own ends, bit for bit
+        // (the round only shortens an arc at its other end)
+        for ((e, _, _, [s, t]), kept) in arcs.iter().zip(&on_arc) {
+            assert!(
+                kept.iter().flatten().any(|p| p == s || p == t),
+                "{name}: the target's arc {e:?} keeps no edge from its own ends"
+            );
+        }
+    }
+
     /// The row's target and its rounded result.
     fn bodies(name: &str) -> (Brep, Brep) {
         let input = inputs(name).real_solid.expect("a real solid");
@@ -4027,6 +4118,7 @@ mod wr459_sphere_rows {
             assert!(d <= tol, "{name}: vertex {v} is {d:e} off the seam, past its tolerance {tol:e}");
         }
 
+        shares_the_target_boundary(name, &target, &body);
         // the target's own failures: the cone faces 4, 5 and 7 near their seams (edgeuse
         // 142's trim failures went with the clamped-sliver drop rule, #21353, which leaves
         // the trim's folded end span out on read)
