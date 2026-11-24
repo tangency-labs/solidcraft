@@ -432,6 +432,7 @@ mod tests {
     #[test]
     fn a_box_with_rounded_corners_is_drawn_with_its_ball_corners_as_spheres() {
         use crate::blend::{blend, Blend, Corners};
+        use solidcore_record::Vec2;
         use std::f64::consts::PI;
 
         // A 10 mm box with all twelve edges rounded at 2 mm: 6 planes, 12 rounds and 8 ball
@@ -480,18 +481,36 @@ mod tests {
         }];
         let d = hidden_lines(&[def], &scene, &view, &opts, &|| false).unwrap();
         assert!(d.unsupported.is_empty());
+        // The corners are drawn on the sphere their spline form is recognised as, to 1e-9 of the
+        // 10 mm body, so a radius or a length is off by some 1e-8 mm: far within a micrometre.
+        let near = |x: f64, y: f64| (x - y).abs() <= 1e-6;
+        let dist = |p: Vec2, q: Vec2| (q.x - p.x).hypot(q.y - p.y);
         let (mut lines, mut arcs) = (0., 0.);
         for l in &d.lines {
-            assert!(matches!(l.source, Source::Silhouette { .. }), "{:?}", l.source);
+            assert!(
+                matches!(l.source, Source::Silhouette { .. }),
+                "{:?}",
+                l.source
+            );
             for p in l.pieces.iter().filter(|p| !p.covered) {
                 assert_eq!(p.visibility, Visibility::Visible);
                 assert_eq!(p.accuracy, CurveAccuracy::Analytic);
                 for s in &p.geometry {
                     match *s {
-                        Seg2::Line { a, b } => lines += (b.x - a.x).hypot(b.y - a.y),
+                        Seg2::Line { a, b } => lines += dist(a, b),
                         Seg2::Arc { radius, sweep, .. } => {
-                            assert!((radius - 2.).abs() <= 1e-9, "arc radius {radius}");
+                            assert!(near(radius, 2.), "arc radius {radius}");
                             arcs += radius * sweep.abs();
+                        }
+                        // A circular arc as a rational quadratic: its legs to the apex are equal,
+                        // its weight is the cosine of half its sweep, and a leg is r tan(sweep/2).
+                        Seg2::Conic { a, apex, b, w } => {
+                            let half = w.acos();
+                            let r = dist(a, apex) / half.tan();
+                            assert!(near(dist(a, apex), dist(b, apex)), "{s:?}");
+                            assert!(near(dist(a, b), 2. * r * half.sin()), "{s:?}");
+                            assert!(near(r, 2.), "conic radius {r}");
+                            arcs += 2. * half * r;
                         }
                         ref other => panic!("outline piece {other:?}"),
                     }
@@ -499,9 +518,7 @@ mod tests {
             }
         }
         let hexagon = 12. * ((13f64 / 14.).sqrt() + (10f64 / 14.).sqrt() + (5f64 / 14.).sqrt());
-        // The corners are drawn on the sphere their spline form is recognised as, to 1e-9 of the
-        // 10 mm body; twelve pieces end where they meet, far within a micrometre.
-        assert!((lines - hexagon).abs() <= 1e-6, "lines {lines}, hexagon {hexagon}");
-        assert!((arcs - 4. * PI).abs() <= 1e-6, "arcs {arcs}, circle {}", 4. * PI);
+        assert!(near(lines, hexagon), "lines {lines}, hexagon {hexagon}");
+        assert!(near(arcs, 4. * PI), "arcs {arcs}, circle {}", 4. * PI);
     }
 }
