@@ -2684,4 +2684,107 @@ mod tests {
         assert_eq!(near.len(), 1, "{:?}", near.as_slice());
         assert!((near.as_slice()[0].start.solution_value - 100.25_f64.sqrt()).abs() < 1e-9);
     }
+
+    /// #20438 (review): a target distance never empties a minimise that has a point
+    /// within it. On this quadratic-by-linear patch (the goldens' `matrix_0069` of
+    /// `surface.surface_point_solve_p3`) the new solver's one candidate is a corner
+    /// 1.85595 away (#20483), while the point at `uv = (u1, 0.715)` is nearer, about
+    /// 1.83809 (evaluated here, a witness). With a target of 1.847 between them the
+    /// bound dropped the corner and reported nothing; the tree solve now answers, and
+    /// its point is within the target and no farther than the witness.
+    #[test]
+    fn a_target_distance_never_empties_a_minimize_with_a_point_within_it() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        let k = &Kernel::default();
+        let (u0, u1) = (0.6180686791137355, 3.5225152313052512);
+        let c = |x: f64, y: f64, z: f64| CPoint::new(x, y, z, 1.0);
+        let pw = vec![
+            vec![
+                c(
+                    -0.17305149026657834,
+                    -0.03346908101705068,
+                    0.12396611893554604,
+                ),
+                c(0.08583970969907223, 1.0253179032590498, -0.5613949912243834),
+            ],
+            vec![
+                c(
+                    0.8044779710024103,
+                    -0.17434933740555447,
+                    -0.09841187988082518,
+                ),
+                c(1.007550194126116, 0.8615878352372972, -0.4012642745306253),
+            ],
+            vec![
+                c(2.1396832703821573, 0.17500811210056272, 0.5199135561009172),
+                c(1.8351039035975116, 0.9379205668584327, 0.14562033638753827),
+            ],
+        ];
+        let s = Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                2,
+                1,
+                5,
+                3,
+                &pw,
+                &[u0, u0, u0, u1, u1, u1],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        );
+        let dom = Extent2d::from_bounds(u0, 0.0, u1, 1.0);
+        let test = Point3::new(1.9758618749156707, 1.5474606483386255, 1.8929611293797999);
+        let tol = 2.1396832703821572e-6;
+        let target = 1.847;
+        let witness = s
+            .evaluate_point(k, Point2::new(u1, 0.715))
+            .unwrap()
+            .distance(test);
+        assert!(witness < target - tol, "{witness}");
+        let corner = s
+            .evaluate_point(k, Point2::new(u1, 1.0))
+            .unwrap()
+            .distance(test);
+        assert!(corner > target + tol, "{corner}");
+        let check = |found: &[Solution<NoObject>], how: &str| {
+            assert_eq!(found.len(), 1, "{how}: {found:?}");
+            let sol = &found[0];
+            let uv = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);
+            let d = s.evaluate_point(k, uv).unwrap().distance(test);
+            assert!(
+                (d - sol.start.solution_value).abs() <= tol,
+                "{how}: {d} {sol:?}"
+            );
+            assert!(d <= witness + tol, "{how}: {d} > {witness}");
+        };
+        let dispatched = s
+            .global_point_solve::<NoObject>(
+                k,
+                None,
+                &dom,
+                SolverOperation::Minimize,
+                test,
+                tol,
+                Some(target),
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        check(dispatched.as_slice(), "global_point_solve");
+        let direct = s
+            .global_point_solve_1::<NoObject>(
+                k,
+                &dom,
+                SolverOperation::Minimize,
+                test,
+                tol,
+                Some(target),
+                SolutionRequested::Single,
+                None,
+            )
+            .unwrap();
+        check(direct.as_slice(), "global_point_solve_1");
+    }
 }

@@ -106,7 +106,10 @@ fn geometry(k: &Kernel, i: &Inputs) -> Result<Surface, HarnessError> {
         Geometry::Rev { rev } => {
             let surface = Surface::from(rev_rust(k, rev)?.map_err(|e| harness(e.to_string()))?);
             Ok(if i.wrap {
-                Surface::from(StepSurface::new(surface, true).map_err(|e| HarnessError::new(e.to_string()))?)
+                Surface::from(
+                    StepSurface::new(surface, true)
+                        .map_err(|e| HarnessError::new(e.to_string()))?,
+                )
             } else {
                 surface
             })
@@ -150,7 +153,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let operation = solver_op(i.solver)?;
     // the object key is read from a second build of the geometry: a query on the
     // solved surface would make and keep a lazy plane's NURB, which upstream does not
-    let object = Object(geometry(&k, i)?.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
+    let object = Object(
+        geometry(&k, i)?
+            .natural_uv_domain_with_nurb(&k)
+            .map_err(|e| HarnessError::new(e.to_string()))?,
+    );
     let oob = |s: &Surface| match s.kind() {
         SurfaceKind::BSpline(b) => Some(b.is_out_of_bounds_enabled()),
         SurfaceKind::Plane(p) => Some(p.base().is_out_of_bounds_enabled()),
@@ -661,7 +668,8 @@ pub(crate) mod witness {
 
     /// Whether a known-failing reason lists its case under `issue`.
     fn listed(why: &str, issue: &str) -> bool {
-        why.strip_prefix(issue).is_some_and(|rest| rest.starts_with(':'))
+        why.strip_prefix(issue)
+            .is_some_and(|rest| rest.starts_with(':'))
     }
 
     /// Every refuted claim must be listed known failing under its class's issue
@@ -798,7 +806,10 @@ mod review_geometry_tests {
                 &solutions,
             ));
         }
-        eprintln!("{}: succeeded with no solution, by operation: {empty:?}", Runner.id());
+        eprintln!(
+            "{}: succeeded with no solution, by operation: {empty:?}",
+            Runner.id()
+        );
         witness::check(Runner.id(), &claims, &known);
     }
 
@@ -828,11 +839,17 @@ mod review_geometry_tests {
                 .evaluate_point(&k, p2([values[4], values[5]]))
                 .unwrap()
                 .distance(v3(input.test));
-            assert!((actual - reported).abs() <= 1e-12 * actual, "{name}: {actual} {reported}");
+            assert!(
+                (actual - reported).abs() <= 1e-12 * actual,
+                "{name}: {actual} {reported}"
+            );
             assert!(reported >= main, "{name}: {reported} < {main}");
             if unconverged {
                 assert_eq!(values[1], 5.0, "{name}: {values:?}");
-                assert!((reported - main).abs() <= 1e-12 * main, "{name}: {reported} {main}");
+                assert!(
+                    (reported - main).abs() <= 1e-12 * main,
+                    "{name}: {reported} {main}"
+                );
             }
         }
     }
@@ -869,19 +886,28 @@ mod review_geometry_tests {
             let row = &rust(&input).unwrap().values["out"];
             assert!(
                 row.len() == new.len()
-                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                    && row
+                        .iter()
+                        .zip(new)
+                        .all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
                 "{name}: the code gives {row:?}, not the new row"
             );
             assert!(matches!(input.op, Operation::Local { .. }), "{name}");
             let surface = geometry(&k, &input).unwrap();
-            let nurbs = solidcore::blend::fillet_section::station::as_b_spline(&k, crate::certify::measured(&surface))
-                .unwrap()
-                .is_some();
+            let nurbs = solidcore::blend::fillet_section::station::as_b_spline(
+                &k,
+                crate::certify::measured(&surface),
+            )
+            .unwrap()
+            .is_some();
             if !nurbs {
                 // (no NURBS form to bound the evaluation by: the answer must be main's
                 // parameters to an ulp each, the same point)
                 let ulp = |a: f64, b: f64| a == b || a.next_up() == b || a.next_down() == b;
-                assert!(ulp(main[4], new[4]) && ulp(main[5], new[5]), "{name}: main {main:?}, new {new:?}");
+                assert!(
+                    ulp(main[4], new[4]) && ulp(main[5], new[5]),
+                    "{name}: main {main:?}, new {new:?}"
+                );
                 eprintln!("{name}: main's parameters to an ulp, main {main:?} new {new:?}");
                 continue;
             }
@@ -897,21 +923,33 @@ mod review_geometry_tests {
             };
             match solver_op(input.solver).unwrap() {
                 SolverOperation::Maximize => {
-                    assert!(n.1 >= m.0, "{name}: new {n:?} proven nearer than main {m:?}");
+                    assert!(
+                        n.1 >= m.0,
+                        "{name}: new {n:?} proven nearer than main {m:?}"
+                    );
                     proven_better += usize::from(n.0 > m.1);
                 }
                 // (an intersection with the point minimizes its distance to zero)
                 SolverOperation::Minimize | SolverOperation::Intersect => {
-                    assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
+                    assert!(
+                        n.0 <= m.1,
+                        "{name}: new {n:?} proven farther than main {m:?}"
+                    );
                     proven_better += usize::from(n.1 < m.0);
                 }
                 op => {
                     // (another operation's answer is not ranked by its distance: the
                     // moved row must be main's point to the rounding)
-                    assert!(n.0 <= m.1 && m.0 <= n.1, "{name} ({op:?}): new {n:?}, main {m:?}");
+                    assert!(
+                        n.0 <= m.1 && m.0 <= n.1,
+                        "{name} ({op:?}): new {n:?}, main {m:?}"
+                    );
                 }
             }
-            eprintln!("{name} ({:?}): main {m:?} new {n:?}", solver_op(input.solver).unwrap());
+            eprintln!(
+                "{name} ({:?}): main {m:?} new {n:?}",
+                solver_op(input.solver).unwrap()
+            );
         }
         eprintln!("{proven_better} answers proven better than main's");
         assert_eq!(proven_better, 4, "the certified count moved");
@@ -941,25 +979,125 @@ mod review_geometry_tests {
         for &name in TARGET_BOUNDED {
             let case = crate::case::regression_case(&Runner, name);
             let input: Inputs = case.parse().unwrap();
-            let Operation::Global { target: Some(target), .. } = input.op else {
+            let Operation::Global {
+                target: Some(target),
+                ..
+            } = input.op
+            else {
                 panic!("{name}: not a global solve with a target");
             };
             let output = rust(&input).unwrap();
             assert_eq!(output.values["status"], [0.0], "{name}");
-            assert_eq!(output.values["out"], [0.0, 1.0], "{name}: not answered empty");
+            assert_eq!(
+                output.values["out"],
+                [0.0, 1.0],
+                "{name}: not answered empty"
+            );
             let surface = geometry(&k, &input).unwrap();
             let dom = dom_of(input.dom);
             let p = v3(input.test);
             let op = solver_op(input.solver).unwrap();
-            assert_eq!(op, SolverOperation::Minimize, "{name}: only a minimize is bounded");
+            assert_eq!(
+                op,
+                SolverOperation::Minimize,
+                "{name}: only a minimize is bounded"
+            );
             let want = target.abs() + input.tol;
             let bound = crate::certify::domain_lower_bound(&k, &surface, &dom, p, want);
             let proved = bound.is_some_and(|lo| lo > want);
-            eprintln!("{name} ({op:?}): target {target:e} tol {:e} bound {bound:?} proved {proved}", input.tol);
+            eprintln!(
+                "{name} ({op:?}): target {target:e} tol {:e} bound {bound:?} proved {proved}",
+                input.tol
+            );
             if !proved {
                 unproven.push(name);
             }
         }
         assert!(unproven.is_empty(), "not certified empty: {unproven:?}");
+    }
+}
+
+#[cfg(test)]
+mod target_bound_hook_tests {
+    use super::*;
+    use solidcore::geom::global_solver::SolverOperation;
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::replay::ReplaySeam;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    /// #20438 (review): a target bound hook that solves again with its kernel is not
+    /// asked about the nested solve's drop (it is dropped, as without a hook) instead
+    /// of locking its own mutex a second time, which deadlocks or panics. On
+    /// `matrix_0069` with a target of 1.847 the global solver drops its candidate (a
+    /// corner beyond the target) and the tree solve answers a nearer point within it,
+    /// in the hook's nested solve and in the outer one. The solve runs on its own
+    /// thread so a deadlock fails the test instead of hanging it.
+    #[test]
+    fn a_target_bound_hook_may_solve_again() {
+        let case = crate::case::regression_case(&Runner, "matrix_0069");
+        let input: Inputs = case.parse().unwrap();
+        let target = 1.847;
+        let asked = Arc::new(AtomicUsize::new(0));
+        let nested = Arc::new(AtomicUsize::new(usize::MAX));
+        let (a, n) = (Arc::clone(&asked), Arc::clone(&nested));
+        let mut k = Kernel::default();
+        k.replay = ReplaySeam::target_bound(Box::new(move |b| {
+            a.fetch_add(1, Ordering::Relaxed);
+            let again = b
+                .surface
+                .global_point_solve_1::<NoObject>(
+                    b.kernel,
+                    b.domain,
+                    b.operation,
+                    b.point,
+                    b.tol,
+                    Some(b.target),
+                    SolutionRequested::Single,
+                    None,
+                )
+                .unwrap();
+            n.store(again.len(), Ordering::Relaxed);
+            true
+        }));
+        let (send, receive) = mpsc::channel();
+        std::thread::spawn(move || {
+            let surface = geometry(&k, &input).unwrap();
+            let found = surface
+                .global_point_solve_1::<NoObject>(
+                    &k,
+                    &dom_of(input.dom),
+                    SolverOperation::Minimize,
+                    v3(input.test),
+                    input.tol,
+                    Some(target),
+                    SolutionRequested::Single,
+                    None,
+                )
+                .map(|f| {
+                    f.as_slice()
+                        .iter()
+                        .map(|s| s.start.solution_value)
+                        .collect::<Vec<_>>()
+                });
+            let _ = send.send(found);
+        });
+        let found = receive
+            .recv_timeout(Duration::from_secs(120))
+            .expect("the solve did not finish: the hook's nested solve locked its mutex again")
+            .unwrap();
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            1,
+            "the hook is asked once, for the outer drop"
+        );
+        assert_eq!(
+            nested.load(Ordering::Relaxed),
+            1,
+            "the nested solve answers the tree's point"
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0] <= target, "{found:?}");
     }
 }

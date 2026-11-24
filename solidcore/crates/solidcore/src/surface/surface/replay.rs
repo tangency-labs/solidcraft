@@ -309,16 +309,25 @@ pub(crate) fn wrap_loop_normal(
 }
 
 /// Whether the target bound drops the answer `bound` describes: the hook's word, if the
-/// kernel has one ([`TargetBoundHook`]), else `true`. A hook that panicked on an earlier
-/// call drops it, as without a hook.
+/// kernel has one ([`TargetBoundHook`]), else `true`. Inside another seam call (the
+/// hook's own solves among them) the hook is not asked, so a hook that solves again with
+/// its kernel does not lock its own mutex twice: the answer is dropped, as without a
+/// hook. A hook that panicked on an earlier call drops it too.
 pub(crate) fn wrap_target_bound(bound: TargetBound<'_>) -> bool {
-    let Some(hook) = bound.kernel.replay.target_bound.as_ref() else {
+    let seam_state = &bound.kernel.replay;
+    let Some(hook) = seam_state.target_bound.as_ref() else {
         return true;
     };
-    match hook.lock() {
+    if seam_state.depth.load(Ordering::Relaxed) > 0 {
+        return true;
+    }
+    seam_state.depth.fetch_add(1, Ordering::Relaxed);
+    let drop = match hook.lock() {
         Ok(mut h) => h(bound),
         Err(_) => true,
-    }
+    };
+    seam_state.depth.fetch_sub(1, Ordering::Relaxed);
+    drop
 }
 
 /// The error a surface routine `operation` answers when it fails as `reason` says, built

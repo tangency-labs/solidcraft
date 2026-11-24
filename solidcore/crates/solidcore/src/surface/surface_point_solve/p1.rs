@@ -482,6 +482,9 @@ pub struct SurfPtGlobalSolver<'s> {
     closed_in_u: Option<bool>,
     /// `m_bClosedInV` (`None` = `UNSURE`).
     closed_in_v: Option<bool>,
+    /// Not upstream (#20438): the last [`Self::solve`] dropped its answer, a minimum
+    /// beyond the target distance.
+    dropped_beyond_target: bool,
 }
 
 /// The result of [`SurfPtGlobalSolver::find_polygon_triangle_guess`].
@@ -543,7 +546,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
             )?,
             closed_in_u: None,
             closed_in_v: None,
+            dropped_beyond_target: false,
         })
+    }
+
+    /// Whether the last [`Self::solve`] dropped its answer because it was a minimum
+    /// farther than the target distance by more than the tolerance (#20438). The
+    /// solve's one candidate need not be the nearest point (#20483), so a caller that
+    /// must honour the target asks the tree solve instead
+    /// ([`Surface::global_point_solve_1`]).
+    #[must_use]
+    pub const fn dropped_beyond_target(&self) -> bool {
+        self.dropped_beyond_target
+    }
+
+    /// Records whether the solve dropped a minimum beyond the target distance.
+    pub(super) fn set_dropped_beyond_target(&mut self, dropped: bool) {
+        self.dropped_beyond_target = dropped;
     }
 
     /// Whether the surface is closed over the domain in `which_dir` (`SM_SP_U` or

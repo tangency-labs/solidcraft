@@ -1023,6 +1023,7 @@ impl SurfPtGlobalSolver<'_> {
         k: &Kernel,
         surface_obj: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        self.set_dropped_beyond_target(false);
         let mut solutions = SolutionArray::new();
 
         // First find a rough guess.
@@ -1251,6 +1252,7 @@ impl SurfPtGlobalSolver<'_> {
                     );
                 if beyond {
                     found_answer = false;
+                    self.set_dropped_beyond_target(true);
                 }
             }
         }

@@ -1697,7 +1697,7 @@ impl Surface {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn global_point_solve_0_in<O: SolutionObject>(
+    pub(crate) fn global_point_solve_0_in<O: SolutionObject>(
         &self,
         k: &Kernel,
         surface: O,
