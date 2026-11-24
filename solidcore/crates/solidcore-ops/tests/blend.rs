@@ -1639,7 +1639,7 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
 /// read gave every blend its definition back and certified its net again (6 s a boolean on a
 /// part of 60 such rounds). Read on one kernel twice, the variable round's record certifies its
 /// blend the first time only, and builds the same body both times; with the memo off
-/// (`memoize_curve_caches`, as `curve-memo-off` builds every kernel) each read certifies it.
+/// (`memoize_curve_caches` false) each read certifies it.
 #[test]
 fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
     all_fixes();

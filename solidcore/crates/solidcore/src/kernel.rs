@@ -900,7 +900,7 @@ pub struct Kernel {
     pub upstream_ub_passed: Vec<&'static str>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
-    /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
+    /// the surface value (`true` by default; a caller sets it), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
     /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
@@ -1055,7 +1055,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             upstream_ub_passed: Vec::new(),
-            memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
+            memoize_curve_caches: true,
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
