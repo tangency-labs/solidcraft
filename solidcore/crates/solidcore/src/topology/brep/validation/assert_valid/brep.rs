@@ -64,7 +64,15 @@ pub(super) fn brep(
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
     let (status, exclusion_failed) = if pointers {
-        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?
+        super::validate_pointers_excluding(
+            k,
+            b,
+            cx.rep.array.as_deref_mut(),
+            0,
+            walk,
+            cx.keys,
+            false,
+        )?
     } else {
         (super::SUCCESS, false)
     };

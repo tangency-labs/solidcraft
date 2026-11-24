@@ -255,7 +255,7 @@ impl BrepCheck {
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
         let pointer_failures = self.pointer_reports.reports().iter().any(is_failure);
-        if self.pointers_status != SUCCESS && self.pointer_reports.is_empty() {
+        if self.pointers_status != SUCCESS && !pointer_failures {
             out.push((FailureClass::PointersStatus(self.pointers_status), None));
         }
         out.extend(
@@ -467,12 +467,13 @@ fn check_with_keys_counted(
         false,
         keys,
         &mut faces_whole,
+        false,
     )?;
     let pointers_repeat = !(k.memoize_curve_caches
         && pointers_status == SUCCESS
         && !exclusion_failed
         && faces_whole
-        && pointer_reports.is_empty()
+        && !pointer_reports.reports().iter().any(is_failure)
         && b.write_stamps() == before);
     let mut reports = AssertArray::new();
     let assert_valid = if pointer_reports.reports().iter().any(is_failure) {
@@ -489,6 +490,21 @@ fn check_with_keys_counted(
             pointers_repeat,
         )?)
     };
+    // Not upstream (#21105): a warning the first pointer pass reported (a turned-back
+    // curve end, test 147) is said once. The second pass (`AssertValid`'s level-0
+    // `ValidatePointers`, run when the first could not be skipped) reports it again; it is
+    // dropped there, so the check says the same whether that pass ran or was skipped.
+    let repeated: Vec<usize> = (0..reports.len())
+        .rev()
+        .filter(|&i| {
+            reports
+                .get(i)
+                .is_some_and(|r| r.is_warning() && pointer_reports.contains(r))
+        })
+        .collect();
+    for i in repeated {
+        reports.remove_at(i);
+    }
     let passes = usize::from(assert_valid.is_some() && pointers_repeat);
     Ok((
         BrepCheck {
@@ -981,7 +997,7 @@ mod tests {
     #[test]
     fn a_pointer_pass_that_writes_nothing_is_not_run_again() {
         let (mut k, mut b) = checked_box(true);
-        // (a first check may make what the body lacks, such as a line's NURB)
+        // (a first check may store what the body lacks, such as its gaps)
         check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         let (skipped, passes) = check_counting(&mut k, &mut b);
         assert_eq!(passes, 0, "the second pointer pass ran");
@@ -1221,6 +1237,7 @@ mod tests {
             false,
             &keys,
             &mut whole,
+            false,
         );
         whole
     }

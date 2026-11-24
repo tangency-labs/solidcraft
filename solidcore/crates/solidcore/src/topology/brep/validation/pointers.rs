@@ -374,12 +374,17 @@ pub fn validate_pointers(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<i32> {
-    Ok(validate_pointers_excluding(k, b, reports, level, walk, keys)?.0)
+    Ok(validate_pointers_excluding(k, b, reports, level, walk, keys, true)?.0)
 }
 
 /// [`validate_pointers`], also saying whether the geometric vertex exclusion (Test #82 for a
 /// vertex at or past the ratio) failed. With a report array that failure is only a report and
 /// the status stays success; `AssertValid` needs it to agree with the reports it carries.
+///
+/// Not upstream (#21105): `repair_ends` straightens an edge curve or UV trim end that turns
+/// back on itself, as upstream's `ValidatePointers` does (`N_CrvIsNotReversed` with
+/// `Fixit = TRUE`); without it the pass leaves the curve as it is and reports the end as
+/// warning 147. [`validate_pointers`], the operation, repairs; a validity check does not.
 pub(crate) fn validate_pointers_excluding(
     k: &Kernel,
     b: &mut Brep,
@@ -387,8 +392,9 @@ pub(crate) fn validate_pointers_excluding(
     level: u8,
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    repair_ends: bool,
 ) -> Result<(i32, bool)> {
-    validate_pointers_traced(k, b, reports, level, walk, keys, &mut true)
+    validate_pointers_traced(k, b, reports, level, walk, keys, &mut true, repair_ends)
 }
 
 /// [`validate_pointers_excluding`], also clearing `faces_whole` (not upstream) when a face's
@@ -403,6 +409,7 @@ pub(crate) fn validate_pointers_traced(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
     faces_whole: &mut bool,
+    repair_ends: bool,
 ) -> Result<(i32, bool)> {
     if level > 4 {
         return Err(invalid("invalid assert test level"));
@@ -698,7 +705,7 @@ pub(crate) fn validate_pointers_traced(
             r.check(b, 111, mated, EntityRef::Loopuse(lu))?;
         }
     }
-    check_edges(k, b, &mut r, &cache, keys)?;
+    check_edges(k, b, &mut r, &cache, keys, repair_ends)?;
     check_vertices(b, &mut r)?;
     for region in p1::regions(b, None)? {
         for &s in &b.region(region)?.shells {
@@ -846,6 +853,7 @@ fn check_edges(
     r: &mut Reports<'_>,
     cache: &Lists,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    repair_ends: bool,
 ) -> Result<()> {
     for e in p1::edges(b, None)? {
         r.check(b, 57, true, EntityRef::Edge(e))?;
@@ -876,7 +884,7 @@ fn check_edges(
             b.tolerance() * 0.99,
             tol,
         )?;
-        let (good, turned_back) = match check_edge_geometry(k, b, e, cache, keys) {
+        let (good, turned_back) = match check_edge_geometry(k, b, e, cache, keys, repair_ends) {
             Ok(turned_back) => (true, turned_back),
             Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => (false, false),
@@ -2098,14 +2106,16 @@ fn ends_turned_back(k: &Kernel, c: &Curve, surface: Option<&Surface>) -> Result<
         CurveKind::Parabola(p) => p.base(),
         _ => return Ok(false),
     };
-    let surface = surface.filter(|_| base.dim == 2);
     if let Some(nurb) = base.gw_nurb() {
+        let surface = surface.filter(|_| base.dim == 2);
         return Ok(turned_ends(k, nurb.cpts(), surface)?.is_some_and(|t| t.contains(&true)));
     }
     let mut copy = c.clone();
     let Some(base) = nurb_base(k, &mut copy, c.owner(), c.owner_zone_tol_3d())? else {
         return Ok(false);
     };
+    // (the dimension as `fix_reversed_on` reads it: after the NURB is made)
+    let surface = surface.filter(|_| base.dim == 2);
     let points = base.get_or_create_gw_nurb()?.cpts();
     Ok(turned_ends(k, points, surface)?.is_some_and(|t| t.contains(&true)))
 }
@@ -2203,6 +2213,7 @@ fn check_edge_geometry(
     e: EdgeId,
     cache: &Lists,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    repair_ends: bool,
 ) -> Result<bool> {
     let primary = required(b.edge(e)?.edgeuses.first().copied())?;
     let eu = if b.edgeuse(primary)?.orientation == OrientType::Same {
@@ -2210,7 +2221,7 @@ fn check_edge_geometry(
     } else {
         required(cache.mate(b, primary, false)?)?
     };
-    edge_geometry(k, b, e, eu, false, keys)
+    edge_geometry(k, b, e, eu, false, repair_ends, keys)
 }
 
 /// `SmEdge::ValidateGeometry(bFixTolerances)` (CO-PORTED by unit
@@ -2234,7 +2245,7 @@ pub(crate) fn validate_geometry(
     } else {
         required(eu1::mate(b, primary)?)?
     };
-    edge_geometry(k, b, e, eu, fix_tolerances, keys).map(|_| ())
+    edge_geometry(k, b, e, eu, fix_tolerances, true, keys).map(|_| ())
 }
 
 /// The body of `SmEdge::ValidateGeometry(bFixTolerances)` from the edge use `eu` the
@@ -2244,23 +2255,25 @@ pub(crate) fn validate_geometry(
 /// the edge's is reparameterized to it.
 ///
 /// Not upstream (#21105): a curve end that turns back on itself (`N_CrvIsNotReversed`,
-/// which upstream calls with `Fixit = TRUE`) is straightened only with `fix_tolerances`,
-/// the explicit fix path; a check (`fix_tolerances` false) leaves the curve as it is and
-/// returns whether the edge curve or a UV trim has such an end, for the check to report
-/// as a warning (upstream logs `SM_ERR_WARNING` and returns success either way).
+/// which upstream calls with `Fixit = TRUE`) is straightened only with `repair_ends`, as
+/// upstream's `ValidateGeometry` and `ValidatePointers` do; a validity check (`repair_ends`
+/// false) leaves the curve as it is and returns whether the edge curve or a UV trim has
+/// such an end, for the check to report as a warning (upstream logs `SM_ERR_WARNING` and
+/// returns success either way).
 fn edge_geometry(
     k: &Kernel,
     b: &mut Brep,
     e: EdgeId,
     eu: EdgeuseId,
     fix_tolerances: bool,
+    repair_ends: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<bool> {
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
     let mut turned_back = false;
-    if !fix_tolerances {
+    if !repair_ends {
         turned_back |= ends_turned_back(k, required(b.edge(e)?.curve.as_ref())?, None)?;
     } else if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
         fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
@@ -2334,7 +2347,7 @@ fn edge_geometry(
             }
             // not upstream (WR-406, #891): the turn judged on the face's surface
             let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
-            if !fix_tolerances {
+            if !repair_ends {
                 turned_back |= ends_turned_back(k, trim, Some(&surface))?;
             } else if reversed_needs_fix(k, trim, Some(&surface))? {
                 fix_reversed_on(
