@@ -790,6 +790,11 @@ fn line_spine(a: &Face, b: &Face, ends: [Point3; 2], row: &[Hom], tol: f64) -> R
     Ok(blend.spine == BlendSpine::Line)
 }
 
+/// A round's end curvature is read from its jets, which every caller takes to second
+/// order or more: `round_end_curvature` calls `round_jets(.., 2)`, and the curved fill takes
+/// them to at least 2.
+const WHY_CURVATURE_JETS: &str = "a round's end curvature is read from its jets, which every caller takes to second order or more (three rows)";
+
 /// `sm_SbRoundRowK`: a round's least normal curvature along its end row (the owner's ruling
 /// (a), the rounds' part of k), II with the unit normal toward e's side, to rounding. `jets`:
 /// its jets there (0 ..= 2), the row a circular arc (a constant round's section about its
