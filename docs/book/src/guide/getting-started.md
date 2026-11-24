@@ -282,9 +282,9 @@ joystick instead of the mouse wheel. Delete the file to undo it.
 ### Shift+right-click in Firefox
 
 In Firefox, holding Shift while you right-click opens Firefox's own menu (Save Image As…,
-Inspect and so on), and a web page can't stop it. On Linux, SolidCraft doesn't see the click at
-all: the face isn't selected and SolidCraft's menu doesn't open. On Windows, SolidCraft selects
-the face and opens its menu, and Firefox's menu opens on top. Chrome, Edge and the desktop app
+Inspect and so on), and a web page can't stop it. SolidCraft opens no menu of its own under
+Firefox's, and says on the status line that the browser took the click. On Linux, SolidCraft
+doesn't see the click at all: the face isn't selected either. Chrome, Edge and the desktop app
 aren't affected.
 
 The gestures this blocks in Firefox, and what to use instead:
@@ -328,11 +328,12 @@ A script is a list of commands:
 
 ![The bracket example, rendered by solidcraft-cli snapshot](../generated/bracket.png)
 
-`snapshot` looks at the model from the iso view. `--view NAME` takes another standard view (`front`, `back`, `top`, `bottom`, `left`, `right`) or the name of a view saved in the design with `view.save`. `--camera JSON` takes any camera, as the MCP `screenshot` tool does (its conventions are in [the MCP page](mcp.md#camera-and-close-up-recipe)). A script that applies a view itself with `view.apply` sets the camera too. The ground grid lies on Z 0, so it cuts through a part that straddles it: `--no-grid` leaves it out of the picture, and `--no-axes` the origin's axes. The picture is drawn on the GPU with the viewport's own pipelines, so it shows what the window would (a surface analysis such as `inspect.zebra` included); a machine without a GPU uses a software one (Mesa's lavapipe on Linux, WARP on Windows), and with neither (a Mac without usable Metal, a Linux box without Mesa's Vulkan) the CPU rasterizer draws it, without surface analysis colours, and the reply's `renderer` says `cpu` with a warning. `SOLIDCRAFT_GPU=auto|hardware|software|cpu` chooses (`hardware` and `software` fail rather than fall to the CPU), and `solidcraft-cli gpu` lists the adapters and the tier a snapshot would use.
+`snapshot` looks at the model from the iso view. `--view NAME` takes another standard view (`front`, `back`, `top`, `bottom`, `left`, `right`) or the name of a view saved in the design with `view.save`. `--camera JSON` takes any camera, as the MCP `screenshot` tool does (its conventions are in [the MCP page](mcp.md#camera-and-close-up-recipe)). A script that applies a view itself with `view.apply` sets the camera too. The ground grid lies on Z 0, so it cuts through a part that straddles it: `--no-grid` leaves it out of the picture, and `--no-axes` the origin's axes. `--transparent` saves the picture on a transparent background instead of the gradient. Where nothing is drawn the picture is fully transparent; the model is fully opaque, and its anti-aliased edges and see-through bodies are partly transparent. The picture is drawn twice to recover the alpha, so it takes about twice as long. The grid and the axes stay unless `--no-grid` and `--no-axes` leave them out. The picture is drawn on the GPU with the viewport's own pipelines, so it shows what the window would (a surface analysis such as `inspect.zebra` included); a machine without a GPU uses a software one (Mesa's lavapipe on Linux, WARP on Windows), and with neither (a Mac without usable Metal, a Linux box without Mesa's Vulkan) the CPU rasterizer draws it, without surface analysis colours, and the reply's `renderer` says `cpu` with a warning. `SOLIDCRAFT_GPU=auto|hardware|software|cpu` chooses (`hardware` and `software` fail rather than fall to the CPU), and `solidcraft-cli gpu` lists the adapters and the tier a snapshot would use.
 
 ```sh
 solidcraft-cli snapshot part.sc --out photo.png --view Photo
 solidcraft-cli snapshot part.sc --out close-up.png --no-grid --no-axes --camera '{"target": [30, -20, 0], "yaw": 0.6, "pitch": 0.25, "distance": 60}'
+solidcraft-cli snapshot part.sc --out cut-out.png --transparent --no-grid --no-axes
 ```
 
 ### Seeing what a cut or a join is about to do
@@ -381,6 +382,21 @@ can come out the same. The default is `standard`.
 
 ```sh
 solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
+
+`--param NAME=EXPR` sets a parameter of the design as `parameters.change` would, for this run
+only: the file on disk is not touched. Repeat it to set several; they apply in the order given,
+before the script's own commands run, so a later one can use an earlier one's value. `--params-file
+FILE.json` does the same from an object such as `{"width": "30 mm", "depth": 20}` and applies before
+any `--param`. The name must already be a parameter of the design (or of one of its features), so a
+typo fails the run and names the parameter, rather than adding a new one. Overrides need a design to
+act on: the positional design, or `--in` with a script on top; a script alone has no parameters yet
+(have it set them itself). A missing `=`, an empty name or expression, or an expression that does not
+evaluate fails the run with the command's own message, and nothing is written. `eval` takes the same
+two options.
+
+```sh
+solidcraft-cli run part.sc --param width=30mm --param depth=width/2 --out part.step
 ```
 
 `--param-check warn|strict` checks each step against its command's parameter contract, for the

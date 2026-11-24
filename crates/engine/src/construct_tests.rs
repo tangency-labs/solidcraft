@@ -1405,3 +1405,61 @@ fn construction_on_a_body_turned_about_an_origin_turns_about_it_too() {
     let (o, d) = axis(&s, "PinAxis");
     assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(-20.0, 0.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// Flat face snap points (#20677): picking the middle of an edge or the centre of a hole
+/// while hovering the flat face builds construction geometry and follows the model.
+#[test]
+fn flat_face_edge_middle_and_hole_centre_snaps_follow_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"base": [20, 15, -1], "radius": 4, "height": "h + 2 mm", "operation": "cut"}));
+
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    // Top flat face of the box at Z=10
+    let top_face = json!({"type": "face", "at": [5, 5, 10]});
+
+    // 1. Hole centre snapped by picking from the flat top face:
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_face.clone(), "centre", [20.0, 15.0, 10.0]), "name": "HoleCentre"}));
+
+    // 2. Edge middle snapped by picking from the flat top face (front edge [0,0,10]-[40,0,10]):
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_face.clone(), "middle", [20.0, 0.0, 10.0]), "name": "FaceEdgeMid"}));
+
+    // 3. Plane offset through an edge middle snapped from a face (repro case from #20677):
+    run(
+        &mut s,
+        "construct.plane.offset",
+        json!({"base": "XY", "through": snap(top_face.clone(), "middle", [20.0, 0.0, 10.0]), "name": "OffsetPlane"}),
+    );
+
+    assert!(near(point(&s, "HoleCentre"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "HoleCentre"));
+    assert!(near(point(&s, "FaceEdgeMid"), Vec3::new(20.0, 0.0, 10.0)), "{:?}", point(&s, "FaceEdgeMid"));
+    assert!(on_plane(&plane(&s, "OffsetPlane"), Vec3::new(20.0, 0.0, 10.0)));
+
+    // Follows the model when parameters change:
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    assert!(near(point(&s, "HoleCentre"), Vec3::new(20.0, 15.0, 25.0)), "{:?}", point(&s, "HoleCentre"));
+    assert!(near(point(&s, "FaceEdgeMid"), Vec3::new(20.0, 0.0, 25.0)), "{:?}", point(&s, "FaceEdgeMid"));
+    assert!(on_plane(&plane(&s, "OffsetPlane"), Vec3::new(20.0, 0.0, 25.0)));
+}
+
+/// Snapping SnapAt::Centre on a spherical cap face returns the center of the sphere,
+/// not the center of the circular boundary rim edge.
+#[test]
+fn spherical_cap_face_centre_snaps_to_sphere_centre_not_circular_rim_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [0, 0, 0], "body_name": "Sphere"}));
+    // Cut off the bottom at Z < 6 with a box to create a spherical cap with a circular rim at Z = 6
+    run(&mut s, "solid.box", json!({"corner": [-15, -15, -15], "length": 30, "width": 30, "height": 21, "operation": "cut"}));
+
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    let cap_face = json!({"type": "face", "at": [0, 0, 10]});
+
+    // Centre snap on the spherical cap must resolve to the sphere's analytic centre (0, 0, 0),
+    // NOT the rim edge circle centre (0, 0, 6).
+    run(&mut s, "construct.point.vertex", json!({"point": snap(cap_face, "centre", [0.0, 0.0, 10.0]), "name": "SphereCentre"}));
+
+    let pt = point(&s, "SphereCentre");
+    assert!(near(pt, Vec3::new(0.0, 0.0, 0.0)), "expected sphere centre (0, 0, 0), got {:?}", pt);
+    assert!((pt.z - 6.0).abs() > 1.0, "incorrectly snapped to rim circle centre (0, 0, 6)");
+}

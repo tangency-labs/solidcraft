@@ -71,8 +71,10 @@
 //! along `n`, over `|N|`), from the net's second partials with `|N|` proved positive, and
 //! only over the net's own domain and over boxes holding no C0 knot of the net inside
 //! them (the normal jumps across one). A surface, or an offset's base, that carries a
-//! procedural definition is evaluated exactly, not through its net, so it has no bound
-//! and keeps upstream's fix-up. The budget is the drop's 3D tolerance less the largest
+//! procedural definition is evaluated exactly, not through its net, so it has no bound.
+//! Its drop instead preserves the traced Hermite jets and proves the whole UV control
+//! polygon inside the domain (`p2::BoundaryPolicy::Preserve`, #17016); it never uses an
+//! unbounded boundary flattening. The budget is the drop's 3D tolerance less the largest
 //! deviation it measured while tracing (that deviation is sampled, as upstream's span test
 //! samples it; only the moves are bounded).
 //!
@@ -82,7 +84,7 @@
 //! here, and its move is not part of the bound.
 //!
 //! Deviations: not upstream (above). Used for B-spline surfaces and offsets of them;
-//! elsewhere the drop keeps upstream's [`super::p1::fix_boundary_curves`].
+//! other nonprocedural surfaces keep upstream's [`super::p1::fix_boundary_curves`].
 
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
@@ -193,7 +195,9 @@ impl MoveBound {
     /// its net's); `None` for any other kind, a net that does not agree, or a surface (or
     /// an offset's base) that carries a procedural definition: the kernel evaluates that
     /// exactly, not its net, so a bound on the net would not hold for it (as
-    /// `offset_executive::face` guards). Without a bound the drop keeps upstream's fix-up.
+    /// `offset_executive::face` guards). The procedural drop preserves its traced jets
+    /// with a whole-polygon domain proof; other surfaces without a bound keep the
+    /// upstream fix-up.
     #[must_use]
     pub fn of(k: &Kernel, surface: &Surface, budget: f64) -> Option<Self> {
         if surface.procedural_definition().is_some() {

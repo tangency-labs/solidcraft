@@ -91,3 +91,23 @@ fn every_builtin_theme_keeps_text_and_icons_readable_on_their_surfaces() {
     }
     assert!(failures.is_empty(), "below the floor:\n{}", failures.join("\n"));
 }
+
+/// The app bar's edit palette keeps its three levels apart and its hovered text readable on Onyx,
+/// which sets the app bar's own colours over Dark. The kit checks its Dark and Light the same way
+/// (`app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground`), and the theme files
+/// are the look's, so this half of the check lives here.
+#[test]
+fn app_bar_edit_palette_reads_on_onyx() {
+    install_tables();
+    let read = theme_files::read_builtin(themes::BUILTIN).unwrap_or_else(|e| panic!("the built-in themes read: {e}"));
+    let onyx_file = read.iter().find(|theme| theme.id == "onyx").expect("Onyx is built in");
+    let color = |name: &str| {
+        onyx_file.colors.get(name).and_then(|v| v.as_str()).and_then(theme_files::parse_color).unwrap_or_else(|| panic!("Onyx's {name}"))
+    };
+    let t = solidcraft_theme::Tokens { app_bar: color("app_bar"), app_bar_text: color("app_bar_text"), ..solidcraft_theme::Tokens::dark() };
+    let c = solidcraft_theme::contrast_ratio;
+    let p = solidcraft_ui_kit::app_bar::edit_palette(t);
+    let (a, b, foreground) = (c(p.card, p.item), c(p.item, p.hover), c(t.app_bar_text, p.hover));
+    assert!(a >= 1.25 && b >= 1.25, "Onyx: separate levels {a}/{b}");
+    assert!(foreground >= 4.5, "Onyx: hovered text remains legible {foreground}");
+}
