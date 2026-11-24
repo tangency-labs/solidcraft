@@ -30,6 +30,17 @@ pub fn form_errors(session: &Session, schema: &Value, params: &Value) -> BTreeMa
         errors.insert("params".into(), invalid("at most 256 form fields".into()));
         return errors;
     }
+    // Applicable root alternatives can constrain fields absent from root properties. Keep
+    // their errors alongside the individual field checks, using the top-level field key.
+    if let Err(error) = check_input(schema, params) {
+        let key = match &error {
+            HostError::InvalidInput { field, .. } => {
+                field.strip_prefix("params.").and_then(|field| field.split(['.', '[']).next()).unwrap_or("params")
+            }
+            _ => "params",
+        };
+        errors.insert(key.into(), invalid(error.to_string()));
+    }
     if let Some(required) = schema.get("required").and_then(Value::as_array) {
         for key in required.iter().filter_map(Value::as_str).take(256) {
             if !values.contains_key(key) && rules.fields.get(key).is_none_or(|r| r.visible(&controls)) {
@@ -46,30 +57,39 @@ pub fn form_errors(session: &Session, schema: &Value, params: &Value) -> BTreeMa
             continue;
         }
         let Some(property) = properties.and_then(|p| p.get(key)) else {
-            if schema.get("additionalProperties") != Some(&Value::Bool(true)) {
-                errors.insert(key.clone(), invalid("is not an input of this entry".into()));
+            match schema.get("additionalProperties") {
+                Some(Value::Bool(true)) => {}
+                Some(extra @ Value::Object(_)) => {
+                    if let Err(error) = craft_plugin::check_input_field(key, extra, value) {
+                        errors.insert(key.clone(), invalid(error.to_string()));
+                    }
+                }
+                _ => {
+                    errors.insert(key.clone(), invalid("is not an input of this entry".into()));
+                }
             }
             continue;
         };
         let annotation = property.get("x-solidcraft-selection");
         let names = matches!(key.as_str(), "bodies" | "body_ids");
         let selection = annotation.is_some() || names || matches!(key.as_str(), "selection" | "target" | "targets");
-        // A generic object item in a selection field means the shared Sel object, not an
-        // empty object. Keep explicit item constraints intact.
-        let mut checked_property = property.clone();
-        if selection
-            && let Some(items) = checked_property.get_mut("items").and_then(Value::as_object_mut)
-            && items.len() == 1
-            && items.get("type").and_then(Value::as_str) == Some("object")
-        {
-            items.insert("additionalProperties".into(), Value::Bool(true));
-        }
-        if let Err(error) = check_input(&checked_property, value) {
+        if let Err(error) = craft_plugin::check_input_field(key, property, value) {
             errors.insert(key.clone(), invalid(error.to_string()));
             continue;
         }
         if let (Some(rule), Some(options)) = (rules.fields.get(key), property.get("oneOf").and_then(Value::as_array))
-            && options.iter().enumerate().all(|(i, option)| !rule.option_available(i, &controls) || check_input(option, value).is_err())
+            && rule.has_choice_filter()
+            && options.iter().enumerate().all(|(i, option)| {
+                if !rule.option_available(i, &controls) {
+                    return true;
+                }
+                // Retain the enclosing annotation when checking an available option.
+                let mut available = property.clone();
+                if let Some(options) = available.get_mut("oneOf") {
+                    *options = json!([option]);
+                }
+                craft_plugin::check_input_field(key, &available, value).is_err()
+            })
         {
             errors.insert(key.clone(), invalid("is not an available choice".into()));
             continue;
@@ -77,7 +97,9 @@ pub fn form_errors(session: &Session, schema: &Value, params: &Value) -> BTreeMa
         if !selection {
             continue;
         }
-        if property.get("type").and_then(Value::as_str) != Some("array") {
+        // Schema validation resolved the applicable alternatives above. Array values contain
+        // picks even when the array type is declared inside oneOf/anyOf.
+        if !value.is_array() {
             continue;
         }
         let Some(items) = value.as_array().filter(|items| items.len() <= 4096) else {
@@ -128,14 +150,18 @@ fn pick_exists(session: &Session, pick: &crate::Sel) -> bool {
     match pick {
         Sel::Body { name } => state.body(name).is_some(),
         Sel::Face { body, index, point } => state.body(body).is_some_and(|b| {
-            let Some(tolerance) = pick_coordinate_tolerance(&b.body) else { return false };
-            b.body.point_lies_on_face(*index, *point, tolerance).is_ok_and(|p| p.is_some())
+            if b.body.is_mesh() {
+                return false;
+            }
+            crate::kernel::start();
+            solidcraft_kernel::services::pick::stored_face(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
         }),
         Sel::Edge { body, index, point } => state.body(body).is_some_and(|b| {
-            // Verify the stored index AND point on the exact trimmed curve. Never substitute
-            // a nearest-looking edge or use the display mesh to establish identity.
-            let Some(tolerance) = pick_coordinate_tolerance(&b.body) else { return false };
-            solidcraft_kernel::services::exact_edge_distance(&b.body, *index, [point.x, point.y, point.z].into()).is_some_and(|d| d <= tolerance)
+            if b.body.is_mesh() {
+                return false;
+            }
+            crate::kernel::start();
+            solidcraft_kernel::services::pick::stored_edge(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
         }),
         Sel::Profile { sketch, index } => state.sketch(*sketch).is_some_and(|s| s.profiles.get(*index).is_some()),
         Sel::ExternalSketchPoint { sketch, id } => state.sketch(*sketch).is_some_and(|s| s.sketch.point_index(id).is_some()),
@@ -144,16 +170,6 @@ fn pick_exists(session: &Session, pick: &crate::Sel) -> bool {
         }
         _ => false,
     }
-}
-
-/// Shared selection coordinates can be approximate hits. Measure their allowance from exact
-/// bounds, independently of tessellation or display settings, and verify only the supplied index.
-fn pick_coordinate_tolerance(body: &crate::kernel::Body) -> Option<f64> {
-    if body.is_mesh() {
-        return None;
-    }
-    let tolerance = (body.exact_bounds().ok()?.diagonal() * 1e-3).max(1e-3).max(body.record().tolerance);
-    tolerance.is_finite().then_some(tolerance)
 }
 
 impl SolidCraftHost {
