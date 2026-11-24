@@ -16,17 +16,25 @@
 //!   surface: `surface::implicit::curve_lies_on`, every Bernstein coefficient of the surface's
 //!   equation on the curve's Bézier segments within the rounding of computing it (nothing
 //!   sampled). On every row, every line edge the pass can have made (two distinct faces,
-//!   both surfaces `is_analytic()`: the guard it skips every other edge by) is certified on
-//!   both surfaces, so each edge that became a line lies on both. `is_analytic()` also holds
+//!   both surfaces `is_analytic()`: the guard it skips every other edge by) and every line or
+//!   conic edge between such faces is certified on both surfaces, so each edge that became a
+//!   line or a conic lies on both; a line that cannot be certified fails the row, as does
+//!   any edge between faces on implicit surfaces that is off one. A conic on a surface of
+//!   revolution (no implicit here) fails a row whose `result.edge_kinds` moved; on the two
+//!   `issue2174_cap_two_rim_edges` rows, whose kinds did not move (only their vertex
+//!   bounds), the pass changed no edge's kind, so it made none of their 4 such ellipses. `is_analytic()` also holds
 //!   for a surface of extrusion, which has no implicit here: 13 rows (`issue1528` and
 //!   `issue1795` plates, `issue2611` half pipes) have 2 to 4 lines between a plane and an
 //!   extrusion of a B-spline along z. Each lies on the plane by its implicit and on the
 //!   extrusion as one of its rulings (`on_ruling`: both its ends within a millionth of the
-//!   edge tolerance of the ruling through one generator point, a distance that is convex
-//!   along the segment). Line edges outside the pass are counted and left as they were.
-//!   Every vertex is within its own or its edge's tolerance of the nearest end of each edge
-//!   curve at it.
-//! * **Vertex bounds (PROVEN, an invariant).** Every moved bound of `result.geometry` or
+//!   edge tolerance of their points on the ruling through one generator point, clamped to
+//!   the surface's STEP domain, a distance that is convex along the segment). Line and conic
+//!   edges outside the pass are counted and left as they were. The edges whose kind moved
+//!   are not listed one by one (`result.edge_kinds` is stored as an aggregate, so main's
+//!   kinds are not kept); `result.counts` did not move on any row, and every line and conic
+//!   between analytic faces is certified. Each edge's start vertex is within its own or the
+//!   edge's tolerance of the curve's start, its end vertex of the curve's end.
+//! * **Vertex bounds (an invariant, checked).** Every moved bound of `result.geometry` or
 //!   `source.after.geometry` moved by at most the body's tolerance (its entry 0, unchanged):
 //!   a vertex moves onto an exact curve only within the tolerance. The moves are 1e-16 to
 //!   1.7e-12 against tolerances of 1e-6.
@@ -36,12 +44,16 @@
 //!   [2, 8]` rounded r 1 about the same axes. Its area is `3444 + 23 pi` (1v) and `3168 +
 //!   92 pi` (4v), its volume `3420 + 21 pi` and `3168 + 84 pi` ([`closed_forms`] derives
 //!   them). Each new `shell_mass_properties` entry is within `1e-9` relative of its closed
-//!   form; the areas are CLOSER (main's were 1.9e-6 and 7.4e-6 short, past `1e-9`); the
+//!   form; the areas are CLOSER (main's were 1.9e-6 and 7.4e-6 short, 5.3e-10 and 2.1e-9
+//!   relative, the `4v` one past `1e-9`); the
 //!   volumes (and masses, density 1) are FARTHER by 1.1e-10 and 2.2e-10 (3e-14 and 6e-14
 //!   relative, far inside the `1e-4` accuracy the integration is asked for; main's happened
 //!   to land within 1.6e-12). Their `shell_geometry` (edge intervals and points sampled at
 //!   fractions of them) moves because the rounds' edges are now exact arcs and lines,
 //!   parameterised as such; the exact-edge certificate above covers them.
+//!
+//! A later change that legitimately moves one of these rows again updates [`ROWS`] (and
+//! [`MAIN_SHELL_MASS`]) with that change's derivation: the replay fails until it does.
 //!
 //! Run: `cargo test --profile goldens -p goldens --test wr545_moved_rows_are_exact`.
 #![allow(
@@ -63,10 +75,10 @@ use goldens::{golden, CaseContext};
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent1d::Extent1d;
-use solidcore::math::Vec3;
+use solidcore::math::{Point2, Vec3};
 use solidcore::surface::implicit::{curve_lies_on, AnalyticSupport, Implicit};
 use solidcore::surface::surf_of_extrusion::p1::SurfOfExtrusion;
-use solidcore::surface::surface::SurfaceKind;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p1;
 use solidcore::topology::{edge, face, vertex, Brep};
 use solidcore::Kernel;
@@ -101,13 +113,17 @@ fn on_implicit(curve: &Curve, a: &Implicit) -> Option<bool> {
 const N: usize = 4096;
 
 /// Whether the line `curve` over the edge's interval `ivl` lies on the surface of extrusion
-/// `x`, as a ruling of it. The surface holds `g(t) + s d` for its generator `g`, every `t` in
-/// `g`'s interval and the extrusion vector `d`, so it holds the ruling through each `g(t)`;
-/// distance to a line is convex along a segment, so the segment is within `delta`, the
-/// larger of its two ends' distances to one such ruling, of the surface. Any `t` gives an
-/// upper bound: `t` is only searched for (a grid, then a ternary refinement on the first
-/// end's distance), the bound is what is checked. Each distance is `|(p - g(t)) x d| / |d|`,
-/// a few ulps of the coordinates (1e-14 here) off; `delta` must be within a millionth of the
+/// `x`, within its domain. The surface is `S(u, v) = g(u) + v d` over its STEP domain
+/// (`evaluate_step_point` clamps `(u, v)` into it, so every point it returns is on the
+/// surface). For one `u`, each end `p` of the segment gets `v = v0 + (p - S(u, v0)) . d / |d|^2`
+/// and its surface point `q = S(u, v)`, clamped. `q` is affine in `v` along the ruling, and
+/// the clamped `v`s of the two ends are in the domain, so the segment from `q(start)` to
+/// `q(end)` is on the surface. The edge's point at fraction `l` minus that segment's is
+/// affine in `l`, and its length is convex, so every point of the edge is within `delta`,
+/// the larger of the two ends' `|p - q|`, of the surface. Any `u` gives an upper bound: `u`
+/// is only searched for (a grid over the STEP u interval, then a ternary refinement on the
+/// first end's distance to the ruling), and the bound is what is checked. Each distance is a
+/// few ulps of the coordinates (1e-14 here) off. `delta` must be within a millionth of the
 /// edge's tolerance, far past that rounding.
 fn on_ruling(
     k: &Kernel,
@@ -116,7 +132,7 @@ fn on_ruling(
     x: &SurfOfExtrusion,
     tolerance: f64,
 ) -> bool {
-    let (CurveKind::Line(_), Some(g)) = (curve.kind(), x.gen_curve()) else {
+    let CurveKind::Line(_) = curve.kind() else {
         return false;
     };
     let d = x.extrusion_vector();
@@ -124,26 +140,35 @@ fn on_ruling(
         curve.evaluate_point(k, ivl.min()).unwrap(),
         curve.evaluate_point(k, ivl.max()).unwrap(),
     ];
-    let off =
-        |p: Vec3, t: f64| (p - g.evaluate_point(k, t).unwrap()).cross(d).length() / d.length();
-    let gi = g.natural_interval();
-    let (lo, hi) = (gi.min(), gi.max());
+    let dom = x.step_uv_domain();
+    let (ui, vi) = (dom.u_interval(), dom.v_interval());
+    let at_v0 = |u: f64| x.evaluate_step_point(k, Point2::new(u, vi.min())).unwrap();
+    let ruling_off = |p: Vec3, u: f64| (p - at_v0(u)).cross(d).length() / d.length();
+    let (lo, hi) = (ui.min(), ui.max());
     let at = |i: usize| lo + (hi - lo) * (i as f64 / N as f64);
     let best = (0..=N)
-        .min_by(|&i, &j| off(ends[0], at(i)).total_cmp(&off(ends[0], at(j))))
+        .min_by(|&i, &j| ruling_off(ends[0], at(i)).total_cmp(&ruling_off(ends[0], at(j))))
         .unwrap();
     let (mut a, mut b) = (at(best.saturating_sub(1)), at((best + 1).min(N)));
     for _ in 0..200 {
         let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
-        if off(ends[0], m1) <= off(ends[0], m2) {
+        if ruling_off(ends[0], m1) <= ruling_off(ends[0], m2) {
             b = m2;
         } else {
             a = m1;
         }
     }
-    let t = 0.5 * (a + b);
-    let delta = ends.iter().map(|&p| off(p, t)).fold(0.0, f64::max);
-    eprintln!("WR545   ruling at t {t}: {delta:e} off (tolerance {tolerance:e})");
+    let u = 0.5 * (a + b);
+    let base = at_v0(u);
+    let delta = ends
+        .iter()
+        .map(|&p| {
+            let v = vi.min() + (p - base).dot(d) / d.length_squared();
+            let q = x.evaluate_step_point(k, Point2::new(u, v)).unwrap();
+            p.distance(q)
+        })
+        .fold(0.0, f64::max);
+    eprintln!("WR545   ruling at u {u}: {delta:e} off (tolerance {tolerance:e})");
     delta <= 1e-6 * tolerance
 }
 
@@ -152,12 +177,17 @@ fn on_ruling(
 struct Found {
     /// Lines and conics between analytic faces, each certified on every face's surface.
     exact: usize,
-    /// Line edges the pass cannot have made: not between two distinct faces whose surfaces
-    /// are both `is_analytic()`, the guard `make_edges_on_analytics_exact` skips an edge by.
-    lines_outside_the_pass: usize,
-    /// Line edges between two such faces not certified on both.
-    lines_uncertifiable: usize,
-    /// Of `exact`, lines certified on a surface of extrusion as its ruling.
+    /// Line and conic edges the pass cannot have made, not certified: not between two distinct
+    /// faces whose surfaces are both `is_analytic()`, the guard
+    /// `make_edges_on_analytics_exact` skips an edge by.
+    outside_the_pass: usize,
+    /// Line edges between two such faces not certified on both (a failure).
+    uncertifiable: usize,
+    /// Conic edges between two such faces not certified on both, a face's surface having no
+    /// implicit here (a surface of revolution): a failure on a row whose edge kinds moved;
+    /// on a row whose did not, the pass changed no edge's kind, so it made none of them.
+    conics_unchanged: usize,
+    /// Of `exact`, lines certified on a surface of extrusion as one of its rulings.
     rulings: usize,
     /// Failures: an edge off one of its surfaces, a vertex off its edge's ends.
     failures: Vec<String>,
@@ -171,47 +201,38 @@ fn certify(k: &Kernel, b: &Brep) -> Found {
             continue;
         };
         let faces = edge::faces(b, e, None).unwrap();
-        let supports: Option<Vec<Implicit>> = faces
-            .iter()
-            .map(|&f| {
-                face::p2::surface(b, f)
-                    .unwrap()
-                    .and_then(AnalyticSupport::of)
-                    .map(|s| s.implicit())
-            })
-            .collect();
         let is_line = matches!(curve.kind(), CurveKind::Line(_));
-        match supports {
-            Some(supports) if !supports.is_empty() => {
-                let on: Option<Vec<bool>> =
-                    supports.iter().map(|a| on_implicit(curve, a)).collect();
-                if let Some(on) = on {
-                    if on.iter().all(|&x| x) {
-                        found.exact += 1;
-                    } else {
-                        found.failures.push(format!(
-                            "edge {e:?} ({}) off a face's surface: {on:?}",
-                            curve.kind().name()
-                        ));
-                    }
-                }
-            }
-            _ if is_line => {
-                let analytic = |f| {
-                    face::p2::surface(b, f)
-                        .unwrap()
-                        .is_some_and(|s| s.is_analytic().unwrap())
-                };
-                let candidate = matches!(faces.as_slice(), &[f0, f1] if f0 != f1 && analytic(f0) && analytic(f1));
-                if candidate {
-                    // each face: a plane, cylinder, cone, sphere or torus by its implicit
-                    // equation, a surface of extrusion by its ruling (below)
-                    let mut certified = true;
-                    for &f in &faces {
-                        let s = face::p2::surface(b, f).unwrap().unwrap();
-                        let on = if let Some(a) = AnalyticSupport::of(s) {
+        let exact_kind = matches!(
+            curve.kind(),
+            CurveKind::Line(_)
+                | CurveKind::Ellipse(_)
+                | CurveKind::Hyperbola(_)
+                | CurveKind::Parabola(_)
+        );
+        if exact_kind {
+            let surfaces: Vec<_> = faces
+                .iter()
+                .map(|&f| face::p2::surface(b, f).unwrap())
+                .collect();
+            let analytic = |s: Option<&Surface>| s.is_some_and(|s| s.is_analytic().unwrap());
+            // the guard `make_edges_on_analytics_exact` skips every other edge by
+            let eligible = matches!(faces.as_slice(), &[f0, f1] if f0 != f1)
+                && surfaces.iter().copied().all(analytic);
+            let all_implicit = !surfaces.is_empty()
+                && surfaces
+                    .iter()
+                    .all(|s| s.and_then(AnalyticSupport::of).is_some());
+            // each face: a plane, cylinder, cone, sphere or torus by its implicit equation,
+            // a surface of extrusion by its rulings (`on_ruling`)
+            let mut ruled = false;
+            let on: Vec<bool> = surfaces
+                .iter()
+                .map(|s| match s {
+                    Some(s) => {
+                        if let Some(a) = AnalyticSupport::of(s) {
                             on_implicit(curve, &a.implicit()) == Some(true)
                         } else if let SurfaceKind::SurfOfExtrusion(x) = s.kind() {
+                            ruled = true;
                             on_ruling(
                                 k,
                                 curve,
@@ -221,44 +242,46 @@ fn certify(k: &Kernel, b: &Brep) -> Found {
                             )
                         } else {
                             false
-                        };
-                        certified &= on;
+                        }
                     }
-                    if certified {
-                        found.exact += 1;
-                        found.rulings += 1;
-                    } else {
-                        found.lines_uncertifiable += 1;
-                    }
-                } else {
-                    found.lines_outside_the_pass += 1;
-                }
+                    None => false,
+                })
+                .collect();
+            if !on.is_empty() && on.iter().all(|&x| x) {
+                found.exact += 1;
+                found.rulings += usize::from(ruled);
+            } else if eligible && is_line {
+                found.uncertifiable += 1;
+            } else if eligible {
+                found.conics_unchanged += 1;
+            } else if all_implicit {
+                found.failures.push(format!(
+                    "edge {e:?} ({}) off a face's surface: {on:?}",
+                    curve.kind().name()
+                ));
+            } else {
+                found.outside_the_pass += 1;
             }
-            _ => {}
         }
         let ivl = edge::interval(b, e).unwrap();
         let ends = [
             curve.evaluate_point(k, ivl.min()).unwrap(),
             curve.evaluate_point(k, ivl.max()).unwrap(),
         ];
-        for v in [
-            edge::start_vertex(b, e).unwrap(),
-            edge::end_vertex(b, e).unwrap(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let point = vertex::point(b, v).unwrap();
-            let gap = ends
-                .iter()
-                .map(|p| p.distance(point))
-                .fold(f64::INFINITY, f64::min);
+        for (v, end) in [
+            (edge::start_vertex(b, e).unwrap(), ends[0]),
+            (edge::end_vertex(b, e).unwrap(), ends[1]),
+        ] {
+            let Some(v) = v else {
+                continue;
+            };
+            let gap = end.distance(vertex::point(b, v).unwrap());
             let allowed = vertex::tolerance(b, v)
                 .unwrap()
                 .max(edge::tolerance(b, e).unwrap());
             if !(gap <= allowed) {
                 found.failures.push(format!(
-                    "vertex {v:?} {gap:e} off edge {e:?}'s ends (tolerance {allowed:e})"
+                    "vertex {v:?} {gap:e} off edge {e:?}'s end (tolerance {allowed:e})"
                 ));
             }
         }
@@ -328,7 +351,7 @@ fn wr545_moved_rows_replay_and_are_exact() {
     let mut bad = Vec::new();
     let mut units: BTreeMap<&str, (golden::Golden, Vec<goldens::Case>)> = BTreeMap::new();
     let (mut exact_edges, mut bounds) = (0_usize, 0_usize);
-    for &(unit, name, _kinds_moved, old_bounds) in &ROWS {
+    for &(unit, name, kinds_moved, old_bounds) in &ROWS {
         let runner = registry.iter().find(|u| u.id() == unit).expect("unit");
         let (lines, cases) = units.entry(unit).or_insert_with(|| {
             (
@@ -361,8 +384,12 @@ fn wr545_moved_rows_replay_and_are_exact() {
         let k = Kernel::default();
         let found = certify(&k, &body);
         eprintln!(
-            "WR545 {unit}/{name}: {} exact edges ({} rulings), {} lines outside the pass, {} uncertifiable",
-            found.exact, found.rulings, found.lines_outside_the_pass, found.lines_uncertifiable
+            "WR545 {unit}/{name}: {} exact edges ({} rulings), {} outside the pass, {} uncertifiable, {} conics on unchanged kinds",
+            found.exact,
+            found.rulings,
+            found.outside_the_pass,
+            found.uncertifiable,
+            found.conics_unchanged
         );
         for f in &found.failures {
             bad.push(format!("{unit}/{name}: {f}"));
@@ -370,10 +397,16 @@ fn wr545_moved_rows_replay_and_are_exact() {
         if found.exact == 0 {
             bad.push(format!("{unit}/{name}: no exact edge"));
         }
-        if found.lines_uncertifiable != 0 {
+        if found.uncertifiable != 0 {
             bad.push(format!(
-                "{unit}/{name}: {} line edges the pass may have made not certifiable",
-                found.lines_uncertifiable
+                "{unit}/{name}: {} edges the pass may have made not certifiable",
+                found.uncertifiable
+            ));
+        }
+        if kinds_moved && found.conics_unchanged != 0 {
+            bad.push(format!(
+                "{unit}/{name}: {} conic edges the pass may have made not certifiable",
+                found.conics_unchanged
             ));
         }
         exact_edges += found.exact;

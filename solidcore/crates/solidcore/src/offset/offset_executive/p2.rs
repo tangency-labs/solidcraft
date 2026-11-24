@@ -217,8 +217,9 @@ impl ShellOutcome {
 
 /// Not upstream (WR-545; the fork's tangency-labs/smlib@cd85d34): the last step of
 /// `ShellBrep`, `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact(crContext,
-/// rpShellBrep)`, on the shell's result under its notification identities. An error
-/// drops the shell.
+/// rpShellBrep)`, on the shell's result under its notification identities. An edge whose
+/// exact curve cannot be found keeps its marched curve; an error of the pass itself (a
+/// missing callee, a cancellation, a failure changing the body) drops the shell.
 fn make_shell_edges_exact(
     kernel: &mut Kernel,
     shell: &mut Brep,

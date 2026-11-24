@@ -114,7 +114,9 @@ fn check(v: f64, want: f64) {
 }
 
 /// With SolidCraft's fixes (the reported configuration; the trimmed cache stub before).
-/// Pinned since #2890 (precise properties integrate from the trims' base): against the
+/// The shell runs `make_edges_on_analytics_exact` through the face-owned surfaces; "with
+/// the flag" below is that path, the only one since the flag was retired (WR-545), and
+/// "without" the marched edges it replaced. Pinned since #2890 (precise properties integrate from the trims' base): against the
 /// closed form, without the flag +4.26e-4 (it was 10400.212787697543, +4.14e-4), with it
 /// +4.26e-4, within the volume's accuracy. With the flag it was 10400.212354107192
 /// (-1.97e-5) before the certified offset became the default (#13827): the shell's
@@ -137,7 +139,8 @@ fn shelled_plate_with_solidcraft_fixes() {
     );
 }
 
-/// With the kernel's defaults. Pinned since #2890: against the closed form, without the flag
+/// With the kernel's defaults ("with the flag" is the only path now, as above). Pinned
+/// since #2890: against the closed form, without the flag
 /// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +4.80e-4, each within the
 /// volume's accuracy. With the flag it was 10400.212413698822 (+3.99e-5) before the
 /// certified offset became the default (#13827), as above; the flag now moves the volume
