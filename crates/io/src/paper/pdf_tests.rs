@@ -483,6 +483,11 @@ fn pdf_layers_share_object_kinds_and_keep_noncontiguous_paint_order() {
     assert!(file.contains("/Order [6 0 R 7 0 R]"), "the visible layers are ordered");
     assert!(file.contains("/ON [6 0 R 7 0 R]"), "both are visible by default");
     assert!(file.contains("/BaseState /ON"), "the default state is ON");
+    // PDF/A-2 and -3 (ISO 19005-2/-3, 6.9) require a name on every optional-content
+    // configuration, the default one included (#21837).
+    let default = &file[file.find("/D <<").unwrap()..];
+    let default = &default[..default.find(">>").unwrap()];
+    assert!(default.contains("/Name (Layers)"), "the default configuration must be named: {default}");
     assert!(file.contains("/Name (TITLE_BLOCK)") && file.contains("/Name (DRAWING_BORDER)"));
     assert!(!file.contains("/Name (SHEET_BORDER)"), "an empty group has no painted layer");
     assert!(file.contains("/Properties") && file.contains("/L0 6 0 R") && file.contains("/L1 7 0 R"));

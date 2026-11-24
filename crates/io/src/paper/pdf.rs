@@ -31,7 +31,7 @@
 //!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
 //!   groups do not invent layers. Consecutive painted groups of the same kind
 //!   share one marked-content run; empty groups do not interrupt it. All present
-//!   layers start visible.
+//!   layers start visible, in a default configuration named `Layers`, which PDF/A needs.
 //!   Set [`PdfOptions::layers`] to false for the same vector marks without layers.
 //! - **Content size:** every append checks the cumulative byte limit before growing the
 //!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
@@ -185,10 +185,12 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
         }
         if !layers.is_empty() {
             // PDF 1.5 optional content: one group per used paper object kind.
-            // The default configuration orders all layers and starts them ON.
+            // The default configuration orders all layers and starts them ON. Its name is optional
+            // in plain PDF, but PDF/A-2 and -3 require one (ISO 19005-2/-3, 6.9; #21837).
             let mut properties = root.insert(Name(b"OCProperties")).dict();
             properties.insert(Name(b"OCGs")).array().items(layers.iter().map(|l| l.reference));
             let mut default = properties.insert(Name(b"D")).dict();
+            default.pair(Name(b"Name"), TextStr("Layers"));
             default.insert(Name(b"Order")).array().items(layers.iter().map(|l| l.reference));
             default.insert(Name(b"ON")).array().items(layers.iter().map(|l| l.reference));
             default.pair(Name(b"BaseState"), Name(b"ON"));
