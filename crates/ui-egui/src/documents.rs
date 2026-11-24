@@ -2494,20 +2494,34 @@ pub(crate) fn tab_name(app: &SolveApp, session: &Session) -> String {
 
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
-    // A part edited in place names its assembly first, so its tab says where it belongs.
-    let named = |session: &Session, edit: Option<&crate::edit_in_place::PartContext>| {
-        let name = tab_name(app, session);
-        (edit.map_or(name.clone(), |context| crate::edit_in_place::tab_name(context, &name)), session.is_dirty())
+    // A part edited in place names its assembly first, so its tab says where it belongs. A part
+    // of a sub-assembly that is itself edited in place names each level ("counter › hinge › arm").
+    let tabs: Vec<(&Session, Option<&crate::edit_in_place::PartContext>)> = if app.docs.slots.is_empty() {
+        vec![(&app.session, app.edit_in_place.active.as_ref())]
+    } else {
+        app.docs
+            .slots
+            .iter()
+            .map(|s| match s {
+                Some(d) => (&d.session, d.edit_in_place.as_ref()),
+                None => (&app.session, app.edit_in_place.active.as_ref()),
+            })
+            .collect()
     };
-    if app.docs.slots.is_empty() {
-        return vec![named(&app.session, app.edit_in_place.active.as_ref())];
-    }
-    app.docs
-        .slots
-        .iter()
-        .map(|s| match s {
-            Some(d) => named(&d.session, d.edit_in_place.as_ref()),
-            None => named(&app.session, app.edit_in_place.active.as_ref()),
+    tabs.iter()
+        .map(|(session, edit)| {
+            let mut name = tab_name(app, session);
+            let mut context = *edit;
+            // Bounded: a chain of assemblies deeper than this names the nearest levels only.
+            for _ in 0..16 {
+                let Some(level) = context else { break };
+                name = crate::edit_in_place::tab_name(level, &name);
+                context = tabs
+                    .iter()
+                    .find(|(owner, _)| owner.path.as_deref().is_some_and(|path| same_path(path, &level.assembly)))
+                    .and_then(|(_, above)| *above);
+            }
+            (name, session.is_dirty())
         })
         .collect()
 }

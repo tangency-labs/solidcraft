@@ -526,6 +526,87 @@ pub struct MakeInternalParams {
     pub path: Option<String>,
 }
 
+/// List the internal components a design file holds (experimental, #6892): its parts and
+/// sub-assemblies, and theirs, read from the file without building its model. This is what
+/// `component.insert_from_design` picks from.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DesignContentsParams {
+    /// A saved design, `.sc`, `.scprt` or `.scasm`.
+    pub path: String,
+}
+
+/// What `component.design_contents` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignContentsResult {
+    /// The design read, as given.
+    pub path: String,
+    /// Its internal components, by the names they have inside the file.
+    pub members: Vec<DesignMember>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One internal component of a design file.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignMember {
+    /// What `component.insert_from_design` takes to pick it: its name inside the file, after
+    /// the names of the sub-assemblies it is inside, with `/` between (`hinge.scasm/arm.scprt`).
+    pub pick: String,
+    /// Its name inside the file that holds it.
+    pub member: String,
+    /// The name of the component that uses it there; its file name without the extension when
+    /// no component does.
+    pub name: String,
+    /// `part`, `assembly`, or `design` for any other design file.
+    pub kind: String,
+    /// How many times the design that holds it places it.
+    pub placements: usize,
+    /// A sub-assembly's own internal components.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<DesignMember>,
+}
+
+/// Insert internal components picked from another design (experimental, #6892): each picked part
+/// or sub-assembly is copied into this design's file as an internal component of its own, with its
+/// timeline, and placed in the active component where the other design had it. A sub-assembly
+/// comes whole, with its parts and the joints between them. The copies are independent of the
+/// design they came from, which is left as it is. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct InsertFromDesignParams {
+    /// The saved design to pick from, `.sc`, `.scprt` or `.scasm`.
+    pub path: String,
+    /// What to take: each a `pick` of `component.design_contents`.
+    pub members: Vec<String>,
+}
+
+/// What `component.insert_from_design` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InsertFromDesignResult {
+    /// What was brought, in the order asked.
+    pub inserted: Vec<PickedMember>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One internal component brought by `component.insert_from_design`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PickedMember {
+    /// The pick it came from.
+    pub pick: String,
+    /// The new component, by id.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// The name the part has inside this design's file, which is its unpacked file's name.
+    pub member: String,
+    /// The unpacked file, whole: the one to open to edit it.
+    pub file: String,
+}
+
 /// What `component.make_internal` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MakeInternalResult {

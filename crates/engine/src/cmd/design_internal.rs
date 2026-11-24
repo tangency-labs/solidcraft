@@ -245,8 +245,19 @@ pub(crate) fn write_back(own: &str, name: &str, bytes: &[u8]) -> Result<usize, S
 /// exactly what its file holds are removed, and the work folder with them when nothing is left.
 /// A work file that differs stays (the next open offers it as a recovery component), and so does
 /// anything else in the folder. How many were removed. A design that can't be read loses nothing.
+///
+/// A sub-assembly's work file has a work folder of its own beside it, tidied the same way before
+/// the sub-assembly's file goes. The backup the last save left beside a removed work file
+/// (`<file>.bak`) goes with it: what it backs up is held by the design.
 pub fn tidy_work_folder(design: &str) -> usize {
-    if cfg!(target_arch = "wasm32") {
+    tidy(design, 0)
+}
+
+/// How deep sub-assemblies' work folders are followed.
+const TIDY_DEPTH: usize = 16;
+
+fn tidy(design: &str, depth: usize) -> usize {
+    if cfg!(target_arch = "wasm32") || depth > TIDY_DEPTH {
         return 0;
     }
     let Some(folder) = work_folder(design) else { return 0 };
@@ -270,8 +281,16 @@ pub fn tidy_work_folder(design: &str) -> usize {
         }
         let Some(stored) = held.get(&name) else { continue };
         let file = entry.path();
-        if std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) && std::fs::remove_file(&file).is_ok() {
+        if !std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) {
+            continue;
+        }
+        // Its own work folder first, while its file is still there to say what that holds.
+        removed += tidy(&file.to_string_lossy(), depth + 1);
+        if std::fs::remove_file(&file).is_ok() {
             removed += 1;
+            let mut backup = file.into_os_string();
+            backup.push(".bak");
+            let _ = std::fs::remove_file(backup);
         }
     }
     // With nothing left but the record of what the files held, that goes too.
@@ -413,7 +432,7 @@ mod tests {
         assert_eq!(again, Unpacked { written: vec![], differ: vec!["Top.scprt".into()], failed: vec![] });
         assert_eq!(std::fs::read(&top).unwrap(), b"top, edited");
         // A work file a power cut left cut short, or all zeros, is no one's work: unpacked again.
-        for left in [&b"to"[..], &b""[..], &b"   "[..]] {
+        for left in [&b"to"[..], &b""[..], &b"\0\0\0"[..]] {
             std::fs::write(&top, left).unwrap();
             let again = unpack(&doc, &design);
             assert_eq!(again, Unpacked { written: vec!["Top.scprt".into()], differ: vec![], failed: vec![] }, "{left:?}");

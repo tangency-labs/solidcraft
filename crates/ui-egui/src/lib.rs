@@ -246,6 +246,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
+pub(crate) mod insert_from_design;
 pub(crate) mod internal_file;
 pub(crate) mod missing_links;
 pub mod mouse_gesture;
@@ -885,6 +886,8 @@ pub struct SolveApp {
     pub recovery_components: Option<recovery_components::RecoveryComponents>,
     /// A file that belongs to another design, opened by itself, waiting to be answered (#6892).
     pub internal_file: Option<internal_file::InternalFile>,
+    /// A design being picked from, for Insert from Design (#6892).
+    pub insert_from_design: Option<insert_from_design::InsertFromDesign>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1211,6 +1214,7 @@ impl SolveApp {
             missing_links: None,
             recovery_components: None,
             internal_file: None,
+            insert_from_design: None,
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -2855,6 +2859,11 @@ impl SolveApp {
             } else {
                 self.pick_design_to_insert();
             }
+            return;
+        }
+        if id == "component.insert_from_design" {
+            // Insert from Design asks for the design, then shows what it holds to pick from.
+            insert_from_design::pick(self);
             return;
         }
         if id == "doc.open" {
@@ -4690,6 +4699,7 @@ impl SolveApp {
         missing_links::show(self, ui.ctx());
         recovery_components::show(self, ui.ctx());
         internal_file::show(self, ui.ctx());
+        insert_from_design::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

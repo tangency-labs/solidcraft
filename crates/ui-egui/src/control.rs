@@ -1298,6 +1298,21 @@ fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
             Err(e) => err(e),
         };
     }
+    if id == "component.insert_from_design"
+        && let Some(path) = q.params.get("path").and_then(Value::as_str)
+    {
+        // The design is named, so no file picker: the window opens on what it holds (#6892).
+        crate::insert_from_design::open(app, path);
+        let mut reply = started(app);
+        reply["insert_from_design"] = json!(
+            app.insert_from_design.as_ref().map(|window| window
+                .rows
+                .iter()
+                .map(|row| json!({"pick": row.pick, "kind": row.kind, "depth": row.depth}))
+                .collect::<Vec<_>>())
+        );
+        return ok(reply);
+    }
     let preset = match (id, q.params) {
         (_, Value::Null) => None,
         ("joint.drive" | "motion.study", params) => Some(params),

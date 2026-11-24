@@ -2091,3 +2091,159 @@ fn a_work_folder_deleted_while_the_design_is_open_loses_no_part() {
     assert_eq!(std::fs::read(work.join("bracket.scprt")).unwrap(), saved["bracket.scprt"].as_bytes());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A hinge sub-assembly file holding an arm (height 10) and a pin (height 5) as its own internal
+/// components, saved at `file`.
+fn hinge(dir: &Path, file: &Path) {
+    part(&dir.join("arm.scprt"), 10);
+    part(&dir.join("pin.scprt"), 5);
+    let mut hinge = Session::default();
+    run(&mut hinge, "file.new", json!({"kind": "assembly"}));
+    run(&mut hinge, "file.save", json!({"path": file}));
+    for name in ["arm", "pin"] {
+        run(&mut hinge, "component.insert_design", json!({"path": dir.join(format!("{name}.scprt"))}));
+        run(&mut hinge, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut hinge, "file.save", json!({}));
+}
+
+/// A sub-assembly is an internal component like a part (#6892): its file is stored inside the
+/// design's, with its own parts inside it, so the design travels alone. Opened from the work
+/// folder, as Edit in Place does, it has its own components and unpacks its parts beside itself.
+/// A change to one of its parts goes up a level at a time: into the sub-assembly's file, then
+/// into the design's.
+#[test]
+fn a_sub_assembly_is_an_internal_component_with_its_own_parts_and_timeline() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("sub-assembly-inside");
+    let (job, away) = (root.join("job"), root.join("away"));
+    std::fs::create_dir_all(&job).unwrap();
+    std::fs::create_dir_all(&away).unwrap();
+    hinge(&job, &job.join("hinge.scasm"));
+    let mut top = Session::default();
+    run(&mut top, "file.save", json!({"path": job.join("counter.sc")}));
+    run(&mut top, "component.insert_design", json!({"path": job.join("hinge.scasm")}));
+    let made = run(&mut top, "component.make_internal", json!({"component": "hinge"}));
+    assert_eq!(made["member"], "hinge.scasm", "{made}");
+    run(&mut top, "file.save", json!({}));
+    let held = |file: &Path| solidcraft_io::internal_components(&std::fs::read(file).unwrap()).unwrap();
+    let inside = held(&job.join("counter.sc"));
+    assert_eq!(inside.keys().map(String::as_str).collect::<Vec<_>>(), ["hinge.scasm"]);
+    let nested = solidcraft_io::internal_components(&inside["hinge.scasm"]).unwrap();
+    assert_eq!(nested.keys().map(String::as_str).collect::<Vec<_>>(), ["arm.scprt", "pin.scprt"], "the sub-assembly holds its own parts");
+
+    // The design's file alone, somewhere else: complete, with the sub-assembly unpacked.
+    std::fs::copy(job.join("counter.sc"), away.join("counter.sc")).unwrap();
+    let mut alone = Session::default();
+    let reply = run(&mut alone, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert!(reply.get("missing_links").is_none() && reply.get("recovery_components").is_none(), "{reply}");
+    assert!((volume(&mut alone) - 3000.0).abs() < 1e-6, "{}", volume(&mut alone));
+    let work = away.join(".~counter.sc.parts");
+    let unpacked = work.join("hinge.scasm");
+    assert!(unpacked.is_file());
+
+    // The sub-assembly opened by itself, as Edit in Place opens it: its own two components, and
+    // its parts unpacked beside it.
+    let mut sub = Session::default();
+    let reply = run(&mut sub, "doc.open", json!({"path": unpacked}));
+    assert_eq!(reply["internal_of"]["design"], "counter.sc", "{reply}");
+    let links = run(&mut sub, "component.links", json!({}));
+    let names: Vec<&str> = links["links"].as_array().unwrap().iter().filter_map(|link| link["name"].as_str()).collect();
+    assert_eq!(names, ["arm", "pin"], "{links}");
+    assert!(links["links"].as_array().unwrap().iter().all(|link| link["internal"] == true && link["found"] == true), "{links}");
+    let parts = work.join(".~hinge.scasm.parts");
+    assert!(parts.join("arm.scprt").is_file() && parts.join("pin.scprt").is_file());
+
+    // The arm is edited and saved; the sub-assembly takes it and is saved; the design takes that.
+    part(&parts.join("arm.scprt"), 30);
+    assert_eq!(run(&mut sub, "component.update_links", json!({}))["updated"], json!(["arm"]));
+    run(&mut sub, "file.save", json!({}));
+    let link = run(&mut alone, "component.links", json!({}))["links"][0].clone();
+    assert_eq!(link["changed"], true, "{link}");
+    assert_eq!(run(&mut alone, "component.update_links", json!({}))["updated"], json!(["hinge"]));
+    assert!((volume(&mut alone) - 7000.0).abs() < 1e-6, "{}", volume(&mut alone));
+    run(&mut alone, "file.save", json!({}));
+    assert_eq!(held(&away.join("counter.sc"))["hinge.scasm"], std::fs::read(&unpacked).unwrap(), "the design's file holds the edited sub-assembly");
+
+    // Closed, innermost first: nothing is left beside the design's file but the backup its own
+    // save made, the sub-assembly's work folder and the backups in the work folders included.
+    assert!(unpacked.with_extension("scasm.bak").is_file(), "the save left a backup beside the work file");
+    drop(sub);
+    crate::tidy_work_folder(&unpacked.to_string_lossy());
+    drop(alone);
+    crate::tidy_work_folder(&away.join("counter.sc").to_string_lossy());
+    let left: Vec<String> = std::fs::read_dir(&away).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+    assert!(!work.exists() && left.iter().all(|name| name.starts_with("counter.sc")), "{left:?}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Internal components picked from another design (#6892): `component.design_contents` lists
+/// what the design holds, sub-assemblies with their own parts, and `component.insert_from_design`
+/// copies the picked ones into this design as internal components of its own, placed where the
+/// other design had them. A sub-assembly comes whole. One undo takes the whole insert back, and
+/// the design picked from is left as it is.
+#[test]
+fn internal_components_are_picked_from_another_design_with_their_timelines() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("insert-from-design");
+    let (src, job) = (root.join("src"), root.join("job"));
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::create_dir_all(&job).unwrap();
+    hinge(&src, &src.join("hinge.scasm"));
+    part(&src.join("plate.scprt"), 20);
+    let source = src.join("source.sc");
+    let mut made = Session::default();
+    run(&mut made, "file.save", json!({"path": source}));
+    run(&mut made, "component.insert_design", json!({"path": src.join("plate.scprt"), "translate": [50, 0, 0]}));
+    run(&mut made, "component.insert_design", json!({"path": src.join("hinge.scasm")}));
+    run(&mut made, "component.make_internal", json!({"component": "plate"}));
+    run(&mut made, "component.make_internal", json!({"component": "hinge"}));
+    run(&mut made, "file.save", json!({}));
+    let before = std::fs::read(&source).unwrap();
+
+    let mut s = Session::default();
+    let contents = run(&mut s, "component.design_contents", json!({"path": source}));
+    let members = contents["members"].as_array().unwrap();
+    let shown: Vec<(&str, &str, &str, u64)> = members
+        .iter()
+        .map(|m| (m["pick"].as_str().unwrap(), m["name"].as_str().unwrap(), m["kind"].as_str().unwrap(), m["placements"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(shown, [("hinge.scasm", "hinge", "assembly", 1), ("plate.scprt", "plate", "part", 1)], "{contents}");
+    let nested: Vec<&str> = members[0]["members"].as_array().unwrap().iter().map(|m| m["pick"].as_str().unwrap()).collect();
+    assert_eq!(nested, ["hinge.scasm/arm.scprt", "hinge.scasm/pin.scprt"], "{contents}");
+    assert!(members[1].get("members").is_none(), "a part holds nothing: {contents}");
+
+    // An unsaved design has no file to store them in; a pick the design does not hold is named.
+    let picks = json!({"path": source, "members": ["plate.scprt", "hinge.scasm", "hinge.scasm/pin.scprt"]});
+    let refused = s.execute("component.insert_from_design", &picks).unwrap_err().to_string();
+    assert!(refused.contains("save this design first"), "{refused}");
+    run(&mut s, "file.save", json!({"path": job.join("target.sc")}));
+    let refused = s.execute("component.insert_from_design", &json!({"path": source, "members": ["bolt.scprt"]})).unwrap_err().to_string();
+    assert!(refused.contains("holds no internal component `bolt.scprt`"), "{refused}");
+    assert!(s.doc.links.is_empty(), "a refused insert leaves nothing");
+
+    let reply = run(&mut s, "component.insert_from_design", picks);
+    let inserted = reply["inserted"].as_array().unwrap();
+    let brought: Vec<(&str, &str)> = inserted.iter().map(|m| (m["name"].as_str().unwrap(), m["member"].as_str().unwrap())).collect();
+    assert_eq!(brought, [("plate", "plate.scprt"), ("hinge", "hinge.scasm"), ("pin", "pin.scprt")], "{reply}");
+    let links = run(&mut s, "component.links", json!({}));
+    assert!(links["links"].as_array().unwrap().iter().all(|link| link["internal"] == true && link["found"] == true), "{links}");
+    // The plate sits where the other design had it; plate 4000, hinge 3000, pin 1000.
+    let plate = inserted[0]["component"].as_u64().unwrap();
+    let placed = s.doc.occurrences.iter().find(|o| o.component == plate).unwrap();
+    assert_eq!(placed.transform[3], [50.0, 0.0, 0.0, 1.0]);
+    assert!((volume(&mut s) - 8000.0).abs() < 1e-6, "{}", volume(&mut s));
+
+    // Saved, the design holds all three, the sub-assembly with its parts, each tagged as its own.
+    run(&mut s, "file.save", json!({}));
+    let held = solidcraft_io::internal_components(&std::fs::read(job.join("target.sc")).unwrap()).unwrap();
+    assert_eq!(held.keys().map(String::as_str).collect::<Vec<_>>(), ["hinge.scasm", "pin.scprt", "plate.scprt"]);
+    assert_eq!(solidcraft_io::internal_components(&held["hinge.scasm"]).unwrap().len(), 2, "the sub-assembly came whole");
+    assert!(held.values().all(|part| solidcraft_io::internal_of(part).is_some_and(|tag| tag.design == "target.sc")));
+    assert_eq!(std::fs::read(&source).unwrap(), before, "the design picked from is untouched");
+
+    // One undo takes the whole insert back.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.links.is_empty(), "one undo step");
+    let _ = std::fs::remove_dir_all(root);
+}

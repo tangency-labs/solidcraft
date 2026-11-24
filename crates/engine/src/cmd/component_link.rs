@@ -21,10 +21,10 @@ use super::CommandSpec;
 use super::design_link::{LinkState, absolute, link_presence, link_target, read_linked_file, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
-    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, MakeInternalParams, MakeInternalResult, RecoveryParams,
-    RecoveryResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult, WriteBackParams,
-    WriteBackResult,
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignContentsParams, DesignContentsResult, DesignInserted, DesignMember,
+    ExtractParams, ExtractResult, InsertDesignParams, InsertDesignResult, InsertFromDesignParams, InsertFromDesignResult, JointDiagnostic,
+    LinkFailure, LinkInfo, LinksParams, LinksResult, MakeInternalParams, MakeInternalResult, PickedMember, RecoveryParams, RecoveryResult,
+    RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult, WriteBackParams, WriteBackResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -46,6 +46,8 @@ const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
 const MAKE_INTERNAL_CONTRACT: TypedContract<MakeInternalParams> = TypedContract::new();
+const DESIGN_CONTENTS_CONTRACT: TypedContract<DesignContentsParams> = TypedContract::new();
+const INSERT_FROM_DESIGN_CONTRACT: TypedContract<InsertFromDesignParams> = TypedContract::new();
 const RECOVERY_CONTRACT: TypedContract<RecoveryParams> = TypedContract::new();
 const WRITE_BACK_CONTRACT: TypedContract<WriteBackParams> = TypedContract::new();
 
@@ -95,6 +97,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component: id or name of a linked component — experimental (Parts and assemblies): copies its design file into this design's file as a \
          stored part, unpacked beside this design while it is open, and links the component to that copy; the file it came from is left as it is; \
          this design must be saved; returns member (the part's name inside the file), file (the unpacked file to open and edit) and previous_path",
+    ),
+    CommandSpec::new("component.design_contents", "List Design Contents", crate::checked!("component.design_contents", design_contents))
+        .icon("inspect")
+        .noundo()
+        .contract(&DESIGN_CONTENTS_CONTRACT)
+        .output(output_schema_for::<DesignContentsResult>)
+        .params(
+        "path: a saved design → members: [{pick, member, name, kind (part|assembly|design), placements, members?}], the internal components \
+         its file holds and, for a sub-assembly, its own; read from the file without building its model (experimental, hybrid environment)",
+    ),
+    CommandSpec::new("component.insert_from_design", "Insert from Design", crate::checked!("component.insert_from_design", insert_from_design))
+        .icon("component")
+        .contract(&INSERT_FROM_DESIGN_CONTRACT)
+        .output(output_schema_for::<InsertFromDesignResult>)
+        .params(
+        "path: a saved design to pick from; members: [each a `pick` of component.design_contents, e.g. \"hinge.scasm\" or \
+         \"hinge.scasm/arm.scprt\"] — experimental (hybrid environment): each picked part or sub-assembly is copied into this design's file as \
+         an internal component with its timeline (a sub-assembly whole, with its parts and their joints) and placed in the active component \
+         where the other design had it; independent of the design it came from; this design must be saved; returns inserted: [{pick, component, \
+         name, member, file}]",
     ),
     CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
         .icon("export")
@@ -1442,7 +1464,7 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
 fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.make_internal";
     if !super::experimental_file_kinds() {
-        return Err(bad(cmd, "storing a part inside a design is experimental: turn on Parts and assemblies in Preferences › General › Environment"));
+        return Err(bad(cmd, "storing a part inside a design is experimental: choose the hybrid environment in Preferences › General › Environment"));
     }
     if cfg!(target_arch = "wasm32") {
         return Err(bad(cmd, "storing a part inside a design needs a folder to unpack it to, which the browser does not have"));
@@ -1488,6 +1510,142 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
         kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
     }
     reply(cmd, MakeInternalResult { component: comp, member, file: file.to_string_lossy().into_owned(), previous_path, param_warnings: Vec::new() })
+}
+
+/// How deep sub-assemblies inside sub-assemblies are followed.
+const MEMBER_DEPTH: usize = 16;
+/// The most picks one `component.insert_from_design` takes.
+const MAX_PICKS: usize = 256;
+
+/// The internal components the design file `container` holds, and theirs, below `prefix`.
+fn members_of(container: &[u8], prefix: &str, depth: usize) -> Vec<DesignMember> {
+    if depth > MEMBER_DEPTH {
+        return Vec::new();
+    }
+    let Ok(held) = solidcraft_io::internal_components(container) else { return Vec::new() };
+    if held.is_empty() {
+        return Vec::new();
+    }
+    // The design's own record of who uses each one: names and placements. A design that does
+    // not read still lists what its file holds, under the files' own names.
+    let doc = solidcraft_io::read_design(container).ok();
+    held.into_iter()
+        .map(|(member, bytes)| {
+            let link = solidcraft_doc::internal::link(&member);
+            let component = doc.as_ref().and_then(|doc| doc.links.iter().find(|(_, used)| used.path == link).map(|(id, _)| *id));
+            let name = component
+                .and_then(|id| doc.as_ref()?.components.iter().find(|c| c.id == id).map(|c| c.name.clone()))
+                .unwrap_or_else(|| member.rsplit_once('.').map_or(member.as_str(), |(stem, _)| stem).to_string());
+            let placements = component.map_or(0, |id| doc.as_ref().map_or(0, |doc| doc.occurrences.iter().filter(|o| o.component == id).count()));
+            let lower = member.to_lowercase();
+            let kind = if lower.ends_with(".scasm") {
+                "assembly"
+            } else if lower.ends_with(".scprt") {
+                "part"
+            } else {
+                "design"
+            };
+            let pick = if prefix.is_empty() { member.clone() } else { format!("{prefix}/{member}") };
+            let members = members_of(&bytes, &pick, depth + 1);
+            DesignMember { pick, member, name, kind: kind.to_string(), placements, members }
+        })
+        .collect()
+}
+
+/// `component.design_contents`: what a design file holds, for picking from.
+fn design_contents(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.design_contents";
+    let path = str_(p, "path").ok_or_else(|| bad(cmd, "`path` must be a saved design"))?;
+    let bytes = read_link(Path::new(path), s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    reply(cmd, DesignContentsResult { path: path.to_string(), members: members_of(&bytes, "", 0), param_warnings: Vec::new() })
+}
+
+/// The bytes of the internal component `pick` names inside the design file `source`, with the
+/// name it has in the file that holds it and, for one the design itself holds, where the design
+/// first places it.
+fn picked(source: &[u8], pick: &str) -> std::result::Result<(String, Vec<u8>, Option<solidcraft_doc::Mat>), String> {
+    let mut container = source.to_vec();
+    let mut name = String::new();
+    let mut placement = None;
+    let segments: Vec<&str> = pick.split('/').collect();
+    if segments.len() > MEMBER_DEPTH || segments.iter().any(|segment| segment.is_empty()) {
+        return Err(format!("`{pick}` is not a pick of component.design_contents"));
+    }
+    for (level, segment) in segments.iter().enumerate() {
+        let held = solidcraft_io::internal_components(&container).map_err(|e| e.to_string())?;
+        let Some((member, bytes)) = held.into_iter().find(|(member, _)| member.eq_ignore_ascii_case(segment)) else {
+            return Err(format!("the design holds no internal component `{pick}`"));
+        };
+        if level == 0 && segments.len() == 1 {
+            let link = solidcraft_doc::internal::link(&member);
+            placement = solidcraft_io::read_design(&container).ok().and_then(|doc| {
+                let component = doc.links.iter().find(|(_, used)| used.path == link).map(|(id, _)| *id)?;
+                doc.occurrences.iter().find(|o| o.component == component).map(|o| o.transform)
+            });
+        }
+        container = bytes;
+        name = member;
+    }
+    Ok((name, container, placement))
+}
+
+/// `component.insert_from_design`: internal components picked from another design become
+/// internal components of this one, each a copy with its timeline, placed where it was.
+fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_from_design";
+    if !super::experimental_file_kinds() {
+        return Err(bad(cmd, "internal components are experimental: choose the hybrid environment in Preferences › General › Environment"));
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Err(bad(cmd, "an internal component needs a folder to unpack it to, which the browser does not have"));
+    }
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the picked parts are stored inside its file"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    let path = str_(p, "path").ok_or_else(|| bad(cmd, "`path` must be a saved design"))?;
+    let picks: Vec<String> = match p.get("members").and_then(Value::as_array) {
+        Some(list) if !list.is_empty() && list.len() <= MAX_PICKS && list.iter().all(Value::is_string) => {
+            list.iter().filter_map(|pick| pick.as_str().map(str::to_string)).collect()
+        }
+        _ => return Err(bad(cmd, format!("`members` must be 1 to {MAX_PICKS} picks of component.design_contents"))),
+    };
+    let source = read_link(Path::new(path), Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
+    let design = Path::new(&own).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut inserted = Vec::new();
+    for pick in picks {
+        let (given, bytes, placement) = picked(&source, &pick).map_err(|why| bad(cmd, format!("{path}: {why}")))?;
+        let member = super::design_internal::free_name(&s.doc, &own, Path::new(&given));
+        // The copy belongs to this design now, and says so.
+        let tag = solidcraft_io::InternalOf {
+            design: design.clone(),
+            key: DesignLink::file_digest(format!("{}|{own}|{member}|{}", DesignLink::file_digest(&bytes), inserted.len()).as_bytes())
+                .chars()
+                .take(16)
+                .collect(),
+        };
+        let bytes = solidcraft_io::with_internal_of(&bytes, Some(&tag)).unwrap_or(bytes);
+        let file = super::design_internal::work_file(Some(&own), &member)
+            .ok_or_else(|| bad(cmd, "this design's file has no folder to unpack the part to"))?;
+        super::design_internal::write(&file, &bytes).map_err(|why| bad(cmd, why))?;
+        s.internal_held.insert(member.clone(), bytes.clone().into());
+        let name = given.rsplit_once('.').map_or(given.as_str(), |(stem, _)| stem).to_string();
+        let mut params = json!({"path": file.to_string_lossy(), "name": name});
+        if let Some(at) = placement {
+            // Row-major 3x4, as `component.insert_design` takes it.
+            let rows: Vec<f64> = (0..3).flat_map(|row| (0..4).map(move |column| at[column][row])).collect();
+            params["to_matrix"] = json!(rows);
+        }
+        let made = insert_design(s, &params)?;
+        let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+        if let Some(kept) = s.doc_mut().links.get_mut(&component) {
+            kept.path = solidcraft_doc::internal::link(&member);
+            kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
+        }
+        let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
+        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned() });
+    }
+    reply(cmd, InsertFromDesignResult { inserted, param_warnings: Vec::new() })
 }
 
 /// `component.write_back`: the internal component's unpacked file goes into the design's file

@@ -1850,3 +1850,86 @@ fn an_internal_file_opened_by_itself_asks_and_each_answer_does_what_it_says() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&lost);
 }
+
+/// Insert from Design (#6892): the window lists what another design holds, a sub-assembly with
+/// its parts under it, and Insert brings the ticked ones into this design as internal components
+/// of its own. Ticking a sub-assembly ticks everything under it and brings it whole; with one
+/// of its parts unticked, the parts left ticked come as parts. A design that holds nothing says
+/// so and shows no window.
+#[test]
+fn insert_from_design_lists_another_designs_internal_components_and_inserts_the_ticked_ones() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("insert_from_design");
+    let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let run = |s: &mut Session, id: &str, params: serde_json::Value| s.execute(id, &params).unwrap_or_else(|e| panic!("{id}: {e}"));
+    for (name, height) in [("arm", 1), ("pin", 2), ("plate", 3)] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 2, "width": 3, "height": height}));
+        run(&mut part, "file.save", json!({"path": text(&dir.join(format!("{name}.scprt")))}));
+    }
+    let mut hinge = Session::default();
+    run(&mut hinge, "file.new", json!({"kind": "assembly"}));
+    run(&mut hinge, "file.save", json!({"path": text(&dir.join("hinge.scasm"))}));
+    for name in ["arm", "pin"] {
+        run(&mut hinge, "component.insert_design", json!({"path": text(&dir.join(format!("{name}.scprt")))}));
+        run(&mut hinge, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut hinge, "file.save", json!({}));
+    let source = dir.join("source.sc");
+    let mut made = Session::default();
+    run(&mut made, "file.save", json!({"path": text(&source)}));
+    for file in ["plate.scprt", "hinge.scasm"] {
+        run(&mut made, "component.insert_design", json!({"path": text(&dir.join(file))}));
+    }
+    for name in ["plate", "hinge"] {
+        run(&mut made, "component.make_internal", json!({"component": name}));
+    }
+    run(&mut made, "file.save", json!({}));
+    let empty = dir.join("empty.sc");
+    run(&mut Session::default(), "file.save", json!({"path": text(&empty)}));
+
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.session.execute("file.save", &json!({"path": text(&dir.join("target.sc"))})).unwrap();
+    crate::insert_from_design::open(&mut app, &text(&empty));
+    assert!(app.insert_from_design.is_none(), "nothing to pick from, no window");
+    assert!(app.status.as_ref().is_some_and(|status| !status.2), "{:?}", app.status);
+
+    crate::insert_from_design::open(&mut app, &text(&source));
+    let shown = app.insert_from_design.clone().expect("the window shows");
+    let rows: Vec<(&str, &str, usize)> = shown.rows.iter().map(|row| (row.pick.as_str(), row.kind.as_str(), row.depth)).collect();
+    assert_eq!(
+        rows,
+        [("hinge.scasm", "assembly", 0), ("hinge.scasm/arm.scprt", "part", 1), ("hinge.scasm/pin.scprt", "part", 1), ("plate.scprt", "part", 0)],
+        "{shown:?}"
+    );
+    // Nothing ticked: Insert leaves the window as it is.
+    crate::insert_from_design::insert(&mut app);
+    assert!(app.insert_from_design.is_some());
+    // Ticking the sub-assembly ticks everything under it, and it comes whole.
+    let ticks = |app: &SolveApp| app.insert_from_design.as_ref().unwrap().rows.iter().map(|row| row.ticked).collect::<Vec<_>>();
+    fn window(app: &mut SolveApp) -> &mut crate::insert_from_design::InsertFromDesign {
+        app.insert_from_design.as_mut().unwrap()
+    }
+    crate::insert_from_design::tick(window(&mut app), 0, true);
+    assert_eq!(ticks(&app), [true, true, true, false]);
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm"]);
+    // Unticking the pin leaves the sub-assembly unticked and mixed: the arm comes as a part.
+    crate::insert_from_design::tick(window(&mut app), 2, false);
+    assert_eq!(ticks(&app), [false, true, false, false]);
+    assert!(crate::insert_from_design::mixed(window(&mut app), 0));
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm/arm.scprt"]);
+    // The pin ticked again: everything under the sub-assembly is ticked, so it is too.
+    crate::insert_from_design::tick(window(&mut app), 2, true);
+    assert_eq!(ticks(&app), [true, true, true, false]);
+    assert!(!crate::insert_from_design::mixed(window(&mut app), 0));
+    crate::insert_from_design::tick(window(&mut app), 3, true);
+    assert_eq!(crate::insert_from_design::picks(window(&mut app)), ["hinge.scasm", "plate.scprt"]);
+    crate::insert_from_design::insert(&mut app);
+    assert!(app.insert_from_design.is_none());
+    assert!(app.status.as_ref().is_some_and(|status| !status.2), "{:?}", app.status);
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    let names: Vec<&str> = links["links"].as_array().unwrap().iter().filter_map(|link| link["name"].as_str()).collect();
+    assert_eq!(names, ["hinge", "plate"], "{links}");
+    assert!(links["links"].as_array().unwrap().iter().all(|link| link["internal"] == true), "{links}");
+    let _ = std::fs::remove_dir_all(dir);
+}
