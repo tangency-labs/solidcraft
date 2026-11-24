@@ -5019,3 +5019,13 @@ fn align_refuses_a_body_listed_twice() {
     let e = align_error(&mut s, json!({"bodies": ["B", "B"], "from": [50, 0, 0], "to": [0, 0, 100]}));
     assert!(e.contains("`B`") && e.contains("twice"), "{e}");
 }
+
+/// A face side is a planar face: a pick on a round face is refused.
+#[test]
+fn align_refuses_a_round_face() {
+    let mut s = blocks_and_pin();
+    let e = align_error(&mut s, json!({"bodies": ["Pin"], "from_face": [-25, 5, 5], "to_face": [5, 5, 10]}));
+    assert!(e.contains("`from_face`") && e.contains("planar"), "{e}");
+    let e = align_error(&mut s, json!({"bodies": ["B"], "from_face": [55, 5, 0], "to_face": [-25, 5, 5]}));
+    assert!(e.contains("`to_face`") && e.contains("planar"), "{e}");
+}
