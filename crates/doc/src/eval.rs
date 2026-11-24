@@ -1114,6 +1114,8 @@ pub struct ModelState {
     pub surface_sheets: Vec<crate::SurfaceSheet>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
+    /// Frame members as made and trimmed so far (`frame.member`, `frame.trim`).
+    pub frame_members: Vec<crate::frame::MemberRecord>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
     /// The edges each fillet or chamfer blended, as found in this evaluation (by feature id):
@@ -1199,6 +1201,7 @@ impl ModelState {
             reserved_body_names,
             surface_sheets,
             construct,
+            frame_members,
             sketch_keys,
             blend_edges,
             named_faces,
@@ -1219,6 +1222,7 @@ impl ModelState {
             reserved_body_names: reserved_body_names.clone(),
             surface_sheets: surface_sheets.clone(),
             construct: construct.clone(),
+            frame_members: frame_members.clone(),
             sketch_keys: sketch_keys.clone(),
             blend_edges: blend_edges.clone(),
             named_faces: named_faces.clone(),
@@ -1310,6 +1314,10 @@ impl ModelState {
         // a feature must change the key (#9544). A state without any hashes as before.
         if !self.construct.is_empty() {
             serde_json::to_string(&self.construct).unwrap_or_default().hash(&mut h);
+        }
+        // Designs without frame members retain their existing cache identities.
+        if !self.frame_members.is_empty() {
+            serde_json::to_string(&self.frame_members).unwrap_or_default().hash(&mut h);
         }
         h.finish()
     }
@@ -1757,6 +1765,14 @@ impl ModelState {
         #[cfg(test)]
         cost_tests::count(|c| c.body_searches += 1);
         self.bodies.iter().find(|b| b.name == name)
+    }
+
+    /// The frame member whose body is the body called `name` now. A member's record stays when a
+    /// later feature removes its body, and another body can take the name; it counts only while
+    /// the body of that name is the one its feature made.
+    pub fn frame_member(&self, name: &str) -> Option<&crate::frame::MemberRecord> {
+        let body = self.body(name)?;
+        self.frame_members.iter().rev().find(|m| m.body == name && m.feature == body.feature)
     }
 
     /// Make every body's display mesh now, on all cores (bodies are meshed independently and
@@ -3766,6 +3782,28 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 }
             }
         }
+        // A trim's face targets are read as an end cap's faces are: in the frame each was picked
+        // in, through the placement it was picked at, so moving that occurrence trims again.
+        FeatureKind::FrameTrim { to, .. } => {
+            let faces = to.iter().filter_map(|t| match t {
+                crate::frame::TrimTarget::Plane { plane } => crate::face_anchor::plane_face_anchor(plane),
+                crate::frame::TrimTarget::Member { .. } => None,
+            });
+            for anchor in faces {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => {
+                        hash_placement(&m, &mut h);
+                        frame.get_or_insert(m);
+                    }
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+            }
+        }
         _ => {}
     }
     // A Frame Member's pairs join points on bodies, sketches and construction points of any
@@ -5567,7 +5605,7 @@ fn voids(b: &Body) -> usize {
 }
 
 /// The operation of a feature that makes or changes bodies with one.
-fn feature_operation(f: &Feature) -> Option<Operation> {
+pub fn feature_operation(f: &Feature) -> Option<Operation> {
     Some(match &f.kind {
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
@@ -7052,6 +7090,30 @@ fn body_on_edge(st: &ModelState, p: Vec3) -> Option<usize> {
     st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
 }
 
+/// The body (index) an edge picked at `p` without a name lies on, as [`body_on_edge`], and the note
+/// when `p` lies on edges of other bodies too: every body with an edge through `p` about as near
+/// as the nearest one, the window the `solid.fillet` command refuses such a pick with (#20517).
+fn body_on_edge_noted(st: &ModelState, p: Vec3) -> (Option<usize>, Option<String>) {
+    let near: Vec<(usize, f64)> = st.bodies.iter().enumerate().filter_map(|(i, b)| Some((i, edge_through(b, p)?))).collect();
+    let Some(&(chosen, d_min)) = near.iter().min_by(|a, b| a.1.total_cmp(&b.1)) else { return (None, None) };
+    let mut names: Vec<&str> =
+        near.iter().filter(|(_, d)| *d <= 2.0 * d_min + 1e-3).filter_map(|(i, _)| Some(st.bodies.get(*i)?.name.as_str())).collect();
+    let first = st.bodies.get(chosen).map(|b| b.name.as_str()).unwrap_or_default();
+    names.sort_by_key(|n| *n != first);
+    let note = match names.split_last() {
+        Some((last, others)) if !others.is_empty() => Some(format!(
+            "[{}, {}, {}] lies on edges of {} bodies, {} and {last}: `{first}` is blended; name the one to blend with `body`",
+            p.x,
+            p.y,
+            p.z,
+            names.len(),
+            others.join(", ")
+        )),
+        _ => None,
+    };
+    (Some(chosen), note)
+}
+
 /// How far `p` is from the edge of `b` that runs through it, when one does.
 fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
     if b.body.is_mesh() {
@@ -7066,12 +7128,14 @@ fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
 /// its stored name finds it on. A named edge that is gone stays on the bodies the feature's other
 /// edges were found on; an unnamed one goes to the body the pick lies on an edge of; failing
 /// both, the body nearest the first pick (as before blends were split by body). A named edge is
-/// never moved onto another body because that body's edge is nearer.
-fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Result<Vec<usize>> {
+/// never moved onto another body because that body's edge is nearer. The notes say which
+/// unnamed picks lie on edges of several bodies: the `solid.fillet` and `solid.chamfer` commands
+/// refuse such a pick, so a design file that has one blends the nearest body, but says so (#20517).
+fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Result<(Vec<usize>, Vec<String>)> {
     // Named, or only one body to blend: no lookup.
     if body.is_some() || st.bodies.iter().filter(|b| !b.body.is_mesh()).count() < 2 {
         let ti = blend_target(st, body, pts)?;
-        return Ok(vec![ti; pts.len()]);
+        return Ok((vec![ti; pts.len()], Vec::new()));
     }
     let names: Vec<Option<&str>> = pts.iter().enumerate().map(|(i, p)| trusted_edge_name(f, i, *p)).collect();
     let by_name: Vec<Option<usize>> = names.iter().zip(pts).map(|(n, p)| n.and_then(|n| named_body(st, n, *p))).collect();
@@ -7092,13 +7156,18 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
     };
     let mut fallback = None;
     let mut out = Vec::with_capacity(pts.len());
+    let mut notes = Vec::new();
     for ((b, n), p) in by_name.into_iter().zip(&names).zip(pts) {
         let found = match (b, n) {
             (Some(ti), _) => Some(ti),
             // A named edge that is gone stays with the feature's other bodies: another body's
             // edge where it was picked is not it.
             (None, Some(_)) => nearest_named(*p).or_else(|| body_on_edge(st, *p)),
-            (None, None) => body_on_edge(st, *p).or_else(|| nearest_named(*p)),
+            (None, None) => {
+                let (on, note) = body_on_edge_noted(st, *p);
+                notes.extend(note);
+                on.or_else(|| nearest_named(*p))
+            }
         };
         let ti = match (found, fallback) {
             (Some(ti), _) => ti,
@@ -7107,7 +7176,7 @@ fn blend_bodies(st: &ModelState, f: &Feature, body: &Option<crate::BodyName>, pt
         };
         out.push(ti);
     }
-    Ok(out)
+    Ok((out, notes))
 }
 
 /// The edges `idx` of blend `f` found on body `mb`: by name, where the edge was stored with one.
@@ -10691,15 +10760,15 @@ pub fn pattern_row(
 
 /// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
 /// add or remove copies when the count changes, update transforms when the source or spacing
-/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
-/// occurrence ids.
+/// moves, and retain copies of a suppressed or rolled-back Pattern for later reactivation.
+/// Surviving copies keep their occurrence ids.
 pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
     let marker = doc.marker.unwrap_or(doc.features.len());
     // The values the features are built with, as `pattern_matrices` reads them when the copies
     // are first placed: a bare number is in the design's unit (#8523).
     let vals = doc.evaluation_values();
-    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
-    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    // Snapshot each Pattern of components before mutating the document. The placement tree
+    // excludes the stored copies of suppressed and rolled-back patterns.
     let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
         .features
         .iter()
@@ -10713,7 +10782,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         .collect();
     for (feature_id, inactive, components, pattern, feature_component) in plans {
         if inactive {
-            clear_pattern_occurrences(doc, feature_id)?;
             continue;
         }
         let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
@@ -10765,20 +10833,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
             *occurrences = made;
         }
-    }
-    Ok(())
-}
-
-fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> {
-    let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
-        return Ok(());
-    };
-    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
-    if !gone.is_empty() {
-        doc.remove_occurrences(&gone);
-    }
-    if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
-        occurrences.clear();
     }
     Ok(())
 }
@@ -14308,7 +14362,7 @@ fn eval_feature_kind(
                 }
                 _ => None,
             };
-            let on = blend_bodies(st, f, body, &crate::plain(edges))?;
+            let (on, on_several) = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
                 match groups.iter_mut().find(|(b, _)| b == ti) {
@@ -14316,7 +14370,7 @@ fn eval_feature_kind(
                     None => groups.push((*ti, vec![i])),
                 }
             }
-            let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), on_several, Vec::new(), Vec::new());
             let mut reduced = false;
             // The kernel blends exactly the edges given: the feature adds each one's tangent
             // chain when it asks for it. A radius law runs along one edge, so a variable or
@@ -14617,6 +14671,7 @@ fn eval_feature_kind(
         FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameGusset { .. } => crate::gusset::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
+        FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
         FeatureKind::FramePlate { .. } => crate::frame_plate::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, contents, margins } => {
             let m = val(vals, margin, Kind::Length)?;
@@ -14779,9 +14834,15 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, records, .. } => {
+        FeatureKind::Import { file, step, skip, records, .. } => {
             #[cfg(test)]
             cost_tests::count(|c| c.imports_read += 1);
+            // A linked design's bodies left out of the file, and not read back when it opened.
+            if records.is_none() && step.is_empty() && doc.links.values().any(|link| link.feature == f.id) {
+                return Err(DocError::Invalid(format!(
+                    "the bodies of the linked design {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
+                )));
+            }
             let (imp, digest) = match records {
                 Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
                 None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
