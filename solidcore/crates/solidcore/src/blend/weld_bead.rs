@@ -86,7 +86,8 @@ const TOE_PIECES: u32 = 32;
 /// # Errors
 ///
 /// The refusal [`NoRoomReason::LegPastFace`] naming the edge and the face, with the largest
-/// leg on that side whose toes stay on the face at the stations (halved down from the leg);
+/// leg on that side whose toes stay on the face at the stations (halved down from the leg
+/// until the bracket is `1e-7 (1 + hi)` wide, `hi` its upper end);
 /// those of the drop and of the classification.
 fn toes_on_faces(
     k: &Kernel,
@@ -110,10 +111,12 @@ fn toes_on_faces(
         if holds(d)? {
             continue;
         }
-        // the largest leg that holds, halved down to a ten-millionth of the leg
+        // the largest leg that holds, halved down until the bracket is a ten-millionth of its
+        // upper end: of the leg found, not of the leg asked, so a face far shorter than the leg
+        // asked still gets its fit (64 halvings take 1e6 down to well under 1e-7)
         let (mut lo, mut hi) = (0.0_f64, d);
         for _ in 0..64 {
-            if hi - lo <= 1e-7 * (1.0 + d) {
+            if hi - lo <= 1e-7 * (1.0 + hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);

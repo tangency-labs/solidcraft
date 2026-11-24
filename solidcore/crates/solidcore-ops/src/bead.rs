@@ -168,7 +168,7 @@ fn refused(k: &Kernel, b: &Brep, e: SolidError) -> solidcore::Result<Error> {
         };
         if let Some(kind) = kind {
             // no size builds: nothing to retry with
-            if fit.size <= 0.0 {
+            if !fit.size.is_finite() || fit.size <= 0.0 {
                 return Ok(Error::NoRoom);
             }
             let site = e.site();

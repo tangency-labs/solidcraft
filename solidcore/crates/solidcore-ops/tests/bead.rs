@@ -172,10 +172,10 @@ fn a_leg_past_its_face_is_refused_with_the_leg_that_fits_and_its_face() {
         panic!("{got:?}")
     };
     assert_eq!(kind, FitKind::Leg);
-    // the kernel halves the leg down until its bracket is 1e-7 (1 + 60) = 6.1e-6 wide, below
-    // the toe's limit, 45 plus the face's tolerance (a toe holds up to it past the face's
-    // edge), then takes that tolerance off: 45 - 6.1e-6 <= fit <= 45
-    assert!((45.0 - 6.1e-6..=45.0).contains(&size), "{size}");
+    // the kernel halves the leg down until its bracket is 1e-7 (1 + hi) wide, hi its upper end
+    // (just past 45, so under 4.7e-6), below the toe's limit, 45 plus the face's tolerance (a
+    // toe holds up to it past the face's edge), then takes that tolerance off
+    assert!((45.0 - 4.7e-6..=45.0).contains(&size), "{size}");
     assert!(at.is_some());
     // the toe at that leg, on the base's top: the leg along the base is the one to shrink
     assert!(
@@ -184,6 +184,41 @@ fn a_leg_past_its_face_is_refused_with_the_leg_that_fits_and_its_face() {
     );
     assert_eq!(t.to_smb(false).unwrap(), before, "the tee changed");
     beads(&[&t], &[along([size, LEG])], 0.0).unwrap();
+}
+
+/// A leg of 1e6 along a face that runs only 0.05 past the edge: the halving's bracket shrinks
+/// with the leg it finds, not the leg asked, so the fit is the face's 0.05, not 0 (#21560).
+#[test]
+fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
+    let plate = make_box([0.0, 0.0, 0.0], [100.0, 100.0, 10.0]).unwrap();
+    let block = make_box([40.0, 0.0, 10.0], [59.95, 100.0, 10.0]).unwrap();
+    let part = union_all(vec![plate, block]).unwrap();
+    let e = edge_at(&part, [99.95, 50.0, 10.0]);
+    let faces = edge_faces_along(&part, e, [0.0, 0.0, 1.0]).unwrap();
+    let top = if faces[0].1 > faces[1].1 {
+        faces[0].0
+    } else {
+        faces[1].0
+    };
+    let along_top = |leg| Joint::Edge {
+        body: 0,
+        edge: e,
+        legs: [leg, 1.0],
+        along: Some(top),
+    };
+    let got = beads(&[&part], &[along_top(1e6)], 0.0);
+    let Err(Error::TooLarge {
+        size,
+        kind: FitKind::Leg,
+        ..
+    }) = got
+    else {
+        panic!("{got:?}")
+    };
+    // the bracket ends 1e-7 (1 + hi) wide, hi just past 0.05 (so under 1.1e-7), below the
+    // toe's limit, 0.05 plus the face's tolerance, which is then taken off
+    assert!((0.05 - 1.1e-7..=0.05).contains(&size), "{size}");
+    assert_eq!(beads(&[&part], &[along_top(size)], 0.0).unwrap().len(), 1);
 }
 
 #[test]
