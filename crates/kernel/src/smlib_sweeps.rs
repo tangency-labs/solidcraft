@@ -357,8 +357,9 @@ mod imp {
         segs.iter().map(|s| curve(plane, s)).collect()
     }
 
-    /// The kernel body of an SMLib result SMLib's own check finds valid (checked here unless the
-    /// evaluation's validation mode leaves it to the feature's end, `crate::validation`).
+    /// The kernel body of an SMLib result: checked here when the evaluation's validation mode
+    /// checks each step, left with the body for the feature's end when it checks each feature,
+    /// and not checked otherwise (`crate::validation`).
     fn body_of(brep: Brep, what: &str) -> Result<Body> {
         use crate::validation::{Checked, Step};
         let step = crate::validation::step();
