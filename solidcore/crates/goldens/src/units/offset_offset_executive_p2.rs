@@ -1789,9 +1789,6 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .map(rust_result_projection)
         .transpose()?;
     // (a probe's copies of the bodies the projections read: capture off, none)
-    if let Some(b) = result.as_ref() {
-        crate::dump::body(&kernel, "result", b);
-    }
     if let Some(b) = exec.as_ref().and_then(OffsetExecutive::offset_brep) {
         crate::dump::body(&kernel, "executive_offset", b);
     }
