@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="420" viewBox="0 0 760 420">
+  <title>heal.heal_data_p2--vertex-tolerance-floor</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="420" fill="#ffffff"/>
+    <path id="main_stated_half" data-name="main stated half" d="M115 150 C115 108.579 148.579 75 190 75 C231.421 75 265 108.579 265 150 C265 191.421 231.421 225 190 225 C148.579 225 115 191.421 115 150 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle id="main_check_zone" data-name="main check zone" cx="190" cy="150" r="31.5" fill="#dce9f5"/>
+    <line id="main_edge_a" data-name="main edge a" x1="190" y1="210" x2="80" y2="330" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="main_edge_b" data-name="main edge b" x1="190" y1="210" x2="320" y2="300" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="main_gap" data-name="main gap" x1="190" y1="150" x2="190" y2="210" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <circle id="main_edge_ends" data-name="main edge ends" cx="190" cy="210" r="4" fill="#555555"/>
+    <circle id="main_vertex" data-name="main vertex" cx="190" cy="150" r="5" fill="#000000"/>
+    <path id="pr_stated_half" data-name="pr stated half" d="M495 150 C495 108.579 528.579 75 570 75 C611.421 75 645 108.579 645 150 C645 191.421 611.421 225 570 225 C528.579 225 495 191.421 495 150 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle id="pr_check_zone" data-name="pr check zone" cx="570" cy="150" r="66" fill="#dce9f5"/>
+    <line id="pr_edge_a" data-name="pr edge a" x1="570" y1="210" x2="460" y2="330" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="pr_edge_b" data-name="pr edge b" x1="570" y1="210" x2="700" y2="300" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="pr_gap" data-name="pr gap" x1="570" y1="150" x2="570" y2="210" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <circle id="pr_edge_ends" data-name="pr edge ends" cx="570" cy="210" r="4" fill="#555555"/>
+    <circle id="pr_vertex" data-name="pr vertex" cx="570" cy="150" r="5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">main</tspan></text>
+    <text transform="matrix(1 0 0 1 40 64)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">healed tolerance 2.1e-4</tspan></text>
+    <text transform="matrix(1 0 0 1 420 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">this PR</tspan></text>
+    <text transform="matrix(1 0 0 1 420 64)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">healed tolerance 4.4e-4 = 1.1 × 2 × gap</tspan></text>
+    <text transform="matrix(1 0 0 1 202 146)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">vertex</tspan></text>
+    <text transform="matrix(1 0 0 1 582 146)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">vertex</tspan></text>
+    <text transform="matrix(1 0 0 1 198 186)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">gap 2e-4</tspan></text>
+    <text transform="matrix(1 0 0 1 578 186)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">gap 2e-4</tspan></text>
+    <text transform="matrix(1 0 0 1 225 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">edge ends</tspan></text>
+    <text transform="matrix(1 0 0 1 605 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">edge ends</tspan></text>
+    <text transform="matrix(1 0 0 1 40 368)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">fails: gap 2e-4 &gt; 2.1e-4 / 2</tspan></text>
+    <text transform="matrix(1 0 0 1 420 368)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">passes: gap 2e-4 ≤ 4.4e-4 / 2</tspan></text>
+    <text transform="matrix(1 0 0 1 40 402)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Shaded: half the healed vertex tolerance, where the check wants the edge ends. Dashed: half the stated 5e-4.</tspan></text>
+  </g>
+</svg>

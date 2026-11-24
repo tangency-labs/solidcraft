@@ -123,7 +123,8 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::{Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1031,19 +1032,32 @@ impl<'s> SurfaceIntersector<'s> {
     // ---- simple virtuals -------------------------------------------------------------------
 
     /// `ComputePointValuesDelta`: not implemented by the basic intersector (`SM_ERR`).
+    ///
+    /// # Errors
+    ///
+    /// Always [`IntersectFailure::DeltaStepUnsupported`], status `SM_ERR`: a law intersection
+    /// run on the basic intersector asks for it (and tries larger steps, then gives up).
     pub fn compute_point_values_delta(&self) -> Result<()> {
-        Err(SolidError::intersect_stage_failed(OP_DELTA, SM_ERR))
+        Err(SolidError::intersect(
+            OP_DELTA,
+            IntersectFailure::DeltaStepUnsupported,
+        ))
     }
 
     /// `ComputeSingularityPoint`: the basic intersector does not handle singular or
     /// tangent points; it reports and returns `SM_ERR`.
+    ///
+    /// # Errors
+    ///
+    /// Always [`IntersectFailure::Tangent`], status `SM_ERR`: a contact the basic
+    /// intersector cannot prove is refused by name (`docs/ssi.md` §1).
     pub fn compute_singularity_point(
         &self,
         _uv_values: [Point2; 2],
         _point: TsectId,
         _previous: Option<TsectId>,
     ) -> Result<()> {
-        Err(SolidError::intersect_stage_failed(OP_SING, SM_ERR))
+        Err(SolidError::intersect(OP_SING, IntersectFailure::Tangent))
     }
 
     /// `ComputeStepSize`: `100 * this_approx_tol_3d` when `old_step_size` is zero
@@ -1377,7 +1391,7 @@ impl<'s> SurfaceIntersector<'s> {
         if next_tsp.crv_deriv().length() < self.stepping_parallel_tol_radians {
             return Err(SolidError::intersect(
                 OP_SPAN,
-                crate::error::intersect::IntersectFailure::StepTangentTooShort,
+                IntersectFailure::StepTangentTooShort,
             ));
         }
 
@@ -1908,12 +1922,13 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// Reverses the traced curve (`ReverseCurveDirection`): negates every point's
     /// curve and UV tangents, re-parameterises so the old end is `0` (same range),
-    /// and reverses the curve point order. An empty curve is `SM_ERR_NULL_POINTER`.
+    /// and reverses the curve point order. An empty curve is the caller's
+    /// [`IntersectFailure::NoCurveToReverse`] (`SM_ERR_NULL_POINTER`).
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::intersect_stage_failed(
+            return Err(SolidError::intersect(
                 OP_REVERSE,
-                SM_ERR_NULL_POINTER,
+                IntersectFailure::NoCurveToReverse,
             ));
         }
         let pnts = core::mem::take(&mut self.curve_points);
@@ -2182,8 +2197,8 @@ impl<'s> SurfaceIntersector<'s> {
 
         // set Offset Surface Offset signed distances
         let [o0, o1] = surface_orientations;
-        set_offset_distance(self.surfaces[0], offsets[0] * o0)?;
-        set_offset_distance(self.surfaces[1], offsets[0] * o1)?;
+        set_offset_distance(self.surfaces[0], 0, offsets[0] * o0)?;
+        set_offset_distance(self.surfaces[1], 1, offsets[0] * o1)?;
 
         // do surf/surf/plane intersection
         let (found_answer, sol) = surface_local_plane_surface_intersect(
@@ -2199,7 +2214,10 @@ impl<'s> SurfaceIntersector<'s> {
             plane_normal,
         )?;
         if !found_answer {
-            return Err(SolidError::intersect_stage_failed(OP_LAW, SM_ERR));
+            return Err(SolidError::intersect(
+                OP_LAW,
+                IntersectFailure::NoIntersection,
+            ));
         }
 
         let [s0, s1, s2, s3] = sol;
@@ -2749,15 +2767,16 @@ fn surface_local_plane_surface_intersect(
 /// `SM_CAST_PTR(SmOffsetSurface, surface)->SetOffsetDistance(distance)` (`NULL`
 /// dereferenced upstream for a surface that is not an offset). The intersector shares
 /// the surface with its owner, as upstream (the offset distance is a `Cell`).
-fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
+/// `index` is the surface's place in the intersector (0 or 1), for the error.
+fn set_offset_distance(surface: &Surface, index: usize, distance: f64) -> Result<()> {
     match surface.kind() {
         SurfaceKind::OffsetSurface(o) => {
             o.set_offset_distance(distance);
             Ok(())
         }
-        _ => Err(SolidError::intersect_stage_failed(
+        _ => Err(SolidError::intersect(
             "intersect::surface_intersector::p1::set_offset_distance",
-            SM_ERR_NULL_POINTER,
+            IntersectFailure::SurfaceNotOffset { surface: index },
         )),
     }
 }
@@ -2765,6 +2784,7 @@ fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_NULL_POINTER;
     use crate::surface::plane::Plane;
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
@@ -3082,6 +3102,7 @@ mod tests {
 
     #[test]
     fn empty_reverse_is_null_pointer() {
+        use crate::error::SM_ERR;
         let k = &Kernel::default();
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -3089,17 +3110,26 @@ mod tests {
         let e = si.reverse_curve_direction().unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::NoCurveToReverse)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(e.upstream_status(), Some(1006));
-        assert!(e.is_defect());
-        // the basic intersector's unimplemented virtuals answer SM_ERR, a stage failure
+        assert!(!e.is_defect());
+        // the basic intersector's unimplemented delta step answers SM_ERR, unsupported
         let e = si.compute_point_values_delta().unwrap_err();
         assert_eq!(
             e.intersect_failure(),
-            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+            Some(&IntersectFailure::DeltaStepUnsupported)
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect());
+        // a singular or tangent point is refused by name, keeping SM_ERR
+        let e = si
+            .compute_singularity_point([Point2::new(0.0, 0.0); 2], TsectId(0), None)
+            .unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::Tangent));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect());
     }
 
     /// WR-51: `IsPointOnStartPoint` compares each distance with the tolerance, so it

@@ -101,7 +101,10 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
 /// The queries pass on the statuses SMLib drops (WR-663): with the fork's
 /// tangency-labs/smlib@8ea6a20 a refined end past a curve/curve range does not abort the
 /// intersection. The skins are 7 and 6 faces (see the module docs) and the difference 18
-/// faces, 42 edges, 26 vertices and 2 shells.
+/// faces and 2 shells. Its edge and vertex counts are not pinned: a fitted section curve
+/// lies within 8e-5 of a cap plane at tolerance 5e-6, and whether an edge is split at a
+/// vertex along it follows from that fit noise (42 edges and 26 vertices before #19912,
+/// 41 and 25 after). Splitting an edge adds one of each, so `V - E + F` stays 2.
 fn difference_volume() -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
     use solidcore::topology::brep::p1::shells;
@@ -123,13 +126,18 @@ fn difference_volume() -> f64 {
         Err(e) => panic!("expected a solid, got {e}"),
     };
     assert!(is_manifold_solid(&body).unwrap());
-    let topology = (
+    let (faces, edges, vertices) = (
         body.face_list().len(),
         body.edge_list().len(),
         body.vertex_list().len(),
-        shells(&mut k, &body, None).unwrap().len(),
     );
-    assert_eq!(topology, (18, 42, 26, 2), "faces, edges, vertices, shells");
+    let shells = shells(&mut k, &body, None).unwrap().len();
+    assert_eq!((faces, shells), (18, 2), "faces, shells");
+    assert_eq!(
+        vertices + faces,
+        edges + 2,
+        "V - E + F = 2 ({vertices} vertices, {edges} edges)"
+    );
     let volume = brep_volume_default(&k, &mut body, 1e-3).unwrap();
     assert!(
         volume > 0.0 && volume < outer_volume,
