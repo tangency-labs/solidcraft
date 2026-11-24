@@ -73,7 +73,8 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
 
 /// Whether `error` is the failure a missing corner produces in the live session: a solver
 /// that looks up the corner of its vertex and finds none
-/// (`SessionGeometryContext::corner`, the session's `Missing("the vertex's corner")`),
+/// (`SessionGeometryContext::corner`, the session's
+/// [`BlendFailure::FilletVertexWithoutCorner`]),
 /// keeping no cause. That failure names no vertex, so which missing corner it met is not
 /// checked.
 pub(super) fn is_missing_corner(error: &SolidError) -> bool {
@@ -81,7 +82,7 @@ pub(super) fn is_missing_corner(error: &SolidError) -> bool {
         && error.operation() == "blend::fillet_executive::session"
         && matches!(
             error.blend_failure(),
-            Some(BlendFailure::Missing("the vertex's corner"))
+            Some(BlendFailure::FilletVertexWithoutCorner)
         )
 }
 
@@ -109,11 +110,6 @@ fn rooted_in(mut error: SolidError, cause: SolidError) -> SolidError {
         }
     }
     error
-}
-
-/// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
-fn failure(what: &'static str) -> SolidError {
-    SolidError::blend_failed(OP, what)
 }
 
 /// The fillet body is not built, or has no faces: a step of the executive failed
@@ -719,6 +715,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             }
         }
         let before = p1::edges(self.0.target, None)?;
+        let vertices_before = std::mem::take(&mut self.0.vertices_before);
         // The cleanup's face and edge merges notify through the session's store, so the
         // survivors keep the attributes of the objects merged into them.
         let result = self.with_target_env(k, |k, target, env| {
@@ -727,8 +724,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 target,
                 &relations,
                 check_all_edges,
-                Some(env),
-            )
+                Some(&mut *env),
+            )?;
+            // As the boolean's merge places its own after its cleanup (#3090): a vertex the
+            // fillet made on a target edge stands on that edge's curve, which may lie up to the
+            // edge's tolerance off one of its faces, past the B-rep's intersection tolerance that
+            // every vertex/face gap must stay under. The fillet's vertices (those the target did
+            // not have) go to the corner their faces define, under the boolean's guards.
+            let vertices: Vec<_> = p1::vertices(target, None)?
+                .into_iter()
+                .filter(|v| !vertices_before.contains(v))
+                .collect();
+            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
         });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
@@ -1169,7 +1176,9 @@ impl FilletSession<'_> {
                 reason: None,
                 comment,
             });
-            return Err(failure("an asked setback is not built"));
+            // the refusal noted just above holds why: a corner refused at its vertex
+            // (`FILEXEC_ERR`, `SM_ERR`, as the phrase it replaces had)
+            return Err(SolidError::blend(OP, BlendFailure::CornerRefused));
         }
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
@@ -1190,6 +1199,9 @@ impl FilletSession<'_> {
                 &refusal,
             ));
         }
+        self.objects.vertices_before = p1::vertices(self.objects.target, None)?
+            .into_iter()
+            .collect();
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         let mut edges = std::collections::BTreeMap::new();
         for edge in p1::edges(self.objects.target, None)? {
@@ -1889,8 +1901,10 @@ mod ball_fit_tests {
     /// classification's error at its end.
     #[test]
     fn a_classification_error_goes_to_the_root_of_the_later_failure() {
-        let missing =
-            SolidError::blend_missing("blend::fillet_executive::session", "the vertex's corner");
+        let missing = SolidError::blend(
+            "blend::fillet_executive::session",
+            BlendFailure::FilletVertexWithoutCorner,
+        );
         assert!(is_missing_corner(&missing));
         let before = later_failure_over(missing);
         let classification = a_classification_failure();
@@ -1930,7 +1944,10 @@ mod ball_fit_tests {
         );
         assert_eq!(after, before);
         assert_eq!(
-            rooted_in(SolidError::sm_err("op"), failure("w")),
+            rooted_in(
+                SolidError::sm_err("op"),
+                SolidError::blend(OP, BlendFailure::CornerRefused)
+            ),
             SolidError::sm_err("op")
         );
     }
@@ -1952,6 +1969,18 @@ mod ball_fit_tests {
                 SolidError::blend_missing(
                     "blend::fillet_executive::session",
                     "the vertex's corner",
+                ),
+                SolidError::sm_err("op"),
+            ),
+            // the same with the cause the session's missing corner now has
+            SolidError::blend(
+                "blend::fillet_solver::p1::set_extension_flags",
+                BlendFailure::FilletVertexWithoutCorner,
+            ),
+            keeping_cause(
+                SolidError::blend(
+                    "blend::fillet_executive::session",
+                    BlendFailure::FilletVertexWithoutCorner,
                 ),
                 SolidError::sm_err("op"),
             ),

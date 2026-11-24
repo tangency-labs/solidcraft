@@ -2997,26 +2997,19 @@ fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
 }
 
 /// #19242: the slots of [`slot_roots_beside_a_hole_s_seam_round_in_one_fillet`] and
-/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`] with
-/// SolidCraft's fixes less `fillet_refuse_overlapping_bands`, as a solidcore caller that never
-/// turns it on runs them. The round that rolls over the seam is taken as apart although
-/// another round stands on the wall it rolls onto, so only the bands' check compares the two;
-/// it runs without its fix too. Where the bands overlap (the second slot's near side 8 or 9
-/// degrees past the seam) the fillet is refused as having no room, as with the fix on (with
-/// the check skipped, the overlap surfaced later as "no fillet B-rep edge matches the fillet
-/// edge"). Where they don't, the fillet builds, valid, the same volume as with the fix on to
-/// 1e-9.
+/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`]. The
+/// round that rolls over the seam is taken as apart although another round stands on the wall
+/// it rolls onto, so only the bands' check compares the two (it always runs: WR-542 is no
+/// longer a flag). Where the bands overlap (the second slot's near side 8 or 9 degrees past the
+/// seam) the fillet is refused as having no room (with the check skipped, the overlap surfaced
+/// later as "no fillet B-rep edge matches the fillet edge"). Where they don't, the fillet
+/// builds, valid.
 #[test]
-fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fix() {
+fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked() {
     let r = 0.5;
-    let with_fix_off = || {
-        let names = solidcraft_fixes::solidcraft_fix_names()
-            .into_iter()
-            .filter(|&name| name != "fillet_refuse_overlapping_bands");
-        session::set_thread_fixes(names).unwrap();
-    };
     let one_slot = |deg: f64| (vec![deg], 2, true);
     let two_slots = |past: f64| (vec![14.8, -(past + slot_half_angle())], 4, past > 10.0);
+    fixes();
     for (slots, n, builds) in [
         one_slot(14.8),
         one_slot(-14.8),
@@ -3025,38 +3018,22 @@ fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fi
         two_slots(12.0),
         two_slots(20.0),
     ] {
-        let run = |fix_on: bool| {
-            if fix_on {
-                fixes();
-            } else {
-                with_fix_off();
-            }
-            let b = slotted_hole(&slots);
-            let mut edges = Vec::new();
-            for &deg in &slots {
-                edges.extend(slot_roots(&b, deg));
-            }
-            blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
-                let report = b.check(CheckLevel::All).unwrap();
-                assert!(
-                    report.is_valid(),
-                    "slots {slots:?}, fix on {fix_on}: {report}"
-                );
-                b.volume(1e-9).unwrap()
-            })
-        };
-        let on = run(true);
-        let off = run(false);
-        match (on, off) {
-            (Err(Error::NoRoom), Err(Error::NoRoom)) if !builds => {}
-            (Ok(on), Ok(off)) if builds => assert!(
-                (on - off).abs() <= 1e-9 * on,
-                "slots {slots:?}: volume {off} with the fix off, {on} with it on"
-            ),
-            (on, off) => panic!("slots {slots:?}: fix on {on:?}, fix off {off:?}"),
+        let b = slotted_hole(&slots);
+        let mut edges = Vec::new();
+        for &deg in &slots {
+            edges.extend(slot_roots(&b, deg));
+        }
+        let result = blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "slots {slots:?}: {report}");
+            b.volume(1e-9).unwrap()
+        });
+        match result {
+            Err(Error::NoRoom) if !builds => {}
+            Ok(v) if builds => assert!(v.is_finite() && v > 0.0, "slots {slots:?}: volume {v}"),
+            other => panic!("slots {slots:?}: {other:?}"),
         }
     }
-    fixes();
 }
 
 /// The tube's radius, the Root rounds' radius, the fin's thickness and the height of its top.
