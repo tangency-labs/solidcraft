@@ -2106,7 +2106,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
                 && Some(group) == plugin_group
             {
-                if let Some(g) = out.groups.iter().find(|g| g.group == group) {
+                if out.groups.iter().any(|g| g.group == group) {
                     let id = egui::Id::unique("sc_plugin_ribbon_menu");
                     ui.ctx().data_mut(|d| {
                         let key = egui::Id::unique("sc_panel_open");
