@@ -144,10 +144,12 @@ pub fn material_toward_axis(
 }
 
 /// The unit directions to step along from a point of a cylindrical face to stay on the face:
-/// along the axis both ways, then round it both ways, the round one being `axis × along` made
-/// unit, where `along` is the direction of a curve through the point (an edge's tangent). When
-/// the curve runs along the axis (`axis × along` shorter than a billionth of `along`) no
-/// direction round the axis follows from it and only the two along the axis are given.
+/// along the axis both ways, then round it both ways, where `along` is the direction of a curve on
+/// the face through the point (an edge's tangent). The face's tangent plane there holds the axis
+/// and the direction round it, so the round one is `along` with its part along the axis taken
+/// away, made unit. When the curve runs along the axis (that remainder shorter than a billionth
+/// of `along`) no direction round the axis follows from it and only the two along the axis are
+/// given.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for a vector that is not finite, or an axis of zero length.
@@ -159,7 +161,7 @@ pub fn round_directions(axis: Vec3, along: Vec3) -> Result<Vec<Vec3>> {
         });
     }
     let u = axis.unitize()?;
-    let round = u.cross(along);
+    let round = along - (u * along.dot(u));
     if round.length() <= along.length() * 1e-9 {
         return Ok(vec![u, -u]);
     }
@@ -337,18 +339,26 @@ mod tests {
     }
 
     #[test]
-    fn directions_round_the_axis_are_axis_cross_along() {
-        // Axis z (length 2), an edge running along +y: z × y = -x, so the four are +z, -z, -x, +x.
+    fn directions_round_the_axis_are_the_curves_direction_off_the_axis() {
+        // Axis z (length 2), at (10, 0, 0) of the cylinder of radius 10, an edge running along +y
+        // (the circle z = 0): the face's tangent plane there is spanned by z and y, so the four
+        // are +z, -z, +y, -y; each is at right angles to the radial direction +x.
         let d = round_directions(v(0.0, 0.0, 2.0), v(0.0, 5.0, 0.0)).unwrap();
         assert_eq!(
             d,
             vec![
                 v(0.0, 0.0, 1.0),
                 v(0.0, 0.0, -1.0),
-                v(-1.0, 0.0, 0.0),
-                v(1.0, 0.0, 0.0)
+                v(0.0, 1.0, 0.0),
+                v(0.0, -1.0, 0.0)
             ]
         );
+        let radial = v(1.0, 0.0, 0.0);
+        assert!(d.iter().all(|s| s.dot(radial) == 0.0), "{d:?}");
+        // A helix through the same point, along (0, 3, 4): its part off the axis is (0, 3, 0).
+        let h = round_directions(v(0.0, 0.0, 1.0), v(0.0, 3.0, 4.0)).unwrap();
+        assert_eq!(h[2], v(0.0, 1.0, 0.0));
+        assert_eq!(h[3], v(0.0, -1.0, 0.0));
         // An edge along the axis (a straight seam), or within a billionth of it, or no direction:
         // only the two along the axis.
         let z2 = vec![v(0.0, 0.0, 1.0), v(0.0, 0.0, -1.0)];

@@ -179,14 +179,15 @@ mod tests {
         assert!(material_toward_axis(o, z, [10.0, 0.0, 5.0], [1.0, 0.0, 0.0]).unwrap());
         assert!(!material_toward_axis(o, z, [10.0, 0.0, 5.0], [-1.0, 0.0, 0.0]).unwrap());
         assert!(material_toward_axis(o, z, [0.0, 0.0, 5.0], [1.0, 0.0, 0.0]).is_err());
-        // z × y = -x.
+        // At (10, 0, 0) on the radius-10 cylinder about z, an edge along +y: the face's tangent
+        // plane there is spanned by z and y (both at right angles to the radial +x).
         assert_eq!(
             round_directions([0.0, 0.0, 2.0], [0.0, 3.0, 0.0]).unwrap(),
             vec![
                 [0.0, 0.0, 1.0],
                 [0.0, 0.0, -1.0],
-                [-1.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0]
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0]
             ]
         );
         assert!(round_directions([0.0; 3], [0.0, 1.0, 0.0]).is_err());
