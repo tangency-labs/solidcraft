@@ -1310,7 +1310,9 @@ impl FootBlendRecord {
     pub fn validate(&self) -> Result<(), RecordError> {
         for support in &self.supports {
             match support {
-                SupportRecord::Nurbs { form, .. } => form.validate("supports")?,
+                SupportRecord::Nurbs {
+                    form, revolution, ..
+                } => validate_support_form(form, revolution.as_ref(), "supports")?,
                 SupportRecord::Blend(_) => {
                     return Err(refuse("supports", "a foot blend's supports are faces"))
                 }

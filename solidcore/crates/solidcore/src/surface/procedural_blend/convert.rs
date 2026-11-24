@@ -1635,19 +1635,16 @@ pub fn foot_blend_to_record(k: &Kernel, surface: &Surface) -> Result<FootBlendRe
     })
 }
 
-/// A face's surface a record holds as a support: its analytic surface derived from its NURBS
-/// form by its label (exact to rounding), or the form.
+/// A face's surface a record holds as a support: read back as every record's support is
+/// ([`surface_of_support`]: its stored cone or cylinder, else derived from its label), or the
+/// form.
 fn face_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
     match s {
-        SupportRecord::Nurbs { kind, form } => {
-            let form = surface_of(form)?;
-            match kind_of(*kind) {
-                None => Ok(Surface::from(form)),
-                Some(kind) => {
-                    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-                }
-            }
-        }
+        SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution,
+        } => surface_of_support(k, *kind, surface_of(form)?, revolution.as_ref()),
         SupportRecord::Blend(_) => Err(SolidError::invalid_input(
             OP_FOOT_FROM,
             "a foot blend's supports are faces",
