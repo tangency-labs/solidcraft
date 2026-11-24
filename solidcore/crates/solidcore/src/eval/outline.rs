@@ -16,10 +16,11 @@
 //! samples (a face that turns toward the viewer and away again within a 32nd of an edge) is not
 //! seen. Every stretch it reports is on the outline, ends bisected to rounding.
 //!
-//! This is the whole outline, not the visible lines: a stretch is reported whether or not another
-//! part of the body hides it, and an edge between two faces that both face the viewer (a crease
-//! seen from outside) is not, however sharp. A drawing view's visible edges and silhouettes are a
-//! different job, hidden-line removal: [`crate::hlr`], and the port of upstream's
+//! This is the outline as the samples find it, hidden parts included, not the visible lines: a
+//! stretch is reported whether or not another part of the body hides it, and an edge between two
+//! faces that both face the viewer (a crease seen from outside) is not, however sharp. A drawing
+//! view's visible edges and silhouettes are a different job, hidden-line removal: [`crate::hlr`],
+//! and the port of upstream's
 //! `SmApiProjectBrepOntoPlane`
 //! ([`crate::topology::api_projection::project_brep_onto_plane`]), which projects the visible
 //! curves of [`crate::blend::hcr`] onto a plane.
