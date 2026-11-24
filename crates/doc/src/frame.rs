@@ -18,7 +18,6 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism::tapered_flange_ends;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
@@ -1066,6 +1065,17 @@ pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
+/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
+/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
+/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
+/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
+/// non-finite input gives a non-finite answer, never a panic.
+fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
+    let change = inside / 2.0 * slope.to_radians().tan();
+    (thickness - change, thickness + change)
 }
 
 /// Group placements as flat views of the same feature: same id, component, profile, pinned
