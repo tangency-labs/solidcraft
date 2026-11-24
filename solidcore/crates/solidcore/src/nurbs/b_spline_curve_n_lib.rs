@@ -2641,12 +2641,7 @@ impl BSplineCurve {
     /// `SM_ERR` for an end clearly outside the natural interval, without a NURB, or
     /// when the trim fails; `InvalidInput` for ends closer than `SM_EFF_ZERO`.
     pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
-        self.trim_with_zone_tol(
-            k,
-            trim_interval,
-            mode,
-            zone_tol_3d(k, SmallTopoType::NormalSize),
-        )
+        self.trim_with_zone_tol(trim_interval, mode, zone_tol_3d(k, SmallTopoType::NormalSize))
     }
 
     /// Trims with the caller-resolved `SmTol::GetZoneTol3d(this)` ownership context.
@@ -2658,7 +2653,6 @@ impl BSplineCurve {
     /// The same errors as [`Self::trim`].
     pub(crate) fn trim_with_zone_tol(
         &mut self,
-        k: &Kernel,
         trim_interval: &mut Extent1d,
         mode: TrimMode,
         zone_tol_3d: f64,
@@ -3293,7 +3287,7 @@ mod tests {
         let mut owned = original.clone();
         let mut owned_interval = interval;
         owned
-            .trim_with_zone_tol(&k, &mut owned_interval, TrimMode::Silent, 1e-9)
+            .trim_with_zone_tol(&mut owned_interval, TrimMode::Silent, 1e-9)
             .unwrap();
         assert_eq!(owned_interval, interval);
         assert_eq!(owned.natural_interval(), interval);
