@@ -270,7 +270,7 @@ installed for you, and your files are not touched. A case is:
 |---|---|
 | `entry` | The entry to run. |
 | `params` | A command's parameters, or an importer's options. Default `{}`. |
-| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. |
+| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. A design saved there as `.json` is not read as a case. |
 | `file` | An importer opens this file, in the `tests` folder. |
 | `grants` | What the user approved: `command_groups`, `folders` (`[{"name", "read", "write", "from"}]`, each a fresh folder, or a copy of `from` in `tests`), `input_folder` and `memory_mib`. Default: everything the manifest asks for, as Install approves it. |
 | `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded` (or, more exactly, `exhausted` when a budget ran out and `over_ceiling` when the app refused it before it ran), `invalid_input`, `unsupported`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
