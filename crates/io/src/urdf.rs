@@ -793,7 +793,7 @@ pub(crate) fn metres(m: &Mesh) -> Mesh {
 /// altogether.
 pub(crate) fn decal_dae(name: &str, corners: &[Vec3; 4], image: &str) -> Option<String> {
     // The quad lifted clear of the face on both sides, from the kernel.
-    let (normal, front, back) = solidcore_ops::affine::lifted_quad(corners.map(|p| [p.x, p.y, p.z]), DECAL_LIFT_MM)?;
+    let (normal, front, back) = solidcore_ops::affine::offset_quad(corners.map(|p| [p.x, p.y, p.z]), DECAL_LIFT_MM)?;
     let normal = Vec3::new(normal[0], normal[1], normal[2]);
     let metres = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z) * 1e-3;
     let positions = front.into_iter().chain(back).map(|p| triple(metres(p))).collect::<Vec<_>>().join(" ");

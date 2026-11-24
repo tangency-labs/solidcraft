@@ -1549,7 +1549,7 @@ impl Body {
                 return part;
             }
             if let Ok((lo, hi)) =
-                solidcore_ops::affine::moved_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
+                solidcore_ops::affine::transformed_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
             {
                 return Aabb3 { min: v3(lo), max: v3(hi) };
             }

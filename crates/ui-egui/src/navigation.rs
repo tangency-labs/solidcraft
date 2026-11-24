@@ -12,7 +12,7 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcore_ops::{point_displacement, point_distance, point_set_summary};
+use solidcore_ops::{point_displacement, point_distance, centroid_and_mean_radius};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_viewport::Camera;
@@ -2024,7 +2024,7 @@ impl TouchNavigation {
                 return TouchMotion::default();
             }
             let current_points: Vec<_> = self.contacts.iter().map(|(_, _, point)| screen_point(*point)).collect();
-            let current_summary = match point_set_summary(&current_points) {
+            let current_summary = match centroid_and_mean_radius(&current_points) {
                 Ok(summary) => summary,
                 Err(_) => {
                     *self = Self::default();
@@ -2067,7 +2067,7 @@ impl TouchNavigation {
             let needs_prior = out.mode.is_some() || self.contacts.len() >= 2;
             let prior_summary = if needs_prior {
                 let prior_points: Vec<_> = before.iter().map(|(_, _, point)| screen_point(*point)).collect();
-                match point_set_summary(&prior_points) {
+                match centroid_and_mean_radius(&prior_points) {
                     Ok(summary) => Some(summary),
                     Err(_) => {
                         *self = Self::default();
@@ -4571,7 +4571,7 @@ mod tests {
         let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
         let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
         let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
-        let kernel_mean = solidcore_ops::point_set_summary(&kernel_points).unwrap().mean_distance;
+        let kernel_mean = solidcore_ops::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
         assert!(
             (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
             "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"

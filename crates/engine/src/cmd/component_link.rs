@@ -382,7 +382,7 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
                 let aspect = if w == 0 { 1.0 } else { f64::from(h) / f64::from(w) };
                 let at = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
                 let (Some(plane), Some((width, stretched))) =
-                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::picture_fit(at(bl), at(br), at(tl), aspect))
+                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::fit_aspect(at(bl), at(br), at(tl), aspect))
                 else {
                     warnings.push(format!("{shown}: image `{}` has no area where its sketch puts it: left out", c.name));
                     continue;
