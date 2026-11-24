@@ -1828,6 +1828,33 @@ mod tests {
         assert!(h.app.home.samples.is_empty(), "no sample model was built");
     }
 
+    #[test]
+    fn opening_a_sample_from_home_restores_the_assistant_contents() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.start("ui.assistant");
+        h.frames(3);
+        assert!(h.app.agent_chat.panel_rect.is_some());
+        h.app.disable_panel_runtime().unwrap();
+        let saved = std::mem::take(&mut h.app.panel_layout_preferences);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.disable_panel_runtime().unwrap();
+        h.app.panel_layout_preferences = saved;
+        h.app.preferences.ai_features = true;
+        h.app.home.open = true;
+        h.frames(2);
+        assert!(!h.app.agent_chat.open);
+
+        // Deliver a ready sample during Home's paint, after the panel services' frame tick.
+        h.app.home.samples.insert(0, Session::default());
+        h.app.home.wanted = Some(0);
+        h.frames(3);
+        assert!(!h.app.home.open);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "the restored Assistant must draw its contents in the new document");
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn selecting_a_sample_does_not_wait_for_a_running_cold_recent() {
