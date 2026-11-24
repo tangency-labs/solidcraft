@@ -1956,10 +1956,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_TolSizes() has run on this Brep
         if exe_heal_op < HealerOpType::FixTolsizes {
-            return Err(SolidError::heal_failed(
-                OP_STAGE2,
-                "the tolerance sizes are not fixed yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE2, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
@@ -2320,10 +2317,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_SplitEdgesAtSeam() has run
         if exe_heal_op < HealerOpType::FixSplitedgeAtseam {
-            return Err(SolidError::heal_failed(
-                OP_STAGE3,
-                "the edges are not split at the seams yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE3, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
@@ -3026,11 +3020,16 @@ mod tests {
         let f = FaceId::from_index(0);
         let mut p: FaceProps<H> = FaceProps::new();
         // before Fix_TolSizes: SM_ERR, nothing is touched
+        let named = |e: &SolidError| {
+            e.upstream_status() == Some(1001)
+                && e.heal_failure() == Some(&HealFailure::HealStepNotRun)
+                && e.kind() == crate::error::ErrorKind::InvalidInput
+        };
         let e = p.set_props_stage2(&k, &b, f, 0, HealerOpType::None);
-        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
+        assert!(matches!(e, Err(ref e) if named(e)), "{e:?}");
         assert_eq!(p.prop_stage, PropStage::Stage0);
         let e = p.set_props_stage3(&k, &b, f, 0, HealerOpType::FixTolsizes);
-        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
+        assert!(matches!(e, Err(ref e) if named(e)), "{e:?}");
     }
 
     #[test]

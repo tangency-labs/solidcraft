@@ -500,7 +500,7 @@ fn move_inputs(h: &Harness) -> Vec<SelInput> {
 /// A fresh Move window's values, with one field replaced. Functional record update (`..base`)
 /// is a struct feature, so an enum variant has to spell every field out.
 fn moved(x: &str, y: &str, angle: &str) -> Mod {
-    Mod::Move { x: x.into(), y: y.into(), angle: angle.into(), copy: false }
+    Mod::Move { x: x.into(), y: y.into(), angle: angle.into(), copy: false, z: "0 mm".into(), three_d: false }
 }
 
 #[test]
@@ -535,7 +535,7 @@ fn the_context_menu_item_fills_the_window_from_the_selection() {
 fn the_typed_distances_and_angle_reach_the_command() {
     let h = rectangle();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false };
+    let k = Mod::Move { x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false, z: "0 mm".into(), three_d: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].0, "sketch.move");
@@ -551,7 +551,7 @@ fn an_expression_and_a_bare_angle_are_evaluated() {
     let mut h = rectangle();
     h.app.run("parameters.add", json!({"name": "step", "expression": "7 mm", "unit": "mm"})).unwrap();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false };
+    let k = Mod::Move { x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false, z: "0 mm".into(), three_d: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out[0].1["translate"], json!([14.0, 0.0]));
     assert!((out[0].1["angle"].as_f64().unwrap() - 45.0).abs() < 1e-9, "{}", out[0].1["angle"]);
@@ -577,7 +577,14 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: true });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "30 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: true,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -613,7 +620,14 @@ fn the_move_window_previews_where_the_entities_will_land() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "30 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     // The preview runs on a worker: frames until it has drawn the moved entities.
     h.step(&json!({"until": {"count": {"name": "sketch_preview_curves", "value": 4}}})).unwrap();
@@ -650,7 +664,14 @@ fn a_plain_move_takes_the_geometry_with_it() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "0 mm".into(), y: "5 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "0 mm".into(),
+            y: "5 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -678,7 +699,14 @@ fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "15 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     h.frames(2);
     h.step(&json!({"key": "Enter"})).unwrap();
@@ -1257,4 +1285,30 @@ fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
         (mirrored(start, -10.0, 3.0) && mirrored(end, -15.0, 8.0)) || (mirrored(start, -15.0, 8.0) && mirrored(end, -10.0, 3.0)),
         "{start:?} {end:?}"
     );
+}
+
+/// #18448: X (and the menu's Normal / Construction) switches a selected point to construction,
+/// and again back; the point is drawn and saved as such, and the sketch origin is left alone.
+#[test]
+fn construction_switches_a_selected_point_and_the_menu_offers_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [5, 5], "id": "guide"})).unwrap();
+    h.settle();
+    let is_construction = |h: &Harness, id: &str| {
+        let sid = h.app.session.active_sketch.unwrap();
+        let st = h.app.session.model.state();
+        st.sketch(sid).unwrap().sketch.points.iter().find(|p| p.id == id).unwrap().construction
+    };
+    h.app.session.selection = vec![Sel::SketchPoint { id: "guide".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(items.iter().any(|i| i.id == "sketch.construction"), "{:?}", items.iter().map(|i| i.id.clone()).collect::<Vec<_>>());
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(is_construction(&h, "guide"));
+    // The same key turns it back, and the origin alone is not a selection it acts on.
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(!is_construction(&h, "guide"));
+    h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }
