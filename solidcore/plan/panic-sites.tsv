@@ -392,6 +392,8 @@ crates/solidcore/src/blend/fillet_standard_solver/p2.rs	LinearCrossSectionFsg::d
 crates/solidcore/src/blend/fillet_standard_solver/p2.rs	VariableRadiusFs::re_calc_fillet_geom	Vec::insert	1	open	insert(index_of_insert, t)	
 crates/solidcore/src/blend/fillet_standard_solver/p2.rs	VariableRadiusFs::re_calc_fillet_geom	Vec::insert	2	open	insert(index_of_insert, vu)	
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::add_span	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/blend/foot_blend.rs	FootBlend::check_stations	int-div	1	proven	div_ceil(breaks.len().saturating_sub(1).max(1))	divisor is max(.., 1) >= 1
+crates/solidcore/src/blend/foot_blend.rs	FootBlend::check_stations	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::feet_series	f64::clamp	1	proven	clamp(1.0, MAX_PIECES)	constant bounds 1.0 <= MAX_PIECES (1024.0)
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::of_edge	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::of_edge	with_capacity	2	proven	Vec::with_capacity(2)	constant capacity
@@ -400,8 +402,6 @@ crates/solidcore/src/blend/foot_blend.rs	FootBlend::prove_feet	windows	1	proven	
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::segment	int-div	1	proven	div_ceil(spans)	spans = breaks.len().saturating_sub(1).max(1) >= 1 just above
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::segment	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::segment	windows	2	proven	windows(2)	constant non-zero size
-crates/solidcore/src/blend/foot_blend.rs	FootBlend::toes_on_faces	int-div	1	proven	div_ceil(breaks.len().saturating_sub(1).max(1))	divisor is max(.., 1) >= 1
-crates/solidcore/src/blend/foot_blend.rs	FootBlend::toes_on_faces	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/foot_blend.rs	strip_face	with_capacity	1	proven	Vec::with_capacity(9)	constant capacity
 crates/solidcore/src/blend/hcr.rs	-	int-div	1	proven	usize::MAX / 2	constant non-zero divisor
 crates/solidcore/src/blend/law_corners.rs	LawCornerPieces::classify	windows	1	proven	windows(2)	constant non-zero size

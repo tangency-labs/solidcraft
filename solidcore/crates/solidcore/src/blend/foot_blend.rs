@@ -618,8 +618,8 @@ impl FootBlend {
     }
 
     /// The largest leg on support `i`, up to `z`, whose foot is found at every one of the
-    /// parameters `ts` (in order, each from the one before): halved down from `z`. 0 where
-    /// no leg is found at all.
+    /// parameters `ts` (in order, each from the one before): `z` where it is, else halved down
+    /// from it. 0 where no leg is found at all.
     ///
     /// # Errors
     ///
@@ -651,6 +651,9 @@ impl FootBlend {
             }
             Ok(true)
         };
+        if holds(z)? {
+            return Ok(z);
+        }
         let (mut lo, mut hi) = (0.0_f64, z);
         for _ in 0..FIT_STEPS {
             if hi - lo <= 1e-7 * (1.0 + z) {
@@ -718,27 +721,15 @@ impl FootBlend {
 }
 
 impl FootBlend {
-    /// Checks that each toe lies on its face of `target` at the legs `legs`: at stations on the
-    /// leader's knots in the interval, at least 4 between each two and 32 in all (sampled),
-    /// each foot's parameters
-    /// classified on its face (trims included). Stations not made are skipped (the build
-    /// refuses them). `within` the spans' leader parameters, ascending (none: the whole
-    /// interval): only the stations inside them and their ends, as the bead covers no more.
-    /// `target` is only read.
+    /// The stations a weld's sizes are checked and searched at: on the leader's knots in the
+    /// interval, at least 4 between each two and 32 in all. `within` the spans' leader
+    /// parameters, ascending (none: the whole interval): only the stations inside them, and
+    /// their ends, as the bead covers no more.
     ///
     /// # Errors
     ///
-    /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
-    /// toe found off its face, naming the face and the edge, with the largest leg on that side
-    /// whose toes stay on the face at those stations; those of the classification.
-    pub fn toes_on_faces(
-        &self,
-        k: &Kernel,
-        target: &Brep,
-        legs: [f64; 2],
-        within: &[[f64; 2]],
-    ) -> Result<()> {
-        check_legs(legs)?;
+    /// Those of the knots.
+    fn check_stations(&self, within: &[[f64; 2]]) -> Result<Vec<f64>> {
         let breaks = self.breaks()?;
         // at least 32 stations, and 4 between each two knots
         let per = 32_usize
@@ -751,14 +742,95 @@ impl FootBlend {
         }
         ts.extend(breaks.last().copied());
         if !within.is_empty() {
-            // shortcut: a tapered or rounded end is checked at the span's full legs, so one
-            // whose smaller legs would fit near a face's end is refused; check the end's own
-            // legs when such a refusal comes up
             ts.extend(within.iter().flatten().copied());
             ts.retain(|t| within.iter().any(|&[a, b]| (a..=b).contains(t)));
             ts.sort_by(f64::total_cmp);
             ts.dedup();
         }
+        Ok(ts)
+    }
+
+    /// `refused`, a refusal of this joint's bead with the legs `legs` and the sagitta
+    /// `sagitta`, with its size searched over the whole weld: the piece that failed (one
+    /// segment of a closed joint, one span of a stitch) names the size that builds over its
+    /// own stations, and another piece may take a smaller one. For no toe at the leg, the
+    /// largest leg on that side, up to the size named, whose foot is found at every one of
+    /// [`FootBlend::check_stations`] of `within` (the weld's spans as leader parameters; none:
+    /// the whole interval); for an arc that cuts into a face, the least bound over them, where
+    /// it is below the size named. A toe off its face is searched over those stations as it is
+    /// ([`FootBlend::toes_on_faces`]). The sizes are those of the stations (sampled), and a
+    /// leg's is its own side's: the other side's refusal comes once this one's size is asked.
+    /// Any other error is returned as it is.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations of the search.
+    pub fn fit_over(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        within: &[[f64; 2]],
+        refused: SolidError,
+    ) -> Result<SolidError> {
+        use crate::blend::fillet_executive::NoRoomReason;
+        let no_toe = matches!(
+            refused.blend_failure(),
+            Some(BlendFailure::NoRoom(NoRoomReason::NoToeAtLeg))
+        );
+        let mut failure = match refused {
+            SolidError::Failed(failure) => failure,
+            other => return Ok(other),
+        };
+        let Some(fit) = failure.fit else {
+            return Ok(SolidError::Failed(failure));
+        };
+        let ts = self.check_stations(within)?;
+        let size = match fit.measure {
+            FitMeasure::Leg if no_toe => {
+                let face = failure.site.face;
+                let side = self.sides.iter().position(|s| {
+                    face.is_some() && s.face.map(crate::error::TargetFace::of_target) == face
+                });
+                match side {
+                    Some(i) if fit.size > 0.0 => self.leg_fit(k, i, &ts, fit.size)?,
+                    _ => fit.size,
+                }
+            }
+            FitMeasure::Sagitta => {
+                let bound = self.sagitta_fit(k, &ts, legs, sagitta)?;
+                // the bound is open: a sagitta a hair below it builds
+                fit.size.min((bound * (1.0 - 1e-9)).max(0.0))
+            }
+            _ => fit.size,
+        };
+        failure.fit = Some(Fit::new(size, fit.measure, fit.edge));
+        Ok(SolidError::Failed(failure))
+    }
+
+    /// Checks that each toe lies on its face of `target` at the legs `legs`: at
+    /// [`FootBlend::check_stations`] of `within` (sampled), each foot's parameters
+    /// classified on its face (trims included). Stations not made are skipped (the build
+    /// refuses them). `target` is only read.
+    ///
+    /// # Errors
+    ///
+    /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
+    /// toe found off its face, naming the face and the edge, with the largest leg on that side
+    /// whose toes stay on the face at those stations (the other side is not looked at once one
+    /// is off: its refusal comes once this size is asked); those of the classification.
+    pub fn toes_on_faces(
+        &self,
+        k: &Kernel,
+        target: &Brep,
+        legs: [f64; 2],
+        within: &[[f64; 2]],
+    ) -> Result<()> {
+        check_legs(legs)?;
+        // shortcut: a tapered or rounded end is checked at the span's full legs, so one whose
+        // smaller legs would fit near a face's end is refused; check the end's own legs when
+        // such a refusal comes up
+        let ts = self.check_stations(within)?;
         // each support's domain and periods: a foot past a periodic support's seam is moved
         // into the domain by whole periods before it is classified
         let mut frames = Vec::new();
@@ -1431,7 +1503,11 @@ impl FootBlend {
         let mut body = Brep::new_with_infinite_region()?;
         body.set_editing_enabled(true);
         let (lo, hi) = (self.interval.min(), self.interval.max());
-        let made = self.add_span(k, &mut body, legs, sagitta, tol, [lo, hi])?;
+        let made = match self.add_span(k, &mut body, legs, sagitta, tol, [lo, hi]) {
+            Ok(made) => made,
+            // a refusal's size over all of the joint, not the failed segment's alone
+            Err(refused) => return Err(self.fit_over(k, legs, sagitta, &[], refused)?),
+        };
         close_bead_body(k, &mut body, tol)?;
         let weld = BeadWeld {
             legs,
