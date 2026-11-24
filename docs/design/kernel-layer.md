@@ -170,8 +170,14 @@ development.
 1. **Body-making operations** take bodies or profiles and return new bodies with a `History`.
    These are the trait, and they are routed per operation.
 2. **Record services** read a body's record and decide nothing about its shape: queries and
-   measures, point classification and picking, tessellation, import and export, the validity
-   check, and the 2D and curve helpers the bypasses use.
+   measures, point classification and picking, tessellation, the validity check, and the 2D and
+   curve helpers the bypasses use. STEP and IGES are treated the same way:
+   - **They live in solidcore and stay there.** Import and export are solidcore's
+     (`solidcore-step`), reached through `solidcore-ops`, and this design doesn't move them.
+   - **They are shared only in one sense.** A body made by another backend is exported by
+     converting it to the record and running solidcore's STEP or IGES writer on that record. An
+     imported body is read by solidcore, and another backend receives it as a record, like any
+     other operand.
    - In v1 they run on solidcore for every backend. A body made by another backend is a record
      like any other, so they work on it unchanged.
    - This keeps the comparison fair: every backend's result is measured, meshed, picked and
@@ -210,8 +216,6 @@ Each comes later as its own `OpKind`, once v1 is measured:
 - **Surfaces:** boundary, patch, ruled, extend, trim and untrim, stitch and sew, match, fair.
 - **Direct edit and repair:** delete, remove, copy and reverse faces; `repair` and
   `heal_tolerance_defects`.
-- **Import:** STEP and IGES import, as an operation. Until a backend wins it on the import
-  corpus, import stays a record service.
 - **Record services that measure slow:** classification, distance and rays.
 
 ### The trait
@@ -728,8 +732,8 @@ results:
    The rig's answers come from analysis, never from a kernel (tests/kernel-cases/README.md), so
    they are already neutral.
 2. **brep-bench** (bmander/brep-bench, Apache-2.0) gets a runner, `solidcraft-kernel --kernel
-   <name>`. The runner builds each case through the router and writes STEP with the shared
-   exporter. That measures a backend as SolidCraft would use it, conversions included, graded by
+   <name>`. The runner builds each case through the router, converts the result to the record,
+   and writes STEP with solidcore's STEP writer. That measures a backend as SolidCraft would use it, conversions included, graded by
    the bench's own closed-form answers.
 3. **The naming corpus** gains `NAMING_CORPUS_KERNEL=<name>`. It builds each design on solidcore
    and on that backend. For each design it reports one of:
@@ -1199,13 +1203,11 @@ How this design limits the cost:
    should every crate take the record types through `kernel-api` re-exports? That would be about
    2,700 mechanical line changes.
 
-   **The other option: CADIR as the one intermediate form.** A community review suggested keeping
-   import, export and display outside the kernel, with cadmpeg's vendor-neutral CADIR as the
-   single intermediate representation, validated by round trips on a large corpus.
+   **Another option to weigh: CADIR as the exchange format.** cadmpeg's vendor-neutral CADIR
+   could be the exchange format instead of the record, validated by round trips on a large
+   corpus. This is an option for the owner to weigh. The design as written uses the record, and
+   it doesn't change because of this option.
 
-   - **The first half is already the design.** Import, export and display are shared record
-     services outside every backend (§2): each backend makes bodies, and one shared STEP/IGES/
-     CADIR reader and writer, one mesher and one checker serve them all.
    - **What CADIR carries.** It holds exact geometry on STEP's topology conventions: analytic and
      NURBS carriers, in millimetres and radians, with per-vertex and per-edge tolerances and a
      document linear tolerance. Bodies carry a name, and entities carry ids. SolidCraft already
@@ -1224,14 +1226,19 @@ How this design limits the cost:
      STEP-style assembly: pcurves, seams, tolerances, canonical order. The record needs none of
      that between two operations: the solidcore backend uses it as it stands, with zero
      conversions.
-   - **Recommendation: keep the record as the exchange format** between the app and its backends
-     and between backends. It is exact, it keeps blend definitions and certificates, it costs
-     nothing on the default path, and it is what names, meshes and the model cache already use.
-     Use **CADIR as the interchange format at the edges**: import and export, other tools, and
-     the round-trip corpus. That corpus test is worth adopting: record → CADIR → record on the
-     naming and rig corpora, reported next to the loopback run (§12, step 11), with the losses
-     above counted as `ExchangeLoss`. A backend that wants to speak CADIR can do so inside its
-     adapter. The router doesn't need to know.
+   - **For CADIR:**
+     - it is vendor-neutral and documented outside solidcore;
+     - other tools already read and write it;
+     - a round-trip corpus would test every backend's exchange against one independent format.
+   - **Against CADIR:**
+     - the losses above (blend definitions and certificates, pcurves, regions);
+     - names and history would travel separately;
+     - two conversions per operation, where the default path has none today;
+     - the default path would no longer be byte-identical.
+   - **For the record:** it is exact, it keeps blend definitions and certificates, it costs
+     nothing on the default path, and names, meshes and the model cache already use it.
+   - **Against the record:** it is solidcore's data crate, so the trait is tied to its schema.
+   - **Which to use is the owner's call.** The design as written uses the record.
 2. **The shared display crates.** viewport, viewport-gpu and gpu are shared with other front ends
    and use `solidcore-tess` display types: `TessPlan`, `Mesh`, and the display-only plan
    evaluator. Keep them as a listed display-format exception, or route them through a
