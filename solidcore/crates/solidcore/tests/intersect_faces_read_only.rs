@@ -6,6 +6,7 @@
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
+use solidcore::error::SolidError;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::intersect::api_intersectors::intersect_faces_read_only;
 use solidcore::kernel::Kernel;
@@ -133,10 +134,15 @@ fn a_rod_standing_on_a_plate_meets_it_round_its_foot_and_leaves_the_plate() {
     let got = intersect_faces_read_only(&mut k, &rod, side, &plate, top, false).unwrap();
     assert!(state(&k, &rod, &plate) == before, "a body changed");
     assert!(!got.curves.is_empty());
-    // every piece runs round the rod's foot: radius 15 about (50, 50) at z = 10
+    // every piece runs round the rod's foot, radius 15 about (50, 50) at z = 10, at its ends
+    // and inside; together they are the whole circle, not part of it
+    let mut length = 0.0;
     for c in &got.curves {
-        let ends = c.ends(&k).unwrap();
-        for p in [ends.start, ends.end] {
+        let span = c.natural_interval();
+        length += c.length(&k, &span, 1e-9).unwrap();
+        for i in 0..=8 {
+            let t = span.min() + (span.max() - span.min()) * f64::from(i) / 8.0;
+            let p = c.evaluate_point(&k, t).unwrap();
             let r = ((p.x - 50.0).powi(2) + (p.y - 50.0).powi(2)).sqrt();
             assert!(
                 (r - 15.0).abs() <= 1e-6 && (p.z - 10.0).abs() <= 1e-9,
@@ -144,6 +150,11 @@ fn a_rod_standing_on_a_plate_meets_it_round_its_foot_and_leaves_the_plate() {
             );
         }
     }
+    let round = 2.0 * std::f64::consts::PI * 15.0;
+    assert!(
+        (length - round).abs() <= 1e-6 * round,
+        "{length} against {round}"
+    );
 }
 
 #[test]
@@ -159,5 +170,8 @@ fn a_face_not_of_its_body_is_refused() {
         .find(|f| !rod.face_list().contains(f))
         .unwrap();
     let got = intersect_faces_read_only(&mut k, &rod, stranger, &plate, top, false);
-    assert!(got.is_err(), "{got:?}");
+    assert!(
+        matches!(got, Err(SolidError::InvalidInput { .. })),
+        "{got:?}"
+    );
 }
