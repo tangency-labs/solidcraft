@@ -5199,7 +5199,7 @@ mod tests {
         doc.features[0].id = 1;
         doc.features[0].name = "PCIe Board Import".into();
         let bytes = solidcraft_io::write_design_container_with_cache(&doc, solidcraft_io::DesignCompression::Fast, None, Some(&model))?;
-        let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes))?;
+        let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
         assert!(!reader.has_model_cache());
 
         let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
