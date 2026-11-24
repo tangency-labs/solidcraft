@@ -16,7 +16,7 @@ pub const MAX_EQUATION_TEXT: usize = 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VariableUnit {
-    /// A plain number: `sin(t)` reads it in radians, and a range in a unit gives up that unit.
+    /// A plain number: a range with units is converted to numbers in the curve's defaults.
     #[default]
     Number,
     /// A length, as the range is: `a ^ 2 / (4 * t)` is a length when `a` is one.
@@ -40,10 +40,9 @@ impl VariableUnit {
 
 /// A curve drawn from formulas: x(t) and y(t) over t from `start` to `end`, or (with `x` left
 /// out) the explicit y = f(x) over x from `start` to `end`. The formulas use the design's
-/// expression language and parameters; the variable is a plain number unless `variable_unit`
-/// says otherwise, so `sin(t)` reads it in radians, as every plain number in a trig call does
-/// (`cos(0.5)` is radians, not degrees: write `deg` for degrees), and a result without a unit
-/// is in the design's length unit.
+/// expression language and parameters. The variable is a plain number unless `variable_unit`
+/// says otherwise. Plain angles read degrees unless `radians_trig` preserves the older radians
+/// convention. A formula's result without a unit is in the design's length unit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationCurve {
     /// The fit point spline it places (a curve id of the sketch).
@@ -62,6 +61,46 @@ pub struct EquationCurve {
     /// What the variable is in the formulas. Left out of the file for a plain number.
     #[serde(default, skip_serializing_if = "VariableUnit::is_number")]
     pub variable_unit: VariableUnit,
+    /// Whether plain angles in the formulas use the old radians convention (#19630).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub radians_trig: bool,
+}
+
+/// The sketch's saved list contains the original flat records for radians curves and tagged
+/// records for degrees curves. Old readers must not mistake a degrees curve for a radians
+/// curve just because they recognise all its formula fields.
+pub(crate) mod saved_equations {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::EquationCurve;
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum Saved<T> {
+        Degrees { degrees: T },
+        Radians(T),
+    }
+
+    pub fn serialize<S: Serializer>(curves: &[EquationCurve], s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(curves.iter().map(|curve| if curve.radians_trig { Saved::Radians(curve) } else { Saved::Degrees { degrees: curve } }))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<EquationCurve>, D::Error> {
+        Ok(Vec::<Saved<EquationCurve>>::deserialize(d)?
+            .into_iter()
+            .map(|record| match record {
+                Saved::Degrees { mut degrees } => {
+                    degrees.radians_trig = false;
+                    degrees
+                }
+                Saved::Radians(mut curve) => {
+                    // An old reader can add a flat curve without a mark while saving a newer file.
+                    curve.radians_trig = true;
+                    curve
+                }
+            })
+            .collect())
+    }
 }
 
 impl EquationCurve {

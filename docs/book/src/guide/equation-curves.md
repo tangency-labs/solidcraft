@@ -28,11 +28,11 @@ With **Explicit**, you write the height `y` using `x`. Try these (same steps, ot
 |---|---|---|---|
 | `x / 2` | `0` | `40` | a straight ramp (above) |
 | `x * x / 20` | `-30` | `30` | a parabola, the shape of a thrown ball's path |
-| `8 * sin(x / 5)` | `0` | `20 * pi` | a smooth wave |
+| `8 * sin((x / 5) rad)` | `0` | `20 * pi` | a smooth wave |
 
 ![The parabola y = x * x / 20 from x = -30 to x = 30](../generated/equation-parabola.png)
 
-![The wave y = 8 * sin(x / 5): two smooth waves along x](../generated/equation-wave.png)
+![The wave y = 8 * sin((x / 5) rad): two smooth waves along x](../generated/equation-wave.png)
 
 In the wave, `8` is how tall each bump is and `5` stretches it sideways: try `x / 10` and the
 waves get twice as long.
@@ -48,31 +48,31 @@ while the clock runs.
 
 | Rule in **x(t)** | Rule in **y(t)** | Start | End | What you get |
 |---|---|---|---|---|
-| `20 * cos(t)` | `20 * sin(t)` | `0` | `2 * pi` | a circle of radius 20 |
-| `2 * t * cos(t)` | `2 * t * sin(t)` | `0` | `4 * pi` | a spiral, two turns |
+| `20 * cos(t)` | `20 * sin(t)` | `0` | `360` | a circle of radius 20 |
+| `2 * t * cos(t rad)` | `2 * t * sin(t rad)` | `0` | `4 * pi` | a spiral, two turns |
 
 ![A circle of radius 20 drawn from x = 20 cos(t), y = 20 sin(t)](../generated/equation-circle.png)
 
 For the circle, `cos` and `sin` walk the pen around, and `20` is how far from the middle it
-stays. `2 * pi` is one full turn, so the circle closes. In the spiral, the distance from the
-middle (`2 * t`) grows while the clock runs, so the pen moves outwards as it goes round.
+stays. `360` is one full turn, so the circle closes. The spiral instead counts `t` in radians
+by writing `t rad` inside each trig function. Its distance from the middle (`2 * t`) grows
+while the clock runs, so the pen moves outwards as it goes round.
 
-![A spiral of two turns drawn from x = 2 t cos(t), y = 2 t sin(t)](../generated/equation-spiral.png)
+![A spiral of two turns drawn from x = 2 t cos(t rad), y = 2 t sin(t rad)](../generated/equation-spiral.png)
 
-## Angles are in radians
+## Angles are in degrees by default
 
-`sin`, `cos` and `tan` count angles in **radians**, not degrees: a full turn is `2 * pi`
-(about 6.28), half a turn is `pi`. This holds for every plain number inside a trig call, not
-only for `t`: `cos(0.5)` is radians. To use degrees inside a rule, spell the unit out, as in
-`cos(0.5 deg)`. You can also write an angle with its unit for **Start** and **End**, such as
-`360 deg`.
+In a new curve, `sin`, `cos` and `tan` read a number without a unit in **degrees**:
+`sin(90)` is 1, whether you type `90` or the formula calculates it. Write `rad` for
+**radians**, as in `sin((pi / 2) rad)`. For a degree-based circle, **End** can be `360`
+or `360 deg`. If the formulas use `sin(t rad)` and `cos(t rad)`, use the plain number
+`2 * pi` for a full turn instead.
 
-The rest of the expression language is the opposite: a plain number in a trig call reads
-degrees, in a sketch point and in a parameter whose unit is not radians. A parameter declared
-in radians reads it as radians: `cos(0.5)` there is `cos(0.5 rad)`. Spell the unit out when a
-formula moves between places.
+A curve saved before this change still reads plain angles in radians, even when edited.
+The edit window shows which convention that curve uses. Explicit `deg` and `rad` in trig
+arguments work with either convention.
 
-A number without a unit is in your design's unit (millimetres unless you changed it).
+A formula result without a unit is in your design's length unit (millimetres unless you changed it).
 
 ## Other functions
 
@@ -89,7 +89,7 @@ makes as you unwind it from the circle. The sides of most gear teeth have this s
 
 | Rule in **x(t)** | Rule in **y(t)** | Start | End |
 |---|---|---|---|
-| `r * (cos(t) + t * sin(t))` | `r * (sin(t) - t * cos(t))` | `0` | `1.5` |
+| `r * (cos(t rad) + t * sin(t rad))` | `r * (sin(t rad) - t * cos(t rad))` | `0` | `1.5` |
 
 ![The involute of a 20 mm base circle, starting on the circle and curving away from it](../generated/equation-involute.png)
 
@@ -123,7 +123,7 @@ An equation curve is an ordinary sketch curve, so you can build with it:
 
   | Rule in **x(t)** | Rule in **y(t)** | Start | End |
   |---|---|---|---|
-  | `(20 + 4 * cos(6 * t)) * cos(t)` | `(20 + 4 * cos(6 * t)) * sin(t)` | `0` | `2 * pi` |
+  | `(20 + 4 * cos(6 * t)) * cos(t)` | `(20 + 4 * cos(6 * t)) * sin(t)` | `0` | `360` |
 
   ![The flower curve extruded 6 mm into a solid](../generated/equation-flower.png)
 
@@ -140,9 +140,9 @@ in it; change them and click **OK**.
 
 - **The curve is tiny or huge.** Check the numbers in the rule and the Start/End range: `sin`
   never goes past 1, so `sin(x)` alone is at most 1 mm high. Multiply it (`8 * sin(x)`).
-- **The wave has too few bumps, or far too many.** Remember radians: `sin(x)` repeats every
-  `2 * pi` (6.28) along x, not every 360.
-- **The circle has a gap.** End must be a whole turn: `2 * pi`, or `360 deg`.
+- **The wave has too few bumps, or far too many.** Check the angle convention: `sin(x)` repeats every
+  `360` along x in a new curve, and every `2 * pi` in an older radians curve.
+- **The circle has a gap.** For `sin(t)` and `cos(t)` starting at `0`, use `360 deg` for a full turn.
 - **A rule is rejected.** Use `*` for multiply (`2 * t`, not `2t`), and close every bracket.
 
 ## For scripts and agents

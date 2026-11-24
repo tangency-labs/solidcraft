@@ -856,7 +856,7 @@ pub struct Sketch {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub wires_joined: bool,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "crate::equation::saved_equations")]
     pub equations: Vec<crate::equation::EquationCurve>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]

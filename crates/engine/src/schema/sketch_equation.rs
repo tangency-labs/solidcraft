@@ -130,7 +130,7 @@ pub struct EquationCurveParams {
     /// The explicit form, y = f(x): `y` is a formula of x and `x` is left out. Default false.
     #[serde(default)]
     pub explicit: Option<bool>,
-    /// Where the variable starts: a number, an angle ("360 deg" is 2·pi) or a length (in the
+    /// Where the variable starts: a number, an angle in the curve's default angle unit ("360 deg" is 360 for a new curve), or a length (in the
     /// design's unit). Required.
     #[serde(default)]
     pub start: Option<Formula>,

@@ -479,6 +479,7 @@ fn sheet_sketch_strokes_refuse_hostile_geometry_without_a_polyline_fallback() {
             end: "1".into(),
             tolerance: 0.01,
             variable_unit: Default::default(),
+            radians_trig: false,
         })
     });
     for bad in cases {

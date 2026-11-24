@@ -42,11 +42,17 @@ pub struct EquationFit {
 const RANGE_UNIT_REFUSED: &str =
     "with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number";
 
-/// How bare numbers read in the formulas: angles in radians (a plain variable's `sin(t)` is its
-/// sine), lengths in the design's unit.
-fn defaults(vals: &BTreeMap<String, Value>) -> Defaults {
+/// How bare numbers read in the formulas: lengths in the design's unit, and angles in degrees,
+/// as everywhere else in the expression language (#19630). A curve saved before that reads
+/// radians still: its `radians_trig` mark, set as the design opens, keeps its angles as they
+/// were, so an older design keeps its curves.
+fn defaults(vals: &BTreeMap<String, Value>, radians_trig: bool) -> Defaults {
     let len = vals.get(crate::eval::DESIGN_LEN).map(|v| v.v).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    Defaults { len, ang: 1.0 }
+    let mut d = Defaults { len, ..Defaults::default() };
+    if radians_trig {
+        d.ang = 1.0;
+    }
+    d
 }
 
 fn checked_text<'a>(what: &str, e: &'a str) -> Result<&'a str> {
@@ -77,12 +83,28 @@ fn formula(vals: &BTreeMap<String, Value>, e: &str, variable: &str, at: Value, d
     if v.is_finite() && v.abs() < MAX_COORD { Ok(v) } else { Err(DocError::Expr("the curve goes out of range".into())) }
 }
 
-/// Where the variable starts or ends, as a number: a number, an angle (in radians) or a length
-/// (in the design's unit); and which of them it is.
+/// Read an angle as a scalar in the curve's default unit. Two adjacent scalars can round to
+/// the same radians (e.g. 7.5 and 7.499999999999999 degrees). Prefer the shorter decimal in
+/// that case, without rounding away a distinguishable angle.
+fn angle_number(radians: f64, scale: f64) -> f64 {
+    let number = radians / scale;
+    if scale == 1.0 || number == 0.0 || !number.is_finite() {
+        return number;
+    }
+    [number, number.next_down(), number.next_up()]
+        .into_iter()
+        .filter(|candidate| candidate * scale == radians)
+        .min_by_key(|candidate| format!("{candidate:e}").len())
+        .unwrap_or(number)
+}
+
+/// Where the variable starts or ends, as a number: a number, an angle in the curve's default angle unit
+/// or a length in the design's unit; and which of them it is.
 fn range_end(vals: &BTreeMap<String, Value>, e: &str, d: Defaults) -> Result<(f64, Kind)> {
     let v = expr::eval_with_defaults(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), d)?;
     let (out, kind) = match v.kind() {
-        Some(kind @ (Kind::Unitless | Kind::Angle)) => (v.v, kind),
+        Some(Kind::Unitless) => (v.v, Kind::Unitless),
+        Some(Kind::Angle) => (angle_number(v.v, d.ang), Kind::Angle),
         Some(Kind::Length) => (v.v / d.len, Kind::Length),
         None => return Err(DocError::Expr(format!("expected a number, an angle or a length, got {}", v.describe()))),
     };
@@ -217,7 +239,7 @@ pub fn sample(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, 
     if !(2..=MAX_SPLINE_POINTS).contains(&count) {
         return Err(DocError::Invalid(format!("an equation curve takes 2 to {MAX_SPLINE_POINTS} points")));
     }
-    let d = defaults(vals);
+    let d = defaults(vals, eq.radians_trig);
     let span = range(vals, eq, d)?;
     let mut points = samples(vals, eq, span, count, d)?;
     let closed = closed.unwrap_or_else(|| closes(&points)) && count >= 4;
@@ -289,12 +311,19 @@ mod tests {
             end: end.into(),
             tolerance: DEFAULT_TOLERANCE,
             variable_unit: VariableUnit::Number,
+            radians_trig: false,
         }
     }
 
     /// The same curve with its variable in its range's unit.
     fn with_range_unit(eq: EquationCurve) -> EquationCurve {
         EquationCurve { variable_unit: VariableUnit::Range, ..eq }
+    }
+
+    /// The same curve with its plain numbers in trig reading radians, as one saved before they
+    /// read degrees (#19630).
+    fn with_radians(eq: EquationCurve) -> EquationCurve {
+        EquationCurve { radians_trig: true, ..eq }
     }
 
     fn with_a(mm: f64, design_len: Option<f64>) -> BTreeMap<String, Value> {
@@ -309,13 +338,52 @@ mod tests {
     #[test]
     fn a_circle_closes_and_stays_within_the_tolerance() {
         let vals = BTreeMap::new();
-        let fit = fit(&vals, &eq(Some("10 * cos(t)"), "10 * sin(t)", "0", "2 * pi")).unwrap();
-        assert!(fit.closed);
-        assert!(fit.deviation <= DEFAULT_TOLERANCE, "{}", fit.deviation);
-        for p in &fit.points {
-            assert!((p.len() - 10.0).abs() < 1e-9, "{p:?}");
+        // A curve saved before plain numbers read degrees (#19630) keeps reading radians.
+        let radians = with_radians(eq(Some("10 * cos(t)"), "10 * sin(t)", "0", "2 * pi"));
+        // The same circle written now: the variable runs in degrees, `rad` spells radians out.
+        let degrees = eq(Some("10 * cos(t)"), "10 * sin(t)", "0", "360");
+        let explicit_bounds = eq(Some("10 * cos(t)"), "10 * sin(t)", "0 deg", "360 deg");
+        let legacy_bounds = with_radians(explicit_bounds.clone());
+        for e in [radians, degrees, explicit_bounds, legacy_bounds] {
+            let fit = fit(&vals, &e).unwrap();
+            assert!(fit.closed);
+            assert!(fit.deviation <= DEFAULT_TOLERANCE, "{}", fit.deviation);
+            for p in &fit.points {
+                assert!((p.len() - 10.0).abs() < 1e-9, "{p:?}");
+            }
+            assert_eq!(fit.points.first(), fit.points.last());
         }
-        assert_eq!(fit.points.first(), fit.points.last());
+    }
+
+    #[test]
+    fn exact_degree_bounds_keep_formulas_defined_at_the_endpoints() {
+        let vals = BTreeMap::new();
+        for (y, start, end, expected) in [
+            ("sqrt(t - 30)^2", "30 deg", "40", [30.0, 40.0]),
+            ("sqrt(29 - t)^2", "28", "29 deg", [28.0, 29.0]),
+            ("sqrt(t - 7.5)^2", "7.5 deg", "10", [7.5, 10.0]),
+        ] {
+            let fit = fit(&vals, &eq(Some("t"), y, start, end)).unwrap();
+            let bounds = [fit.points.first().unwrap().x, fit.points.last().unwrap().x];
+            assert_eq!(bounds, expected);
+        }
+        // Don't snap a genuinely different bound, even one a single float away.
+        let radians = (30.0 * Defaults::default().ang).next_down();
+        let mut vals = vals;
+        vals.insert("bound".into(), Value::angle(radians));
+        assert!(range_end(&vals, "bound", Defaults::default()).unwrap().0 < 30.0);
+    }
+
+    /// A new curve reads plain numbers in trig as degrees, like the rest of the expression
+    /// language (#19630): `sin(90)` is 1.
+    #[test]
+    fn a_new_curve_reads_sin_90_as_one() {
+        let vals = BTreeMap::new();
+        let fit = fit(&vals, &eq(None, "sin(90)", "0 mm", "10 mm")).unwrap();
+        assert!(!fit.points.is_empty());
+        for p in &fit.points {
+            assert!((p.y - 1.0).abs() < 1e-12, "{p:?}");
+        }
     }
 
     #[test]
@@ -323,7 +391,8 @@ mod tests {
         let mut vals = BTreeMap::new();
         vals.insert("t".to_string(), Value::length(1000.0));
         vals.insert("amp".to_string(), Value::length(5.0));
-        let fit = fit(&vals, &eq(None, "amp * sin(x / 10)", "0 mm", "100 mm")).unwrap();
+        // Saved before plain numbers read degrees: the mark keeps its radians (#19630).
+        let fit = fit(&vals, &with_radians(eq(None, "amp * sin(x / 10)", "0 mm", "100 mm"))).unwrap();
         assert!(!fit.closed);
         let (first, last) = (fit.points[0], *fit.points.last().unwrap());
         assert!((first - Vec2::new(0.0, 0.0)).len() < 1e-9, "{first:?}");
@@ -340,26 +409,30 @@ mod tests {
         assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
     }
 
-    /// Plain numbers read radians in the formulas' trig calls, constants as well as the variable
-    /// (#19630): the same `cos(0.5)` that a sketch point reads in degrees is radians here, as
-    /// the variable in `sin(t)` is. `deg` spells degrees out.
+    /// Plain numbers read degrees in the formulas' trig calls, constants as well as the variable
+    /// (#19630): the same `cos(0.5)` a sketch point reads in degrees, now here too; `rad`
+    /// spells radians out. A curve saved before the change keeps its radians.
     #[test]
-    fn plain_numbers_read_radians_in_trig_calls_and_deg_spells_degrees_out() {
+    fn plain_numbers_read_degrees_in_trig_calls_and_rad_spells_radians_out() {
         let vals = BTreeMap::new();
-        let rad = fit(&vals, &eq(None, "cos(0.5)", "0 mm", "10 mm")).unwrap();
+        let deg = fit(&vals, &eq(None, "cos(0.5)", "0 mm", "10 mm")).unwrap();
+        for p in &deg.points {
+            assert!((p.y - 0.5f64.to_radians().cos()).abs() < 1e-9, "{p:?}");
+        }
+        let rad = fit(&vals, &eq(None, "cos(0.5 rad)", "0 mm", "10 mm")).unwrap();
         for p in &rad.points {
             assert!((p.y - 0.5f64.cos()).abs() < 1e-9, "{p:?}");
         }
-        let deg = fit(&vals, &eq(None, "cos(0.5 deg)", "0 mm", "10 mm")).unwrap();
-        for p in &deg.points {
-            assert!((p.y - 0.5f64.to_radians().cos()).abs() < 1e-9, "{p:?}");
+        let marked = fit(&vals, &with_radians(eq(None, "cos(0.5)", "0 mm", "10 mm"))).unwrap();
+        for p in &marked.points {
+            assert!((p.y - 0.5f64.cos()).abs() < 1e-9, "{p:?}");
         }
     }
 
     #[test]
     fn more_points_where_the_tolerance_is_tighter() {
         let vals = BTreeMap::new();
-        let mut e = eq(Some("t * cos(t)"), "t * sin(t)", "0", "6 * pi");
+        let mut e = with_radians(eq(Some("t * cos(t)"), "t * sin(t)", "0", "6 * pi"));
         e.tolerance = 0.1;
         let loose = fit(&vals, &e).unwrap();
         e.tolerance = 0.005;

@@ -2277,6 +2277,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
                 end: "1".into(),
                 tolerance: 0.01,
                 variable_unit: solidcraft_sketch::VariableUnit::Number,
+                radians_trig: false,
             });
             "equations"
         };
