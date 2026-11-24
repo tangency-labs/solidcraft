@@ -179,6 +179,18 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     Ok((solidcraft_io::read_design(&bytes)?, entry))
 }
 
+/// The kind an entry's design is, and the design it belongs to when it was one of a design's
+/// work files (#6892), as its header says. A copy an earlier build wrote says neither: a single
+/// design.
+pub fn header(dir: &Path, id: &str) -> (solidcraft_io::DesignKind, Option<solidcraft_io::InternalOf>) {
+    if !valid_id(id) {
+        return (solidcraft_io::DesignKind::Single, None);
+    }
+    let path = design_file(dir, id);
+    let path = path.to_string_lossy();
+    (solidcraft_io::read_design_kind_file(&path), solidcraft_io::read_internal_of_file(&path))
+}
+
 /// Delete an entry. Only a real one: `<id>.json` must describe entry `id` and its design must
 /// be there, so a folder and id that merely name someone's `part.sc` delete nothing.
 pub fn remove(dir: &Path, id: &str) -> Result<()> {
@@ -282,6 +294,11 @@ struct Snapshot {
     visibility: crate::Visibility,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
+    /// The kind of design it is, and the design it belongs to when it is one of a design's work
+    /// files (#6892): written into the copy's header as a save writes them, so a recovered part
+    /// is still that part and saves back to its place.
+    kind: solidcraft_io::DesignKind,
+    internal_of: Option<solidcraft_io::InternalOf>,
 }
 
 impl Snapshot {
@@ -291,7 +308,16 @@ impl Snapshot {
     fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
-        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&doc, &self.visibility, &self.dimension_values))?;
+        let saved = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        let bytes = match self.kind {
+            solidcraft_io::DesignKind::Single => solidcraft_io::write_design_container(&saved)?,
+            kind => solidcraft_io::write_design_container_as(&saved, kind, solidcraft_io::DesignCompression::Fast, None, None, None, None)?,
+        };
+        // A tag that can't be written leaves a copy without one: still the design, recovered.
+        let bytes = match self.internal_of.as_ref().map(|tag| solidcraft_io::with_internal_of(&bytes, Some(tag))) {
+            Some(Ok(tagged)) => tagged,
+            _ => bytes,
+        };
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -374,7 +400,16 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
+                    let snapshot = Snapshot {
+                        dir: self.dir.clone(),
+                        id: self.id.clone(),
+                        doc,
+                        visibility,
+                        dimension_values,
+                        path: s.path.clone(),
+                        kind: s.design_kind,
+                        internal_of: s.internal_of.clone(),
+                    };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -415,6 +450,8 @@ impl Autosaver {
             visibility: s.visibility.clone(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
+            kind: s.design_kind,
+            internal_of: s.internal_of.clone(),
         })
     }
 

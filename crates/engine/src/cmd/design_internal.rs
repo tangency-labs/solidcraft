@@ -279,6 +279,16 @@ fn tidy(design: &str, depth: usize) -> usize {
             let _ = std::fs::remove_file(entry.path());
             continue;
         }
+        // A lock a work file's editing left when the app was stopped (a crash during Edit in
+        // Place): nobody holds it any more, and it would keep the folder from going. One this
+        // process or a running app still holds stays.
+        if let Some(of) = entry.file_name().to_str().and_then(|name| name.strip_prefix(".~")).and_then(|name| name.strip_suffix(".lock")) {
+            let now = solidcraft_io::design_lock::now_secs();
+            if solidcraft_io::design_lock::read(&folder.join(of)).is_none_or(|lock| !lock.is_mine() && (lock.is_stale(now) || lock.owner_is_gone())) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            continue;
+        }
         let Some(stored) = held.get(&name) else { continue };
         let file = entry.path();
         if !std::fs::read(&file).is_ok_and(|bytes| bytes == *stored) {

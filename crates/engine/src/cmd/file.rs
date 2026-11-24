@@ -3689,7 +3689,13 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
+    // Read before the entry can be discarded below: the copy's header says what the design was.
+    let (kind, internal_of) = crate::recovery::header(&dir, id);
     s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
+    // A recovered part or assembly is still one, and a design's work file still belongs to its
+    // design, so it saves back to its place (#6892).
+    s.design_kind = kind;
+    s.internal_of = internal_of.filter(|_| entry.path.is_some());
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;

@@ -2247,3 +2247,60 @@ fn internal_components_are_picked_from_another_design_with_their_timelines() {
     assert!(s.doc.links.is_empty(), "one undo step");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A part edited in place and not yet saved is the app's autosave to bring back (#6892). The
+/// recovered copy is still a part and still belongs to its design, so a save puts it back in
+/// its place in the work folder, where the design offers it as a recovery component. The lock
+/// the crashed edit left in the work folder goes when the design closes, and the folder with it.
+#[test]
+fn an_unsaved_internal_part_recovered_from_the_autosave_saves_back_to_its_design() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("autosave-internal-part");
+    part(&root.join("bracket.scprt"), 10);
+    let design = root.join("counter.sc");
+    let work = root.join(".~counter.sc.parts");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
+    run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    run(&mut s, "file.save", json!({}));
+
+    // The part as Edit in Place has it open, changed and not saved; then the app is gone.
+    let file = work.join("bracket.scprt");
+    let mut edit = Session::default();
+    run(&mut edit, "doc.open", json!({"path": file}));
+    run(&mut edit, "solid.box", json!({"length": 3, "width": 3, "height": 3, "corner": [20, 0, 0]}));
+    let recovery = root.join("recovery");
+    let mut saver = crate::recovery::Autosaver::new(&recovery, std::time::Duration::from_secs(3600)).unwrap();
+    assert!(saver.save(&edit).unwrap(), "the unsaved part is autosaved");
+    drop(saver);
+    let gone = solidcraft_io::design_lock::Lock { pid: u32::MAX - 7, opened: 1, refreshed: 1, ..solidcraft_io::design_lock::Lock::mine(1) };
+    solidcraft_io::design_lock::write(&file, &gone).unwrap();
+    let lock = solidcraft_io::design_lock::lock_path(&file);
+    assert!(lock.is_file());
+
+    // Recovered: a part, of this design, and it saves to where it was.
+    let found = crate::recovery::orphans(&recovery);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let mut back = Session::default();
+    run(&mut back, "doc.recover", json!({"id": found[0].id, "dir": recovery}));
+    assert_eq!(back.design_kind, solidcraft_io::DesignKind::Part, "a recovered part is still a part");
+    assert_eq!(back.internal_of.as_ref().map(|tag| tag.design.as_str()), Some("counter.sc"), "and still belongs to its design");
+    run(&mut back, "file.save", json!({}));
+    assert_eq!(solidcraft_io::read_internal_of_file(&file.to_string_lossy()).map(|tag| tag.design), Some("counter.sc".to_string()));
+
+    // The design finds the part's newer work and takes it.
+    let mut again = Session::default();
+    let reply = run(&mut again, "doc.open", json!({"path": design}));
+    assert_eq!(reply["recovery_components"], json!(["bracket.scprt"]), "{reply}");
+    run(&mut again, "component.restore_recovery", json!({"component": "bracket"}));
+    run(&mut again, "file.save", json!({}));
+    crate::tidy_work_folder(&design.to_string_lossy());
+    assert!(!lock.exists(), "the lock nobody holds is gone");
+    assert!(
+        !work.exists(),
+        "and the work folder with it: {:?}",
+        std::fs::read_dir(&work).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>())
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
