@@ -687,6 +687,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // What is selected, described for an agent (the MCP server adds it to every reply).
+        "document.selection" => ok(json!({"selection": solidcraft_engine::selection_context::selection_reply(&mut app.session)})),
         // A host that keeps the files itself (an editing embed, #8517).
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
