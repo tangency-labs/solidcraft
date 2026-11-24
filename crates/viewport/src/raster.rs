@@ -179,7 +179,15 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         tinted.map(|v| v * shade)
     };
     for pass in [Pass::Solid, Pass::GlassFar, Pass::GlassNear] {
-        for sm in scene.meshes.iter().filter(|m| m.glass() == pass.glass()) {
+        // The closed solid bodies before the open ones, so the count is whole when an open body
+        // asks it whether the cut there lies inside a body (as the viewport's `Cut::rest` reads
+        // its stencil after `Cut::count`). Without a section, and for the glass (it blends), the
+        // scene's order stays: it settles ties between coplanar faces.
+        let mut meshes: Vec<&crate::SceneMesh> = scene.meshes.iter().filter(|m| m.glass() == pass.glass()).collect();
+        if !pass.glass() && !scene.clip.is_empty() {
+            meshes.sort_by_key(|m| !m.closed);
+        }
+        for sm in meshes {
             let alpha = sm.alpha();
             let m = &sm.mesh;
             let body = sm.color.f();
@@ -268,6 +276,12 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         if hid {
                             continue;
                         }
+                        // Where the cut lies inside a body, the cap hides all the section keeps
+                        // on that view ray: an open body there (a sheet inside a cut solid) is
+                        // not drawn, from either side (#4258).
+                        if !sm.closed && !pass.glass() && count.get(i).is_some_and(|n| *n > 0) {
+                            continue;
+                        }
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and
                             // leaves the depth buffer alone, so bodies inside it stay visible
@@ -287,7 +301,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 None => base,
                             };
                             // A see-through body has no cut face: the interior already shows.
-                            let cut = !pass.glass() && !scene.clip.is_empty() && inside;
+                            // Nor has an open one: its back face is its other side, lit as it
+                            // is without a section (the viewport's `fs_solid_open`).
+                            let cut = !pass.glass() && sm.closed && !scene.clip.is_empty() && inside;
                             let exit = if cut { cut_at(at) } else { None };
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
                                 *d = exit.and_then(|(cz, _)| cz).map_or(f32::INFINITY, |c| c.min(z));
@@ -978,6 +994,49 @@ mod tests {
                     let c = render(&Scene { meshes, radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
                     let differ = c.rgba.chunks(4).zip(want.rgba.chunks(4)).filter(|(a, b)| a != b).count();
                     assert_eq!(differ, 0, "fov {fov}, flipped {flip}, block {with_block}: the hidden sheet changes {differ} pixels");
+                }
+            }
+        }
+    }
+
+    /// #4258: a sheet inside a cut solid is hidden by the cap from either side, as the cap is
+    /// opaque; it used to paint the cap in its own colour where its back faced the eye. A kept
+    /// sheet alone is lit from either side, never hatched: it has no inside to cut.
+    #[test]
+    fn a_sheet_inside_a_cut_solid_hides_under_the_cap() {
+        let sheet = |flip: bool| {
+            let mut m = Mesh::default();
+            m.positions.extend([Vec3::new(-15.0, 0.0, 5.0), Vec3::new(15.0, 0.0, 5.0), Vec3::new(15.0, 0.0, 15.0), Vec3::new(-15.0, 0.0, 15.0)]);
+            m.normals.extend([if flip { Vec3::Y } else { -Vec3::Y }; 4]);
+            m.triangles.extend(if flip { [[0, 2, 1], [0, 3, 2]] } else { [[0, 1, 2], [0, 2, 3]] });
+            m.tri_face.extend([0u32; 2]);
+            SceneMesh::sheet(Arc::new(m), Rgb(40, 200, 60))
+        };
+        let solid = || SceneMesh::solid(Arc::new(block(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0))), Rgb(150, 160, 175));
+        let clip = vec![(Vec3::X, 0.0)];
+        let green = |c: &Canvas| c.rgba.chunks(4).filter(|p| p[1] > p[0].saturating_add(40) && p[1] > p[2].saturating_add(40)).count();
+        let hatched = |c: &Canvas| c.rgba.chunks(4).filter(|p| warm([p[0], p[1], p[2]])).count();
+        for fov in [0.0f64, 0.5] {
+            // From both sides of the sheet, looking at the cut face.
+            for from in [Vec3::new(1.0, 0.5, 0.7), Vec3::new(1.0, -0.5, 0.7)] {
+                let mut cam = Camera { distance: if fov > 0.0 { 60.0 / (fov * 0.5).tan() } else { 120.0 }, fov, ..Default::default() };
+                cam = cam.looking_from(from);
+                let want = render(&Scene { meshes: vec![solid()], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                // The sheet's kept half, 15 x 10 mm facing Y, as the picture shows it: 355 pixels
+                // orthographic, 227 in perspective (measured at the target, within a tenth).
+                let px_per_mm = 120.0 / cam.half_height();
+                let kept = 15.0 * 10.0 * cam.back().y.abs() * px_per_mm * px_per_mm;
+                for flip in [false, true] {
+                    let scene = Scene { meshes: vec![sheet(flip), solid()], radius: 40.0, clip: clip.clone(), ..Default::default() };
+                    let c = render(&scene, &cam, 240, 240);
+                    let differ = c.rgba.chunks(4).zip(want.rgba.chunks(4)).filter(|(a, b)| a != b).count();
+                    assert_eq!(differ, 0, "fov {fov}, from {from:?}, flipped {flip}: the sheet shows through the cap in {differ} pixels");
+                    let alone = render(&Scene { meshes: vec![sheet(flip)], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                    let (lit, cap) = (green(&alone), hatched(&alone));
+                    assert!(
+                        (lit as f64 - kept).abs() < 0.1 * kept && cap == 0,
+                        "fov {fov}, from {from:?}, flipped {flip}: the kept sheet alone: {lit} of {kept:.0} lit, {cap} hatched pixels"
+                    );
                 }
             }
         }

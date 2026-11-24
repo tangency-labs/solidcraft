@@ -25,6 +25,10 @@ macro_rules! sketch_preferences {
             /// Where a dimension's value is typed: in a box on the dimension (the default), or in a small
             /// window at it whose arrows step the value (#7246, `dim_view::window`).
             dimension_input: DimensionInput = DimensionInput::View, PAGE_SKETCH;
+            /// Draw the theme's halo colour as a rim under dimension lines, their arrows and fully
+            /// constrained sketch lines, so they read on a lit face in the Dark theme (#17575). Off draws
+            /// them bare, as before.
+            dimension_rim: bool = true, PAGE_SKETCH => check_tr("prefs.dimension_rim");
             dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
             /// What the dimension window's arrows, Up/Down and the wheel add to a length (millimetres,
             /// converted to the unit the value is written in) and to an angle (degrees).
@@ -128,6 +132,9 @@ macro_rules! sketch_preferences {
             sketch_face_activates_part: bool = false, PAGE_SKETCH;
             /// Use the only straight construction line in the preselection as Mirror's reference.
             sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+            /// Move/Copy Sketch Entities has only its X Distance arrow, and a drawn 3D point clicked gets
+            /// its own arrows instead of dragging freely, as before #7664. Off by default.
+            sketch_move_classic: bool = false, PAGE_SKETCH;
             /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
             /// it is, and Look At faces the sketch when asked.
             sketch_open_look_at: bool = true, PAGE_SKETCH;

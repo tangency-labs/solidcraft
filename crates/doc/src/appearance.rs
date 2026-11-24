@@ -21,10 +21,10 @@ pub struct Look {
     pub opacity: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pbr: Option<crate::pbr_appearance::PbrParameters>,
-    /// Procedural wood grain (`None`: a plain colour). `color` stays the wood's average colour,
+    /// Procedural wood grain (`None`: a plain colour), boxed so a plain look stays small. `color` stays the wood's average colour,
     /// for exports that carry one colour per body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grain: Option<crate::wood_grain::Grain>,
+    pub grain: Option<Box<crate::wood_grain::Grain>>,
 }
 
 #[derive(Deserialize)]
@@ -45,7 +45,7 @@ impl TryFrom<LookWire> for Look {
         if value.pbr.is_some() && value.opacity != 1.0 {
             return Err("opaque PBR requires opacity 1; refraction/transmission is not supported".into());
         }
-        Ok(Self { name: value.name, color: value.color, opacity: value.opacity, pbr: value.pbr, grain: value.grain })
+        Ok(Self { name: value.name, color: value.color, opacity: value.opacity, pbr: value.pbr, grain: value.grain.map(Box::new) })
     }
 }
 
@@ -878,7 +878,7 @@ mod tests {
                 assert_eq!(find(preset.name), Some(preset));
             }
             for (category, count) in [
-                (Category::Wood, 16),
+                (Category::Wood, 8),
                 (Category::Metal, 10),
                 (Category::Plastic, 10),
                 (Category::Glass, 6),
@@ -967,24 +967,25 @@ mod tests {
             for preset in STARTER_PACK {
                 if let Some(recipe) = preset.future_texture_recipe {
                     assert!(preset.name.contains("Uniform Preview"));
-                    assert!(preset.preview_note.contains("Uniform opaque preview only"));
+                    assert!(preset.preview_note.contains(if preset.category == Category::Wood {
+                        "Procedural 3D grain"
+                    } else {
+                        "Uniform opaque preview only"
+                    }));
                     assert_eq!(recipe.id, format!("{}.maps-v1", preset.id));
                     assert!(recipe.repeat_mm.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 10000.0));
-                    assert_eq!(recipe.grain_axis, None);
-                    assert_ne!(preset.category, Category::Wood, "woods are procedural now");
+                    assert_eq!(recipe.grain_axis, if preset.category == Category::Wood { Some(TextureAxis::V) } else { None });
                     assert_eq!(preset.requirements, &[Requirement::OpaquePbr]);
                     recipes += 1;
                 }
-                // Every wood carries its species' procedural grain, and says so.
+                // Every wood carries its species' procedural grain.
                 if preset.category == Category::Wood {
                     let look = preset.opaque_look().unwrap();
                     let grain = look.grain.expect("a starter wood has grain");
                     assert!(preset.id.ends_with(&grain.species), "{}", preset.id);
-                    assert!(!preset.name.contains("Uniform"), "{}", preset.name);
-                    assert!(preset.preview_note.contains("Procedural 3D grain"));
                 }
             }
-            assert!(recipes >= 6);
+            assert!(recipes >= 14);
         }
     }
 }

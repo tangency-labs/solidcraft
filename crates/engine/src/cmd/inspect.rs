@@ -1175,12 +1175,12 @@ pub(super) fn attach_grain(cmd: &str, params: &Value, look: &mut solidcraft_doc:
     }
     let species = value.get("species").and_then(Value::as_str);
     let mut grain = match (look.grain.clone(), species) {
-        (Some(g), None) => g,
+        (Some(g), None) => *g,
         (_, Some(species)) => Grain::species(species).ok_or_else(|| bad(cmd, format!("unknown wood species `{species}`")))?,
         (None, None) => return Err(bad(cmd, "`grain` on a look that is not a wood needs `species`")),
     };
     grain.apply_json(value).map_err(|e| bad(cmd, e))?;
-    look.grain = Some(grain);
+    look.grain = Some(Box::new(grain));
     Ok(())
 }
 

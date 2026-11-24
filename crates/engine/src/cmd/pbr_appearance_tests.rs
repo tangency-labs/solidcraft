@@ -1012,7 +1012,7 @@ fn wood_grain_settings_survive_undo_save_reopen_and_copy_paste() {
     assert!((wood.to_grain[0][1] - 0.8).abs() < 1e-5, "{:?}", wood.to_grain);
     let saved = s.doc.to_json();
     s.execute("edit.undo", &json!({})).unwrap();
-    assert!(s.doc.appearances.bodies.get("Specimen").is_none());
+    assert!(!s.doc.appearances.bodies.contains_key("Specimen"));
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc.appearances.bodies["Specimen"].grain.as_ref(), Some(&grain));
     let mut reopened = Session::new(crate::doc::Document::from_json(&saved).unwrap());

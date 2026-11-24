@@ -337,6 +337,63 @@ fn conflicting_constraints_fail_and_restore() {
     assert_eq!(sk.points, before.points);
 }
 
+/// A solve under a cancelled token ([`crate::cancel`], the app's Cancel) stops before
+/// its first iteration: the sketch fails and keeps its geometry. The same solve uncancelled
+/// iterates and solves.
+#[test]
+fn cancelled_solve_stops_and_restores() {
+    let build = || {
+        let mut sk = Sketch::new();
+        let l = rect(&mut sk, [v(0.3, -0.2), v(38.0, 1.0), v(41.0, 29.0), v(-1.0, 31.0)]);
+        use ConstraintKind::*;
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 40.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 30.0 }, None).unwrap();
+        sk
+    };
+    let token = crate::cancel::CancelToken::new();
+    token.cancel();
+    let mut sk = build();
+    let before = sk.points.clone();
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert_eq!(rep.iterations, 0, "{rep:?}");
+    assert_eq!(sk.points, before);
+    let mut sk = build();
+    let rep = seeded(false, || solve(&mut sk));
+    assert!(rep.ok() && rep.iterations > 0, "{rep:?}");
+}
+
+/// Cancel stops a solve part way: a long chain whose last link conflicts keeps LM iterating
+/// over every link; cancelled at a fixed point of its work (the token's 2,000th check, inside
+/// its first iterations), it stops there, with fewer iterations than it does uncancelled,
+/// failed, and its geometry as it was.
+#[test]
+fn cancel_stops_a_solve_part_way() {
+    let mut sk = Sketch::new();
+    let mut prev = 0usize;
+    let mut last = 0;
+    for i in 0..400 {
+        let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
+        last = sk.add_line_pts(prev, p, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l: last }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l: last, value: 10.0 }, None).unwrap();
+        prev = p;
+    }
+    sk.add_constraint(ConstraintKind::Vertical { l: last }, None).unwrap();
+    let free = seeded(false, || solve(&mut sk.clone()));
+    assert!(free.iterations > 2, "{free:?}");
+    let before = sk.points.clone();
+    let token = crate::cancel::CancelToken::after_polls(2_000);
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert!(rep.iterations < free.iterations, "{} iterations cancelled, {} not", rep.iterations, free.iterations);
+    assert_eq!(sk.points, before);
+}
+
 #[test]
 fn circles_tangent_equal_concentric() {
     let mut sk = Sketch::new();
@@ -497,6 +554,32 @@ fn midpoint_symmetry_point_on_curve_arc() {
     let (ax, _) = line_pts(&sk, axis);
     assert!((sk.points[s1].pos.x + sk.points[s2].pos.x - 2.0 * ax.x).abs() < 1e-7);
     assert!((sk.points[s1].pos.y - sk.points[s2].pos.y).abs() < 1e-7);
+}
+
+/// Four closed strips laid out as a # shut off a 6 x 6 square inside none of them: the one gap
+/// (#19963). Four open lines laid out as a # close off the same square, which was drawn by them,
+/// so it is no gap; neither is a region inside a strip or where two strips cross.
+#[test]
+fn enclosed_gaps_are_regions_crossing_closed_loops_shut_off() {
+    let mut sk = Sketch::new();
+    for (x0, y0, x1, y1) in [(-6.0, 3.0, 6.0, 4.0), (-6.0, -4.0, 6.0, -3.0), (-4.0, -6.0, -3.0, 6.0), (3.0, -6.0, 4.0, 6.0)] {
+        rect(&mut sk, [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)]);
+    }
+    let ps = find_profiles(&sk);
+    let gaps = enclosed_gaps(&sk, &ps);
+    assert_eq!(gaps.len(), ps.len());
+    let found: Vec<f64> = ps.iter().zip(&gaps).filter(|(_, g)| **g).map(|(p, _)| p.area).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0] - 36.0).abs() < 1e-9, "{found:?}");
+    assert!(ps.iter().zip(&gaps).filter(|(_, g)| !**g).all(|(p, _)| !p.region.contains(v(0.0, 0.0))));
+
+    let mut open = Sketch::new();
+    for (a, b) in [(v(-6.0, 3.0), v(6.0, 3.0)), (v(-6.0, -3.0), v(6.0, -3.0)), (v(-3.0, -6.0), v(-3.0, 6.0)), (v(3.0, -6.0), v(3.0, 6.0))] {
+        open.add_line(a, b, None, None, None).unwrap();
+    }
+    let ps = find_profiles(&open);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert_eq!(enclosed_gaps(&open, &ps), [false]);
 }
 
 #[test]
@@ -3004,6 +3087,32 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
         assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
     }
 }
+
+/// A circle crossing a hexagon's sides a hair from their corners (#20992): a hexagon of apothem
+/// 1 mm and a concentric circle just short of its corners. The sketch has thirteen regions (the
+/// centre, a sliver at each corner and a segment outside each side), and the centre one is found,
+/// as for a circle well inside the corners.
+#[test]
+fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
+    // The corners of a regular hexagon of apothem 1, at radius 2/sqrt(3) = 1.1547005383792515.
+    let (big, half) = (1.154_700_538_379_251_5, 0.577_350_269_189_625_8);
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
+    for radius in [1.1, 1.1545, 1.15469] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), radius, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 13, "radius {radius}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "radius {radius}: no profile at the centre");
+        let biggest = ps.iter().map(|p| p.area).fold(0.0, f64::max);
+        let centre = profile_at_point(&ps, v(0.0, 0.0)).and_then(|i| ps.get(i)).map(|p| p.area).unwrap_or(0.0);
+        assert!((centre - biggest).abs() < 1e-12, "radius {radius}: the centre region ({centre}) is not the largest ({biggest})");
+    }
+}
+
 /// `bezier_distance` measures a point off a straight Bézier piece exactly (#20048): the piece
 /// whose controls all lie on a line is that line, so the distance is the perpendicular one.
 #[test]

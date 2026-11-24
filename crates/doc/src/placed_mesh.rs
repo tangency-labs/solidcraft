@@ -207,8 +207,10 @@ pub(super) fn definition_plan(
     q: crate::display_quality::DisplayQuality,
     name: &str,
 ) -> Option<Arc<TessPlan>> {
-    cell.get_or_init(|| match body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.chord(body.size()), angle: Some(q.angle()) }) {
-        Ok(plan) => Some(Arc::new(plan)),
+    // Shared: an imported part keeps the plan its import's check made at Normal quality
+    // ([`solidcraft_kernel::Body::keeping_plans`]), which this takes rather than planning again.
+    cell.get_or_init(|| match body.mesh_plan_shared(&solidcraft_kernel::MeshTolerance { chord: q.chord(body.size()), angle: Some(q.angle()) }) {
+        Ok(plan) => Some(plan),
         Err(e) => {
             log::debug!("{name}: no display plan ({e})");
             None

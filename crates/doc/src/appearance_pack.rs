@@ -169,8 +169,11 @@ impl VisualPreset {
         };
         let pbr = PbrParameters::new(recipe.metallic, recipe.roughness, recipe.dielectric_ior).map_err(|e| DocError::Invalid(e.to_string()))?;
         // A wood preset carries its species' procedural grain.
-        let grain =
-            if self.category == Category::Wood { self.id.strip_prefix("starter.wood.").and_then(crate::wood_grain::Grain::species) } else { None };
+        let grain = if self.category == Category::Wood {
+            self.id.strip_prefix("starter.wood.").and_then(crate::wood_grain::Grain::species).map(Box::new)
+        } else {
+            None
+        };
         Ok(Look { name: self.name.into(), color: recipe.color, opacity: 1.0, pbr: Some(pbr), grain })
     }
 }

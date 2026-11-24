@@ -253,11 +253,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
                 if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                     ui_kit::help_icon(ui, app.tr("prefs.joint_drag_trackball_help"));
+                }
+            });
+            // Components pasted from another design go to the target's origin (#17621).
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::paste_components_at_origin(app, ui);
+                crate::scenario::publish_target("prefs:paste_components_at_origin", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.paste_components_at_origin_help"));
                 }
             });
         });
