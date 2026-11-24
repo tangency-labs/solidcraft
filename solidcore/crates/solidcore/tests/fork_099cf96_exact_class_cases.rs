@@ -617,8 +617,7 @@ fn solidcraft_kernel() -> Kernel {
 }
 
 fn exact_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k
+    Kernel::default()
 }
 
 #[test]

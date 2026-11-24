@@ -2309,10 +2309,6 @@ mod tests_c3 {
         )
     }
 
-    fn offset(k: &Kernel, d: f64, base: &Surface) -> Surface {
-        Surface::from(offset_surface::OffsetSurface::new(k, d, base.clone(), false, 0).unwrap())
-    }
-
     fn solver(k: &Kernel, a: &Surface, b: &Surface) -> ConstantRadiusAssistedFs {
         ConstantRadiusAssistedFs::from_parts(
             0.001,
