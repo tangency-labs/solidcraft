@@ -20,7 +20,8 @@ use super::record::{
     ExactNetRecord, ExactRoundDefinition, ExactRoundRecord, FaceDefinition, LeaderMapRecord,
     MixedCornerRecord, MixedSideRecord, NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord,
     PlaneRecord, ProceduralBlendRecord, QuadricKindRecord, QuadricRecord, RadiusRecord,
-    SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord, SweptCornerRecord,
+    RevolutionRecord, SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord,
+    SweptCornerRecord,
 };
 use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
@@ -30,7 +31,8 @@ use crate::blend::fillet_exact::{classify_supports, BlendSpine, ClassInputs};
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
 use crate::error::surface::SurfaceFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR};
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::Point3;
@@ -47,6 +49,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::FaceId;
 
 const OP_TO: &str = "surface::procedural_blend::convert::to_record";
+const OP_SUPPORT: &str = "surface::procedural_blend::convert::surface_of_support";
 const OP_FROM: &str = "surface::procedural_blend::convert::from_record";
 const OP_FACE: &str = "surface::procedural_blend::convert::rebuild_for_face";
 
@@ -75,6 +78,13 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
     let supports = [support_record(k, s0, depth)?, support_record(k, s1, depth)?];
     let radius = match &d.law {
         Some(law) => RadiusRecord::Law(curve_record(law)?),
+        None if d
+            .chamfer
+            .and_then(ChamferDefinition::constant_setback)
+            .is_some() =>
+        {
+            RadiusRecord::EqualSetback
+        }
         None => RadiusRecord::Constant { offsets: d.offsets },
     };
     let [seed0, seed1] = &d.seeds;
@@ -101,15 +111,16 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
 
 /// A support's record: a nested blend's own record, or the NURBS form its stations are
 /// solved on ([`as_b_spline`]: an analytic support is evaluated as its net), labelled with
-/// its analytic kind only where reading the record derives that surface back from the form
+/// its analytic kind where reading the record derives that surface back from the form
 /// written ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as
-/// [`exact_from_record`], [`from_record`] and [`corner_from_record`] do). The record holds
-/// no numbers for the label: reading it takes them off the form's control rows, and a form
-/// whose rows give them only to more than the evaluation's rounding (a cone's short arc
-/// span, whose control points carry the rounding of the conversions that made them) does
-/// not prove the surface read off it, though the support's own numbers prove the form. Such
-/// a support goes unlabelled, as its form, as a face whose form does not prove its label
-/// does (`face_surface::record_face`, owner 22254), and the record reads back.
+/// [`exact_from_record`], [`from_record`] and [`corner_from_record`] do), or where the
+/// cone or cylinder the surface is places onto that form ([`proved_revolution`]). A circle
+/// is its chord and its middle weight, so a span of a few degrees proves by evaluation. A
+/// shorter arc fixes its centre only to about the radius over the square of the sweep. The
+/// cone or cylinder, when [`proved_revolution`] places it, is written beside the form
+/// ([`RevolutionRecord`]). A form that is neither that cone nor proved from its rows goes
+/// unlabelled, as a face whose form does not prove its label does
+/// (`face_surface::record_face`, owner 22254), and the record reads back.
 fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> {
     nurbs_record(k, s, depth, true)
 }
@@ -140,15 +151,26 @@ fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<Sup
     };
     let form = surface_record(&b)?;
     // the reader's own steps on the form as it reads it
+    let stored_form = surface_of(&form)?;
+    let revolution = match (revolution_record(s), AnalyticSupport::of(s)) {
+        (Some(rev), Some(AnalyticSupport::Cylinder { .. })) => {
+            proved_revolution(k, &stored_form, SupportKindRecord::Cylinder, &rev)?.map(|_| rev)
+        }
+        (Some(rev), Some(AnalyticSupport::Cone { .. })) => {
+            proved_revolution(k, &stored_form, SupportKindRecord::Cone, &rev)?.map(|_| rev)
+        }
+        _ => None,
+    };
     let reads_back = |kind: SupportKind| -> Result<bool> {
-        match labelled(k, kind, surface_of(&form)?) {
+        match labelled(k, kind, stored_form.copy()) {
             Ok(_) => Ok(true),
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
             Err(_) => Ok(false),
         }
     };
+    // The label stands when the stored cone places on the form, or when the form proves it.
     let label = match AnalyticSupport::of(s).map(|a| a.kind()) {
-        Some(kind) if !proved || reads_back(kind)? => Some(kind),
+        Some(kind) if !proved || revolution.is_some() || reads_back(kind)? => Some(kind),
         _ => None,
     };
     let kind = match label {
@@ -159,7 +181,100 @@ fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<Sup
         Some(SupportKind::Sphere) => SupportKindRecord::Sphere,
         Some(SupportKind::Torus) => SupportKindRecord::Torus,
     };
-    Ok(SupportRecord::Nurbs { kind, form })
+    Ok(SupportRecord::Nurbs {
+        kind,
+        form,
+        revolution,
+    })
+}
+
+/// The cone or cylinder `s` is, as stored. `None` for any other surface.
+fn revolution_record(s: &Surface) -> Option<RevolutionRecord> {
+    let (placement, radius, semi_angle_deg) = match AnalyticSupport::of(s)? {
+        AnalyticSupport::Cylinder { placement, radius } => (placement, radius, 0.0),
+        AnalyticSupport::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        } => (placement, base_radius, semi_angle_deg),
+        _ => return None,
+    };
+    let o = placement.origin();
+    let x = placement.x_axis();
+    let y = placement.y_axis();
+    Some(RevolutionRecord {
+        origin: [o.x, o.y, o.z],
+        x_axis: [x.x, x.y, x.z],
+        y_axis: [y.x, y.y, y.z],
+        radius,
+        semi_angle_deg,
+    })
+}
+
+/// `form` as the cone or cylinder `revolution` names, when the form lies on it and those
+/// numbers place a cone on the form. `None` when the numbers are not a placement or the
+/// form does not lie on that cone. The caller then derives the label from the form.
+fn proved_revolution(
+    k: &Kernel,
+    form: &BSplineSurface,
+    kind: SupportKindRecord,
+    revolution: &RevolutionRecord,
+) -> Result<Option<Surface>> {
+    let xyz = |p: [f64; 3]| Point3::new(p[0], p[1], p[2]);
+    let origin = xyz(revolution.origin);
+    let x_axis = xyz(revolution.x_axis);
+    let y_axis = xyz(revolution.y_axis);
+    let finite = [origin, x_axis, y_axis]
+        .iter()
+        .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite())
+        && revolution.radius.is_finite()
+        && revolution.semi_angle_deg.is_finite();
+    if !finite {
+        return Ok(None);
+    }
+    let placement = Axis2Placement::from_stored(origin, x_axis, y_axis);
+    let cylinder = revolution.semi_angle_deg == 0.0;
+    let support = match (kind, cylinder) {
+        (SupportKindRecord::Cylinder, true) => AnalyticSupport::Cylinder {
+            placement,
+            radius: revolution.radius,
+        },
+        (SupportKindRecord::Cone, false) => AnalyticSupport::Cone {
+            placement,
+            base_radius: revolution.radius,
+            semi_angle_deg: revolution.semi_angle_deg,
+        },
+        _ => return Ok(None),
+    };
+    // The stored axis, radius and angle, once the form lies on them.
+    match support.place_on(k, form) {
+        Ok(surface) => Ok(Some(surface)),
+        Err(e) if e.is_cancelled() || e.is_not_certified() => Err(e),
+        Err(SolidError::InvalidInput { .. }) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// A NURBS support read back. A stored cone or cylinder places on the form, or the read
+/// is refused. A support with no stored cone is the surface derived from its label.
+fn surface_of_support(
+    k: &Kernel,
+    kind: SupportKindRecord,
+    form: BSplineSurface,
+    revolution: Option<&RevolutionRecord>,
+) -> Result<Surface> {
+    if let Some(revolution) = revolution {
+        return proved_revolution(k, &form, kind, revolution)?.ok_or_else(|| {
+            SolidError::invalid_input(
+                OP_SUPPORT,
+                "a support's cone does not place on its NURBS form",
+            )
+        });
+    }
+    match kind_of(kind) {
+        None => Ok(Surface::from(form)),
+        Some(kind) => labelled(k, kind, form),
+    }
 }
 
 /// A labelled form's analytic surface, as every reader of a record makes it and
@@ -190,13 +305,13 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
     let nurb = c
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP_TO, SurfaceFailure::CurveWithoutNurb))?;
     let rational = nurb.is_rational();
     let points_3d = nurb.is_3d();
     let cpts = nurb.cpts();
     Ok(NurbsCurveRecord {
         dim: u32::try_from(c.dim)
-            .map_err(|_| SolidError::surface_failed(OP_TO, "the curve's dimension is past u32"))?,
+            .map_err(|_| SolidError::surface(OP_TO, SurfaceFailure::CurveDimensionTooLarge))?,
         points_3d,
         degree: to_u32(nurb.degree())?,
         knots: nurb.knots().to_vec(),
@@ -210,9 +325,11 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
 
 /// A NURBS surface's stored numbers.
 fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
-    let nurb = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline surface has no NURB"))?;
+    let nurb = s.gw_nurb().ok_or_else(|| {
+        Failure::new(OP_TO, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let rational = nurb.is_rational();
     let mut points = Vec::new();
     let mut weights = Vec::new();
@@ -281,11 +398,10 @@ pub fn rebuild_for_face(
         if e.is_cancelled() || e.is_not_certified() {
             return e;
         }
-        SolidError::surface_at(
-            OP_FACE,
-            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
-            EntityRef::Face(face),
-        )
+        Failure::new(OP_FACE, SurfaceFailure::RecordDoesNotRebuild)
+            .at(EntityRef::Face(face))
+            .caused_by(e)
+            .into_error()
     })
 }
 
@@ -297,45 +413,49 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
         ));
     }
     let d = &rec.definition;
-    let mut supports = Vec::new();
-    for (i, s) in d.supports.iter().enumerate() {
-        supports.push(match s {
-            SupportRecord::Nurbs { kind, form } => {
-                let form = surface_of(form)?;
-                match kind_of(*kind) {
-                    None => Surface::from(form),
-                    // the analytic surface derived from the form, the form checked on it
-                    Some(kind) => labelled(k, kind, form).map_err(|e| match e {
-                        SolidError::InvalidInput { .. } => SolidError::invalid_input(
-                            OP_FROM,
-                            if i == 0 {
-                                "support 1's NURBS form is not of its kind"
-                            } else {
-                                "support 2's NURBS form is not of its kind"
-                            },
-                        ),
-                        other => other,
-                    })?,
-                }
-            }
+    let support_of = |i: usize, s: &SupportRecord| -> Result<Surface> {
+        Ok(match s {
+            SupportRecord::Nurbs {
+                kind,
+                form,
+                revolution,
+            } => surface_of_support(k, *kind, surface_of(form)?, revolution.as_ref()).map_err(
+                |e| match e {
+                    SolidError::InvalidInput { .. } => SolidError::invalid_input(
+                        OP_FROM,
+                        if i == 0 {
+                            "support 1's NURBS form is not of its kind"
+                        } else {
+                            "support 2's NURBS form is not of its kind"
+                        },
+                    ),
+                    other => other,
+                },
+            )?,
             SupportRecord::Blend(b) => Surface::from(from_record_at(k, b, depth + 1)?),
-        });
-    }
+        })
+    };
+    let [r0, r1] = &d.supports;
+    let supports = [support_of(0, r0)?, support_of(1, r1)?];
+    let mut chamfer = d.chamfer.as_ref().map(chamfer_of).transpose()?;
     let (law, offsets) = match &d.radius {
         RadiusRecord::Constant { offsets } => (None, *offsets),
         RadiusRecord::Law(law) => (Some(curve_of(law)?), [0.0, 0.0]),
+        RadiusRecord::EqualSetback => {
+            let sizes = chamfer
+                .ok_or_else(|| {
+                    SolidError::invalid_input(OP_FROM, "a local wedge needs the chamfer's setbacks")
+                })?
+                .at_every_station()?;
+            chamfer = Some(sizes);
+            (None, sizes.offsets()?)
+        }
     };
-    let chamfer = d.chamfer.as_ref().map(chamfer_of).transpose()?;
     let leader = curve_of(&d.leader)?;
     let [seed0, seed1] = &d.seeds;
     let seeds = [curve_of(seed0)?, curve_of(seed1)?];
     let net = surface_of(&rec.net)?;
-    let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::surface_failed(
-            OP_FROM,
-            "the record has fewer than two supports",
-        ));
-    };
+    let [s0, s1] = &supports;
     if !(d.map.b[0] != 0.0 && d.map.b[1] != 0.0) {
         return Err(SolidError::invalid_input(
             OP_FROM,
@@ -395,17 +515,21 @@ fn stored_point(
     z: bool,
 ) -> Result<CPoint> {
     let [x, y, pz] = *points.get(i).ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP_FROM,
-            "the control point index is past the end of the points",
+            SurfaceFailure::Defect {
+                why: "a stored point past the record's points was asked for, though its readers ask only below its point count (a surface's u_count * v_count), which the record's check or the kernel's own writing of it guarantees",
+            },
         )
     })?;
     let w = match weights {
         Some(ws) => {
             let w = *ws.get(i).ok_or_else(|| {
-                SolidError::surface_failed(
+                SolidError::surface(
                     OP_FROM,
-                    "the control point index is past the end of the weights",
+                    SurfaceFailure::Defect {
+                        why: "a stored weight past the record's weights was asked for, though a rational record has a weight per point, which its check or the kernel's own writing of it guarantees",
+                    },
                 )
             })?;
             if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
@@ -452,7 +576,12 @@ fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
                 .checked_mul(nv)
                 .and_then(|x| x.checked_add(j))
                 .ok_or_else(|| {
-                    SolidError::surface_failed(OP_FROM, "the control point index overflows")
+                    SolidError::surface(
+                        OP_FROM,
+                        SurfaceFailure::Defect {
+                            why: "a stored point's index i * v_count + j overflows, though it is below u_count * v_count, the point count, which the record's check or the kernel's own writing of it guarantees",
+                        },
+                    )
                 })?;
             row.push(stored_point(&r.points, r.weights.as_ref(), at, true)?);
         }
@@ -474,7 +603,8 @@ const OP_EXACT_FROM: &str = "surface::procedural_blend::convert::exact_from_reco
 /// # Errors
 ///
 /// `InvalidInput` for a surface that is not an exact round; `Unsupported` for a net of a
-/// kind with no label; those of [`to_record`]'s supports and forms.
+/// kind with no label and for a chord with a sagitta (a weld bead's, #15129, which no record
+/// holds yet); those of [`to_record`]'s supports and forms.
 pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord> {
     let Some(BlendRef::Exact { round, net }) = surface.procedural_blend() else {
         return Err(SolidError::invalid_input(
@@ -482,6 +612,14 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
             "the surface is not an exact round",
         ));
     };
+    // a weld bead's chord with a sagitta (#15129): no record holds a sagitta yet, and one read
+    // without it would be the flat chord, so it is refused rather than dropped
+    if round.sagitta != 0.0 {
+        return Err(SolidError::Unsupported {
+            operation: OP_EXACT_TO,
+            reason: "a chord with a sagitta (a weld bead's) has no record yet",
+        });
+    }
     let [s0, s1] = &round.supports;
     let supports = [support_record(k, s0, 1)?, support_record(k, s1, 1)?];
     let kind = match net.kind() {
@@ -501,9 +639,11 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
         }
     };
     let Some(form) = as_b_spline(k, net)? else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXACT_TO,
-            "the exact net has no B-spline form",
+            SurfaceFailure::Defect {
+                why: "the exact net has no B-spline form, though it is of a kind with a label (a plane, cone, sphere, torus, surface of revolution, ball patch or B-spline), which as_b_spline always gives one",
+            },
         ));
     };
     let i = round.inputs;
@@ -555,24 +695,23 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
 pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> {
     rec.validate()
         .map_err(|e| SolidError::invalid_input(OP_EXACT_FROM, e.reason))?;
-    let mut supports = Vec::new();
-    for s in &rec.supports {
-        supports.push(match s {
-            SupportRecord::Nurbs { kind, form } => {
-                let form = surface_of(form)?;
-                match kind_of(*kind) {
-                    None => Surface::from(form),
-                    Some(kind) => labelled(k, kind, form)?,
-                }
-            }
+    let support_of = |s: &SupportRecord| -> Result<Surface> {
+        Ok(match s {
+            SupportRecord::Nurbs {
+                kind,
+                form,
+                revolution,
+            } => surface_of_support(k, *kind, surface_of(form)?, revolution.as_ref())?,
             SupportRecord::Blend(_) => {
                 return Err(SolidError::invalid_input(
                     OP_EXACT_FROM,
                     "an exact round's supports are faces",
                 ))
             }
-        });
-    }
+        })
+    };
+    let [r0, r1] = &rec.supports;
+    let supports = [support_of(r0)?, support_of(r1)?];
     let form = surface_of(&rec.net.form)?;
     let analytic = |kind: SupportKind, form: BSplineSurface| labelled(k, kind, form);
     let mut net = match rec.net.kind {
@@ -607,12 +746,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
         ExactClassRecord::NodalQuartic => ExactClass::NodalQuartic,
     };
     let leader = rec.leader.as_ref().map(curve_of).transpose()?;
-    let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::surface_failed(
-            OP_EXACT_FROM,
-            "the record has fewer than two supports",
-        ));
-    };
+    let [s0, s1] = &supports;
     if rec.net.kind == ExactNetKindRecord::BallPatch {
         // a ball patch's sphere: the ball of its point class, from its supports
         let blend = classify_supports(k, [s0, s1], &inputs)?;
@@ -623,9 +757,11 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
             ));
         }
         let SurfaceKind::BSpline(form) = net.kind() else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EXACT_FROM,
-                "the exact net is not a B-spline surface",
+                SurfaceFailure::Defect {
+                    why: "a ball patch's exact net is not a B-spline surface, though it was just made as the surface of its B-spline form",
+                },
             ));
         };
         net = Surface::from(BallPatch::create(form, blend.point, blend.radius)?);
@@ -971,9 +1107,9 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         CornerDefinition::Setback(d) => {
             let fill = &*d.fill;
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_CORNER_TO,
-                    "the setback corner surface has no B-spline form",
+                    SurfaceFailure::NoBSplineForm,
                 ));
             };
             CornerRecord::Setback(SetbackCornerRecord {
@@ -1002,15 +1138,16 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
                 tol: fill.tol,
                 convex: fill.convex,
                 containment: fill.containment,
+                certified: fill.certified,
                 patch: to_u32(d.patch)?,
                 net: surface_record(&form)?,
             })
         }
         CornerDefinition::Mixed(d) => {
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_CORNER_TO,
-                    "the mixed corner surface has no B-spline form",
+                    SurfaceFailure::NoBSplineForm,
                 ));
             };
             let [b1, b2] = &d.blends;
@@ -1035,13 +1172,11 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
 /// form by its label (exact to rounding, the form as stored), or the form.
 fn corner_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
     match s {
-        SupportRecord::Nurbs { kind, form } => {
-            let form = surface_of(form)?;
-            match kind_of(*kind) {
-                None => Ok(Surface::from(form)),
-                Some(kind) => labelled(k, kind, form),
-            }
-        }
+        SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution,
+        } => surface_of_support(k, *kind, surface_of(form)?, revolution.as_ref()),
         SupportRecord::Blend(_) => Err(SolidError::invalid_input(
             OP_CORNER_FROM,
             "a corner's face is a NURBS form",
@@ -1114,6 +1249,7 @@ pub fn corner_from_record(k: &Kernel, rec: &CornerRecord) -> Result<Surface> {
                 r.tol,
                 r.convex,
                 r.containment,
+                r.certified,
             )?;
             let mut net = Surface::from(surface_of(&r.net)?);
             net.set_corner_definition(CornerDefinition::setback(
@@ -1461,6 +1597,122 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
 mod tests {
     use super::*;
 
+    /// A one-degree cone reads back as the axis, radius and semi-angle it was built with.
+    /// A placement the patch does not lie on contributes no surface.
+    #[test]
+    fn a_one_degree_cone_keeps_the_axis_it_was_built_with() {
+        use crate::surface::cone::Cone;
+        use crate::surface::surface::Surface;
+        let k = Kernel::default();
+        let origin = Point3::new(1000.0, 500.0, 40.0);
+        let mut cone = Cone::new_bounded(
+            origin,
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            28.5,
+            33.0,
+            0.0,
+            1.0,
+            8.0,
+            false,
+            false,
+            false,
+        );
+        cone.make_nurb(&k).unwrap();
+        let built = cone.rev.position.origin();
+        let want_radius = cone.base_radius;
+        let want_angle = cone.semi_angle_deg;
+        let want_x = cone.rev.position.x_axis();
+        let surface = Surface::from(cone);
+        let rec = nurbs_record(&k, &surface, 1, true).unwrap();
+        let SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution: Some(revolution),
+        } = rec
+        else {
+            panic!("the cone was not stored");
+        };
+        assert_eq!(kind, SupportKindRecord::Cone);
+        let back = surface_of_support(
+            &k,
+            SupportKindRecord::Cone,
+            surface_of(&form).unwrap(),
+            Some(&revolution),
+        )
+        .unwrap();
+        let read = AnalyticSupport::of(&back).unwrap();
+        let AnalyticSupport::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        } = read
+        else {
+            panic!("the support did not read back as a cone");
+        };
+        assert!(
+            (placement.origin() - built).length() < 1e-9,
+            "origin moved from {built:?} to {:?}",
+            placement.origin()
+        );
+        assert!(
+            (placement.x_axis() - want_x).length() < 1e-9,
+            "x axis moved to {:?}",
+            placement.x_axis()
+        );
+        assert!((base_radius - want_radius).abs() < 1e-9);
+        assert!((semi_angle_deg - want_angle).abs() < 1e-9);
+        let nurbs = surface_of(&form).unwrap();
+        let mut forged = revolution;
+        forged.origin[0] += 1.0;
+        let refused = proved_revolution(&k, &nurbs, SupportKindRecord::Cone, &forged).unwrap();
+        assert!(
+            refused.is_none(),
+            "a centre the patch does not lie on was used"
+        );
+
+        // A one-degree cylinder: semi-angle 0, the same placement and radius.
+        let mut cylinder = Cone::new_cylinder_bounded(
+            origin,
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            28.5,
+            0.0,
+            1.0,
+            8.0,
+            false,
+            false,
+            false,
+        );
+        cylinder.make_nurb(&k).unwrap();
+        let cyl_origin = cylinder.rev.position.origin();
+        let cyl = Surface::from(cylinder);
+        let rec = nurbs_record(&k, &cyl, 1, true).unwrap();
+        let SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution: Some(revolution),
+        } = rec
+        else {
+            panic!("the cylinder was not stored");
+        };
+        assert_eq!(kind, SupportKindRecord::Cylinder);
+        assert_eq!(revolution.semi_angle_deg, 0.0);
+        let back = surface_of_support(
+            &k,
+            SupportKindRecord::Cylinder,
+            surface_of(&form).unwrap(),
+            Some(&revolution),
+        )
+        .unwrap();
+        let AnalyticSupport::Cylinder { placement, radius } = AnalyticSupport::of(&back).unwrap()
+        else {
+            panic!("the support did not read back as a cylinder");
+        };
+        assert!((placement.origin() - cyl_origin).length() < 1e-9);
+        assert!((radius - 28.5).abs() < 1e-9);
+    }
+
     /// The memo keeps keys up to its cap, starts again empty when the next key would pass it,
     /// and keeps no key larger than the cap on its own, so no such allocation outlives the call.
     #[test]
@@ -1489,51 +1741,64 @@ mod tests {
         assert_eq!(memo.bounds.get("d".repeat(11).as_str()), None);
     }
 
-    /// The record conversion failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The record conversion's named causes keep the status of the phrase causes they replaced
+    /// (a site whose status differs from the cause's own keeps it through `with_status`), with
+    /// the kind their condition is: the caller's blend, curve or surface, or a surface kind the
+    /// conversion has no code for.
     #[test]
-    fn typed_surface_failures_keep_their_upstream_answers() {
+    fn the_record_conversion_causes_keep_the_status_they_replaced() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+        use crate::error::ErrorKind;
+        let no_nurb = Failure::new(OP_TO, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error();
+        let samples = [
             (
-                OP_TO,
-                SurfaceFailure::Failed("the B-spline surface has no NURB"),
-                crate::error::SM_ERR,
+                no_nurb,
+                SurfaceFailure::NoNurb,
+                SM_ERR,
+                ErrorKind::InvalidInput,
             ),
             (
-                OP_EXACT_FROM,
-                SurfaceFailure::Failed("the record has fewer than two supports"),
-                crate::error::SM_ERR,
+                SolidError::surface(OP_TO, SurfaceFailure::CurveWithoutNurb),
+                SurfaceFailure::CurveWithoutNurb,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SolidError::surface(OP_TO, SurfaceFailure::CurveDimensionTooLarge),
+                SurfaceFailure::CurveDimensionTooLarge,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SolidError::surface(OP_CORNER_TO, SurfaceFailure::NoBSplineForm),
+                SurfaceFailure::NoBSplineForm,
+                SM_ERR,
+                ErrorKind::Unsupported,
             ),
         ];
-        for (operation, failure, code) in samples {
-            let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
-            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+        for (typed, failure, code, kind) in samples {
+            assert_eq!(typed.sm_status(), Some(code), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
-            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
-            assert_eq!(typed.is_port_failure(), before.is_port_failure());
-            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert!(!typed.is_defect(), "{typed:?}");
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
     }
 
-    /// The rebuild refusal keeps the face the bare status named.
+    /// The rebuild refusal keeps the face and status the bare status named, and the rebuild's
+    /// own error as its cause.
     #[test]
-    fn the_rebuild_refusal_keeps_its_face() {
+    fn the_rebuild_refusal_keeps_its_face_and_cause() {
         use crate::error::surface::SurfaceFailure;
         let face = EntityRef::Face(FaceId::from_index(3));
-        let typed = SolidError::surface_at(
-            OP_FACE,
-            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
-            face,
-        );
+        let why = SolidError::invalid_input(OP_FROM, "its parametrization is singular");
+        let typed = Failure::new(OP_FACE, SurfaceFailure::RecordDoesNotRebuild)
+            .at(face)
+            .caused_by(why.clone())
+            .into_error();
         let before = SolidError::Upstream {
             operation: OP_FACE,
             code: crate::error::SM_ERR_INVALID_INPUT,
@@ -1545,5 +1810,6 @@ mod tests {
         assert_eq!(typed.operation(), before.operation());
         assert_eq!(typed.entity(), Some(face));
         assert_eq!(typed.is_status_answer(), before.is_status_answer());
+        assert_eq!(typed.cause(), Some(&why));
     }
 }

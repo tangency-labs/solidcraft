@@ -308,6 +308,54 @@ fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     }
 }
 
+/// Every point where the ray meets a face, nearest first: along +x at y = 3, z = 4 the tube's
+/// one face gives (-4, 3, 4) at 16 and (4, 3, 4) at 24, the first where `face_hit_by_ray` lands;
+/// at y = 0 the far crossing, (5, 0, 4), is on the seam and still one hit; from inside, only the
+/// far side; facing away, none.
+/// What is no ray is refused as `face_hit_by_ray` refuses it.
+#[test]
+fn a_ray_through_a_tube_hits_both_sides_nearest_first() {
+    all_fixes();
+    let (b, _, order) = tube();
+    let hits = b
+        .face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    for (hit, (at, distance)) in hits
+        .iter()
+        .zip([([-4.0, 3.0, 4.0], 16.0), ([4.0, 3.0, 4.0], 24.0)])
+    {
+        assert!(close(hit.point, at), "{hits:?}");
+        assert!(near(hit.distance, distance, 1e-6), "{hits:?}");
+    }
+    let first = b
+        .face_hit_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.face, hits[0].face);
+    assert!(close(first.point, hits[0].point), "{first:?} {hits:?}");
+    // through the seam: the tube's rings start at (5, 0), so x = 5 is one hit, not two
+    let seam = b
+        .face_hits_by_ray(&order, [-20.0, 0.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(seam.len(), 2, "{seam:?}");
+    assert!(close(seam[0].point, [-5.0, 0.0, 4.0]), "{seam:?}");
+    assert!(close(seam[1].point, [5.0, 0.0, 4.0]), "{seam:?}");
+    let inside = b
+        .face_hits_by_ray(&order, [0.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    assert!(close(inside[0].point, [4.0, 3.0, 4.0]), "{inside:?}");
+    assert_eq!(
+        b.face_hits_by_ray(&order, [20.0, 3.0, 4.0], [1.0, 0.0, 0.0]),
+        Ok(vec![])
+    );
+    assert_eq!(
+        b.face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [0.0, 0.0, 0.0]),
+        Err(Error::Argument)
+    );
+}
+
 /// A doubly curved face: a ray along +z through (1.72, 2.96) runs (0.72, 0.96) off the axis of
 /// the radius-2 sphere about (1, 2, 3), 1.2 from it (a 3-4-5 triangle scaled by 0.24), which
 /// leaves sqrt(4 - 1.44) = 1.6 in z: the ray meets the sphere first at z = 3 - 1.6 = 1.4, 11.4
@@ -498,6 +546,72 @@ fn a_ray_through_a_box_edge_hits_one_of_its_two_faces_on_the_edge() {
         .point(hit.uv)
         .unwrap();
     assert!(close(on, [0.0, 0.0, 1.0]), "{hit:?} evaluates to {on:?}");
+}
+
+/// Every face at an edge or a corner, once, at one point and distance, in the record's face order:
+/// on the box [0, 2]^3 the ray from (-3, -4, 1) along (3, 4, 0) meets the faces x = 0 and y = 0
+/// on their edge at (0, 0, 1), 5 along it, then leaves through y = 2 at 7.5; the ray from
+/// (-1, -1, -1) along (1, 1, 1) meets the three faces x = 0, y = 0, z = 0 at the corner (0, 0, 0),
+/// sqrt 3 along it, and x = 2, y = 2, z = 2 at (2, 2, 2), 3 sqrt 3 along it (compared squared:
+/// ops takes no square roots). `face_hit_by_ray` names one of the first.
+#[test]
+fn a_ray_through_a_box_edge_or_corner_hits_every_face_there_once() {
+    all_fixes();
+    let b = make_box([0.0; 3], [2.0; 3]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    // each group: its distance squared and its faces
+    let cases = [
+        (
+            [-3.0, -4.0, 1.0],
+            [3.0, 4.0, 0.0],
+            vec![(25.0, vec![(X, 0.0), (Y, 0.0)]), (56.25, vec![(Y, 2.0)])],
+        ),
+        (
+            [-1.0; 3],
+            [1.0; 3],
+            vec![
+                (3.0, vec![(X, 0.0), (Y, 0.0), (Z, 0.0)]),
+                (27.0, vec![(X, 2.0), (Y, 2.0), (Z, 2.0)]),
+            ],
+        ),
+    ];
+    for (origin, direction, groups) in cases {
+        let hits = b.face_hits_by_ray(&order, origin, direction).unwrap();
+        let mut rest = hits.as_slice();
+        for (squared, planes) in &groups {
+            let mut faces: Vec<usize> = planes
+                .iter()
+                .map(|&(axis, at)| box_face(&record, &order, axis, at))
+                .collect();
+            faces.sort_unstable();
+            assert!(rest.len() >= faces.len(), "{hits:?}");
+            let (here, after) = rest.split_at(faces.len());
+            assert_eq!(
+                here.iter().map(|h| h.face).collect::<Vec<_>>(),
+                faces,
+                "{hits:?}"
+            );
+            for hit in here {
+                assert_eq!((hit.point, hit.distance), (here[0].point, here[0].distance));
+                assert!(
+                    near(hit.distance * hit.distance, *squared, 1e-9),
+                    "{hits:?}"
+                );
+            }
+            rest = after;
+        }
+        assert!(rest.is_empty(), "{hits:?}");
+        let first = b
+            .face_hit_by_ray(&order, origin, direction)
+            .unwrap()
+            .unwrap();
+        assert!(
+            hits.iter()
+                .take_while(|h| h.distance == hits[0].distance)
+                .any(|h| h.face == first.face),
+            "{first:?} {hits:?}"
+        );
+    }
 }
 
 #[test]

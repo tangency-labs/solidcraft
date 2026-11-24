@@ -57,10 +57,12 @@ use the same container reader/writer; JSON export and Save As remain available.
 
 ## Provisional saved display
 
-Experimental engine saves with `preview: true` can include `cache/preview.json` and
+Saves with `preview: true` can include `cache/preview.json` and
 `cache/preview.bin` when the evaluated
-world display meshes are already warm. Ordinary saves omit this redundant display data
-to avoid extra save work; it is separate from the native B-rep cache below. Saving never triangulates a cold body for this
+world display meshes are already warm. The window's Save and Save As ask for it, so a file
+browser can show the model in 3D (Quick Look on macOS, #19328); other engine saves omit this
+redundant display data unless they ask. `cache/preview.bin` is stored Deflate-compressed. It is
+separate from the native B-rep cache below. Saving never triangulates a cold body for this
 cache. Pending occurrence moves, active sketch edits, feature errors and oversized
 previews omit it. The cache is bounded to 8 MiB, 1,024 bodies and 100,000 triangles;
 its manifest is at most 64 KiB. Body names/colours and contiguous binary mesh slices
@@ -184,8 +186,9 @@ without the application's version, `.cargo/config.toml`, and the cache's own rea
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
-again, once, and the next save writes a cache of its own. A build of unknown source
-(a tarball without git) never reads a cache.
+again, once, and the next save writes a cache of its own. Without `git` (Docker,
+Nix, or a source archive), `build.rs` hashes those same inputs from disk; a build
+whose source cannot be read (`"unknown"`) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
@@ -318,8 +321,17 @@ PNG size/header and hashes without resolving source blobs. The Home/Recent Files
 reader tries its local picture cache, then this portable picture, then its existing
 background reconstruction. PNG decoding also has dimension and allocation limits.
 Missing, mismatched, truncated or malformed pictures are misses and never prevent
-authoritative document opening. Embedding a PNG does not install an operating-system
-file-browser thumbnail provider.
+authoritative document opening.
+
+On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
+shows this picture as the design's icon, and Space shows the design's saved display meshes
+(see "Provisional saved display") in a 3D view turned by dragging and zoomed by scrolling or
+pinching, or this picture when the design has none. They read the container with
+`crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
+the container format, the PNG header and size and every mesh blob, but not the caches' keys or
+build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and
+Metal draws the meshes only when the view changes; nothing evaluates or tessellates the model.
+A design with neither cache keeps the generic icon and card.
 
 Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide

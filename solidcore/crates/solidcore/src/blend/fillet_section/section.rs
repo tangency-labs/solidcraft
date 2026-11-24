@@ -25,7 +25,7 @@ use super::certificate::{
 };
 use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
-use super::series::{Ser, Trunc, VSer};
+use super::series::{Trunc, VSer};
 use super::station::{
     feet_on_knots, gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs,
     StationOptions,
@@ -34,7 +34,7 @@ use super::tay::{
     acos_clamped, gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, GnAreaCells,
     Ring, Tay,
 };
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionInput, SectionLimit};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::intersect::surface_intersector::p1::TsectPnt;
@@ -284,10 +284,12 @@ fn solve_top(
     n: usize,
     sides: Option<[i32; 4]>,
     before: bool,
-    law: Option<&Ser<f64>>,
+    law: Option<&GnLaw<'_>>,
 ) -> Result<GnStation> {
+    let series = law_series(law, s, tr.s(), before)?;
     let opts = StationOptions {
-        law,
+        law: series.as_ref(),
+        equal_setback: law.and_then(GnLaw::equal_setback),
         top: n,
         sides,
         before,
@@ -295,6 +297,19 @@ fn solve_top(
     gn_solve_station_with(k, faces, center, s, seed, r, side, tr, tol, opts)
         .0
         .map(|(st, _)| st)
+}
+
+/// The radius used by the point solve and by the enclosure of the same station.
+pub(crate) fn section_law(
+    curve: Option<&BSplineCurve>,
+    chamfer: Option<ChamferDefinition>,
+) -> Result<Option<GnLaw<'_>>> {
+    match curve {
+        Some(curve) => Ok(Some(GnLaw::of(curve)?)),
+        None => Ok(chamfer
+            .and_then(ChamferDefinition::constant_setback)
+            .map(GnLaw::EqualSetback)),
+    }
 }
 
 /// `GetNaturalInterval` as `(min, max)`.
@@ -477,9 +492,9 @@ fn gn_station_thumbweight(k: &Kernel, n: usize, rr: f64, st: &mut GnStation) -> 
     let falls = d.at(1) < 0.0;
     if !falls {
         // "the section's area does not fall with its thumbweight"
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the section's area does not fall with its thumbweight",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::AreaDoesNotFall),
         ));
     }
     let sw = gn_invert(&gn_target(&u), &d, w);
@@ -516,9 +531,9 @@ pub(crate) fn certificate_faces<'a>(
         let Some(bs) = super::station::as_b_spline(k, face)? else {
             // "a face that is not a NURBS surface: its blend of order 2 and up cannot
             // be certified"
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "a face is not a NURBS surface: its blend of order 2 and up cannot be certified",
+                BlendFailure::SectionUnsupported(SectionLimit::FaceNotNurbs),
             ));
         };
         if matches!(face.kind(), SurfaceKind::ProceduralBlend(_)) {
@@ -530,9 +545,9 @@ pub(crate) fn certificate_faces<'a>(
             // radius between NURBS faces" (WR-714)
             let enclosed = order == 1 && !has_law && definition_enclosable(face);
             if !enclosed {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "only a round of one radius between NURBS faces is certified by its definition",
+                    BlendFailure::SectionUnsupported(SectionLimit::DefinitionFaceNotOneRadius),
                 ));
             }
             if let Some(slot) = defs.faces.get_mut(f) {
@@ -543,9 +558,12 @@ pub(crate) fn certificate_faces<'a>(
     }
     let mut it = nurbs.into_iter();
     let (Some(n0), Some(n1)) = (it.next(), it.next()) else {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the section does not have two faces",
+            BlendFailure::Defect {
+                why: "the faces' NURBS data hold fewer than two faces: one is pushed for each \
+                      of the two faces",
+            },
         ));
     };
     Ok(([n0, n1], defs))
@@ -636,7 +654,6 @@ impl StationSystem<'_> {
         sides: Option<[i32; 4]>,
     ) -> Result<GnStation> {
         let m = self.leader.evaluate_point(s)?;
-        let law_r = law_series(self.law, s, self.tr.s(), false)?;
         let mut st = solve_top(
             k,
             self.faces,
@@ -650,7 +667,7 @@ impl StationSystem<'_> {
             self.n,
             sides,
             false,
-            law_r.as_ref(),
+            self.law,
         )?;
         if self.equal_area {
             gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut st)?;
@@ -664,7 +681,6 @@ impl StationSystem<'_> {
     pub(crate) fn solve_before(&self, k: &Kernel, st: &mut GnStation) -> Result<()> {
         let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
         let m = self.leader.evaluate_point(st.s)?;
-        let law_r = law_series(self.law, st.s, self.tr.s(), true)?;
         let mut before = solve_top(
             k,
             self.faces,
@@ -678,7 +694,7 @@ impl StationSystem<'_> {
             self.n,
             Some(st.before),
             true,
-            law_r.as_ref(),
+            self.law,
         )?;
         if self.equal_area {
             gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut before)?;
@@ -690,6 +706,18 @@ impl StationSystem<'_> {
         st.sided = true;
         Ok(())
     }
+}
+
+/// The failure of a build that returned no surface where it does not check the solver's
+/// feet: only a build with the feet check returns none.
+fn no_surface_built() -> SolidError {
+    SolidError::blend(
+        OP,
+        BlendFailure::Defect {
+            why: "the build returned no surface without its feet check, the only path that \
+                  returns none",
+        },
+    )
 }
 
 /// The order-n section's control points across: `3 n + 2`, 3 for the ball's circle, 2 for
@@ -719,9 +747,12 @@ pub(crate) fn net_of_spans(
     let (u_knots, u_mult) = hermite_knots(ss);
     let lnu = 3 * spans.len() + 1;
     if spans.len() + 1 != ss.len() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the spans are not the stations'",
+            BlendFailure::Defect {
+                why: "the section's spans do not number its stations less one: its callers \
+                      build one span between each two stations",
+            },
         ));
     }
     let mut homog: Vec<Vec3> = Vec::new();
@@ -732,9 +763,12 @@ pub(crate) fn net_of_spans(
         wv.extend(w.iter().copied().skip(skip));
     }
     if homog.len() != lnu * ld || wv.len() != lnu * ld {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the section's rows are not the size of its spans",
+            BlendFailure::Defect {
+                why: "the section's rows are not the size of its spans: each span is built \
+                      four rows of the section's width",
+            },
         ));
     }
     let mut w_min = BIG_DOUBLE;
@@ -746,9 +780,9 @@ pub(crate) fn net_of_spans(
     let positive = w_min > 0.0;
     if !positive {
         // "a weight of the section's rows is not positive"
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "a weight of the section's rows is not positive",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::WeightOrLengthZero),
         ));
     }
     let w_scale = 1.0 / crate::geom::vector3d::sqrt(w_min * w_max);
@@ -862,9 +896,9 @@ impl NetForm {
                     let moving = dd.c[0] > 0.0;
                     if !moving {
                         // "the balls' centres stand still"
-                        return Err(SolidError::blend_failed(
+                        return Err(SolidError::blend(
                             OP,
-                            "the balls' centres stand still",
+                            BlendFailure::SectionDegenerate(SectionDegeneracy::CentresStandStill),
                         ));
                     }
                     let kk = bd / dd;
@@ -878,9 +912,9 @@ impl NetForm {
                 let [rho0, rho1] = &rho;
                 let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
                     // "a section of the ball's circle is a half turn or more"
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "a section of the ball's circle is a half turn or more",
+                        BlendFailure::SectionDegenerate(SectionDegeneracy::ArcHalfTurn),
                     ));
                 };
                 for (hj, wj) in h.iter().zip(&w).take(ld) {
@@ -1197,7 +1231,7 @@ impl GnSectionFsg {
             None,
         )?
         .map(|(s, _)| s)
-        .ok_or_else(|| SolidError::blend_failed(OP, "no surface was built"))
+        .ok_or_else(no_surface_built)
     }
 
     /// `CreateSurfaceFromCurves`: the blend surface between two rails on the faces'
@@ -1231,7 +1265,7 @@ impl GnSectionFsg {
             None,
         )?
         .map(|(s, _)| s)
-        .ok_or_else(|| SolidError::blend_failed(OP, "no surface was built"))
+        .ok_or_else(no_surface_built)
     }
 
     /// `Build(..., bReplaceRails, rpFilletSurface, dRadius)` (cc08236): [`Self::build`]
@@ -1269,7 +1303,7 @@ impl GnSectionFsg {
             None,
         )?
         .map(|(s, _)| s)
-        .ok_or_else(|| SolidError::blend_failed(OP, "no surface was built"))
+        .ok_or_else(no_surface_built)
     }
 
     /// `Build(..., TRUE, rpFilletSurface, dRadius, &bNotTheFeet)` as the fork's circle
@@ -1395,10 +1429,7 @@ impl GnSectionFsg {
                 "a radius law is for the ball's circle",
             ));
         }
-        let gn_law = match law_round {
-            Some(l) => Some(GnLaw::of(l.law)?),
-            None => None,
-        };
+        let gn_law = section_law(law_round.map(|l| l.law), chamfer)?;
         let gn_law = gn_law.as_ref();
         let leader: &BSplineCurve = law_round.map_or(center, |l| l.leader);
         let n = self.order;
@@ -1436,17 +1467,17 @@ impl GnSectionFsg {
             pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
             let (Some(&(t_front, _)), Some(&(t_back, _))) = (pts.first(), pts.last()) else {
                 // "the round's stations have no length"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the round's stations have no length",
+                    BlendFailure::SectionDegenerate(SectionDegeneracy::NoLength),
                 ));
             };
             let has_length = t_back > t_front;
             if pts.len() < 2 || !has_length {
                 // "the round's stations have no length"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the round's stations have no length",
+                    BlendFailure::SectionDegenerate(SectionDegeneracy::NoLength),
                 ));
             }
             i_min = t_front;
@@ -1455,9 +1486,9 @@ impl GnSectionFsg {
                 let inside = r.min() >= t_front && r.max() <= t_back && r.max() > r.min();
                 if !inside {
                     // "the round's range is not within its stations"
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the round's range is not within its stations",
+                        BlendFailure::SectionInputInvalid(SectionInput::RangeOutsideStations),
                     ));
                 }
                 i_min = r.min();
@@ -1493,9 +1524,12 @@ impl GnSectionFsg {
                     kk += 1;
                 }
                 let (Some(&(tk, xk)), next) = (pts.get(kk), pts.get(kk + 1)) else {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the round has no station at the parameter",
+                        BlendFailure::Defect {
+                            why: "the round has no solver's station at the parameter: there \
+                                  are at least two, and the search stops on one",
+                        },
                     ));
                 };
                 let mut x = xk;
@@ -1522,9 +1556,9 @@ impl GnSectionFsg {
             let (lo, hi) = interval(c);
             if (lo - c_min).abs() > 1.0e-9 * scale || (hi - c_max).abs() > 1.0e-9 * scale {
                 // "the rails and the centre line run over different intervals"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the rails and the centre line run over different intervals",
+                    BlendFailure::SectionInputInvalid(SectionInput::IntervalsDiffer),
                 ));
             }
             ss.extend(c.knots(None)?.0);
@@ -1547,7 +1581,10 @@ impl GnSectionFsg {
         }
         if ss.len() < 2 {
             // "the rails have no length"
-            return Err(SolidError::blend_failed(OP, "the rails have no length"));
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NoLength),
+            ));
         }
         // (on the curves' own parameter: with a law it is not t, and the first station is the
         // round's start, i_min, at its parameter on the rails; a piece of a law-cornered
@@ -1594,9 +1631,9 @@ impl GnSectionFsg {
                 let has_radius = *rf > tol;
                 if !has_radius {
                     // "the ball has no radius at the rails' start"
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the ball has no radius at the rails' start",
+                        BlendFailure::SectionDegenerate(SectionDegeneracy::BallHasNoRadius),
                     ));
                 }
             }
@@ -1614,7 +1651,13 @@ impl GnSectionFsg {
             k.check_cancelled(OP_BUILD)?;
             let seed = if law_round.is_some() {
                 law_seeds.get(j).copied().ok_or_else(|| {
-                    SolidError::blend_failed(OP, "the radius law has no seed for the station")
+                    SolidError::blend(
+                        OP,
+                        BlendFailure::Defect {
+                            why: "a station has no seed: with a law, each station's seed is \
+                                  pushed with the station",
+                        },
+                    )
                 })?
             } else {
                 let w0 = uvs[0].evaluate_point(s)?;
@@ -1624,27 +1667,21 @@ impl GnSectionFsg {
             // a constant ball: the station's centre on the centre line at the same offsets
             let m = leader.evaluate_point(s)?;
             let solve_tol = 1.0e-9 * smax(1.0, m.length());
-            let law_r = law_series(gn_law, s, tr.s(), false)?;
             // with a ball of a given radius or law (feet_check), a station that does not
             // solve from the solver's rails (Newton from within the tolerance of a regular
             // root converges) says the rails are not that ball's feet there (c596548)
-            let solved = solve_top(
-                k,
-                faces,
-                leader,
-                s,
-                seed,
-                r,
-                side,
-                tr,
-                solve_tol,
-                n,
-                None,
-                false,
-                law_r.as_ref(),
-            );
-            let st = match solved {
-                Ok(st) => st,
+            let series = law_series(gn_law, s, tr.s(), false)?;
+            let opts = StationOptions {
+                law: series.as_ref(),
+                equal_setback: gn_law.and_then(GnLaw::equal_setback),
+                top: n,
+                sides: None,
+                before: false,
+            };
+            let solved =
+                gn_solve_station_with(k, faces, leader, s, seed, r, side, tr, solve_tol, opts);
+            let st = match solved.0 {
+                Ok((st, _)) => st,
                 // a cancel (#2136) is not a refused ball: it ends the operation
                 Err(e @ SolidError::Cancelled { .. }) => return Err(e),
                 Err(_) if feet_check => return Ok(None),
@@ -1772,14 +1809,9 @@ impl GnSectionFsg {
             rows.push(net_form.station_rows(st)?);
         }
         let mut spans: Vec<(Vec<Vec3>, Vec<f64>)> = Vec::new();
-        for (pair, rp) in stations.windows(2).zip(rows.windows(2)) {
+        let ends = stations.iter().zip(&rows);
+        for ((a, ra), (b, rb)) in ends.clone().zip(ends.skip(1)) {
             k.check_cancelled(OP_BUILD)?;
-            let ([a, b], [ra, rb]) = (pair, rp) else {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the span does not have two stations",
-                ));
-            };
             spans.push(net_form.span(a, ra, b, rb));
         }
         let surface = net_of_spans(&ss, &spans, ld)?;
@@ -1897,9 +1929,12 @@ impl GnSectionFsg {
         // and sides, the section, the centre line as the leader the stations were solved
         // in, the seeds, the certified bound
         let (Some(seed0), Some(seed1)) = (seeds.first(), seeds.get(1)) else {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the definition does not have two seeds",
+                BlendFailure::Defect {
+                    why: "the definition has fewer than two seeds: one is built for each of \
+                          the two rails",
+                },
             ));
         };
         // its bound: the certificate's, of the Hermite rows; how far the net stored (its
@@ -1913,8 +1948,7 @@ impl GnSectionFsg {
             sides: side,
             offsets: r,
             law: law_round.map(|l| l.law),
-            order: u32::try_from(n)
-                .map_err(|_| SolidError::blend_failed(OP, "the section's order does not fit"))?,
+            order: n as u32,
             thumbweight: self.thumbweight,
             leader,
             seeds: [seed0, seed1],
@@ -2013,7 +2047,6 @@ impl GnSectionFsg {
                                 };
                             }
                             let tol_ds = solve_tol(ds)?;
-                            let law_r = law_series(law, ds, tr.s(), false)?;
                             let st = solve_top(
                                 k,
                                 faces,
@@ -2027,7 +2060,7 @@ impl GnSectionFsg {
                                 self.order,
                                 Some(ai_before),
                                 false,
-                                law_r.as_ref(),
+                                law,
                             )?;
                             let x = param(&st, q, 0, 0) - dk;
                             at = Some(st);
@@ -2050,7 +2083,6 @@ impl GnSectionFsg {
                             // for the span ending there (3bc54a4)
                             let on = [0, 1, 2, 3].map(|q2| param(&st, q2, 0, 0));
                             let tol_on = solve_tol(st.s)?;
-                            let law_r = law_series(law, st.s, tr.s(), false)?;
                             let mut st = solve_top(
                                 k,
                                 faces,
@@ -2064,7 +2096,7 @@ impl GnSectionFsg {
                                 self.order,
                                 Some(ai_after),
                                 false,
-                                law_r.as_ref(),
+                                law,
                             )?;
                             st.before = ai_before;
                             next.push(st);
@@ -2102,7 +2134,6 @@ impl GnSectionFsg {
             let (before, _) = feet_on_knots(k, faces, on, dir, true, partials)?;
             if other {
                 let tol_on = solve_tol(st.s)?;
-                let law_r = law_series(law, st.s, tr.s(), false)?;
                 *st = solve_top(
                     k,
                     faces,
@@ -2116,7 +2147,7 @@ impl GnSectionFsg {
                     self.order,
                     Some(after),
                     false,
-                    law_r.as_ref(),
+                    law,
                 )?;
             }
             st.before = before;
@@ -2158,9 +2189,12 @@ impl GnSectionFsg {
                 if *bj < 0.0 {
                     certifications += 1;
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
-                        return Err(SolidError::blend_failed(
+                        return Err(SolidError::blend(
                             OP,
-                            "the span does not have two stations",
+                            BlendFailure::Defect {
+                                why: "a span to certify has no station at an end: there is one \
+                                      bound for each two stations",
+                            },
                         ));
                     };
                     // a bound over the target is only ever halved below, never read
@@ -2264,9 +2298,9 @@ impl GnSectionFsg {
                 let mid = 0.5 * (a.s + b.s);
                 let inside = mid > a.s && mid < b.s;
                 if !inside {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the span cannot be split (its midpoint is not inside it)",
+                        BlendFailure::SectionDegenerate(SectionDegeneracy::SpanCannotSplit),
                     ));
                 }
                 let mut seed = [0.0_f64; 4];
@@ -2274,21 +2308,8 @@ impl GnSectionFsg {
                     *sc = 0.5 * (param(a, c, 0, 0) + param(b, c, 0, 0));
                 }
                 let tol_mid = solve_tol(mid)?;
-                let law_r = law_series(law, mid, tr.s(), false)?;
                 let mut st = solve_top(
-                    k,
-                    faces,
-                    center,
-                    mid,
-                    seed,
-                    r,
-                    side,
-                    tr,
-                    tol_mid,
-                    n,
-                    None,
-                    false,
-                    law_r.as_ref(),
+                    k, faces, center, mid, seed, r, side, tr, tol_mid, n, None, false, law,
                 )?;
                 if equal_area {
                     gn_station_thumbweight(k, n, rr, &mut st)?;
@@ -2350,16 +2371,14 @@ impl GnSectionFsg {
         let m = center.evaluate_point(s)?;
         let mut r = [0.0_f64; 2];
         let mut side = [0.0_f64; 2];
+        let [u0, v0, u1, v1] = seed;
         let rows = r
             .iter_mut()
             .zip(side.iter_mut())
             .zip(faces)
             .zip(rail_points)
-            .zip(seed.chunks_exact(2));
-        for ((((rf, sf), face), rho), uv) in rows {
-            let (Some(&u), Some(&v)) = (uv.first(), uv.get(1)) else {
-                return Err(SolidError::blend_failed(OP, "the rail point has no seed"));
-            };
+            .zip([[u0, v0], [u1, v1]]);
+        for ((((rf, sf), face), rho), [u, v]) in rows {
             let nrm = unit_normal(k, face, Point2::new(u, v))?;
             let off = m - rho;
             *rf = off.length();
@@ -2368,6 +2387,7 @@ impl GnSectionFsg {
         let tr = Trunc::new(0, n + 1)?;
         let opts = StationOptions {
             law: None,
+            equal_setback: None,
             top: n,
             sides: None,
             before: false,
@@ -2735,9 +2755,9 @@ mod tests {
     #[test]
     fn spans_that_are_not_the_stations_are_a_typed_failure() {
         let error = net_of_spans(&[0.0], &[(Vec::new(), Vec::new())], 3).unwrap_err();
-        assert_eq!(
-            error,
-            SolidError::blend_failed(OP, "the spans are not the stations'")
+        assert!(
+            matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{error:?}"
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }

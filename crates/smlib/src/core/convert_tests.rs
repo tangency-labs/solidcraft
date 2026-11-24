@@ -276,7 +276,7 @@ fn a_sealed_void_crosses_the_arrays_outer_shell_first() {
 fn an_import_with_a_sealed_void_reuses_its_proven_shell_order() {
     let unordered = shells_reversed(&to_arrays(&sealed_void()).unwrap());
     let imported = crate::Brep::from_arrays(&unordered).unwrap();
-    let (record, _, prepared) = imported.to_native_prepared().unwrap();
+    let (record, _, prepared, _) = imported.to_native_prepared().unwrap();
     let prepared = prepared.expect("the exact containment test established the outer shell");
     let rebuilt = crate::Brep::from_record(&record, true).unwrap();
     assert_eq!(prepared.to_native_ordered().unwrap().0, rebuilt.to_native_ordered().unwrap().0);

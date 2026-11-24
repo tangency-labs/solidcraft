@@ -404,13 +404,15 @@ fn corner_of(a: Tangent, b: Tangent, c: Tangent, tangent_sine: f64) -> Option<Ve
 }
 
 /// A class a local operation's reach is bounded on: a plane, or a cone (a cylinder for
-/// `tan_angle = 0`) or a sphere, as [`Implicit`] holds them, or a bare B-spline net
-/// ([`net::Net`]).
+/// `tan_angle = 0`) or a sphere, as [`Implicit`] holds them, a bare B-spline net
+/// ([`net::Net`]), or a torus ([`Implicit::Torus`]), whose sections are quartics: it is
+/// bounded only kept, beside a moved plane ([`plane_torus_piece`]), and refused anywhere else.
 #[derive(Debug, Clone)]
 enum Exact {
     Plane(Tangent),
     Quadric(Implicit),
     Net(std::rc::Rc<net::Net>),
+    Torus(Implicit),
 }
 
 /// `surface`'s class: its analytic label (a plane, cylinder, cone or sphere) with its NURBS
@@ -418,15 +420,12 @@ enum Exact {
 /// for an exact class at bound 0); a B-spline surface, extrusion or surface of revolution
 /// with no label and no definition is a bare net where [`net::Net::of`] takes it (a
 /// revolution's turn continued only within `tolerance` of its end), a plane stored as a NURBS
-/// among them. `None` for any other kind, a net [`net::Net::of`] turns away, a torus (its
-/// sections are quartics), or a form not proved on its label.
+/// among them. A torus label proved on its form is [`Exact::Torus`]. `None` for any other
+/// kind, a net [`net::Net::of`] turns away, or a form not proved on its label.
 fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<Exact>> {
     let Some(support) = AnalyticSupport::of(surface) else {
         return Ok(net::Net::of(k, surface, tolerance)?.map(|n| Exact::Net(std::rc::Rc::new(n))));
     };
-    if matches!(support, AnalyticSupport::Torus { .. }) {
-        return Ok(None);
-    }
     let equation = support.implicit();
     let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, surface)? else {
         return Ok(None);
@@ -441,7 +440,7 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
             raw: normal,
         })),
         Implicit::Cone { .. } | Implicit::Sphere { .. } => Some(Exact::Quadric(equation)),
-        Implicit::Torus { .. } => None,
+        Implicit::Torus { .. } => Some(Exact::Torus(equation)),
     })
 }
 
@@ -454,7 +453,9 @@ fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<E
 /// along the normal: a cone, or a cylinder whose axis is not parallel to the plane.
 ///
 /// A sphere about `c` of radius `r` spans `n.c ± r` along a unit `n`; a cylinder about an
-/// axis through `o` square to `n`, `n.o ± r`. The heights are measured against these closed
+/// axis through `o` square to `n`, `n.o ± r`; a torus about `c` with major radius `R`, minor
+/// radius `r` and its axis along `n`, `n.c ± r` (its tube's top and bottom), widened by
+/// `R |n × axis|` for an axis within `EFF_ZERO` of `n`, which is above the lift of its major circle. The heights are measured against these closed
 /// forms with `tolerance` (the B-rep's, far above their rounding) on either side, so a plane
 /// within the tolerance of the extent is not decided here (the pieces' bounds decide it).
 fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Option<f64> {
@@ -473,6 +474,17 @@ fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Opti
         } if tan_angle.abs() <= EFF_ZERO && n.dot(axis).abs() <= EFF_ZERO => {
             (n.dot(origin), radius.abs())
         }
+        // a torus square to the plane spans its centre's height ± its minor radius; an axis
+        // tipped by up to EFF_ZERO lifts the major circle by up to `major` times the tip
+        Implicit::Torus {
+            centre,
+            axis,
+            major,
+            minor,
+        } if n.cross(axis).length() <= EFF_ZERO => (
+            n.dot(centre),
+            minor.abs() + major.abs() * n.cross(axis).length(),
+        ),
         _ => return None,
     };
     let (lo, hi) = (middle - half, middle + half);
@@ -492,12 +504,12 @@ fn past_extent(old: Tangent, new: Tangent, q: &Implicit, tolerance: f64) -> Opti
 
 /// A certified upper bound on the distance from `x` to the surface of class `c` at a point
 /// (a moved surface's move at a vertex); `None` for a net, whose move is bounded by the
-/// meetings on it.
+/// meetings on it, and for a torus, which is not bounded moved.
 fn point_distance(x: Vec3, c: &Exact) -> Option<f64> {
     match c {
         Exact::Plane(t) => Some(plane_distance(x, *t)),
         Exact::Quadric(q) => Some(round_up(quadric_gap(q, Dv::constant(x)).hi)),
-        Exact::Net(_) => None,
+        Exact::Net(_) | Exact::Torus(_) => None,
     }
 }
 
@@ -1638,6 +1650,161 @@ fn plane_quadric_piece(
     trace_quadric_piece(over, mid, dt, &trace, quadric, tolerance)
 }
 
+/// The square of an interval: `[0, mag²]` where it holds zero, so the two factors are not
+/// taken apart as [`Ivl`]'s product takes them.
+fn square(x: Ivl) -> Ivl {
+    if x.lo > 0.0 || x.hi < 0.0 {
+        x * x
+    } else {
+        Ivl::checked(0.0, x.mag() * x.mag())
+    }
+}
+
+/// The torus `(c, a, R, r)`'s `dist(x, C)² − r²` at the points `x` (`C` its centre circle)
+/// and its rate along the edge, enclosed: `(ρ − R)² + h² − r²`, `h² = ((x − c)·a)² / |a|²`,
+/// `ρ² = |x − c|² − h²`. It is zero on the torus, negative inside its tube and positive
+/// outside, so a sign change along a line holds a point of the torus. `None` for any other
+/// kind.
+fn torus_gap2(torus: &Implicit, x: Dv) -> Option<Di> {
+    let Implicit::Torus {
+        centre,
+        axis,
+        major,
+        minor,
+    } = *torus
+    else {
+        return None;
+    };
+    let y = x.sub(Dv::constant(centre));
+    let a = Dv::constant(axis);
+    let along = y.dot(a);
+    let h2 = along * along / a.dot(a);
+    let rho = (y.dot(y) - h2).sqrt() - Di::constant(major);
+    Some(rho * rho + h2 - Di::constant(minor * minor))
+}
+
+/// The parameter of the point of the line `x0 + τ u` on the torus near `x0`, predicted in
+/// plain arithmetic: the meeting in `x0`'s meridian, on the side of the tube `x0` is on,
+/// `ρ = R ± √(r² − h²)`, taken along `u`, then refined by Newton's method on
+/// `(ρ − R)² + h² − r²`. A prediction only: [`plane_torus_piece`] certifies a meeting
+/// near it. `None` where `x0` is above or below the tube or on the axis, or the line runs
+/// within 60° of across the meridian's radial direction.
+fn torus_root_near(torus: &Implicit, x0: Vec3, u: Vec3) -> Option<f64> {
+    let Implicit::Torus {
+        centre,
+        axis,
+        major,
+        minor,
+    } = *torus
+    else {
+        return None;
+    };
+    let a = axis.unitize().ok()?;
+    let at = |tau: f64| {
+        let y = x0 + u * tau - centre;
+        let h = y.dot(a);
+        let radial = y - a * h;
+        (h, radial, radial.length())
+    };
+    let (h, radial, rho) = at(0.0);
+    let room = minor * minor - h * h;
+    // (a NaN fails each test)
+    let positive = |x: f64| x > 0.0;
+    if !positive(room) || !positive(rho) {
+        return None;
+    }
+    let out = radial * (1.0 / rho);
+    let across = out.dot(u);
+    if !positive(across.abs() - 0.5 * u.length()) {
+        return None;
+    }
+    let side = if rho > major { 1.0 } else { -1.0 };
+    let mut tau = (major + side * sqrt(room) - rho) / across;
+    for _ in 0..32 {
+        let (h, radial, rho) = at(tau);
+        if !positive(rho) {
+            return None;
+        }
+        let g = (rho - major) * (rho - major) + h * h - minor * minor;
+        let dg = 2.0 * (rho - major) * radial.dot(u) / rho + 2.0 * h * a.dot(u);
+        if !positive(dg.abs()) {
+            return None;
+        }
+        let step = g / dg;
+        tau -= step;
+        if !positive(step.abs() - f64::EPSILON * (1.0 + tau.abs())) {
+            break;
+        }
+    }
+    tau.is_finite().then_some(tau)
+}
+
+/// The certified upper bound of the reach over a piece where a moved plane `(o, ν)` meets
+/// a kept torus in the edge's normal sections ([`local_extension_reach`]). The plane's trace
+/// there `x0 + τ u` (its foot and squared distance by their mean-value forms over the
+/// piece) is a quartic's line on the torus, so its meeting is not solved but certified:
+/// [`torus_root_near`] predicts it at `τm` in the middle section, and [`torus_gap2`]
+/// enclosed over the whole piece (by its mean-value form) at `τm − δ` and `τm + δ` with
+/// opposite signs holds a point
+/// of the torus between them in every section of the piece (the gap is continuous along
+/// the line). The nearest meeting in each section is then within
+/// `√(|x0 − p|² + (|τm| + δ)² |u|²)` of the edge point. `δ` is tried from a rounding of the
+/// part's size up to a tenth of it, four times wider each try; a piece no `δ` certifies is
+/// undecided, and halved.
+fn plane_torus_piece(
+    over: (Dv, Dv),
+    mid: (Dv, Dv),
+    dt: Ivl,
+    plane: Tangent,
+    torus: &Implicit,
+    tolerance: f64,
+) -> PieceBound {
+    let Implicit::Torus { major, minor, .. } = *torus else {
+        return PieceBound::Unknown;
+    };
+    let trace = |(p, t): (Dv, Dv)| plane_trace(p, t, plane.point, plane.raw);
+    let (Some(line), Some(mline)) = (trace(over), trace(mid)) else {
+        return PieceBound::Unknown;
+    };
+    let middle = |d: Dv| Vec3::new(d.x.v.mid(), d.y.v.mid(), d.z.v.mid());
+    let Some(tau) = torus_root_near(torus, middle(mline.x0), middle(mline.u)) else {
+        return PieceBound::Unknown;
+    };
+    // the gap at `τ` over the piece, by its mean-value form about the middle section's
+    let at = |tau: f64| {
+        let t = Di::constant(tau);
+        let on = |l: &Trace| torus_gap2(torus, l.x0.add(l.u.scale(t)));
+        Some(mean_value(on(&line)?, on(&mline)?, dt))
+    };
+    let size = major.abs() + minor.abs() + tau.abs();
+    let opposite = |a: Ivl, b: Ivl| (a.hi < 0.0 && b.lo > 0.0) || (a.lo > 0.0 && b.hi < 0.0);
+    // from a rounding of the part's size up to a tenth of it, four times wider each try
+    let certified = (0..20)
+        .scan(1e-12 * size, |delta, _| {
+            let tried = *delta;
+            *delta *= 4.0;
+            (tried <= 0.1 * size).then_some(tried.max(tolerance * 1e-3))
+        })
+        .find(|&delta| match (at(tau - delta), at(tau + delta)) {
+            (Some(below), Some(above)) => opposite(below, above),
+            _ => false,
+        });
+    let Some(delta) = certified else {
+        return PieceBound::Unknown;
+    };
+    let far = Ivl::from(tau.abs() + delta);
+    let uu = line.u.dot(line.u).v;
+    let foot2 = mean_value(line.foot2, mline.foot2, dt);
+    let upper = round_up(sqrt((foot2 + square(far) * uu).hi.max(0.0)));
+    let mu = middle(mline.u);
+    let lower = sqrt((mline.foot2.v.lo + tau * tau * mu.dot(mu)).max(0.0));
+    PieceBound::Value {
+        upper,
+        lower,
+        crosses: true,
+    }
+}
+
 /// [`plane_quadric_piece`] of the plane whose trace in the normal section at `p` across `t`
 /// is `trace(p, t)`.
 fn trace_quadric_piece(
@@ -2000,7 +2167,9 @@ fn exact_bits(c: &Exact) -> Option<Vec<u64>> {
             bits.extend(v(centre));
             bits.push(radius.to_bits());
         }
-        Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. }) | Exact::Net(_) => {
+        Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. })
+        | Exact::Net(_)
+        | Exact::Torus(_) => {
             return None;
         }
     }
@@ -2262,9 +2431,10 @@ fn corner_with_quadric(
     line_with_quadric(planes_line(p, a, b, tangent_sine), q, tolerance)
 }
 
-/// Where the plane `a` and two cylinders on one axis direction, `q` and another, meet at a
-/// corner, from the vertex `p`: where the line of `a` and their radical plane `radical`
-/// meets `q` ([`quadric::Radical`], [`corner_with_quadric`]). The radical plane is no face,
+/// Where the plane `a` and two cylinders on one axis direction, `q` and another (or a
+/// cylinder `q` and a cone on its axis line), meet at a corner, from the vertex `p`: where
+/// the line of `a` and their radical plane `radical` meets `q` ([`quadric::Radical`],
+/// [`corner_with_quadric`]). The radical plane is no face,
 /// so a plane a small angle off it still meets it on a line, however far from the vertex
 /// (the tangency tolerance does not apply); a line not established on the enclosures (the
 /// two planes' determinant not certified apart from zero) is not decided, never nowhere.
@@ -2571,7 +2741,9 @@ fn kept_straight_edge_corner(
 /// one axis direction otherwise meet where the first meets their radical plane
 /// ([`quadric::Radical`]), as a plane and a quadric do above: in closed form, a round
 /// tangent to a bore included (its gradient parallel to the bore's there, which no
-/// Newton-type certificate proves). Any other two: [`quadric_pair_piece`] proves a root of
+/// Newton-type certificate proves); a cone and a cylinder on one axis line (a countersink
+/// and its hole) where the cylinder meets the plane square to the axis at which the cone's
+/// radius is the cylinder's, on the cone's own nappe wherever its apex has moved. Any other two: [`quadric_pair_piece`] proves a root of
 /// both implicit equations and the normal-section plane, uniformly over each edge piece,
 /// with a displacement box
 /// certified by Krawczyk's operator ([`quadric::meet`]). Both cones' positive-radius
@@ -2589,8 +2761,9 @@ fn kept_straight_edge_corner(
 /// meetings. Every pair is taken, so the reach bounds the split points from above. Three
 /// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
 /// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
-/// A plane and two cylinders on one axis direction meet where the line of the plane and
-/// their radical plane meets the first ([`quadric::Radical`], [`line_with_quadric`]); any
+/// A plane and two cylinders on one axis direction, or a cone and a cylinder on one axis
+/// line, meet where the line of the plane and their radical plane meets the (first)
+/// cylinder ([`quadric::Radical`], [`line_with_quadric`]); any
 /// other plane and two quadrics by the same three-equation certificate, on the plane at
 /// the vertex ([`quadric::meet`]); a plane and two parallel quadrics
 /// ([`parallel_quadrics`]) meet in no one point, and the edges' meetings stand; so do three
@@ -2614,10 +2787,16 @@ fn kept_straight_edge_corner(
 /// nets ([`net::plane_quadric_and_net_meet`], [`net::plane_and_nets_meet`]), each at a
 /// point proved the same way.
 ///
+/// A moved plane beside a kept torus at an edge: in each normal section the plane's trace
+/// meets the torus between two points where the tube's gap has opposite signs
+/// ([`plane_torus_piece`]), and past the tube's top or bottom (a plane square to its axis)
+/// nowhere, refused naming the room ([`past_extent`]).
+///
 /// Anything else beside an edge or at a vertex where something moves (two curved
 /// quadrics without a certified meeting, a quadric or net beside a net, any
 /// three faces at the vertex but those above, even three that all stay, a net
-/// [`net::Net::of`] turns away, a torus, a blend or sweep, a plane not proved on its label,
+/// [`net::Net::of`] turns away, a torus moved or beside anything but a plane, or one of
+/// three faces at a vertex, a blend or sweep, a plane not proved on its label,
 /// an edge curve with no NURBS form), a meeting with a net that is not proved, and a piece
 /// left undecided past the caps, has no certified bound here:
 /// [`OffsetFailure::ReachUncertified`].
@@ -2646,7 +2825,15 @@ pub fn local_extension_reach(
     let is_moved = |f: Option<FaceId>| f.is_some_and(|f| moved.iter().any(|(m, _)| *m == f));
     let uncertified = || match own_face {
         Some(face) => Failure::new(LOCAL_OP, OffsetFailure::ReachUncertified { face }).into_error(),
-        None => SolidError::offset_stage_failed(LOCAL_OP, crate::error::SM_ERR_NULL_POINTER),
+        None => Failure::new(
+            LOCAL_OP,
+            OffsetFailure::Defect {
+                why: "the face use whose extension reach is asked has no face, though the kernel \
+                      links every face use to its face",
+            },
+        )
+        .with_status(crate::error::SM_ERR_NULL_POINTER)
+        .into_error(),
     };
     // each face's exact class, proved once
     let mut classes: Vec<(FaceId, Option<Exact>)> = Vec::new();
@@ -2758,6 +2945,8 @@ pub fn local_extension_reach(
                             Ok(Some(pieces(&piece, bounds, of, surfaces.as_deref())?.0))
                         }
                         Exact::Net(_) => Ok(None),
+                        // a moved torus's move is not bounded here
+                        Exact::Torus(_) => Err(uncertified()),
                     }
                 };
             let mut net_moved = false;
@@ -2841,6 +3030,44 @@ pub fn local_extension_reach(
                         });
                     pieces(&piece, bounds, pair, surfaces.as_deref())?
                 }
+                (&Exact::Plane(plane), Exact::Torus(torus))
+                | (Exact::Torus(torus), &Exact::Plane(plane)) => {
+                    // the torus stays (a moved one is refused above, by its move): a moved
+                    // plane past the tube's top or bottom meets it nowhere, refused naming
+                    // how far it could move
+                    let (plane_face, torus_face) = if matches!(own, Exact::Plane(_)) {
+                        (own_face, other_face)
+                    } else {
+                        (other_face, own_face)
+                    };
+                    if let (Some(face), Some(side)) = (plane_face, torus_face) {
+                        let old = match crate::topology::face::p2::surface(b, face)? {
+                            Some(s) => exact_class(k, s, tolerance)?,
+                            None => None,
+                        };
+                        if let Some(Exact::Plane(old)) = old {
+                            if let Some(largest) = past_extent(old, plane, torus, tolerance) {
+                                return Err(Failure::new(
+                                    LOCAL_OP,
+                                    OffsetFailure::PastSide {
+                                        face,
+                                        side,
+                                        largest,
+                                    },
+                                )
+                                .into_error());
+                            }
+                        }
+                    }
+                    let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+                        Ok(plane_torus_piece(over, mid, dt, plane, torus, tolerance))
+                    };
+                    // a torus's bound is not recorded: it carries no bits to key it on
+                    let pair =
+                        EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
+                    pieces(&piece, bounds, pair, None)?
+                }
+                (Exact::Torus(_), _) | (_, Exact::Torus(_)) => return Err(uncertified()),
                 (&Exact::Plane(plane), Exact::Net(n)) | (Exact::Net(n), &Exact::Plane(plane)) => {
                     let guess = std::cell::Cell::new(None);
                     let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
@@ -2887,16 +3114,18 @@ pub fn local_extension_reach(
                             };
                             pieces(&piece, bounds, pair, surfaces.as_deref())?
                         }
-                        // two cylinders on one axis direction: the first's meeting with
-                        // their radical plane, in closed form, a tangent meeting included
+                        // two cylinders on one axis direction, or a cone and a cylinder on
+                        // one axis line: the radical plane's meeting with the first cylinder
+                        // (the cylinder), in closed form, a tangent meeting included
                         _ => {
                             if let Some(radical) = quadric::Radical::of(q, r) {
                                 let trace = |p: Dv, t: Dv| {
                                     let (nu, h) = radical.over(p);
                                     section_trace(p, t, nu, h)
                                 };
+                                let on = radical.quadric();
                                 let piece = |over, mid, dt| {
-                                    Ok(trace_quadric_piece(over, mid, dt, &trace, q, tolerance))
+                                    Ok(trace_quadric_piece(over, mid, dt, &trace, on, tolerance))
                                 };
                                 pieces(&piece, bounds, pair, surfaces.as_deref())?
                             } else {
@@ -3119,7 +3348,8 @@ struct Corner {
 /// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
 /// straight edge where present and its third's new surface a plane, nowhere for parallel
 /// quadrics, on the radical plane of two
-/// cylinders on one axis direction ([`quadric::Radical`]), otherwise by [`quadric::meet`];
+/// cylinders on one axis direction or of a cone and a cylinder on one axis line
+/// ([`quadric::Radical`]), otherwise by [`quadric::meet`];
 /// three quadrics nowhere where every two are parallel;
 /// anything else, or a meeting with a net not proved, is `refuse`d), and each moved
 /// surface's distance from the vertex (a moved net's: the farthest meeting found on it
@@ -3159,11 +3389,20 @@ fn corner(
         }
         others.push((f, c));
     }
+    // a torus is bounded only kept and beside one plane at an edge: moved, or one of three
+    // surfaces at a corner, it has no bound here
+    let torus_moved = |f: Option<FaceId>, c: &Exact| matches!(c, Exact::Torus(_)) && is_moved(f);
+    if torus_moved(at.own, &a) || others.iter().any(|(f, c)| torus_moved(Some(*f), c)) {
+        return Err(refuse());
+    }
     // the largest meeting on each moved net, `None` until one is found
     let mut on_nets: Vec<Option<f64>> = vec![None; moved_nets.len()];
     for (i, (fc, c)) in others.iter().enumerate() {
         for (fd, d) in others.iter().skip(i + 1) {
             let three = [&a, c, d];
+            if three.iter().any(|x| matches!(x, Exact::Torus(_))) {
+                return Err(refuse());
+            }
             let planes: Vec<Tangent> = three
                 .iter()
                 .filter_map(|x| match x {
@@ -3236,10 +3475,12 @@ fn corner(
                             }
                             (&[plane], [a, c], _) => {
                                 if let Some(radical) = quadric::Radical::of(a, c) {
-                                    // two cylinders on one axis direction: where the plane's
-                                    // line with their radical plane meets the first
+                                    // two cylinders on one axis direction, or a cone and a
+                                    // cylinder on one axis line: where the plane's line with
+                                    // their radical plane meets the (first) cylinder
+                                    let on = radical.quadric();
                                     let meeting =
-                                        corner_with_cylinders(p, plane, &radical, a, at.tolerance);
+                                        corner_with_cylinders(p, plane, &radical, on, at.tolerance);
                                     match meeting {
                                         CornerMeeting::Within(reach) => Some(reach),
                                         CornerMeeting::Nowhere => None,
@@ -3819,6 +4060,37 @@ mod tests {
             tan_angle: 0.2,
         };
         assert_eq!(past_extent(at(10.0), at(1e4), &cone, tol), None);
+        // a torus about z (R 30, r 8) spans z = ±8; one about x has no extent along z here
+        let ring = |axis: Vec3| Implicit::Torus {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            axis,
+            major: 30.0,
+            minor: 8.0,
+        };
+        assert_eq!(
+            past_extent(at(0.0), at(-9.0), &ring(Vec3::Z), tol),
+            Some(8.0)
+        );
+        assert_eq!(
+            past_extent(at(2.0), at(9.0), &ring(Vec3::Z), tol),
+            Some(6.0)
+        );
+        assert_eq!(past_extent(at(0.0), at(-3.2), &ring(Vec3::Z), tol), None);
+        assert_eq!(past_extent(at(0.0), at(9.0), &ring(Vec3::X), tol), None);
+        // an axis tipped within EFF_ZERO lifts a wide torus's major circle (R 1e8 by 5e-13:
+        // 5e-5 above r 8): a plane 8.00002 up still meets it, and its room counts the lift
+        let tipped = Implicit::Torus {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(5e-13, 0.0, 1.0).unitize_or_z(),
+            major: 1e8,
+            minor: 8.0,
+        };
+        assert_eq!(past_extent(at(0.0), at(8.00002), &tipped, 1e-6), None);
+        let room = past_extent(at(0.0), at(9.0), &tipped, 1e-6);
+        assert!(
+            room.is_some_and(|r| (8.00005..8.0001).contains(&r)),
+            "{room:?}"
+        );
     }
 
     fn plane_at_x(x: f64) -> Surface {
@@ -4624,7 +4896,6 @@ mod tests {
         use crate::primitive::api_primitives as ap;
         // Revolve the two cap endpoints and the bore seam together. The later slab
         // cut cannot touch the full bore, whose radius is strictly less than 2.
-        k.fixes.revolve_analytic_profile_faces = true;
         let angle = (1.0_f64 / 3.0).acos().to_degrees();
         let arc = Curve::from(
             BSplineCurve::create_circle_segment(
@@ -4812,6 +5083,73 @@ mod tests {
     fn a_plate_top_offset_beside_a_small_hole_far_from_the_origin_moves() {
         for x in [-200.0, -300.0, -490.0] {
             plate_with_hole_offset(x);
+        }
+    }
+
+    /// A half torus, R 30 and r 8 about z less everything below z = 0 (the stress corpus's
+    /// S1499, #21474), its flat face and its torus face.
+    fn half_torus(k: &mut Kernel) -> (Brep, FaceId, FaceId) {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::primitive::api_primitives::{create_box, create_torus};
+        use crate::surface::plane::Plane;
+        let torus = create_torus(k, Point3::ZERO, 30.0, 8.0).unwrap();
+        let below = create_box(k, Point3::new(-40.0, -40.0, -9.0), 80.0, 80.0, 9.0).unwrap();
+        let b = boolean_difference(k, torus, below).unwrap();
+        let faces = bp1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 2);
+        let is_flat = |f: FaceId| {
+            let s = b.face(f).unwrap().surface.as_ref().unwrap();
+            s.is_kind_of(Plane::TYPE).unwrap()
+        };
+        let flat = faces.iter().copied().find(|&f| is_flat(f)).unwrap();
+        let ring = faces.iter().copied().find(|&f| !is_flat(f)).unwrap();
+        (b, flat, ring)
+    }
+
+    /// [`half_torus`]'s flat face moved `d` along its outward normal (down) by the offset.
+    fn half_torus_flat_face_offset(k: &mut Kernel, d: f64) -> Result<Brep> {
+        use crate::offset::offset_faces::OffsetFacesExecutive;
+        let (mut b, flat, _) = half_torus(k);
+        OffsetFacesExecutive::new().offset_faces(k, &mut b, &[flat], d)?;
+        Ok(b)
+    }
+
+    /// [`half_torus`]'s flat face moved to z = −d: the torus goes on past the cut, and the
+    /// moved plane meets it in each meridian where the tube's circle about ρ = 30 does,
+    /// ρ = 30 ± √(64 − d²), on the side of the tube each rim is on. Both faces' reach is the
+    /// chord from the rim, `√((8 − √(64 − d²))² + d²)`, the same at the inner and outer rim
+    /// and all round them. Each moved d (the rims' distance from the moved plane).
+    #[test]
+    fn a_half_toruss_flat_face_moved_is_reached_where_the_torus_meets_it() {
+        use crate::surface::plane::Plane;
+        let mut k = Kernel::default();
+        let (b, flat, ring) = half_torus(&mut k);
+        for d in [0.2, 3.2, 7.5] {
+            let down = Surface::from(Plane::from_normal(Point3::new(0.0, 0.0, -d), Vec3::Z));
+            let moved = [(flat, &down)];
+            let chord = ((8.0 - (64.0 - d * d).sqrt()).powi(2) + d * d).sqrt();
+            for f in [flat, ring] {
+                let found = reach_of(&k, &b, f, &moved);
+                // certified by a sign change a little past the meeting: above the chord, and
+                // within 10⁻³ of it (the piece caps stop the halving there)
+                let near = found.reach >= chord - 1e-9 && found.reach <= chord * (1.0 + 1e-3);
+                assert!(near, "d {d}, {f:?}: {found:?}, chord {chord}");
+                assert!(bounds(&b, found.shift, d), "d {d}, {f:?}: {found:?}");
+            }
+        }
+    }
+
+    /// Moved 9 down, past the tube's bottom at z = −8, the flat face meets the torus nowhere:
+    /// refused, naming the 8 it could move.
+    #[test]
+    fn a_half_toruss_flat_face_moved_past_the_tube_names_its_room() {
+        let mut k = Kernel::default();
+        let e = half_torus_flat_face_offset(&mut k, 9.0).unwrap_err();
+        match e.failure().map(|f| &f.reason) {
+            Some(crate::error::Reason::Offset(OffsetFailure::PastSide { largest, .. })) => {
+                assert!((largest - 8.0).abs() < 1e-9, "{largest}");
+            }
+            other => panic!("{other:?}: {e:?}"),
         }
     }
 
@@ -5117,6 +5455,70 @@ mod tests {
             tan_angle: 0.1,
         };
         assert!(quadric::Radical::of(&bore, &cone).is_none());
+    }
+
+    /// A countersink's 45° cone (r 4 at z = 1.5 to r 2 at z = 3.5, `r = 5.5 − z`) moved 2
+    /// off the material is `r = 5.5 − 2√2 − z`, its apex at z = 2.67, below the hole's edge
+    /// (r 2, z 3.5). In the edge's normal section it meets the hole r 2 at z = 3.5 − 2√2,
+    /// 2√2 below the edge. Newton from the edge converges on the other nappe (r = −2 at
+    /// z = 7.5 − 2√2) and is refused; the cone and the cylinder on one axis line meet on the
+    /// plane z = 3.5 − 2√2, where the cone's radius is the hole's, either way round. A
+    /// cylinder a little off the cone's axis line, or a cylinder of radius zero, is left to the
+    /// certificate.
+    #[test]
+    fn a_countersinks_cone_meets_its_hole_past_its_apex_in_closed_form() {
+        let k = Kernel::default();
+        let root = sqrt(2.0);
+        let cylinder = |origin: Vec3, axis: Vec3, radius: f64| Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle: 0.0,
+        };
+        let hole = cylinder(Vec3::new(0.0, 0.0, -5.0), Vec3::Z, 2.0);
+        let cone = Implicit::Cone {
+            origin: Vec3::new(0.0, 0.0, 0.0),
+            axis: Vec3::Z,
+            radius: 5.5 - 2.0 * root,
+            tan_angle: -1.0,
+        };
+        let edge = (
+            Dv::constant(Vec3::new(2.0, 0.0, 3.5)),
+            Dv::constant(Vec3::Y),
+        );
+        let section = quadric::Section::edge(edge);
+        assert!(
+            quadric::meet(&k, &cone, &hole, section, section, Ivl::from(0.0))
+                .unwrap()
+                .is_none()
+        );
+        let far = 2.0 * root;
+        // the hole's axis stored either way along the line, in either argument order: the
+        // plane follows the cone's own axis
+        let reversed = cylinder(Vec3::new(0.0, 0.0, -5.0), -Vec3::Z, 2.0);
+        for (a, c, on) in [
+            (&cone, &hole, &hole),
+            (&hole, &cone, &hole),
+            (&cone, &reversed, &reversed),
+            (&reversed, &cone, &reversed),
+        ] {
+            let radical = quadric::Radical::of(a, c).unwrap();
+            assert_eq!(radical.quadric(), on);
+            let trace = |p: Dv, t: Dv| {
+                let (nu, h) = radical.over(p);
+                section_trace(p, t, nu, h)
+            };
+            match trace_quadric_piece(edge, edge, Ivl::from(0.0), &trace, on, 1e-6) {
+                PieceBound::Value { upper, .. } => {
+                    assert!(far <= upper && upper < far + 1e-9, "{upper}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        let off = cylinder(Vec3::new(1e-3, 0.0, -5.0), Vec3::Z, 2.0);
+        assert!(quadric::Radical::of(&cone, &off).is_none());
+        let line = cylinder(Vec3::new(0.0, 0.0, -5.0), Vec3::Z, 0.0);
+        assert!(quadric::Radical::of(&cone, &line).is_none());
     }
 
     #[test]

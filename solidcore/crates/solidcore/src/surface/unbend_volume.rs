@@ -110,6 +110,7 @@ use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p4::has_plane_crossings;
 use crate::curve::curve::p6::calculate_bounding_box_base;
 use crate::curve::line::Line;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -768,17 +769,21 @@ impl UnbendVolume {
 
         // check - crProjPoint must be in a valid domain
         if !volume.is_point_in_param_domain(proj_point, true)? {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_GLOBAL,
-                "the point is outside the volume's parameter domain",
+                SurfaceFailure::PointOutsideVolumeDomain {
+                    point: [proj_point.x, proj_point.y, proj_point.z],
+                },
             ));
         }
 
         // check - crProjPoint must be in OptParamDomain
         if param_domain.is_some_and(|d| !d.contains_point(proj_point, EFF_ZERO)) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_GLOBAL,
-                "the point is outside the given parameter domain",
+                SurfaceFailure::PointOutsideGivenDomain {
+                    point: [proj_point.x, proj_point.y, proj_point.z],
+                },
             ));
         }
 
