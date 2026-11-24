@@ -34,8 +34,8 @@ use solidcore::{Brep, Kernel, Point3};
 use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
-use crate::order::{self, Order};
 use crate::measure::box_max_distance_to_point;
+use crate::order::{self, Order};
 use crate::session::{answer, read_body, Answer};
 use crate::{Error, Result};
 
