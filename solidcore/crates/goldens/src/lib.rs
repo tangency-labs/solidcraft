@@ -53,6 +53,8 @@ pub mod util;
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
+#[cfg(test)]
+mod wr587_replay;
 
 pub use case::Case;
 pub use case::CaseContext;

@@ -10691,15 +10691,15 @@ pub fn pattern_row(
 
 /// Keep each Pattern of components' occurrences in step with its count and spacing (#12116):
 /// add or remove copies when the count changes, update transforms when the source or spacing
-/// moves, and drop copies of a suppressed or rolled-back Pattern. Surviving copies keep their
-/// occurrence ids.
+/// moves, and retain copies of a suppressed or rolled-back Pattern for later reactivation.
+/// Surviving copies keep their occurrence ids.
 pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Result<()> {
     let marker = doc.marker.unwrap_or(doc.features.len());
     // The values the features are built with, as `pattern_matrices` reads them when the copies
     // are first placed: a bare number is in the design's unit (#8523).
     let vals = doc.evaluation_values();
-    // Snapshot what each Pattern of components wants, then mutate. Features after the marker
-    // are rolled back: their copies go, like bodies of a rolled-back Pattern.
+    // Snapshot each Pattern of components before mutating the document. The placement tree
+    // excludes the stored copies of suppressed and rolled-back patterns.
     let plans: Vec<(u64, bool, Vec<u64>, crate::PatternKind, u64)> = doc
         .features
         .iter()
@@ -10713,7 +10713,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         .collect();
     for (feature_id, inactive, components, pattern, feature_component) in plans {
         if inactive {
-            clear_pattern_occurrences(doc, feature_id)?;
             continue;
         }
         let mats = pattern_transforms(doc, &vals, st, feature_component, &pattern)?;
@@ -10765,20 +10764,6 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
         if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
             *occurrences = made;
         }
-    }
-    Ok(())
-}
-
-fn clear_pattern_occurrences(doc: &mut Document, feature_id: u64) -> Result<()> {
-    let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature(feature_id).map(|f| &f.kind) else {
-        return Ok(());
-    };
-    let gone: std::collections::BTreeSet<u64> = occurrences.iter().copied().collect();
-    if !gone.is_empty() {
-        doc.remove_occurrences(&gone);
-    }
-    if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(feature_id).map(|f| &mut f.kind) {
-        occurrences.clear();
     }
     Ok(())
 }
@@ -13372,8 +13357,9 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
         };
         return Ok((picked.offset(face.centroid.dot(n) - picked.origin.dot(n)), note));
     }
-    let mut best: Option<(f64, f64)> = None; // (distance from `at`, plane offset along n)
-    for b in &st.bodies {
+    // (distance from `at`, plane offset along n, body, face)
+    let mut best: Option<(f64, f64, usize, usize)> = None;
+    for (bi, b) in st.bodies.iter().enumerate() {
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let (Ok(faces), Ok(mesh)) = (b.body.faces(tol), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol))) else { continue };
         for f in faces {
@@ -13390,17 +13376,36 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
                 .map(|[a, bb, c]| crate::project::closest_on_triangle(at, a, bb, c).dist(at))
                 .fold(f64::INFINITY, f64::min);
             if best.is_none_or(|x| d < x.0) {
-                best = Some((d, f.centroid.dot(n)));
+                best = Some((d, f.centroid.dot(n), bi, f.index));
             }
         }
     }
     Ok(match best {
-        Some((_, off)) => {
+        Some((_, off, bi, face)) => {
             let shift = off - picked.origin.dot(n);
-            (picked.offset(shift), None)
+            (picked.offset(shift), off_its_face(st, bi, face, at, n, off))
         }
         None => (*picked, Some("the face the sketch was on is gone; the sketch stays where it was".into())),
     })
+}
+
+/// The note for a sketch whose unnamed face point `at` is on no face now: `at`, moved along `n`
+/// onto the plane (offset `off`) of face `face` of body `bi`, the face nearest it, is decided
+/// exactly on that face (#20518). A face that moved along its normal (a taller box) still holds
+/// the point and says nothing; a pick off every face (the `sketch.create` command refuses it)
+/// keeps the sketch on that face's plane, but says so.
+fn off_its_face(st: &ModelState, bi: usize, face: usize, at: Vec3, n: Vec3, off: f64) -> Option<String> {
+    let b = st.bodies.get(bi).filter(|b| !b.body.is_mesh())?;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let on_plane = at + n * (off - at.dot(n));
+    match b.body.point_lies_on_face(face, on_plane, tol) {
+        Ok(None) => Some(format!(
+            "no face is at the point the sketch was placed on, [{}, {}, {}]; the sketch is on the plane of the nearest flat face \
+             facing the same way: check it",
+            at.x, at.y, at.z
+        )),
+        _ => None,
+    }
 }
 
 /// A chamfer, equal or by its second distance or angle.
@@ -15076,8 +15081,10 @@ fn move_turn_line(
 ) -> Result<(Vec3, Vec3)> {
     let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
     match found {
-        Ok((o, d)) if o.is_finite() && d.is_finite() && d.len() > 1e-12 => Ok((o, if d.dot(axis) < 0.0 { -d } else { d })),
-        Ok(_) => lost_turn_line(origin, axis, "it has no direction".into(), warning),
+        Ok((o, d)) => match solidcore_ops::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
+            Some(d) => Ok((o, Vec3::from(d))),
+            None => lost_turn_line(origin, axis, "it has no direction".into(), warning),
+        },
         Err(e) => lost_turn_line(origin, axis, e.to_string(), warning),
     }
 }
