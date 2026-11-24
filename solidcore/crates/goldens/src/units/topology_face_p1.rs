@@ -1465,6 +1465,8 @@ mod tests {
     use crate::units::topology_vertexuse::{BssIn, SrfIn};
     use solidcore::geom::geom_utility::p2::ContinuityType;
     use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
+    use solidcore::surface::surface::p1::zone_tol_3d;
+    use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::{edge, vertex};
 
     /// The body tolerance, a new vertex's tolerance.
@@ -1710,19 +1712,47 @@ mod tests {
         closed_v: Tri,
         closed_val_v: ContinuityType,
     ) -> (fp1::MoveSeamResult, Vec<String>, bool) {
+        let run = move_seam_on(&kinked_tube(), closed_v, closed_val_v);
+        (run.result, run.found, run.periodic_v)
+    }
+
+    /// What [`move_seam_on`] saw and did.
+    struct SeamRun {
+        /// The move's result (the default when it refused; `found` then names the refusal).
+        result: fp1::MoveSeamResult,
+        /// The invariants (0-3 above) the move broke.
+        found: Vec<String>,
+        /// `IsPeriodic` in V on the input surface: the sampled verdict the gate used before
+        /// #21491.
+        periodic_v: bool,
+        /// The net's certified bound on the gap between the V boundary curves
+        /// (`BSplineSurface::boundary_gap_bound`).
+        gap_v: Option<f64>,
+        /// The face's 3D tolerance, which the gate compares the gap with.
+        zone_tol: f64,
+    }
+
+    /// `move_seam` on the one-face B-rep `brep` with face properties that report a seam
+    /// crossed in V and closed in V as `closed_v` at `closed_val_v`.
+    fn move_seam_on(brep: &BrepIn, closed_v: Tri, closed_val_v: ContinuityType) -> SeamRun {
         let mut k = crate::runner_kernel();
-        let Ok(Ok((mut b, _))) = own_brep(&kinked_tube(), false, false) else {
-            panic!("the tube face did not build");
+        let Ok(Ok((mut b, _))) = own_brep(brep, false, false) else {
+            panic!("the face did not build");
         };
         let faces: Vec<FaceId> = b.faces().ids().collect();
         let [f] = faces[..] else {
-            panic!("the tube is one face, got {}", faces.len());
+            panic!("the B-rep is one face, got {}", faces.len());
         };
         let s = b.face(f).unwrap().surface.clone().unwrap();
         let d = s.natural_uv_domain_with_nurb(&k).unwrap();
         let periodic_v = s.is_periodic(&k, &d, SurfParamType::V).unwrap();
+        let SurfaceKind::BSpline(net) = s.kind() else {
+            panic!("the face's surface is a B-spline surface");
+        };
+        let gap_v = net.boundary_gap_bound(SurfParamType::V).unwrap();
+        let zone_tol = zone_tol_3d(&k, &s).unwrap();
         let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut Vec::new())
-            .unwrap_or_else(|_| panic!("HasSeamProblem failed on the tube"));
+            .unwrap_or_else(|_| panic!("HasSeamProblem failed on the face"));
         let before = before(&mut b);
         let mut fp = FaceProps::<H>::new();
         fp.bad_crossed_seam_dir = SurfParamType::V;
@@ -1745,7 +1775,125 @@ mod tests {
         );
         let refused = r.as_ref().err().map(ToString::to_string);
         let found = problems(&mut b, &before, refused);
-        (r.unwrap_or_default(), found, periodic_v)
+        SeamRun {
+            result: r.unwrap_or_default(),
+            found,
+            periodic_v,
+            gap_v,
+            zone_tol,
+        }
+    }
+
+    /// The U knots of [`rounded_tube`]: degree 1, a knot `1/70` either side of each of
+    /// `IsPeriodic`'s six samples `i/7` (so the span holding a sample has both its control
+    /// points at the sample's own neighbours), and one more knot at `3.5/7`, half way
+    /// between the third and fourth samples, whose control point (index 7) touches no
+    /// sample's span.
+    fn rounded_tube_u_knots() -> Vec<f64> {
+        let d = 1.0 / 70.0;
+        let mut u = vec![0.0, 0.0];
+        for i in 1..=6 {
+            let t = f64::from(i) / 7.0;
+            u.push(t - d);
+            u.push(t + d);
+            if i == 3 {
+                u.push(3.5 / 7.0);
+            }
+        }
+        u.extend([1.0, 1.0]);
+        u
+    }
+
+    /// A tube round a rounded square, closed in V with matching tangents: V is quadratic
+    /// over the six points `(1, 0)`, `(1, 1)`, `(-1, 1)`, `(-1, -1)`, `(1, -1)`, `(1, 0)`
+    /// (knots `0 0 0 1 2 3 4 4 4`), so `S(u, 0) = S(u, 4) = (1, 0, z)` and
+    /// `S_v = 2 (P_1 - P_0) = 2 (P_5 - P_4) = (0, 2, 0)` at both ends; U is linear in `z`
+    /// over [`rounded_tube_u_knots`]. `last(i)` moves the last V point of U row `i` by
+    /// that much in x. The face covers V in `[0.5, 2.5]`, as [`kinked_tube`]'s.
+    fn rounded_tube(last: &dyn Fn(usize) -> f64) -> BrepIn {
+        let u = rounded_tube_u_knots();
+        let rows = u.len() - 2;
+        let net = (0..rows)
+            .map(|i| {
+                // the Greville abscissa of a degree 1 control point: its own knot
+                let z = u[i + 1];
+                vec![
+                    [1.0, 0.0, z, 1.0],
+                    [1.0, 1.0, z, 1.0],
+                    [-1.0, 1.0, z, 1.0],
+                    [-1.0, -1.0, z, 1.0],
+                    [1.0, -1.0, z, 1.0],
+                    [1.0 + last(i), 0.0, z, 1.0],
+                ]
+            })
+            .collect();
+        BrepIn::Face {
+            surface: SrfIn::Bspline(BssIn {
+                oob: false,
+                form: 0,
+                net,
+                p: 1,
+                q: 2,
+                u,
+                v: vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0, 4.0],
+            }),
+            dom: [0.0, 0.5, 1.0, 2.5],
+        }
+    }
+
+    /// #21491, the sampled closure's false "closed": the tube's last V line is moved by
+    /// `0.01` in x at U row 7 alone, between `IsPeriodic`'s samples, so its V boundary
+    /// curves agree in position and tangent at all six samples (row 7's basis function is
+    /// 0 on every span holding one) but are `0.01` apart at `u = 3.5/7` (degree 1: the
+    /// curve passes through row 7's point there). `IsPeriodic` calls V periodic, and the
+    /// gate before #21491 moved the seam, gluing the open ends together. The net bounds
+    /// the gap from above by `0.01` (one moved point; the others agree), past the face's
+    /// tolerance, so V is not closed and nothing moves.
+    #[test]
+    fn move_seam_keeps_a_seam_open_between_the_samples() {
+        let run = move_seam_on(
+            &rounded_tube(&|i| if i == 7 { 0.01 } else { 0.0 }),
+            Tri::False,
+            ContinuityType::C0,
+        );
+        assert!(run.periodic_v, "the samples must miss the gap");
+        let gap = run.gap_v.expect("a clamped, non-rational net certifies its gap");
+        assert!(gap >= 0.01 && gap > run.zone_tol, "gap bound {gap}, tolerance {}", run.zone_tol);
+        assert_eq!(run.result.u, fp1::FixSeamPlanType::NoChanges);
+        assert_eq!(
+            run.result.v,
+            fp1::FixSeamPlanType::NoChanges,
+            "a seam in a direction the surface does not close in was moved"
+        );
+        assert!(run.found.is_empty(), "{}", run.found.join("\n"));
+    }
+
+    /// #21491, the sampled closure's false "open": the whole last V line is moved by half
+    /// the face's tolerance in x, so the V boundary curves are that far apart everywhere
+    /// (a translation: `S(u, 4) - S(u, 0) = (tol / 2, 0, 0)`), past `IsPeriodic`'s scaled
+    /// zero but within the tolerance the join removes its knot to. The gate before #21491
+    /// left the seam; the net certifies the gap within the tolerance, so the seam moves out
+    /// of the face (to the middle of the unused `[2.5, 4.5]`, as on [`kinked_tube`]), and
+    /// the join, which averages the two lines, moves the surface by at most a quarter of
+    /// the tolerance: no invariant breaks.
+    #[test]
+    fn move_seam_moves_a_seam_closed_within_the_tolerance() {
+        let tol = {
+            let probe = move_seam_on(&rounded_tube(&|_| 0.0), Tri::False, ContinuityType::C0);
+            probe.zone_tol
+        };
+        let run = move_seam_on(&rounded_tube(&|_| tol / 2.0), Tri::False, ContinuityType::C0);
+        assert_eq!(run.zone_tol, tol);
+        assert!(!run.periodic_v, "the gap must be past IsPeriodic's scaled zero");
+        let gap = run.gap_v.expect("a clamped, non-rational net certifies its gap");
+        assert!(gap >= tol / 2.0 && gap <= tol, "gap bound {gap}, tolerance {tol}");
+        assert_eq!(run.result.u, fp1::FixSeamPlanType::NoChanges);
+        assert_eq!(
+            run.result.v,
+            fp1::FixSeamPlanType::MoveOutOfFace,
+            "a seam closed within the tolerance was not moved out of the face"
+        );
+        assert!(run.found.is_empty(), "{}", run.found.join("\n"));
     }
 
     /// The face properties' closure gate (review of #21381): a seam the properties

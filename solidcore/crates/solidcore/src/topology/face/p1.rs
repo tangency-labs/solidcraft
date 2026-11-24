@@ -31,10 +31,11 @@
 //!
 //! Deviations:
 //! - **A seam move needs a closed direction.** `move_seam` drops a crossed or near-miss
-//!   seam the caller's face properties report in a direction the surface does not close
-//!   in by either of `HasSeamProblem`'s tests: the properties' closure (closed, not
-//!   False, at C1 or better) or `Surface::is_periodic` over the natural UV domain.
-//!   Upstream splits the surface there and joins the open ends, so the face's
+//!   seam reported in a direction the surface does not close in: closed means the net
+//!   certifies its two boundary curves within the face's tolerance of each other
+//!   everywhere (`BSplineSurface::boundary_gap_bound`; a creased closure counts, an
+//!   unclamped net or a weight not positive certifies nothing), not a sampled test
+//!   (#21491). Upstream splits the surface there and joins the open ends, so the face's
 //!   surface no longer passes through its edges (11.8 away on `vase_rev.smb`), and the
 //!   seam split that follows merges interval ends onto edge points up to 4.19 away,
 //!   growing the vertex tolerances to 1.18-2.59 (#21368).
@@ -184,7 +185,6 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::IdentitySlot;
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::periodic_extent1d::PeriodicExtent1d;
 use crate::geom::tol::are_same_to_tol;
@@ -2132,7 +2132,9 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<Point2> {
 ///
 /// `SM_ERR_INVALID_INPUT` for a surface that is not a B-spline kind; `SM_ERR` when the
 /// surface cannot be split; [`SolidError::InvalidInput`] as in the module docs; those
-/// of the surface join, the knot query and the classification state;
+/// of the surface join, the knot query, the closure bound
+/// ([`crate::nurbs::b_spline_surface::BSplineSurface::boundary_gap_bound`]: a boundary
+/// control point not finite) and the classification state;
 /// [`SolidError::Unported`] (`GetUpwardLoopuses`, `IsCrossedByEdge`, `HasNearMisses`,
 /// `GetUpwardVertexuses`, `GetBrep`, `SmFace::Notify` (also through `ReplaceSurface`),
 /// `HasSeamProblem`, the split).
@@ -2260,19 +2262,34 @@ pub fn move_seam_notified<O: LoopObject>(
     // not upstream: a seam exists only where the surface closes on itself, so a seam
     // problem reported in a direction the surface does not close in is no seam problem
     // (upstream splits and rejoins the open ends there, gluing edges the surface no longer
-    // passes through; UB-138's trigger). A direction is closed by `HasSeamProblem`'s own
-    // tests: the face properties' closure (closed, not False, at C1 or better: the
-    // healer's measure, to its cross-section tolerance) or `IsPeriodic` on the surface.
+    // passes through; UB-138's trigger). A direction is closed when its net certifies
+    // that the two boundary curves lie within the face's tolerance of each other
+    // everywhere (`BSplineSurface::boundary_gap_bound`, #21491): the join below averages
+    // the two boundary lines, so it moves the surface by at most half that gap. A creased
+    // (C0) closure is closed: the surface still passes through its edges. No sample
+    // decides it (§7.6): `IsPeriodic`'s six samples and the healer's sampled closure
+    // grade prove nothing between their points.
     let closed = |dir: Sp| -> Result<bool> {
-        let by_props = props.is_some_and(|p| {
-            let (c, val) = if dir == Sp::U {
-                (p.closed_u, p.closed_val_u)
-            } else {
-                (p.closed_v, p.closed_val_v)
-            };
-            c != Tri::False && val as i32 >= ContinuityType::C1 as i32
-        });
-        Ok(by_props || surface0.is_periodic(k, &uv_domain, dir)?)
+        let net = match surface0.kind_with_nurb(k)? {
+            SurfaceKind::BSpline(b) => Some(b),
+            SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
+            SurfaceKind::BallPatch(bp) => Some(bp.net()),
+            SurfaceKind::Plane(p) => Some(p.base()),
+            SurfaceKind::Cone(c) => Some(c.rev().base()),
+            SurfaceKind::Sphere(s) => Some(s.base().base()),
+            SurfaceKind::Torus(t) => Some(t.base().base()),
+            SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
+            SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
+            SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => None,
+        };
+        let gap = match net {
+            Some(net) => net.boundary_gap_bound(dir)?,
+            None => None,
+        };
+        Ok(gap.is_some_and(|gap| gap <= zone_tol))
     };
     let closed_u = !(crosses_u || near_miss_u) || closed(Sp::U)?;
     let closed_v = !(crosses_v || near_miss_v) || closed(Sp::V)?;
