@@ -796,6 +796,9 @@ struct FailedSketches {
     ids: Vec<u64>,
     placed: std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>>,
     bounds: solidcraft_engine::geom::Aabb3,
+    /// Results looked up among the model's sketches, to tell whether they failed and are shown.
+    #[cfg(test)]
+    asked: usize,
     #[cfg(test)]
     builds: usize,
     #[cfg(test)]
@@ -822,8 +825,17 @@ fn failed_sketches_built(app: &SolveApp) -> std::sync::Arc<Vec<std::sync::Arc<so
         .model
         .results
         .iter()
-        .filter(|r| !r.skipped && !r.stale && model.sketch(r.id).is_none() && solidcraft_engine::view::sketch_shown(s, r.id))
-        .filter_map(|r| r.lost_projections.as_ref().map(|lost| (r.id, lost)))
+        // The few that failed this way first: each other question looks through every sketch, and
+        // a camera move asks this many times a frame.
+        .filter_map(|r| r.lost_projections.as_ref().map(|lost| (r, lost)))
+        .filter(|(r, _)| {
+            #[cfg(test)]
+            {
+                cache.asked += 1;
+            }
+            !r.skipped && !r.stale && model.sketch(r.id).is_none() && solidcraft_engine::view::sketch_shown(s, r.id)
+        })
+        .map(|(r, lost)| (r.id, lost))
         .collect();
     let mut changed = cache.built.len() != failed.len() || failed.iter().any(|(id, _)| !cache.built.contains_key(id));
     cache.built.retain(|id, _| failed.iter().any(|(f, _)| f == id));
@@ -853,6 +865,12 @@ fn failed_sketches_built(app: &SolveApp) -> std::sync::Arc<Vec<std::sync::Arc<so
 #[cfg(test)]
 pub(crate) fn failed_sketch_counts(app: &SolveApp) -> (usize, usize) {
     app.viewport.failed_sketches.lock().map(|c| (c.builds, c.placements)).unwrap_or_default()
+}
+
+/// How many results have been looked up among the model's sketches (tests).
+#[cfg(test)]
+pub(crate) fn failed_sketches_asked(app: &SolveApp) -> usize {
+    app.viewport.failed_sketches.lock().map(|c| c.asked).unwrap_or_default()
 }
 
 /// The failed sketches drawn ([`failed_sketches_built`]), placed where the world places
