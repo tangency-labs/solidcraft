@@ -1817,3 +1817,110 @@ fn a_round_notch_drawn_as_two_arcs_keeps_their_meeting_points_on_its_outline() {
         area(&out[0])
     );
 }
+
+/// A face strays across a direction by its tilt over its own size (the diagonal of its tight
+/// box), in closed form: on a Y-groove plate swept along z the walls not at all, each cap by
+/// twice its diagonal, the 30° bevel across x by √3 times its own diagonal, the top not at all;
+/// a cylinder's side along its axis not at all and across it by four times its box diagonal; a
+/// wide thin disc's caps by their whole diameter (a cap's only vertex is its seam's, brett19 on
+/// #21614); any finite scale of a direction as the unit one; zero no bound; NaN and a face past
+/// the faces refused.
+#[test]
+fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let close = |got: f64, want: f64, what: &str| {
+        assert!((got - want).abs() <= 1e-6 * want, "{what}: {got} != {want}");
+    };
+    let t = 30.0_f64.to_radians().tan();
+    let top = 0.5 + 7.0 * t;
+    let corners = [
+        v(-40.0, 0.0),
+        v(-40.0, -8.0),
+        v(-0.5, -8.0),
+        v(-0.5, -7.0),
+        v(-top, 0.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&corners),
+        holes: vec![],
+    };
+    let plate = extrude_planar_regions(&Plane::XY, &[region], 0.0, 120.0).unwrap();
+    let (_, order) = plate.to_record().unwrap();
+    let normal = |f: usize| plate.face_plane_normal(&order, f).unwrap().unwrap().value;
+    let stray = |f: usize, d: [f64; 3]| plate.face_straying(&order, f, d).unwrap().unwrap();
+    let cap = (39.5_f64.powi(2) + 8.0_f64.powi(2)).sqrt();
+    let bevel = ((7.0 * t).powi(2) + 7.0_f64.powi(2) + 120.0_f64.powi(2)).sqrt();
+    let (mut caps, mut bevels, mut tops) = (0, 0, 0);
+    for f in 0..order.faces.len() {
+        let n = normal(f);
+        let along = stray(f, [0.0, 0.0, 1.0]);
+        if n[2].abs() > 0.99 {
+            caps += 1;
+            close(along, 2.0 * cap, "cap");
+            continue;
+        }
+        assert!(along <= zone, "face {f}: {along}");
+        let across = stray(f, [1.0, 0.0, 0.0]);
+        if n[1] > 0.99 {
+            tops += 1;
+            assert!(across <= zone, "top: {across}");
+        } else if n[0] > 0.1 && n[1] > 0.1 {
+            bevels += 1;
+            close(across, 3.0_f64.sqrt() * bevel, "bevel");
+        }
+    }
+    assert_eq!((caps, bevels, tops), (2, 1, 1));
+    // any finite scale of a direction gives the unit direction's bound
+    let f = (0..order.faces.len())
+        .find(|&f| normal(f)[0] > 0.1 && normal(f)[1] > 0.1)
+        .unwrap();
+    let unit = stray(f, [1.0, 0.0, 0.0]);
+    for scale in [7.0, 1e200, 1e-200] {
+        let scaled = stray(f, [scale, 0.0, 0.0]);
+        assert!(
+            (scaled - unit).abs() <= 1e-12 * unit,
+            "{scale}: {scaled} != {unit}"
+        );
+    }
+    assert_eq!(plate.face_straying(&order, f, [0.0; 3]).unwrap(), None);
+    assert!(matches!(
+        plate.face_straying(&order, f, [f64::NAN, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        plate.face_straying(&order, order.faces.len(), [0.0, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+
+    // a cylinder of radius 5 and height 20: its side's box diagonal is √600
+    let cylinder = make_cylinder([0.0; 3], 5.0, 20.0).unwrap();
+    let (_, order) = cylinder.to_record().unwrap();
+    let side = (0..order.faces.len())
+        .find(|&f| cylinder.face_plane_normal(&order, f).unwrap().is_none())
+        .unwrap();
+    let along = cylinder
+        .face_straying(&order, side, [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(along <= zone, "{along}");
+    let across = cylinder
+        .face_straying(&order, side, [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    close(across, 4.0 * 600.0_f64.sqrt(), "side across x");
+
+    // a disc of radius 1000 and height 1, d 4e-6 off its plane: a line along d across a cap
+    // leaves it by 8e-3, so each cap is far from straight (its vertex box would have said 1)
+    let disc = make_cylinder([0.0; 3], 1000.0, 1.0).unwrap();
+    let (_, order) = disc.to_record().unwrap();
+    let d = [1.0, 0.0, 4e-6];
+    let mut flat = 0;
+    for f in 0..order.faces.len() {
+        if disc.face_plane_normal(&order, f).unwrap().is_some() {
+            flat += 1;
+            let got = disc.face_straying(&order, f, d).unwrap().unwrap();
+            assert!(got > 1e-2, "cap {f}: {got}");
+        }
+    }
+    assert_eq!(flat, 2);
+}

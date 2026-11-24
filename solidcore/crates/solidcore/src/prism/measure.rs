@@ -885,6 +885,33 @@ pub struct PrismSection {
     pub volume: Interval,
 }
 
+/// A whole bound on how far face `f` of `b` strays across the direction `d`: the face lies
+/// within the bound of a surface swept along `d`. It is the bound [`section`] proves for each of a
+/// prism's walls (a plane by its normal against `d`, a cylinder by its axis, a ruled spline net by
+/// its rows), taken over the face's own size: the diagonal of its tight box, curved edges
+/// included (a cylinder's cap has one seam vertex, whose vertex box omits the circle). A face
+/// whose bound is within the zone tolerance runs straight along `d`.
+///
+/// `None` where no bound is proved: a face with no surface; a surface that is not a plane, a
+/// cylinder or a ruled spline net (an extruded surface among them); a net that stands for a
+/// procedural definition (it is only within the definition's own tolerance of the surface); a
+/// net whose rows run along `d` less than half the face's size, or past the work budget; a `d`
+/// that is zero or not finite (any finite length else, scaled before it is squared).
+#[must_use]
+pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
+    let (_, d) = d.length_and_unit()?;
+    let surface = b.face(f).ok()?.surface.as_ref()?;
+    if surface.procedural_definition().is_some() {
+        return None;
+    }
+    let bounds = crate::query::api_queries::face_bounding_box(k, b, f, true).ok()?;
+    let size = (bounds.max() - bounds.min()).length();
+    if !size.is_finite() {
+        return None;
+    }
+    wall_error(surface, d, size, &mut 262_144_usize)
+}
+
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).
 pub(crate) fn body_size(b: &Brep) -> Option<f64> {
     let mut lo = [f64::INFINITY; 3];
