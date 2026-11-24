@@ -9262,7 +9262,8 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
     {
         let shown_ms = crate::now_ms() - at;
-        if shown_ms < STATUS_TOAST_MS {
+        let sticky = app.status_sticky_at == Some(at);
+        if sticky || shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
             // A JSON save refused for its binary data offers to save the design as a container.
             let save_sc = app.status_save_sc && !undo;
@@ -9279,7 +9280,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
-                countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
+                countdown: (!sticky).then(|| (countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
@@ -9316,12 +9317,15 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                     app.status = None;
                     app.status_undo = false;
                     app.status_save_sc = false;
+                    app.status_sticky_at = None;
                 }
             }
             // One frame when it is due to go, not a frame every half second while it shows.
-            let left_ms = STATUS_TOAST_MS - shown_ms;
-            let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            if !sticky {
+                let left_ms = STATUS_TOAST_MS - shown_ms;
+                let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            }
         } else {
             app.status = None;
         }
