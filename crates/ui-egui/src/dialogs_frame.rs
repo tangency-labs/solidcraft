@@ -97,6 +97,8 @@ pub struct Group {
 pub struct Member {
     /// Every line of the frame sketch, now and as lines are added, not only the lines picked.
     pub all: bool,
+    /// The picked curves, in pick order, make one continuous member along a tangent path.
+    pub continuous: bool,
     /// The built-in profile (an index into `frame::profile_kinds`), used when no section is picked.
     pub kind: usize,
     /// Each built-in profile's dimensions, its required ones then its optional ones; kept per
@@ -353,6 +355,7 @@ pub(crate) fn remove_tubes(app: &mut SolveApp, ids: &[String]) {
     for t in all.iter().filter(|t| ids.contains(&t.id)) {
         match t.pair {
             Some(k) => gone.extend(pairs.get(k).into_iter().flat_map(|(a, b)| [*a, *b])),
+            None if m.continuous && t.id == "$path" => gone.extend(lines.iter().copied()),
             None => gone.extend(lines.iter().filter(|i| line_id(path.items.get(**i)) == Some(t.id.as_str()))),
         }
     }
@@ -436,6 +439,7 @@ impl Member {
         let kind = frame::profile_kinds().iter().position(|k| k.kind == "rect_tube").unwrap_or(0);
         Member {
             all: false,
+            continuous: false,
             kind,
             dims,
             whole: None,
@@ -1217,6 +1221,8 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
         form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
     }
     group_rows(ui, m, inputs);
+    let continuous_label = app.tr("ui.frame.continuous").to_string();
+    form_row(ui, &continuous_label, |ui| check(ui, &mut m.continuous));
     let picked = !crate::selection::items(inputs, 1).is_empty();
     if let Some(sketch) = m.whole.filter(|_| !picked) {
         let name = app.session.doc.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
@@ -1251,6 +1257,9 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     if m.groups.len() <= 1 {
         return flat_commands(app, m, inputs, extra);
+    }
+    if m.continuous {
+        return Err("not supported yet: continuous members cannot be combined with groups; use separate Frame Members".into());
     }
     if m.corner != NONE
         || !m.overrides.is_empty()
@@ -1385,6 +1394,12 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
     }
     if !pairs.is_empty() {
         p["pairs"] = json!(pairs);
+    }
+    if m.continuous {
+        if m.all {
+            return Err(app.tr("ui.frame.continuous_requires_selection").into());
+        }
+        p["continuous"] = json!(true);
     }
     if let Some(ps) = section_sketch {
         p["profile_sketch"] = json!(ps);
@@ -1529,6 +1544,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let FeatureKind::FrameMember {
         path_sketch,
         lines,
+        continuous,
         pairs,
         groups,
         profile,
@@ -1553,6 +1569,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     let st = app.session.model.state();
     let mut m = Member::new();
     m.all = lines.is_empty() && path_sketch.is_some();
+    m.continuous = *continuous;
     // The sketch's lines (without the pairs' ids, which come after them, or an Auto frame's later pieces).
     let ids = if m.all {
         let (ids, later) = frame::member_parts(&st, kind).unwrap_or_default();

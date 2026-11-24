@@ -105,8 +105,9 @@ fn selecting_the_centre_and_an_edge_preselects_the_alignment() {
 fn the_hv_tool_aligns_a_picked_centre_with_a_picked_edge() {
     let mut h = square_with_circle();
     h.app.start("sketch.constraint.horizontal_vertical");
-    // The circle's centre, then the square's right edge.
-    for xy in [[40, 60], [100, 50]] {
+    // The circle's centre, then the square's right edge: not on its middle, which the tool
+    // takes as a point (#20442).
+    for xy in [[40, 60], [100, 70]] {
         let at = h.call("ui.at", json!({"sketch": xy}))["result"].clone();
         h.step(&json!({"click": at})).unwrap();
     }
