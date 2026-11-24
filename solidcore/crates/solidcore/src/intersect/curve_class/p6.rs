@@ -15,7 +15,10 @@
 //! to `ComputePointParameters` is explicitly unused upstream and is omitted here.
 //! Undefined indices return an error. Debug-only
 //! diagnostics are omitted. Insertion restarts after a squeeze in a loop, in upstream
-//! order, bounded by the initial interval count plus one (every restart removes one).
+//! order, bounded by the initial interval count plus three (every restart removes one,
+//! or splits an interval at one of the input's two ends). Not upstream (WR-647): an
+//! E-E-E or F-F-F input that ends inside an interval it spans splits that interval at
+//! its end before it is combined, so it labels only its own extent.
 //! Homogenization's final squeezes must reduce the count. Nonempty boundary lookups
 //! await p2, as does interval splicing/squeezing.
 //!
@@ -215,10 +218,13 @@ impl<O: ClassObject> CurveClassification<O> {
         a: &mut impl Imprint<O>,
         input: &CurveInterval<O>,
     ) -> Result<()> {
-        let allowed = self.size().saturating_add(1);
+        // every restart removes one interval, or splits an interval the input ends inside
+        // of, which happens at most once at each of the input's two ends
+        let allowed = self.size().saturating_add(3);
         let mut restarts = allowed;
+        let mut split = [false; 2];
         loop {
-            if !self.insert_curve_interval_step(a, input)? {
+            if !self.insert_curve_interval_step(a, input, &mut split)? {
                 return Ok(());
             }
             restarts = match restarts.checked_sub(1) {
@@ -233,11 +239,14 @@ impl<O: ClassObject> CurveClassification<O> {
         }
     }
 
-    // true means upstream's tail-recursive restart after removal of an interval.
+    // true means upstream's tail-recursive restart after removal of an interval, or (not
+    // upstream) after splitting an interval an E-E-E or F-F-F input ends inside of;
+    // `split` records the splits made at the input's start and end.
     fn insert_curve_interval_step(
         &mut self,
         a: &mut impl Imprint<O>,
         input: &CurveInterval<O>,
+        split: &mut [bool; 2],
     ) -> Result<bool> {
         let tol = input.mid.obj_zone_tol_3d(a.kernel(), a.geometry())?;
         let fa = self.find_interval(a.kernel(), a.geometry(), input.min(), BIG_DOUBLE, tol)?;
@@ -277,11 +286,41 @@ impl<O: ClassObject> CurveClassification<O> {
                     && input.mid.point_class() == Pc::Edge
                     && input.end.point_class() == Pc::Edge)
             {
+                // Not upstream (WR-647): upstream combines the input into the whole of
+                // every interval from i to j, which is the input's extent only when the
+                // input starts and ends on those intervals' boundaries (its [B53] and
+                // big-cube cases). An input that ends inside interval j (or starts inside
+                // interval i) would label the rest of that interval, where the curve may
+                // have left the edge or face, as on it. Such an interval is split at the
+                // input's end first (once per end), so the combined intervals are the
+                // input's extent; an end whose split is refused (an interior
+                // classification there conflicts) keeps the part beyond it unlabelled.
+                for (at, inside, done, end, param) in [
+                    (1, pb == IntervalPosition::Inside, split[1], &input.end, input.max()),
+                    (0, pa == IntervalPosition::Inside, split[0], &input.start, input.min()),
+                ] {
+                    if inside && !done {
+                        if let Some(flag) = split.get_mut(at) {
+                            *flag = true;
+                        }
+                        if self.insert_point_class_in(a, end, param, BIG_DOUBLE, false)? {
+                            return Ok(true);
+                        }
+                    }
+                }
                 for index in i..=j {
+                    let reaches_start = index > i || pa != IntervalPosition::Inside;
+                    let reaches_end = index < j || pb != IntervalPosition::Inside;
                     let ivl = self.at_mut(index)?;
-                    combine_in(a, &mut ivl.start, &input.start)?;
-                    combine_in(a, &mut ivl.mid, &input.mid)?;
-                    combine_in(a, &mut ivl.end, &input.end)?;
+                    if reaches_start {
+                        combine_in(a, &mut ivl.start, &input.start)?;
+                    }
+                    if reaches_start && reaches_end {
+                        combine_in(a, &mut ivl.mid, &input.mid)?;
+                    }
+                    if reaches_end {
+                        combine_in(a, &mut ivl.end, &input.end)?;
+                    }
                 }
                 return Ok(false);
             }

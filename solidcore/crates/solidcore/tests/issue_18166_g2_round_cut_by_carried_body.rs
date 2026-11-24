@@ -57,12 +57,15 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "brep_ray_classifies_current_trims",
 ];
 
-fn kernel() -> Kernel {
+/// SolidCraft's fixes; without `simple_coincidence_crossing_is_point` when
+/// `nearest_point` is false (WR-647 part B: the flag is being retired).
+fn kernel(nearest_point: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in SOLIDCRAFT_FIXES {
         *f.flag_mut(name).unwrap() = true;
     }
+    f.simple_coincidence_crossing_is_point = nearest_point;
     k.fixes = f;
     k
 }
@@ -95,7 +98,22 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 #[test]
 fn g2_round_minus_its_carried_body_cuts() {
-    let mut k = kernel();
+    cut_takes_the_carried_body(true);
+}
+
+/// WR-647 part B: without `simple_coincidence_crossing_is_point` the cut is the same.
+/// There the blend/cylinder pair returns the round's tangent edge twice: once as a curve
+/// that is the edge from vertex to vertex, once as a curve that runs along it from 0.35
+/// to its end. The second run is a copy of the edge (the topology intersector's
+/// `duplicate_edge_run`); before it was dropped, its inner end split the edge the first
+/// curve keeps whole and the merge failed with `RelateConflict`.
+#[test]
+fn g2_round_minus_its_carried_body_cuts_without_the_nearest_point_flag() {
+    cut_takes_the_carried_body(false);
+}
+
+fn cut_takes_the_carried_body(nearest_point: bool) {
+    let mut k = kernel(nearest_point);
     let mut rounded = load(
         &mut k,
         include_bytes!("data/issue_18166_g2_round_rounded.smb"),
