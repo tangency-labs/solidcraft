@@ -35,6 +35,23 @@ fn record_surface(g: &SurfaceGeometry) -> (solidcore_record::brep::Surface, bool
     }
 }
 
+/// A surface's `∂u × ∂v` at (u, v), by central differences.
+fn normal_at(f: impl Fn(f64, f64) -> [f64; 3], u: f64, v: f64) -> [f64; 3] {
+    let h = 1e-6;
+    let d = |p: [f64; 3], q: [f64; 3]| [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    let du = d(f(u - h, v), f(u + h, v));
+    let dv = d(f(u, v - h), f(u, v + h));
+    [
+        du[1] * dv[2] - du[2] * dv[1],
+        du[2] * dv[0] - du[0] * dv[2],
+        du[0] * dv[1] - du[1] * dv[0],
+    ]
+}
+
+fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /// The record's volume: positive when its faces face out of the material.
 fn volume(s: &Solid) -> f64 {
     let (body, _) = solidcore_ops::Body::from_record(&s.brep, false).unwrap();
@@ -1731,6 +1748,58 @@ fn a_solid_refused_for_one_face_comes_in_as_an_open_surface_of_the_others() {
     );
 }
 
+/// A solid refused for two faces (both planes moved 5 mm off their edges) leaves both out in one
+/// read again: the refusal names every face whose pcurves failed, not only the first, so a solid
+/// with more such faces than reads still comes in.
+#[test]
+fn a_solid_refused_for_several_faces_leaves_them_all_out_in_one_read() {
+    let mut ir = cube();
+    for k in 0..2 {
+        let face = ir.model.faces[k].clone();
+        let surface = ir
+            .model
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == face.surface)
+            .unwrap();
+        let SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(plane)) = &surface.geometry else {
+            panic!("{:?}", surface.geometry)
+        };
+        let o = plane.origin().get();
+        let (n, u) = (
+            plane.frame().axis().as_raw(),
+            plane.frame().reference().as_raw(),
+        );
+        let moved = cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+            Point3::new(o.x + 5.0 * n.x, o.y + 5.0 * n.y, o.z + 5.0 * n.z),
+            Vector3::new(n.x, n.y, n.z),
+            Vector3::new(u.x, u.y, u.z),
+        )
+        .unwrap();
+        surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(moved));
+    }
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.failures.is_empty(), "{:?}", bodies.failures);
+    let s = &bodies.read[0].solid;
+    assert!(s.sheet, "an open surface");
+    assert_eq!(s.brep.faces.len(), 4);
+    assert!(
+        !s.face_origin.contains(&0) && !s.face_origin.contains(&1),
+        "{:?}",
+        s.face_origin
+    );
+    let left: Vec<&String> = s
+        .notes
+        .iter()
+        .filter(|n| n.starts_with("left out: "))
+        .collect();
+    assert_eq!(left.len(), 1, "one read left both out: {:?}", s.notes);
+    assert!(
+        left[0].contains("face #0") && left[0].contains("face #1"),
+        "{left:?}"
+    );
+}
+
 /// A refusal that names its face by the face's id in the model (as this reader names a face it
 /// cannot read: here its surface is missing) leaves that face out as one naming it by index does.
 #[test]
@@ -1790,8 +1859,11 @@ fn a_region_is_built_at_the_largest_tolerance_its_faces_carry() {
 /// A torus whose tube reaches its axis (a spindle torus: major radius 1 under the tube's 5, as
 /// cadmpeg reads a STEP torus written with a negative major radius) is its meridian circle
 /// revolved about its axis, as the STEP reader reads one: the circle starts where the torus does
-/// (`C + (R + r) x` at u = v = 0), turns towards the axis, and the side follows the tube radius's
-/// sign as a plain torus's does.
+/// (`C + (R + r) x` at u = v = 0) and turns towards the axis. It keeps its side for either sign of
+/// the tube radius, as a plain torus does, checked by the normals at one point: CADIR's torus
+/// `C + (R + r cos v)(cos u x + sin u y) + r sin v z` with `r = -5` is the one with `r = 5` at
+/// `v + π`, the same surface with the same `∂u × ∂v`, and the revolution `∂angle × ∂profile` of
+/// the circle of radius 5 is that of `r = 5`.
 #[test]
 fn a_spindle_torus_is_its_meridian_circle_revolved() {
     use cadmpeg_ir::geometry::analytic::TorusSurface;
@@ -1801,6 +1873,18 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
         Vector3::new(0.0, 0.0, 1.0),
         Vector3::new(1.0, 0.0, 0.0),
     );
+    let theirs = |r: f64| {
+        move |u: f64, v: f64| {
+            let ring = 1.0 + r * v.cos();
+            [
+                1.0 + ring * u.cos(),
+                2.0 + ring * u.sin(),
+                3.0 + r * v.sin(),
+            ]
+        }
+    };
+    let (u, v) = (0.3, 0.4);
+    let pi = std::f64::consts::PI;
     for r in [5.0, -5.0] {
         let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
             TorusSurface::try_new(c, z, x, 1.0, r).unwrap(),
@@ -1831,7 +1915,31 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
             ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
             "from x towards z"
         );
-        assert_eq!(reversed, r < 0.0, "tube radius {r}");
+        // The revolution's point at (angle, profile parameter).
+        let ours = move |u: f64, t: f64| {
+            let p = [
+                frame.origin[0] - origin[0]
+                    + radius * (t.cos() * frame.x_axis[0] + t.sin() * frame.y_axis[0]),
+                frame.origin[1] - origin[1]
+                    + radius * (t.cos() * frame.x_axis[1] + t.sin() * frame.y_axis[1]),
+                frame.origin[2] - origin[2]
+                    + radius * (t.cos() * frame.x_axis[2] + t.sin() * frame.y_axis[2]),
+            ];
+            [
+                origin[0] + p[0] * u.cos() - p[1] * u.sin(),
+                origin[1] + p[0] * u.sin() + p[1] * u.cos(),
+                origin[2] + p[2],
+            ]
+        };
+        let ot = if r < 0.0 { v + pi } else { v };
+        let (a, b) = (theirs(r)(u, v), ours(u, ot));
+        assert!(
+            (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9),
+            "tube radius {r}: {a:?} {b:?}"
+        );
+        let agree = dot3(normal_at(theirs(r), u, v), normal_at(ours, u, ot)) > 0.0;
+        assert!(agree, "tube radius {r}");
+        assert!(!reversed, "tube radius {r}");
     }
     // A torus whose tube stays clear of its axis is still the record's torus.
     let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
@@ -1841,4 +1949,88 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
         geometry::surface(&g, fit()).unwrap(),
         Some((geometry::FaceSurface::Record(_), false))
     ));
+}
+
+/// A placed spindle torus is its meridian circle revolved, placed: the circle, the axis point and
+/// the axis are mapped by the placement, and the side is kept (a placement that mirrors is
+/// refused). The torus of [`a_spindle_torus_is_its_meridian_circle_revolved`] (C = (1, 2, 3),
+/// R = 1, tube 5) placed by the quarter turn about z, twice the size and moved by 10 along x
+/// (`p ↦ (10 - 2y, 2x, 2z)`) is the spindle torus about (6, 2, 6) with reference direction y,
+/// R = 2 and tube 10: its circle about (6, 2, 6) + 2 y = (6, 4, 6), from y towards z. The
+/// identity placement leaves it as it was.
+#[test]
+fn a_placed_spindle_torus_is_its_meridian_circle_revolved_and_placed() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::TorusSurface;
+    use cadmpeg_ir::transform::Transform;
+    use solidcore_step::assembly::SweptSurface;
+    let quarter = Transform::affine([
+        [0.0, -2.0, 0.0, 10.0],
+        [2.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 2.0, 0.0],
+    ])
+    .unwrap();
+    let identity = Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ])
+    .unwrap();
+    for r in [5.0, -5.0] {
+        let torus = SolvedSurfaceGeometry::Torus(
+            TorusSurface::try_new(
+                Point3::new(1.0, 2.0, 3.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(1.0, 0.0, 0.0),
+                1.0,
+                r,
+            )
+            .unwrap(),
+        );
+        for (placement, centre, tube, reference, radius) in [
+            (
+                quarter,
+                [6.0, 2.0, 6.0],
+                [6.0, 4.0, 6.0],
+                [0.0, 1.0, 0.0],
+                10.0,
+            ),
+            (
+                identity,
+                [1.0, 2.0, 3.0],
+                [2.0, 2.0, 3.0],
+                [1.0, 0.0, 0.0],
+                5.0,
+            ),
+        ] {
+            let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Transformed(
+                PlacedSurface::try_new(Box::new(torus.clone()), placement).unwrap(),
+            ));
+            let read = geometry::surface(&g, fit());
+            let Ok(Some((
+                geometry::FaceSurface::Swept(SweptSurface::Revolution {
+                    profile:
+                        solidcore_record::brep::Curve::Circle {
+                            frame,
+                            radius: tube_radius,
+                        },
+                    origin,
+                    axis,
+                }),
+                reversed,
+            ))) = read
+            else {
+                panic!("tube radius {r}: not a placed revolution: {read:?}")
+            };
+            assert_eq!((origin, axis), (centre, [0.0, 0.0, 1.0]), "tube radius {r}");
+            assert_eq!(tube_radius, radius, "tube radius {r}");
+            assert_eq!(frame.origin, tube, "tube radius {r}: the tube's centre");
+            assert_eq!(
+                (frame.x_axis, frame.y_axis),
+                (reference, [0.0, 0.0, 1.0]),
+                "tube radius {r}: from the reference direction towards the axis"
+            );
+            assert!(!reversed, "tube radius {r}");
+        }
+    }
 }

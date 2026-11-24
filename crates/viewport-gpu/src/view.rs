@@ -22,6 +22,7 @@ mod ao;
 pub use ao::GroundAo;
 mod clouds;
 mod edges;
+mod gpu_cull;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 mod motions;
@@ -771,6 +772,11 @@ pub struct SharedEdges {
 /// How far (pixels) a coarser level of a placement's edges may stray from its edges: as far as a
 /// body's edges in its block are simplified (`edge_detail::TOLERANCE_PX` in the UI).
 pub const EDGE_PX: f32 = 0.25;
+
+/// How far (pixels) a placement's edges may stray while the view moves ([`Frame::edge_px`]):
+/// orbiting a large assembly at [`EDGE_PX`] drew three times the segments, for a difference no
+/// moving picture shows; the fine edges come back once the view holds still.
+pub const EDGE_PX_MOVING: f32 = 1.0;
 
 impl SharedEdges {
     /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
@@ -1529,6 +1535,9 @@ pub struct Frame {
     /// Occlusion samples per shaded pixel: [`AO_SAMPLES`] for a still picture,
     /// [`AO_SAMPLES_MOVING`] while the view moves (#7165).
     pub ao_samples: u32,
+    /// How far (pixels) an instanced part's edges may stray where drawn: [`EDGE_PX`] for a still
+    /// picture, [`EDGE_PX_MOVING`] while the view moves.
+    pub edge_px: f32,
     /// Supersampling (#1288): draw the frame this many times the viewport's pixels in each
     /// direction and filter it down (1: off). Under 1 the frame is drawn smaller and filtered up
     /// (the product preview past its pixel budget, #1464).
@@ -2427,6 +2436,13 @@ struct Batches {
     arena: Option<Arc<indirect::Arena>>,
     /// `instanced`'s edges, drawn from the parts' shared edges ([`edges`]).
     edges: Option<edges::Edges>,
+    /// `instanced` culled on the GPU ([`gpu_cull`]), where the device can: made at the first
+    /// cull after the scene changes (`gpu_cull_stale`), from the pipelines kept across scenes.
+    gpu_cull: Option<gpu_cull::GpuCull>,
+    gpu_cull_stale: bool,
+    cull_kernel: Option<Arc<gpu_cull::Kernel>>,
+    /// The device cannot build the pipelines: the CPU culls.
+    cull_kernel_failed: bool,
     /// [`GpuScene::instanced_hidden_edges`].
     hidden_edges: bool,
     /// [`GpuScene::lit_instanced_edges`] and [`GpuScene::lit_instanced_hidden`].
@@ -2578,6 +2594,11 @@ impl Batches {
             };
             let parts = edges::Part::of_draws(&self.instanced);
             self.edges = shared_edges(&parts, self.edges.as_ref());
+            // The new draws are culled on the GPU from the next cull, by a cull made for them.
+            if let Some(g) = self.gpu_cull.take() {
+                self.cull_kernel = Some(g.kernel());
+            }
+            self.gpu_cull_stale = true;
             let lit_from = self.edges.as_ref().or_else(|| model.and_then(|scene| scene.edges.as_ref()));
             let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
@@ -2808,8 +2829,69 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions) {
+    /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
+    /// frame's passes: here only the see-through looks' placements are, to sort them. A frame
+    /// that moves bodies is culled here too, where their motions put the placements, and the GPU
+    /// cull is made again for the next frame that moves nothing.
+    fn cull(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        motions: &Motions,
+        edge_px: f32,
+    ) {
         self.cull_blocks(vp, motions);
+        if std::mem::take(&mut self.gpu_cull_stale) {
+            self.gpu_cull = None;
+            if motions.is_empty() {
+                if self.cull_kernel.is_none() && !self.cull_kernel_failed && !self.instanced.is_empty() {
+                    self.cull_kernel = gpu_cull::Kernel::new(device).map(Arc::new);
+                    self.cull_kernel_failed = self.cull_kernel.is_none();
+                }
+                if let (Some(kernel), Some(indirect)) = (self.cull_kernel.clone(), self.indirect.as_mut()) {
+                    self.gpu_cull = gpu_cull::GpuCull::new(device, kernel, &self.instanced, indirect, self.edges.as_mut());
+                }
+            }
+        }
+        if !motions.is_empty() {
+            // The cull reads the placements as the scene holds them, not where their motions put
+            // them: a frame that moves something is culled where it is drawn on the CPU, in
+            // [`Self::cull_placements`], and the cull is made again for the next frame that
+            // moves nothing.
+            let took_over = self.indirect.as_ref().is_some_and(|i| i.culls_on_gpu()) || self.edges.as_ref().is_some_and(|e| e.culls_on_gpu());
+            self.gpu_cull = None;
+            self.gpu_cull_stale = true;
+            if took_over {
+                // The buffers hold the cull's placements: write every draw's again, where its
+                // motion puts it.
+                for d in &mut self.instanced {
+                    d.shown = None;
+                    d.edges_shown = None;
+                }
+            }
+        }
+        let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
+        if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
+            g.run(queue, encoder, vp, size, changed, &self.instanced, indirect, self.edges.as_mut());
+            return;
+        }
+        if changed && let Some(indirect) = self.indirect.as_mut() {
+            indirect.write(device, queue, &self.instanced);
+        }
+        if edges_changed && let Some(edges) = self.edges.as_mut() {
+            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
+        }
+    }
+
+    /// [`Batches::cull`] on the CPU: the placements of each instanced draw in view, with their
+    /// levels (`shown`, `edges_shown`), those not drawn indirectly written to their levels'
+    /// buffers. With a GPU cull, only the draws it leaves (see-through), and no edges. Whether
+    /// the placements and the edges' placements changed.
+    fn cull_placements(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) -> (bool, bool) {
+        let gpu = self.gpu_cull.as_ref();
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         // A placement where its motion draws it: its rows, then the motion its own word names,
@@ -2829,7 +2911,10 @@ impl Batches {
         };
         let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
-            let edge_levels = if self.edges.is_some() { d.edges.clone() } else { None };
+            if gpu.is_some_and(|g| g.culls(d)) {
+                continue;
+            }
+            let edge_levels = if self.edges.is_some() && gpu.is_none() { d.edges.clone() } else { None };
             let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             // Each placement's corners go through the view once, for whether it is in view and
@@ -2844,7 +2929,7 @@ impl Batches {
                 }
                 let axes = if finer { placed.axes(size) } else { None };
                 if let (Some(list), Some(e)) = (edges_shown.as_mut(), edge_levels.as_ref()) {
-                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes))));
+                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes), edge_px)));
                 }
                 let level = if errors.len() > 1 { level_for(&errors, PlacedBox::scale_of(axes)) } else { 0 };
                 shown.push((i as u32, u8::try_from(level).unwrap_or(0)));
@@ -2893,12 +2978,7 @@ impl Batches {
             }
             d.shown = Some(shown);
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
-            indirect.write(device, queue, &self.instanced);
-        }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
-            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
-        }
+        (changed, edges_changed)
     }
 
     /// Draw the instanced placements of look `look` (only closed bodies' when `closed_only`):
@@ -3037,12 +3117,15 @@ struct Cut {
     /// ray comes into what the section keeps adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
     /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
     count: wgpu::RenderPipeline,
-    /// Where the count is above the base, the nearest back face past that point, by its true
-    /// depth, in its body's cut colour (the body the cut lies inside: the ray leaves it there),
-    /// hidden itself where the body reaches past another plane first.
+    /// Where the count is above the base, the nearest closed body's back face past that point,
+    /// by its true depth, in its body's cut colour (the body the cut lies inside: the ray leaves
+    /// it there), hidden itself where the body reaches past another plane first. An open body
+    /// is left out: its back face is no cut face, and a sheet inside a cut solid painted the
+    /// cap in its colour from one side only (#4258); `rest` leaves it out there too.
     fill: wgpu::RenderPipeline,
     /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
-    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
+    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728), from
+    /// the same closed bodies.
     cap: wgpu::RenderPipeline,
     /// Elsewhere, the faces as they are drawn without a section, pushed back by
     /// `FACE_BIAS` so their edges draw over them (#1434); a back face there is an open body's
@@ -3568,6 +3651,35 @@ pub fn depth_bias(reversed: bool, b: wgpu::DepthBiasState) -> wgpu::DepthBiasSta
     if reversed { wgpu::DepthBiasState { constant: -b.constant, slope_scale: -b.slope_scale, clamp: -b.clamp } } else { b }
 }
 
+/// `ds` with its constant depth bias taken off for the vertex shader to apply (`FACE_PUSH` in
+/// viewport.wgsl), and those steps (positive: away from the eye), where depth is reversed. A
+/// float buffer's constant bias counts steps at the triangle's largest depth, so a triangle
+/// reaching from near the eye (or cut by the near plane) to far away went back by a share of the
+/// depth range where it was near: about half a millimetre 20 mm from the eye, and the face behind
+/// it showed through (#21024). The shader takes the steps of each vertex's own depth instead.
+/// Other formats count steps evenly and keep the GPU's bias (0 steps).
+pub fn split_push(ds: Option<wgpu::DepthStencilState>) -> (Option<wgpu::DepthStencilState>, f64) {
+    match ds {
+        Some(d) if reversed_depth(Some(d.format)) && d.bias.constant != 0 => {
+            let steps = -f64::from(d.bias.constant);
+            (Some(wgpu::DepthStencilState { bias: wgpu::DepthBiasState { constant: 0, ..d.bias }, ..d }), steps)
+        }
+        ds => (ds, 0.0),
+    }
+}
+
+/// The vertex stage's options for a pipeline pushed `push[0].1` steps ([`split_push`]): the
+/// `FACE_PUSH` constant, or none at 0 (so a module without it can take them too).
+pub fn push_options<'a>(push: &'a [(&'static str, f64); 1]) -> wgpu::PipelineCompilationOptions<'a> {
+    let constants: &[(&str, f64)] = if push[0].1 == 0.0 { &[] } else { push };
+    wgpu::PipelineCompilationOptions { constants, ..Default::default() }
+}
+
+/// The `FACE_PUSH` constant for [`push_options`].
+pub fn face_push(steps: f64) -> [(&'static str, f64); 1] {
+    [("FACE_PUSH", steps)]
+}
+
 /// The depth of the far plane, which a depth buffer is cleared to.
 pub fn far_depth(reversed: bool) -> f32 {
     if reversed { 0.0 } else { 1.0 }
@@ -3732,10 +3844,12 @@ impl Renderer {
                         buf: wgpu::VertexBufferLayout<'static>,
                         ds: Option<wgpu::DepthStencilState>,
                         blend: Option<wgpu::BlendState>| {
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
-                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: Default::default() },
+                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: push_options(&push) },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                 depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
@@ -3901,6 +4015,8 @@ impl Renderer {
         // `colour`: whether the pipeline writes colour (the cap's depth pass writes none).
         let solid_writes = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
             let fs = source.fragment(fs);
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&solid_layout),
@@ -3912,7 +4028,7 @@ impl Renderer {
                         TriSource::Planned => &evaluated[..],
                         TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
                     },
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
                 depth_stencil: ds,
@@ -4111,6 +4227,8 @@ impl Renderer {
             )
         };
         let pbr = || {
+            let (instanced_depth, push) = split_push(opaque());
+            let push = face_push(push);
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
@@ -4121,10 +4239,10 @@ impl Renderer {
                         module: &module,
                         entry_point: Some("vs_pbr_inst"),
                         buffers: &[Some(shared_layout()), Some(instance_layout())],
-                        compilation_options: Default::default(),
+                        compilation_options: push_options(&push),
                     },
                     primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-                    depth_stencil: opaque(),
+                    depth_stencil: instanced_depth,
                     multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
@@ -4216,6 +4334,8 @@ impl Renderer {
                     immediate_size: 0,
                 });
                 let pipe_with = |label: &str, vs: &str, fs: &str, depth_stencil: Option<wgpu::DepthStencilState>, blend: Option<wgpu::BlendState>| {
+                    let (depth_stencil, push) = split_push(depth_stencil);
+                    let push = face_push(push);
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(label),
                         layout: Some(&layout),
@@ -4223,7 +4343,7 @@ impl Renderer {
                             module: &module,
                             entry_point: Some(vs),
                             buffers: &[Some(edges::instance_layout())],
-                            compilation_options: Default::default(),
+                            compilation_options: push_options(&push),
                         },
                         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                         depth_stencil,
@@ -4744,6 +4864,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     if let Some(ground) = &cb.ground {
         format!("{ground:?}").hash(&mut h);
     }
+    cb.edge_px.to_bits().hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4984,7 +5105,7 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px, &cb.motions);
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px);
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
         let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));
@@ -5227,7 +5348,7 @@ impl Renderer {
         pass.set_bind_group(1, &res.access_bind, &[]);
         pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
+        // `counting`: only closed bodies, for a section's crossing count, fill and cap ([`Cut`]).
         let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
             for d in b.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
                 pass.set_pipeline(p);
@@ -5291,11 +5412,12 @@ impl Renderer {
             (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(base)) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
-                // `counting`: the crossing count, which leaves open bodies out.
-                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, counting: bool| {
+                // `closed_only`: the crossing count, the fill and the cap, which leave open bodies
+                // out (an open body has no inside, so its back face is no cut face, #4258).
+                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, closed_only: bool| {
                     pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                     tris(pass, pick(cut), &m.tris);
-                    if counting {
+                    if closed_only {
                         for block in m.block_order.iter().filter_map(|k| m.blocks.get(k)).filter(|b| b.closed.is_some()) {
                             pass.set_pipeline(pick(cut));
                             block.draw_closed(pass, tally);
@@ -5304,11 +5426,11 @@ impl Renderer {
                         tris(pass, pick(cut), &m.open_tris);
                         block_class(pass, pick(cut), TriClass::Opaque);
                     }
-                    planned(pass, pick(cut_planned), m, counting);
-                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, counting);
+                    planned(pass, pick(cut_planned), m, closed_only);
+                    instanced(pass, pick(cut_instanced), pick(cut_flat), m, closed_only);
                     in_moving(pass, &|pass, mv| {
                         tris(pass, pick(cut), &mv.tris);
-                        if counting {
+                        if closed_only {
                             for block in mv.block_order.iter().filter_map(|k| mv.blocks.get(k)).filter(|b| b.closed.is_some()) {
                                 pass.set_pipeline(pick(cut));
                                 block.draw_closed(pass, tally);
@@ -5317,12 +5439,12 @@ impl Renderer {
                             tris(pass, pick(cut), &mv.open_tris);
                             blocks_of(pass, pick(cut), TriClass::Opaque, mv);
                         }
-                        planned(pass, pick(cut_planned), mv, counting);
-                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, counting);
+                        planned(pass, pick(cut_planned), mv, closed_only);
+                        instanced(pass, pick(cut_instanced), pick(cut_flat), mv, closed_only);
                     });
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
-                    if !counting {
+                    if !closed_only {
                         tris(pass, pick(cut), &pv.open_tris);
                     }
                 };
@@ -5331,8 +5453,8 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
                 tally.call();
                 all(pass, |c| &c.count, true);
-                all(pass, |c| &c.fill, false);
-                all(pass, |c| &c.cap, false);
+                all(pass, |c| &c.fill, true);
+                all(pass, |c| &c.cap, true);
                 all(pass, |c| &c.rest, false);
             }
             _ => {
@@ -6577,6 +6699,7 @@ mod tests {
             eye: [0.0; 4],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
         }
@@ -7300,6 +7423,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
@@ -7509,6 +7633,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa,
         }
@@ -7908,6 +8033,59 @@ mod glass_tests {
         let img = draw(2, segments, Vec::new());
         assert!(green(&img, ahead.0, ahead.1), "the bead ahead");
         assert!(!green(&img, below.0, below.1), "no wedge of bead below the eye");
+    }
+
+    /// An opaque face that reaches behind the eye still hides a face just behind it (#21024).
+    /// With reversed float depth the GPU counted a face's constant bias in steps of its largest
+    /// depth, which the near plane makes 1 for a face it cuts; a millimetre-near view (the near
+    /// plane at 1 µm) then pushed such a face back by a share of the depth range, and the face
+    /// behind (a box's bottom, seen from above, along its front's lower edge) showed through. The
+    /// push now follows each point's own depth.
+    #[test]
+    fn a_face_reaching_behind_the_eye_still_hides_the_face_behind_it() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        if !reversed_depth(Some(depth)) {
+            eprintln!("skipping: no float depth with stencil, so depth is not reversed here");
+            return;
+        }
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        // Looking along -z from the origin, the near plane at 1 µm as `Camera::clip_bounds` puts
+        // it when the model reaches past the eye.
+        let (near, far) = (0.001f32, 1000.0f32);
+        let (a, b) = (-far / (far - near), -far * near / (far - near));
+        let green_surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.1, 0.8, 0.1), 0.0, 0.6, 1.5).unwrap();
+        // The near floor drawn as a plain triangle and as a material (PBR) one: each kind of
+        // opaque face takes the push in its own vertex shader.
+        for pbr in [false, true] {
+            // A renderer of its own: one that drew the first scene keeps it (same frame key).
+            let mut renderer =
+                Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
+            let mut sc = GpuScene::default();
+            let (green, red) = (sc.color([0, 200, 0, 255]), sc.color([200, 0, 0, 255]));
+            // A floor at y = -1 running from ahead of the eye to behind it, and another 0.1%
+            // further along the view (y = -1.001) that stays ahead of it.
+            for p in [[-4.0, -1.0, -6.0], [4.0, -1.0, -6.0], [0.0, -1.0, 5.0]] {
+                if pbr {
+                    sc.pbr_tri(p, [0.0, 1.0, 0.0], green_surface);
+                } else {
+                    sc.tri(p, [0.0, 1.0, 0.0], green);
+                }
+            }
+            for p in [[-4.0, -1.001, -6.0], [4.0, -1.001, -6.0], [0.0, -1.001, -0.5]] {
+                sc.tri(p, [0.0, 1.0, 0.0], red);
+            }
+            let mut frame = test_frame(sc, 1.0);
+            frame.view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+            frame.eye = [0.0, 0.0, 0.0, 1.0];
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // Row 42 of the 64 by 64 picture, its middle column: the floor 3 units ahead.
+            let at = (42 * 64 + 32) * 4;
+            let p = img.get(at..at + 3).unwrap_or_default();
+            // The far floor is red; the near one green (a material floor shades dark here, the
+            // frame giving it no lights) and the background white: no red, and something drawn.
+            assert!(p.len() == 3 && p[0] < 40, "the near floor (pbr: {pbr}) hides the one behind it: {p:?}");
+        }
     }
 
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is
