@@ -110,6 +110,7 @@ crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:new_surface_faces cross,dot
+crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
 crates/doc/src/eval.rs:parallel_tapped_wall dot
@@ -551,8 +552,6 @@ crates/engine/src/cmd/sketch.rs:arc_center normalized
 crates/engine/src/cmd/sketch.rs:dimension_result atan2,cross,dot,normalized
 crates/engine/src/cmd/sketch.rs:edge_direction normalized
 crates/engine/src/cmd/sketch.rs:ellipse_half_axis cross,dot
-crates/engine/src/cmd/sketch.rs:face_contains cross,dot,normalized,triangles
-crates/engine/src/cmd/sketch.rs:face_triangles triangles
 crates/engine/src/cmd/sketch.rs:infer_at_start dot,normalized
 crates/engine/src/cmd/sketch.rs:polygon_edge normalized
 crates/engine/src/cmd/sketch.rs:rect_edge_center dot
@@ -582,7 +581,7 @@ crates/engine/src/cmd/sketch_drag.rs:Dragged::at dot
 crates/engine/src/cmd/sketch_drag.rs:LineGrab::new cross,dot
 crates/engine/src/cmd/sketch_drag.rs:drag_entity dot
 crates/engine/src/cmd/sketch_drag.rs:plan cross,normalized
-crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized,triangles
+crates/engine/src/cmd/sketch_face.rs:capture_impl dot,normalized
 crates/engine/src/cmd/sketch_freeform.rs:support_hits normalized
 crates/engine/src/cmd/sketch_inspect.rs:closest_on_triangle cross,dot
 crates/engine/src/cmd/sketch_inspect.rs:face_at closest_on_triangle,triangles
