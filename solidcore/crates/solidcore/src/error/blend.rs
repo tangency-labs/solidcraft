@@ -51,6 +51,7 @@ use super::{
     SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::blend::fillet_executive::NoRoomReason;
+use crate::blend::fillet_geom::p1::FilStatus;
 
 mod band;
 mod cliff;
@@ -58,6 +59,7 @@ mod corner;
 mod crease_trim;
 mod crossing;
 mod ease;
+mod input;
 mod keep;
 mod law_corner;
 mod no_room;
@@ -82,13 +84,16 @@ pub use crossing::CrossingInput;
 pub use ease::EaseGeometry;
 pub use ease::EaseInput;
 pub use ease::EaseStop;
+pub use input::BlendInput;
 pub use keep::KeepStop;
 pub use law_corner::LawCornerSearch;
 pub use no_room::no_room_class;
 pub use overflow::OverflowDrop;
 pub use overflow::OverflowInput;
 pub use removal::removal_class;
+pub use removal::RemovalInput;
 pub use removal::RemovalRefusal;
+pub use removal::RemovalStop;
 pub use rib::RibPoint;
 pub use section::SectionDegeneracy;
 pub use section::SectionInput;
@@ -204,10 +209,12 @@ pub enum BlendFailure {
         /// The edge.
         edge: crate::topology::EdgeId,
     },
-    /// A surface binding of the fillet insertion is resolved after its face's surface was
-    /// removed: a stale binding the caller kept past an edit of the body; the failure is at
-    /// the face. A check of the caller's input ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// A surface binding of the fillet insertion, or a fillet geometry's surface
+    /// transferred to a face of the caller's owner body
+    /// ([`crate::blend::fillet_geom::p1::FilletGeom::fillet_surface`]), is resolved after
+    /// its face's surface was removed: a stale binding the caller kept past an edit of the
+    /// body; the failure is at the face. A check of the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     BoundSurfaceRemoved,
     /// The face named for a chamfer's first size is neither of its edge's two faces; the
     /// failure is at the edge. A check of the caller's arguments
@@ -240,6 +247,15 @@ pub enum BlendFailure {
         start: f64,
         /// The rail curve's parameter at the end vertex.
         end: f64,
+    },
+    /// The fillet surface of a cliff does not cross the curve of the body's edge `edge` its
+    /// cliff vertex is classified to: the curve/surface intersection found no point within
+    /// `tolerance`. An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    CliffSurfaceMissesEdge {
+        /// The body's edge.
+        edge: crate::topology::EdgeId,
+        /// The intersection's tolerance.
+        tolerance: f64,
     },
     /// The interior section did not divide the periodic blend face. Status `SM_ERR`.
     /// Its class is [`ErrorKind::Failed`].
@@ -358,13 +374,13 @@ pub enum BlendFailure {
         /// The curve's kind, as its type string.
         kind: &'static str,
     },
-    /// A curve the step needs as a B-spline curve, the curve of fillet edge `edge` (`None`
-    /// where the step names no edge), is of kind `kind` (its type string), which is not of
+    /// A curve the step needs as a B-spline curve, a curve of edge `edge` (its 3D curve, or
+    /// a UV trim curve of one of its uses; `None` where the step names no edge), is of kind `kind` (its type string), which is not of
     /// a B-spline class. An unsupported kind ([`ErrorKind::Unsupported`]); status `SM_ERR`
     /// unless its site says otherwise (`SM_ERR_NULL_POINTER` where upstream dereferences
     /// the failed cast).
     CurveWithoutNet {
-        /// The fillet edge whose curve it is, where the step names one.
+        /// The edge whose curve (or edge use's UV trim curve) it is, where the step names one.
         edge: Option<crate::topology::EdgeId>,
         /// The curve's kind, as its type string.
         kind: &'static str,
@@ -507,6 +523,23 @@ pub enum BlendFailure {
         /// The second curve's index in the intersection.
         second: usize,
     },
+    /// A fillet edge matches none of the `candidates` edges of the stitched fillet B-rep: no
+    /// edge's midpoint lies on the fillet edge's curve, or near it, within the edges'
+    /// tolerance (valid models reach it, for example a chamfer as wide as its face). An empty
+    /// search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    FilletEdgeMatchesNoBrepEdge {
+        /// The edges of the fillet B-rep searched.
+        candidates: usize,
+    },
+    /// The closest-point drop of a fillet-by-fillet edge's end vertex (`at_end`: its end, else
+    /// its start) onto the edge's curve found no point within `tolerance`. An empty search
+    /// ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    FilletEndOffIntersectionCurve {
+        /// True for the edge's end vertex, false for its start.
+        at_end: bool,
+        /// The drop's tolerance.
+        tolerance: f64,
+    },
     /// A fillet end's start or end vertex (`at_end`) is classified to `class`, not to a
     /// side edge use (for example to a vertex of the body, where a rail ends exactly at
     /// one): no fillet end is built from a vertex that is not on a side edge. A missing
@@ -529,6 +562,25 @@ pub enum BlendFailure {
     /// caller builds need not have a corner; status `SM_ERR_NULL_POINTER` (upstream
     /// dereferences the corner).
     FilletVertexWithoutCorner,
+    /// Neither end vertex of a fillet-by-fillet edge was placed: their calculations returned
+    /// leaving the statuses `start` and `end`. The class is theirs
+    /// ([`unplaced_ends_class`]): a rail that meets no side edge use
+    /// ([`crate::blend::fillet_geom::p1::FilStatus::NoIntRailEu`]) is an empty search, a
+    /// solver that did not converge
+    /// ([`crate::blend::fillet_geom::p1::FilStatus::SolverNotConverge`]) is not converged,
+    /// and any other status is a defect. Status `SM_ERR`.
+    FilletXFilletEndsUnplaced {
+        /// The start vertex's status.
+        start: FilStatus,
+        /// The end vertex's status.
+        end: FilStatus,
+    },
+    /// The intersection of the two fillet surfaces of a fillet-by-fillet edge returned no
+    /// curve within `tolerance`. An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    FilletsMeetInNoCurve {
+        /// The intersection's tolerance.
+        tolerance: f64,
+    },
     /// The intersection of the two fillet surfaces of a fillet/fillet edge, from its
     /// processed end, failed: the intersection's error is kept as the cause and decides
     /// whether the failure is a defect or a refusal. A failed stage
@@ -547,6 +599,10 @@ pub enum BlendFailure {
     /// (upstream `AERN`, `SM_ERR_ASSERT_FAILURE`). A phrase cause
     /// ([`BlendFailure::is_phrase`]).
     Inconsistent(&'static str),
+    /// An input supplied by the blend routine's caller (a solver slot or the body's
+    /// topology or geometry) is not there: invalid input ([`ErrorKind::InvalidInput`]),
+    /// not a defect or refusal. Status `SM_ERR_NULL_POINTER`; not a phrase cause.
+    InputMissing(BlendInput),
     /// The 3D curve built between two rails' ends drops onto the surface of the face `face`
     /// as `curves` UV curves, not one: a curve that crosses a closed surface's seam or
     /// leaves the surface's domain has no one UV curve on it. Unsupported
@@ -836,6 +892,19 @@ pub enum BlendFailure {
         /// The station's surface parameter v.
         v: f64,
     },
+    /// The natural quadric read off a support surface is not that surface at the point:
+    /// its distance exceeds the tolerance or its normal turns from the surface's.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    QuadricReadbackMismatch {
+        /// The point's distance from the quadric.
+        distance: f64,
+        /// The largest distance allowed.
+        tolerance: f64,
+        /// The quadric normal dotted with the surface normal.
+        normal_dot: f64,
+        /// The smallest normal dot product allowed.
+        minimum_normal_dot: f64,
+    },
     /// The radius law of a round is not positive at `s`, where the section is built on it:
     /// a check on the caller's law ([`ErrorKind::InvalidInput`]), status `SM_ERR`.
     RadiusLawNotPositive {
@@ -890,10 +959,23 @@ pub enum BlendFailure {
         /// The rail.
         rail: crate::topology::EdgeId,
     },
+    /// A thing of the body a fillet removal reads lacks the topology link named
+    /// ([`RemovalInput`]). The removal reads the caller's body and the topology its own
+    /// edits leave alike, so the cause names what is missing and leaves the blame open, as
+    /// [`BlendFailure::EaseInputMissing`] does: status `SM_ERR_NULL_POINTER` (upstream
+    /// `NER`) and the kind of that status ([`ErrorKind::Missing`]), neither a defect nor a
+    /// refusal.
+    RemovalInputMissing(RemovalInput),
     /// A fillet removal refuses the face it is asked to remove, for the reason named
     /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
     /// Status `SM_ERR`.
     RemovalRefused(RemovalRefusal),
+    /// A fillet removal stops where a search or a drop finds nothing or stops, where the
+    /// geometry it reads gives it nothing to build on, or where an argument of its edits
+    /// does not hold ([`RemovalStop`] says which, with its kind and status: `SM_ERR`, or
+    /// `SM_ERR_NULL_POINTER` where upstream's `NER` returns it). A failed call it made is
+    /// kept as the cause.
+    RemovalStopped(RemovalStop),
     /// A tangent end rib on a face the certificate does not enclose still has a span whose
     /// midpoint is off the exact rib by more than the tolerance with `stations` stations,
     /// after `halvings` spans halved, when its station cap (1024 spans) ran out. Not within
@@ -1178,6 +1260,15 @@ pub enum BlendFailure {
     /// status are the cause's ([`TraceFailure::class`]; the status as each [`TraceFailure`]
     /// variant says).
     Trace(TraceFailure),
+    /// The trace of a fillet geometry's surface intersection, after every seam retry, did not
+    /// reach `missed` of its `points` rail-end points (the first is where it starts). An empty
+    /// search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    TraceMissesRailEnd {
+        /// The rail-end points after the first that the trace did not reach.
+        missed: usize,
+        /// The rail-end points.
+        points: usize,
+    },
     /// The collection of the faces the rails enclose reached past a rail (the trim leaks):
     /// the failure's site face, where the check names it, is the face it reached. A defect
     /// ([`ErrorKind::TrimLeaks`]).
@@ -1242,6 +1333,25 @@ pub enum BlendFailure {
     WeldNotBuilt(WeldGap),
 }
 
+/// The class of [`BlendFailure::FilletXFilletEndsUnplaced`], from the statuses its end
+/// vertices' calculations left: [`ErrorKind::NotFound`] where a rail met no side edge use
+/// ([`FilStatus::NoIntRailEu`]), else [`ErrorKind::NotConverged`] where a solver did not
+/// converge ([`FilStatus::SolverNotConverge`]), else [`ErrorKind::StageFailed`], a defect: a
+/// vertex calculation that returns leaves one of those two statuses when it does not place
+/// its vertex.
+#[must_use]
+pub const fn unplaced_ends_class(start: FilStatus, end: FilStatus) -> ErrorKind {
+    if matches!(start, FilStatus::NoIntRailEu) || matches!(end, FilStatus::NoIntRailEu) {
+        ErrorKind::NotFound
+    } else if matches!(start, FilStatus::SolverNotConverge)
+        || matches!(end, FilStatus::SolverNotConverge)
+    {
+        ErrorKind::NotConverged
+    } else {
+        ErrorKind::StageFailed
+    }
+}
+
 impl BlendFailure {
     /// The entity the failure names, if any: the entity of a
     /// [`BlendFailure::CornerInputInvalid`] where its step has one.
@@ -1275,6 +1385,7 @@ impl BlendFailure {
             Self::ChamferSizeInvalid => SM_ERR_INVALID_INPUT,
             Self::CliffInputMissing { .. } => SM_ERR_NULL_POINTER,
             Self::CliffRailEndsReversed { .. } => SM_ERR,
+            Self::CliffSurfaceMissesEdge { .. } => SM_ERR,
             Self::ClosedCliffWouldNotSplit { .. } => SM_ERR,
             Self::CornerCurvesDoNotMeet => SM_ERR,
             Self::CornerCurvesMeetMoreThanOnce { .. } => SM_ERR,
@@ -1313,12 +1424,17 @@ impl BlendFailure {
             Self::FaceWithoutSurface { .. } => SM_ERR_NULL_POINTER,
             Self::Failed(_) => SM_ERR,
             Self::FilletCrossesItself { .. } => SM_ERR,
+            Self::FilletEdgeMatchesNoBrepEdge { .. } => SM_ERR,
+            Self::FilletEndOffIntersectionCurve { .. } => SM_ERR,
             Self::FilletEndVertexOffSideEdge { .. } => SM_ERR,
             Self::FilletSetUpInvalid(_) => SM_ERR_NULL_POINTER,
             Self::FilletVertexWithoutCorner => SM_ERR_NULL_POINTER,
+            Self::FilletXFilletEndsUnplaced { .. } => SM_ERR,
+            Self::FilletsMeetInNoCurve { .. } => SM_ERR,
             Self::FilletsNotIntersected => SM_ERR,
             Self::GnSectionInvalid { .. } => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
+            Self::InputMissing(_) => SM_ERR_NULL_POINTER,
             Self::InterpolantDropsToCurves { .. } => SM_ERR,
             Self::IntersectionCurveHasNoUvCurve { .. } => SM_ERR,
             Self::IntersectionCurveNotBSpline { .. } => SM_ERR,
@@ -1359,6 +1475,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => SM_ERR,
             Self::PlaneCurveStepVanished { .. } => SM_ERR,
             Self::PlaneCurveTouches { .. } => SM_ERR,
+            Self::QuadricReadbackMismatch { .. } => SM_ERR,
             Self::RadiusLawNotPositive { .. } => SM_ERR,
             Self::RadiusTypeNotForEdges { .. } => SM_ERR_INVALID_INPUT,
             Self::RailCrossingNotConverged { .. } => SM_ERR,
@@ -1366,7 +1483,9 @@ impl BlendFailure {
             Self::RailEndNotDropped => SM_ERR,
             Self::RailMissesEndSurface { .. } => SM_ERR,
             Self::RailNotBlending { .. } => SM_ERR,
+            Self::RemovalInputMissing(_) => SM_ERR_NULL_POINTER,
             Self::RemovalRefused(_) => SM_ERR,
+            Self::RemovalStopped(stop) => stop.status(),
             Self::RibFitCap { .. } => SM_ERR,
             Self::RibPointNotDropped { .. } => SM_ERR,
             Self::RibStationNotSolved { .. } => SM_ERR,
@@ -1401,6 +1520,7 @@ impl BlendFailure {
             Self::TangentEndSingular { .. } => SM_ERR,
             Self::TargetNotGiven => SM_ERR_INVALID_INPUT,
             Self::Trace(t) => t.comparison_status(),
+            Self::TraceMissesRailEnd { .. } => SM_ERR,
             Self::TrimLoopDoesNotSeparate => SM_ERR,
             Self::TrimLoopOpen => SM_ERR,
             Self::UvCurveEndOffSurface { .. } => SM_ERR,
@@ -1437,6 +1557,7 @@ impl BlendFailure {
             Self::ChamferSizeInvalid => ErrorKind::InvalidInput,
             Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::CliffRailEndsReversed { .. } => ErrorKind::Unsupported,
+            Self::CliffSurfaceMissesEdge { .. } => ErrorKind::NotFound,
             Self::ClosedCliffWouldNotSplit { .. } => ErrorKind::Failed,
             Self::CornerCurvesDoNotMeet => ErrorKind::NotFound,
             Self::CornerCurvesMeetMoreThanOnce { .. } => ErrorKind::Unsupported,
@@ -1475,12 +1596,17 @@ impl BlendFailure {
             Self::FaceWithoutSurface { .. } => ErrorKind::InvalidInput,
             Self::Failed(_) => ErrorKind::of_status(self.comparison_status()),
             Self::FilletCrossesItself { .. } => ErrorKind::Unsupported,
+            Self::FilletEdgeMatchesNoBrepEdge { .. } => ErrorKind::NotFound,
+            Self::FilletEndOffIntersectionCurve { .. } => ErrorKind::NotFound,
             Self::FilletEndVertexOffSideEdge { .. } => ErrorKind::Unsupported,
             Self::FilletSetUpInvalid(_) => ErrorKind::InvalidInput,
             Self::FilletVertexWithoutCorner => ErrorKind::InvalidInput,
+            Self::FilletXFilletEndsUnplaced { start, end } => unplaced_ends_class(*start, *end),
+            Self::FilletsMeetInNoCurve { .. } => ErrorKind::NotFound,
             Self::FilletsNotIntersected => ErrorKind::Failed,
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
             Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::InputMissing(_) => ErrorKind::InvalidInput,
             Self::InterpolantDropsToCurves { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveHasNoUvCurve { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveNotBSpline { .. } => ErrorKind::Unsupported,
@@ -1521,6 +1647,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::PlaneCurveStepVanished { .. } => ErrorKind::StageFailed,
             Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
+            Self::QuadricReadbackMismatch { .. } => ErrorKind::NotWithinTolerance,
             Self::RadiusLawNotPositive { .. } => ErrorKind::InvalidInput,
             Self::RadiusTypeNotForEdges { .. } => ErrorKind::InvalidInput,
             Self::RailCrossingNotConverged { .. } => ErrorKind::NotConverged,
@@ -1528,7 +1655,9 @@ impl BlendFailure {
             Self::RailEndNotDropped => ErrorKind::Failed,
             Self::RailMissesEndSurface { .. } => ErrorKind::NotFound,
             Self::RailNotBlending { .. } => ErrorKind::InvalidInput,
+            Self::RemovalInputMissing(_) => ErrorKind::Missing,
             Self::RemovalRefused(reason) => removal_class(*reason),
+            Self::RemovalStopped(stop) => stop.class(),
             Self::RibFitCap { .. } => ErrorKind::NotWithinTolerance,
             Self::RibPointNotDropped { .. } => ErrorKind::StageFailed,
             Self::RibStationNotSolved { .. } => ErrorKind::StageFailed,
@@ -1563,6 +1692,7 @@ impl BlendFailure {
             Self::TangentEndSingular { .. } => ErrorKind::Unsupported,
             Self::TargetNotGiven => ErrorKind::InvalidInput,
             Self::Trace(t) => t.class(),
+            Self::TraceMissesRailEnd { .. } => ErrorKind::NotFound,
             Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
             Self::TrimLoopOpen => ErrorKind::TrimLeaks,
             Self::UvCurveEndOffSurface { .. } => ErrorKind::NotFound,
@@ -1612,6 +1742,7 @@ impl BlendFailure {
             Self::ChamferSizeInvalid => true,
             Self::CliffInputMissing { .. } => true,
             Self::CliffRailEndsReversed { .. } => true,
+            Self::CliffSurfaceMissesEdge { .. } => true,
             Self::ClosedCliffWouldNotSplit { .. } => true,
             Self::CornerCurvesDoNotMeet => true,
             Self::CornerCurvesMeetMoreThanOnce { .. } => true,
@@ -1650,12 +1781,17 @@ impl BlendFailure {
             Self::FaceWithoutSurface { .. } => true,
             Self::Failed(_) => true,
             Self::FilletCrossesItself { .. } => true,
+            Self::FilletEdgeMatchesNoBrepEdge { .. } => true,
+            Self::FilletEndOffIntersectionCurve { .. } => true,
             Self::FilletEndVertexOffSideEdge { .. } => true,
             Self::FilletSetUpInvalid(_) => true,
             Self::FilletVertexWithoutCorner => true,
+            Self::FilletXFilletEndsUnplaced { .. } => true,
+            Self::FilletsMeetInNoCurve { .. } => true,
             Self::FilletsNotIntersected => true,
             Self::GnSectionInvalid { .. } => true,
             Self::Inconsistent(_) => true,
+            Self::InputMissing(_) => true,
             Self::InterpolantDropsToCurves { .. } => true,
             Self::IntersectionCurveHasNoUvCurve { .. } => true,
             Self::IntersectionCurveNotBSpline { .. } => true,
@@ -1696,6 +1832,7 @@ impl BlendFailure {
             Self::PlaneCurveLeavesDomain { .. } => true,
             Self::PlaneCurveStepVanished { .. } => true,
             Self::PlaneCurveTouches { .. } => true,
+            Self::QuadricReadbackMismatch { .. } => true,
             Self::RadiusLawNotPositive { .. } => true,
             Self::RadiusTypeNotForEdges { .. } => true,
             Self::RailCrossingNotConverged { .. } => true,
@@ -1703,7 +1840,9 @@ impl BlendFailure {
             Self::RailEndNotDropped => true,
             Self::RailMissesEndSurface { .. } => true,
             Self::RailNotBlending { .. } => true,
+            Self::RemovalInputMissing(_) => true,
             Self::RemovalRefused(_) => true,
+            Self::RemovalStopped(_) => true,
             Self::RibFitCap { .. } => true,
             Self::RibPointNotDropped { .. } => true,
             Self::RibStationNotSolved { .. } => true,
@@ -1738,6 +1877,7 @@ impl BlendFailure {
             Self::TangentEndSingular { .. } => true,
             Self::TargetNotGiven => true,
             Self::Trace(_) => true,
+            Self::TraceMissesRailEnd { .. } => true,
             Self::TrimLoopDoesNotSeparate => true,
             Self::TrimLoopOpen => true,
             Self::UvCurveEndOffSurface { .. } => true,
@@ -1824,6 +1964,11 @@ impl core::fmt::Display for BlendFailure {
             Self::CliffRailEndsReversed { start, end } => write!(
                 f,
                 "{}: the cliff rail's start vertex drops onto its curve at {start}, past its end vertex at {end}: no reversed trim is built",
+                self.class()
+            ),
+            Self::CliffSurfaceMissesEdge { edge, tolerance } => write!(
+                f,
+                "{}: the cliff's fillet surface does not cross the edge {edge:?}'s curve within {tolerance}",
                 self.class()
             ),
             Self::ClosedCliffWouldNotSplit { face } => write!(
@@ -1987,6 +2132,17 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the offset surfaces' intersection curves {first} and {second} cross, so the fillet would cross itself",
                 self.class()
             ),
+            Self::FilletEdgeMatchesNoBrepEdge { candidates } => write!(
+                f,
+                "{}: the fillet edge matches none of the {candidates} edges of the fillet B-rep",
+                self.class()
+            ),
+            Self::FilletEndOffIntersectionCurve { at_end, tolerance } => write!(
+                f,
+                "{}: the fillet-by-fillet edge's {} vertex does not drop onto the edge's curve within {tolerance}",
+                self.class(),
+                if *at_end { "end" } else { "start" },
+            ),
             Self::FilletEndVertexOffSideEdge { at_end, class } => write!(
                 f,
                 "{}: the fillet end's {} vertex is classified to {class:?}, not to a side edge use: no fillet end is built there",
@@ -1997,6 +2153,16 @@ impl core::fmt::Display for BlendFailure {
             Self::FilletVertexWithoutCorner => write!(
                 f,
                 "{}: the fillet vertex has no fillet corner",
+                self.class()
+            ),
+            Self::FilletXFilletEndsUnplaced { start, end } => write!(
+                f,
+                "{}: neither end vertex of the fillet-by-fillet edge is placed (start {start:?}, end {end:?})",
+                self.class()
+            ),
+            Self::FilletsMeetInNoCurve { tolerance } => write!(
+                f,
+                "{}: the two fillet surfaces' intersection found no curve within {tolerance}",
                 self.class()
             ),
             Self::FilletsNotIntersected => write!(
@@ -2010,6 +2176,7 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
+            Self::InputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::InterpolantDropsToCurves { face, curves } => write!(
                 f,
                 "{}: the curve between the rails' ends drops onto face {face:?} as {curves} UV curves, not one",
@@ -2187,6 +2354,15 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the surface touches the plane at (u, v) = ({u}, {v}): the crossing has no direction",
                 self.class()
             ),
+            Self::QuadricReadbackMismatch {
+                distance,
+                tolerance,
+                normal_dot,
+                minimum_normal_dot,
+            } => write!(
+                f,
+                "the quadric read off the support surface does not match it: distance {distance} (tolerance {tolerance}), normal dot {normal_dot} (minimum {minimum_normal_dot})"
+            ),
             Self::RadiusLawNotPositive { s, radius } => write!(
                 f,
                 "{}: the radius law is {radius} at s = {s}, not positive",
@@ -2223,7 +2399,9 @@ impl core::fmt::Display for BlendFailure {
                 self.class(),
                 rail.index()
             ),
+            Self::RemovalInputMissing(input) => write!(f, "{}: {}", self.class(), input.what()),
             Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::RemovalStopped(stop) => write!(f, "{}: {}", self.class(), stop.what()),
             Self::RibFitCap { stations, halvings } => write!(
                 f,
                 "{}: the tangent end rib is still off the exact rib by more than the tolerance with {stations} stations after {halvings} spans halved",
@@ -2417,6 +2595,11 @@ impl core::fmt::Display for BlendFailure {
                 write!(f, "{}: the fillet has no target body", self.class())
             }
             Self::Trace(t) => write!(f, "{}: {t}", t.class()),
+            Self::TraceMissesRailEnd { missed, points } => write!(
+                f,
+                "{}: the fillet surface's trace missed {missed} of its {points} rail-end points",
+                self.class()
+            ),
             Self::TrimLoopDoesNotSeparate => {
                 write!(
                     f,
@@ -2918,6 +3101,71 @@ mod tests {
             assert_eq!(e.sized(), class.sized(), "{cause:?}");
             assert!(!e.is_port_failure(), "{cause:?}");
         }
+    }
+
+    #[test]
+    fn missing_blend_inputs_are_invalid_inputs_with_the_null_pointer_status() {
+        use crate::topology::{EdgeId, EdgeuseId};
+        let cases = [
+            (
+                BlendInput::SolverEdgeuse { rail: 0 },
+                "the solver's edge use on rail 0 is missing",
+            ),
+            (
+                BlendInput::EdgeuseEdge {
+                    edgeuse: EdgeuseId::from_index(4),
+                },
+                "the edge use's edge (edge use 4) is missing",
+            ),
+            (
+                BlendInput::EdgeCurve {
+                    edge: EdgeId::from_index(7),
+                },
+                "the edge's evaluation curve (edge 7) is missing",
+            ),
+            (
+                BlendInput::SupportSurface { rail: 1 },
+                "the solver's support surface on rail 1 is missing",
+            ),
+            (
+                BlendInput::SurfaceGenerator,
+                "the solver's surface generator is missing",
+            ),
+        ];
+        for (input, message) in cases {
+            let cause = BlendFailure::InputMissing(input);
+            assert_eq!(cause.class(), ErrorKind::InvalidInput);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::op", cause);
+            assert_eq!(e.kind(), ErrorKind::InvalidInput);
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+            assert_eq!(e.blend_failure(), Some(&cause));
+            assert_eq!(e.to_string(), format!("blend::op: {message}"));
+        }
+    }
+
+    #[test]
+    fn a_quadric_readback_mismatch_names_its_measurements_and_keeps_sm_err() {
+        let cause = BlendFailure::QuadricReadbackMismatch {
+            distance: 0.25,
+            tolerance: 0.01,
+            normal_dot: 0.9,
+            minimum_normal_dot: 0.99,
+        };
+        assert_eq!(cause.class(), ErrorKind::NotWithinTolerance);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal() && !e.sized());
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(
+            e.to_string(),
+            "blend::op: the quadric read off the support surface does not match it: distance 0.25 (tolerance 0.01), normal dot 0.9 (minimum 0.99)"
+        );
     }
 
     #[test]
@@ -3496,6 +3744,128 @@ mod tests {
             assert_eq!(super::super::upstream_status(&e), Some(status), "{cause:?}");
             assert!(!e.is_defect() && !e.is_refusal() && !e.sized(), "{cause:?}");
             assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+        }
+    }
+
+    /// A named cause of the fillet geometry's parts 1 and 3: its class, its status, whether it
+    /// is a defect, and its message.
+    fn assert_fillet_geom_cause(
+        cause: BlendFailure,
+        class: ErrorKind,
+        status: i32,
+        defect: bool,
+        message: &str,
+    ) {
+        assert_eq!(cause.class(), class);
+        assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), class);
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.upstream_status(), Some(status));
+        assert_eq!(e.is_defect(), defect);
+        assert!(!e.is_refusal() && !e.sized());
+        assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+    }
+
+    #[test]
+    fn the_fillet_geometry_searches_and_kinds_are_named() {
+        use crate::topology::{EdgeId, FaceId};
+        let edge = EdgeId::from_index(4);
+        let face = FaceId::from_index(6);
+        assert_fillet_geom_cause(
+            BlendFailure::CliffSurfaceMissesEdge {
+                edge,
+                tolerance: 0.25,
+            },
+            ErrorKind::NotFound,
+            SM_ERR,
+            false,
+            &format!(
+                "the cliff's fillet surface does not cross the edge {edge:?}'s curve within 0.25"
+            ),
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::FilletEdgeMatchesNoBrepEdge { candidates: 3 },
+            ErrorKind::NotFound,
+            SM_ERR,
+            false,
+            "the fillet edge matches none of the 3 edges of the fillet B-rep",
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::MateFaceSurfaceNotBSpline {
+                face,
+                kind: "SmOffsetSurface_TYPE",
+            },
+            ErrorKind::Unsupported,
+            SM_ERR_NULL_POINTER,
+            false,
+            &format!("the face {face:?} has a SmOffsetSurface_TYPE surface, which is not of a B-spline class: no point or curve is built on it"),
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::RailCrossingNotConverged { face },
+            ErrorKind::NotConverged,
+            SM_ERR,
+            false,
+            &format!("the local solve of the two rails' crossing on the face {face:?} stopped without finding it"),
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::FilletsMeetInNoCurve { tolerance: 0.5 },
+            ErrorKind::NotFound,
+            SM_ERR,
+            false,
+            "the two fillet surfaces' intersection found no curve within 0.5",
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::FilletEndOffIntersectionCurve {
+                at_end: true,
+                tolerance: 0.5,
+            },
+            ErrorKind::NotFound,
+            SM_ERR,
+            false,
+            "the fillet-by-fillet edge's end vertex does not drop onto the edge's curve within 0.5",
+        );
+        assert_fillet_geom_cause(
+            BlendFailure::TraceMissesRailEnd {
+                missed: 1,
+                points: 4,
+            },
+            ErrorKind::NotFound,
+            SM_ERR,
+            false,
+            "the fillet surface's trace missed 1 of its 4 rail-end points",
+        );
+    }
+
+    /// A fillet-by-fillet edge with neither end placed takes its class from the statuses its
+    /// end vertices were left with: no side edge use met first, then a solver that did not
+    /// converge, else a defect.
+    #[test]
+    fn unplaced_fillet_by_fillet_ends_take_their_vertices_class() {
+        use FilStatus as S;
+        for (start, end, class, defect) in [
+            (S::NoIntRailEu, S::Unprocessed, ErrorKind::NotFound, false),
+            (
+                S::SolverNotConverge,
+                S::NoIntRailEu,
+                ErrorKind::NotFound,
+                false,
+            ),
+            (
+                S::Unprocessed,
+                S::SolverNotConverge,
+                ErrorKind::NotConverged,
+                false,
+            ),
+            (S::Unprocessed, S::Failure, ErrorKind::StageFailed, true),
+        ] {
+            assert_fillet_geom_cause(
+                BlendFailure::FilletXFilletEndsUnplaced { start, end },
+                class,
+                SM_ERR,
+                defect,
+                &format!("neither end vertex of the fillet-by-fillet edge is placed (start {start:?}, end {end:?})"),
+            );
         }
     }
 
@@ -4521,6 +4891,191 @@ mod tests {
         );
     }
 
+    /// #19826: each cause the fillet removal names is no phrase, replaces the status it
+    /// keeps, has its class (a missing link of the topology it walks is `Missing`; a stop
+    /// has its stop's kind), is neither a defect nor a refusal, and is worded with its
+    /// class.
+    #[test]
+    fn the_removal_causes_keep_their_status_and_class() {
+        let mut rows = Vec::new();
+        for input in [
+            RemovalInput::EdgeUseFace,
+            RemovalInput::EdgeUseLoopUse,
+            RemovalInput::EdgeUseMate,
+            RemovalInput::EdgeUseNeighbour,
+            RemovalInput::EdgeUseOnFace,
+            RemovalInput::EdgeUseRadial,
+            RemovalInput::EdgeUseVertexUse,
+            RemovalInput::FaceToDelete,
+            RemovalInput::PrimaryEdgeUse,
+            RemovalInput::ShellRegion,
+            RemovalInput::SideEdge,
+            RemovalInput::VertexUseOnFace,
+        ] {
+            rows.push((
+                BlendFailure::RemovalInputMissing(input),
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ));
+        }
+        for (stop, class, status) in [
+            (RemovalStop::CornerNotSolved, ErrorKind::NotFound, SM_ERR),
+            (
+                RemovalStop::CornerSurfacesApart,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::CurveNotExtended,
+                ErrorKind::Degenerate,
+                SM_ERR_NULL_POINTER,
+            ),
+            (RemovalStop::EdgeNotOnFace, ErrorKind::InvalidInput, SM_ERR),
+            (
+                RemovalStop::EdgeToDeleteNotLamina,
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::ExtendedSupportNotRecognised,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::ExtensionDeviates,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (RemovalStop::FarVertexDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::FarVertexDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::FarVertexOffSideEdge,
+                ErrorKind::NotWithinTolerance,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::GrownSurfaceNotBSpline,
+                ErrorKind::Unsupported,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::NoCertifiedBox,
+                ErrorKind::Unsupported,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::NoSameUseOnFace,
+                ErrorKind::InvalidInput,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::RailDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (RemovalStop::RunOnDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::RunOnDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::RunOnEndHasNoSpeed,
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamContinuationNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamCrossingNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SeamParameterNotFinite,
+                ErrorKind::Degenerate,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SharpCurveNotDecided,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SharpDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (RemovalStop::SideEdgeDropFailed, ErrorKind::Failed, SM_ERR),
+            (
+                RemovalStop::SideEdgeDropStopped,
+                ErrorKind::NotConverged,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::SideExtensionNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::TangentIntersectionNotFound,
+                ErrorKind::NotFound,
+                SM_ERR,
+            ),
+            (
+                RemovalStop::UvTrimNotMade,
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::VertexNotGiven,
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                RemovalStop::VertexNotOnEdge,
+                ErrorKind::InvalidInput,
+                SM_ERR_NULL_POINTER,
+            ),
+        ] {
+            assert_eq!(stop.class(), class, "{stop:?}");
+            assert_eq!(stop.status(), status, "{stop:?}");
+            rows.push((BlendFailure::RemovalStopped(stop), class, status));
+        }
+        for (cause, class, status) in rows {
+            assert!(!cause.is_phrase(), "{cause:?}");
+            assert!(cause.replaces_upstream_status(), "{cause:?}");
+            assert_eq!(cause.class(), class, "{cause:?}");
+            assert_eq!(cause.comparison_status(), status, "{cause:?}");
+            let text = cause.to_string();
+            assert!(text.starts_with(&format!("{class}: ")), "{text}");
+            let error = SolidError::blend("blend::op", cause);
+            assert_eq!(error.kind(), class, "{error:?}");
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+            assert!(!error.is_refusal(), "{error:?}");
+        }
+        assert_eq!(
+            BlendFailure::RemovalStopped(RemovalStop::CornerNotSolved).to_string(),
+            "not_found: the end and tangent surfaces' intersection finds no new corner"
+        );
+        let refusal = BlendFailure::RemovalRefused(RemovalRefusal::EndEdgeMissesTangentEdges);
+        assert_eq!(refusal.class(), ErrorKind::NotARemovableFillet);
+        assert_eq!(refusal.comparison_status(), SM_ERR);
+    }
+
     /// #19825: each cause the overflows name is no phrase, replaces the status it
     /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
     /// the overflow's helpers read the caller's body and the executive's sheet alike), and
@@ -4767,6 +5322,7 @@ mod tests {
             ("blend/crease_trim.rs", include_str!("blend/crease_trim.rs")),
             ("blend/crossing.rs", include_str!("blend/crossing.rs")),
             ("blend/ease.rs", include_str!("blend/ease.rs")),
+            ("blend/input.rs", include_str!("blend/input.rs")),
             ("blend/keep.rs", include_str!("blend/keep.rs")),
             ("blend/law_corner.rs", include_str!("blend/law_corner.rs")),
             ("blend/no_room.rs", include_str!("blend/no_room.rs")),

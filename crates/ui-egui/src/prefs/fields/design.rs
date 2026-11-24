@@ -82,6 +82,12 @@ macro_rules! design_preferences {
             /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
             /// or set to one this version doesn't have for a part).
             part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
+            /// Components pasted from another design (tab) go to the origin of the component they are
+            /// pasted into, the first one's origin on it and the others kept where they are from it,
+            /// each one's contents where they are from its own origin; a whole design copied and pasted
+            /// as a linked component goes there too (#17621). Off: copied components go where they were
+            /// in the world in their design, and a copied design under the pointer, as before.
+            paste_components_at_origin: bool = false, PAGE_DESIGN => check_id_help("prefs.paste_components_at_origin", "prefs.paste_components_at_origin_help");
             /// Reapply a file's stand-up answer when its original bytes have not changed.
             remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
             /// Reopen an unchanged CAD import from the existing saved-design model cache.
