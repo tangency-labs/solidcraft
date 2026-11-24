@@ -1186,7 +1186,7 @@ fn status(r: solidcore::Result<()>) -> Result<f64, solidcore::SolidError> {
     match r {
         Ok(()) => Ok(1000.0),
         Err(e) if e.is_unported() => Err(e),
-        Err(err) if solidcore::error::upstream_status(&err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+        Err(err) if crate::output::recorded_status(&err).is_some() => Ok(f64::from(crate::output::recorded_status(&err).unwrap_or(-1))),
         Err(e) => Err(e),
     }
 }

@@ -1097,7 +1097,7 @@ pub fn point_3d_classify_at(
     let mut lease = FaceSurfaceCacheGuard(match face_surface_cache(k, b, f) {
         Ok(lease) => Some(lease),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER) => {
+        Err(e) if e.sm_status() == Some(crate::error::SM_ERR_NULL_POINTER) => {
             return Err(SolidError::invalid_input(OP_POINT, "face without surface"));
         }
         Err(_) => None,

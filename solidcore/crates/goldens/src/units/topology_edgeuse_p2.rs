@@ -474,7 +474,7 @@ fn run_rust_op(
             });
             let code = match status {
                 Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Err(up_err) if crate::output::recorded_status(&up_err).is_some() => Ok(f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1))),
                 Err(e) => Err(e),
             };
             code.map(|c| {
@@ -489,7 +489,7 @@ fn run_rust_op(
         OpIn::Rebuild { .. } => {
             let status = match eu2::rebuild_uv_trim_curve(&k, b, eu) {
                 Ok(()) => Ok(0.0),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                Err(up_err) if crate::output::recorded_status(&up_err).is_some() => Ok(f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1))),
                 Err(e) => Err(e),
             };
             status.and_then(|s| {

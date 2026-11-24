@@ -651,7 +651,7 @@ pub(crate) fn make_face_topology_attempt_with_state(
         options,
     );
     if let Err(error) = &attempt.status {
-        if error.upstream_status().is_none() {
+        if error.sm_status().is_none() || error.is_nurbs_failure() {
             return Err(error.clone());
         }
     }
@@ -1312,7 +1312,7 @@ fn find_sector(
             )?;
         }
         // the status is ignored
-        Err(e) if e.upstream_status().is_some() => {}
+        Err(e) if e.sm_status().is_some() && !e.is_nurbs_failure() => {}
         Err(error) => return Err(error),
     }
 
@@ -1481,7 +1481,7 @@ fn finish_split_attempt(
 ) -> Result<RegionSplitAttempt> {
     match status {
         Ok(()) => Ok(attempt),
-        Err(error) if error.upstream_status().is_some() => {
+        Err(error) if error.sm_status().is_some() && !error.is_nurbs_failure() => {
             attempt.status = Err(error);
             Ok(attempt)
         }

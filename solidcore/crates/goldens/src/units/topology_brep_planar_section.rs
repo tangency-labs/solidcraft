@@ -135,7 +135,7 @@ fn path(i: &Inputs) -> Result<String, HarnessError> {
 /// The status code of a section call (`SM_SUCCESS` is `0`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::output::recorded_status(up_err).is_some() => Some(f64::from(crate::output::recorded_status(up_err).unwrap_or(-1))),
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }

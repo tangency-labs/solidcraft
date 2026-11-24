@@ -421,7 +421,7 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
+        err if crate::output::recorded_status(err).is_some() => f64::from(crate::output::recorded_status(err).unwrap_or(-1)),
         _ => -1.0,
     }
 }

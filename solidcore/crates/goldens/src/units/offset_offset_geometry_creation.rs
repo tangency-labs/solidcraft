@@ -1590,8 +1590,8 @@ fn put_curve(out: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), HarnessError
 /// The upstream status code of an error the surface samples report.
 fn status_code(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -2171,8 +2171,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-            o.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)));
+        Err(e) if crate::output::recorded_status(&e).is_some() => {
+            o.push(f64::from(crate::output::recorded_status(&e).unwrap_or(-1)));
             Ok(None)
         }
         Err(SolidError::InvalidInput {

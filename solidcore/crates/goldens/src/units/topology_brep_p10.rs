@@ -236,8 +236,8 @@ fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> 
 /// Upstream status of a Rust error: the guard's `-2` for `InvalidInput`.
 fn status(e: &SolidError) -> i64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            i64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => -2,
         _ => -1,

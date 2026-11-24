@@ -1487,7 +1487,7 @@ fn status_of(e: &SolidError) -> f64 {
         // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
             && e.blend_failure().is_some()
-            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
+            && crate::output::recorded_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }

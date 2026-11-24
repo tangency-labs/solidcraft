@@ -461,8 +461,8 @@ fn put_samples(c: &SmCurve, out: &mut Vec<f64>) -> Result<(), SolidError> {
     for k in 0..=2u8 {
         match c.evaluate_point(&crate::runner_kernel(), ivl.evaluate(f64::from(k) / 2.0)) {
             Ok(p) => out.extend([0.0, p.x, p.y, p.z]),
-            Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                out.extend([f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            Err(e) if crate::output::recorded_status(&e).is_some() => {
+                out.extend([f64::from(crate::output::recorded_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
             }
             Err(e) => return Err(e),
         }
@@ -529,7 +529,7 @@ fn status_of(e: SolidError) -> Result<Result<i32, Output>, HarnessError> {
         return Ok(Err(o));
     }
     match e {
-        e if solidcore::error::upstream_status(&e).is_some() => Ok(Ok(solidcore::error::upstream_status(&e).unwrap_or(-1))),
+        e if crate::output::recorded_status(&e).is_some() => Ok(Ok(crate::output::recorded_status(&e).unwrap_or(-1))),
         e => Err(harness(format!("rust: {e}"))),
     }
 }

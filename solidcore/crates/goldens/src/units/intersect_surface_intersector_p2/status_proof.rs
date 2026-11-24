@@ -18,7 +18,7 @@ use crate::case::{repo_root, CaseContext};
 fn class(e: &SolidError) -> String {
     let status = match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        e => solidcore::error::nurbs::upstream_status(e).unwrap_or(-1),
+        e => crate::output::recorded_status(e).unwrap_or(-1),
     };
     match e.failure() {
         Some(f) => {

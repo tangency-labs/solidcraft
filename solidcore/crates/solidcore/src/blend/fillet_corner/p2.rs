@@ -932,7 +932,9 @@ impl FilletCorner {
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: no surface
             // was added, so they read as FALSE (upstream reads TRUE; WR-254). A
             // certificate past its work budget carries a status but is work given up.
-            Err(e) if e.upstream_status().is_some() && !e.is_not_certified() => Ok(false),
+            Err(e) if e.sm_status().is_some() && !e.is_nurbs_failure() && !e.is_not_certified() => {
+                Ok(false)
+            }
             // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every error
             // whose `upstream_status()` is `None` (`NotFound`, `Degenerate`, ...): no
             // surface was added either, and none of them is an upstream FALSE to patch

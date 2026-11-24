@@ -79,8 +79,7 @@ const OP: &str = "heal::heal_data::p1";
 /// [`SolidError::NotFound`] propagate.
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
-        Ok(()) => Ok(()),
-        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
+        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::Failed(_)) => Ok(()),
         Err(e) => Err(e),
     }
 }

@@ -639,7 +639,7 @@ impl Constructor {
         uv_domain: Extent2d,
     ) -> Result<(), SolidError> {
         const OP: &str = "difftest::brep_validation::set_face_surface";
-        let face = need(self.face, OP, "SetFaceSurface", ConstructorPart::Face)?;
+        let face = need(self.face, OP, ConstructorCall::SetFaceSurface, ConstructorPart::Face)?;
         surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
         let f = b.face_mut(face)?;
         f.surface = Some(surface);

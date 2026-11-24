@@ -68,7 +68,7 @@ fn cclosest(o: &mut Vec<f64>, p: api::CurveClosestPoint) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
-        e => solidcore::error::upstream_status(e).map_or(-1., f64::from),
+        e => crate::output::recorded_status(e).map_or(-1., f64::from),
     }
 }
 fn output(op: i32, r: Result<Vec<f64>>) -> Output {

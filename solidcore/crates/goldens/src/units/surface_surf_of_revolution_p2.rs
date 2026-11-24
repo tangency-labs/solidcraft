@@ -61,8 +61,8 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 /// (where upstream returns it), `-1` for one upstream cannot return.
 fn status(e: &solidcore::SolidError) -> f64 {
     match e {
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,

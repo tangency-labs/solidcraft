@@ -241,7 +241,7 @@ impl From<HarnessError> for Fail {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
+        e => crate::output::recorded_status(e).map_or(-1.0, f64::from),
     }
 }
 

@@ -59,6 +59,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{keeps, op_err, solve, Continuity, Extended, Local, Made, H, OP, REL};
+use crate::blend::fillet_section::certificate::is_foot_past_domain_end;
 use crate::blend::fillet_section::continuation::{
     growth, net_weights, section_degree, section_weight_range,
 };
@@ -285,7 +286,13 @@ fn along(
             let span = match span_of_definition(k, &next, idx, target) {
                 Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
                 Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
-                Err(e) if e.upstream_status().is_some() => return Ok(None),
+                Err(e)
+                    if e.sm_status().is_some()
+                        && !e.is_nurbs_failure()
+                        && !is_foot_past_domain_end(&e) =>
+                {
+                    return Ok(None)
+                }
                 Err(e) => return Err(e),
             };
             let length = (y - x) / rate;

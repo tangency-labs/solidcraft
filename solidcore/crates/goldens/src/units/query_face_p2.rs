@@ -925,7 +925,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 };
                 let status = match qf::point_classify(&k, b, f, uv, &mut pc, opts) {
                     Ok(()) => 0.0,
-                    Err(e) if solidcore::error::upstream_status(&e).is_some() => f64::from(solidcore::error::upstream_status(&e).unwrap_or_default()),
+                    Err(e) if crate::output::recorded_status(&e).is_some() => f64::from(crate::output::recorded_status(&e).unwrap_or_default()),
                     Err(e) => return Ok(rust_err(&e)),
                 };
                 last = put_pc(
@@ -992,8 +992,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             // SmBSplineCurve::CreateLineSegment, as the shim
             let line = match BSplineCurve::create_line_segment(u64::from(*dim), p, q) {
                 Ok(line) => line,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    let code = solidcore::error::upstream_status(&e).unwrap_or_default();
+                Err(e) if crate::output::recorded_status(&e).is_some() => {
+                    let code = crate::output::recorded_status(&e).unwrap_or_default();
                     return Ok(
                         Output::new().values("curve_classification", vec![-3.0, f64::from(code)])
                     )
@@ -1011,7 +1011,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 &k, b, f, &objects, *do_pc, &mut cc, *big_gaps, *check3d, true,
             ) {
                 Ok(modified) => (0.0, modified),
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => (f64::from(solidcore::error::upstream_status(&e).unwrap_or_default()), false),
+                Err(e) if crate::output::recorded_status(&e).is_some() => (f64::from(crate::output::recorded_status(&e).unwrap_or_default()), false),
                 Err(e) => return Ok(rust_err(&e)),
             };
             let mut o = vec![status, flag(modified), cc.size() as f64];

@@ -546,12 +546,9 @@ fn keep_seam_side(
 
 /// The status upstream would store for a failed callee (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
-    if let Some(code) = e.upstream_status() {
-        return code;
-    }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        _ => SM_ERR,
+        _ => e.sm_status().unwrap_or(SM_ERR),
     }
 }
 
@@ -1121,7 +1118,12 @@ impl DropPt {
             // A larger correction rejects this candidate without moving the endpoint.
             match start.check_seam_jump(k, surface, srf_closure, approx_tol_3d, end) {
                 Ok(()) => {}
-                Err(e) if e.upstream_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
+                Err(e)
+                    if matches!(
+                        e.intersect_failure(),
+                        Some(IntersectFailure::SeamJumpNotSnapped)
+                    ) =>
+                {
                     return Ok(SM_ERR_OUTSIDE_OF_DOMAIN)
                 }
                 Err(e) => return Err(e),

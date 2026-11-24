@@ -965,6 +965,8 @@ pub enum ConstructorCall {
     EndShell,
     /// `SetEdgeCurve`.
     SetEdgeCurve,
+    /// `SetFaceSurface`.
+    SetFaceSurface,
     /// `SetLimits`.
     SetLimits,
     /// `StartAndEndSingleVertexLoop`.
@@ -993,6 +995,7 @@ impl core::fmt::Display for ConstructorCall {
             Self::EndRegion => "EndRegion",
             Self::EndShell => "EndShell",
             Self::SetEdgeCurve => "SetEdgeCurve",
+            Self::SetFaceSurface => "SetFaceSurface",
             Self::SetLimits => "SetLimits",
             Self::StartAndEndSingleVertexLoop => "StartAndEndSingleVertexLoop",
             Self::StartBrep => "StartBrep",

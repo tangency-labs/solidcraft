@@ -926,7 +926,7 @@ fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
             dz,
         );
         if let Err(error) = made {
-            let code = solidcore::error::upstream_status(&error)
+            let code = crate::output::recorded_status(&error)
                 .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
             return Ok(Some(
                 Output::rejected(format!("{side} box refused by its constructor (status {code})"))

@@ -683,7 +683,7 @@ fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(super) fn status(e: &SolidError) -> f64 {
-    solidcore::error::nurbs::upstream_status(e).map_or(-1.0, f64::from)
+    crate::output::recorded_status(e).map_or(-1.0, f64::from)
 }
 
 /// A Rust failure: deferred for `Unported`, a harness error otherwise.

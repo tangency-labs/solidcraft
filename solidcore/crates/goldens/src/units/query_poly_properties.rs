@@ -63,7 +63,7 @@ fn output(flat: Vec<f64>) -> Output {
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
+        e if crate::output::recorded_status(e).is_some() => crate::output::recorded_status(e).map_or(-1.0, f64::from),
         // SM_ERR_INVALID_INPUT
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,

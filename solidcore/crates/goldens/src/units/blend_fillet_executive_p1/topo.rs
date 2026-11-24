@@ -75,8 +75,8 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                e if solidcore::error::upstream_status(&e).is_some() => {
-                    f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))
+                e if crate::output::recorded_status(&e).is_some() => {
+                    f64::from(crate::output::recorded_status(&e).unwrap_or(-1))
                 }
                 other => return Err(err(&format!("rust: {other}"))),
             }

@@ -234,7 +234,7 @@ impl From<HarnessError> for RunError {
 fn status(r: Result<(), SolidError>) -> Result<i64, RunError> {
     match r {
         Ok(()) => Ok(0),
-        Err(err) if solidcore::error::upstream_status(&err).is_some() => Ok(i64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+        Err(err) if crate::output::recorded_status(&err).is_some() => Ok(i64::from(crate::output::recorded_status(&err).unwrap_or(-1))),
         Err(e) => Err(RunError::Rust(e)),
     }
 }

@@ -340,7 +340,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(e) => {
             // a status answer is recorded by its operation and status, as `Upstream` printed
             // it, so a B-spline failure's own wording does not move the row
-            let text = match solidcore::error::nurbs::upstream_status(&e) {
+            let text = match crate::output::recorded_status(&e) {
                 Some(code) => format!("{}: upstream status {code}", e.operation()),
                 None => e.to_string(),
             };

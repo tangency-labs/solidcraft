@@ -1017,7 +1017,7 @@ fn make_face_transfer_attempt_with_state(
     out.face = attempt.face;
     let result = (|| {
         if let Err(error) = attempt.status {
-            if error.upstream_status().is_some() {
+            if error.sm_status().is_some() && !error.is_nurbs_failure() {
                 out.status = Err(error);
                 return Ok(());
             }
@@ -1899,7 +1899,9 @@ fn make_face_with_curves_transfer_impl(
         let r = face_create_uv_trim_curves(k, b, face, false, uv, orients);
         match r {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(cause) if cause.upstream_status() == Some(crate::error::SM_ERR) => {
+            Err(cause)
+                if cause.sm_status() == Some(crate::error::SM_ERR) && !cause.is_nurbs_failure() =>
+            {
                 // delete the edge uses of the face's edges
                 for e in face_edges(b, face)? {
                     for eu in ed::edgeuses(b, e, None, None)? {

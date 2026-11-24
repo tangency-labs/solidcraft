@@ -827,8 +827,8 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
             }
             let status = match e {
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-                ref e if solidcore::error::upstream_status(e).is_some() => {
-                    f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+                ref e if crate::output::recorded_status(e).is_some() => {
+                    f64::from(crate::output::recorded_status(e).unwrap_or(-1))
                 }
                 // a typed refusal (no upstream status): recorded, not a harness failure
                 SolidError::Unsupported { .. } => return Ok(Output::err(e.to_string())),

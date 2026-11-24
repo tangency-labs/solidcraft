@@ -1201,7 +1201,7 @@ fn classify(e: SolidError) -> Fail {
     }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Fail::NullDeref,
-        err if solidcore::error::upstream_status(&err).is_some() => Fail::Status(solidcore::error::upstream_status(&err).unwrap_or(-1)),
+        err if crate::output::recorded_status(&err).is_some() => Fail::Status(crate::output::recorded_status(&err).unwrap_or(-1)),
         e => Fail::Other(e.to_string()),
     }
 }

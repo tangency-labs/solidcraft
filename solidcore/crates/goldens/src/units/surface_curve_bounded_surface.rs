@@ -544,8 +544,8 @@ fn side(left: bool) -> Side {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }

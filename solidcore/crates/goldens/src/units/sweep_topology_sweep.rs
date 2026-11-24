@@ -87,8 +87,8 @@ fn entity_id(e: Option<E>) -> i64 {
 }
 fn status(e: &SolidError) -> i64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            i64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         e if nlib_number(e).is_some() => 1001,
@@ -1263,7 +1263,7 @@ mod tests {
         model.b[0].set_infinite_region(None);
         let missing = model.infinite_region(b);
         assert!(
-            matches!(&missing, Err(e) if solidcore::error::upstream_status(e) == Some(1006)),
+            matches!(&missing, Err(e) if crate::output::recorded_status(e) == Some(1006)),
             "{missing:?}"
         );
         Ok(())
@@ -1274,7 +1274,7 @@ mod tests {
         let brep = BrepId::from_index(0);
         assert!(matches!(
             model.remove_all_topology(brep),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
+            Err(ref e) if crate::output::recorded_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         // No traversable shell topology: the actual empty cleanup now completes.
@@ -1282,7 +1282,7 @@ mod tests {
         assert!(model.b[0].editing_enabled());
         assert!(matches!(
             model.remove_all_topology(BrepId::from_index(99)),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1320,7 +1320,7 @@ mod tests {
                 SweepMergeId(0),
                 &mut mates
             ),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1367,7 +1367,7 @@ mod tests {
         assert_eq!(model.shell_vertices(b)?, vec![vertex.1]);
         assert!(matches!(
             model.shell_vertices(BrepId::from_index(99)),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         let face = model.b[0].add_face_record(Face::new(ShellId::from_index(0)))?;
         // This bare face has no upward faceuse. The real PRE_EDIT notification
@@ -1377,7 +1377,7 @@ mod tests {
         assert!(
             matches!(
                 vertex_loop,
-                Err(ref e) if e.operation() == "topology::brep::p9" && solidcore::error::upstream_status(e) == Some(1006)
+                Err(ref e) if e.operation() == "topology::brep::p9" && crate::output::recorded_status(e) == Some(1006)
             ),
             "{vertex_loop:?}"
         );
@@ -1402,7 +1402,7 @@ mod tests {
                 OrientType::Same,
                 0.375
             ),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
+            Err(ref e) if crate::output::recorded_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         let uv_line = solidcore::curve::curve::Curve::from(
@@ -1421,7 +1421,7 @@ mod tests {
             ),
             // FindVertexSector (topology.face_p4) finds no sector of a face without
             // face uses, so MakeEdgeInFace's NER(pStartVU) reports a null pointer
-            Err(ref e) if e.operation() == solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP && solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if e.operation() == solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP && crate::output::recorded_status(e) == Some(1006)
         ));
         model.b[0].set_editing_enabled(false);
         assert!(!model.has_lamina_edge((b, face))?);
@@ -1573,7 +1573,7 @@ mod tests {
                 &mut point,
                 &mut normal
             )
-            .is_err_and(|e| solidcore::error::upstream_status(&e) == Some(1007)));
+            .is_err_and(|e| crate::output::recorded_status(&e) == Some(1007)));
         assert_eq!(point, Point3::new(7., 8., 9.));
         assert_eq!(normal, Point3::new(3., 2., 1.));
         Ok(())
