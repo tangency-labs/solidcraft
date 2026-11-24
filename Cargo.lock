@@ -909,7 +909,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -1861,6 +1861,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339ee130d97a610ea5a5872d2bbb130fdf68884ff09d3028b81bec8a1ac23bbc"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2175,7 +2196,7 @@ dependencies = [
  "cc",
  "memchr",
  "rustc_version",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
  "vswhom",
  "winreg",
 ]
@@ -5056,6 +5077,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "ref-cast"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6059,9 +6091,11 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-look",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
+ "solidcraft-ui-kit",
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
@@ -6209,6 +6243,7 @@ dependencies = [
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-views",
+ "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
@@ -6331,6 +6366,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
+ "sysinfo",
  "thiserror 2.0.21",
  "web-time",
 ]
@@ -6344,7 +6380,7 @@ dependencies = [
  "solidcraft-theme",
  "solidcraft-ui-kit",
  "tiny-skia",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -6359,6 +6395,7 @@ dependencies = [
  "solidcraft-mcp-server",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "tempfile",
 ]
 
 [[package]]
@@ -6945,6 +6982,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
+version = "0.9.12+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
 version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
@@ -6952,10 +7004,19 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.7.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
@@ -6974,10 +7035,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
 dependencies = [
  "indexmap",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -6986,7 +7047,7 @@ version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
- "winnow",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -7524,6 +7585,7 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.254.2",
  "wasmtime-environ",
+ "wasmtime-internal-cache",
  "wasmtime-internal-component-macro",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
@@ -7565,6 +7627,26 @@ dependencies = [
  "wasmprinter",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
+]
+
+[[package]]
+name = "wasmtime-internal-cache"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e6294e00c31bc4ad09b5354825cf32b08fbcfc19aaa49691fefe705ea088c82"
+dependencies = [
+ "base64 0.22.1",
+ "directories-next",
+ "log",
+ "postcard",
+ "rustix 1.1.6",
+ "serde",
+ "serde_derive",
+ "sha2 0.10.9",
+ "toml 0.9.12+spec-1.1.0",
+ "wasmtime-environ",
+ "windows-sys 0.61.2",
+ "zstd",
 ]
 
 [[package]]
@@ -8457,6 +8539,12 @@ dependencies = [
 
 [[package]]
 name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+
+[[package]]
+name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
@@ -8657,7 +8745,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "syn 2.0.119",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
  "wit-component",
  "zip",
 ]
@@ -8752,7 +8840,7 @@ dependencies = [
  "uds_windows",
  "uuid",
  "windows-sys 0.61.2",
- "winnow",
+ "winnow 1.0.4",
  "zbus_macros 5.19.0",
  "zbus_names 4.3.4",
  "zvariant 5.15.0",
@@ -8828,7 +8916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8bf88b4a3ff53e883001e0e0115b297a9d53c31b9c1edd2bfdd853e3428624e"
 dependencies = [
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zvariant 5.15.0",
 ]
 
@@ -8839,7 +8927,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1586c021a01ca0a9216dcd874e546382e156a5cbab5fab6cb5f10087e22682a"
 dependencies = [
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zbus_names 4.3.4",
  "zvariant 5.15.0",
 ]
@@ -8989,6 +9077,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "zstd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50adf04cf3ec914b0b9905c9dde90c80fe74bfd701e331fc80a39c512c525278"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498d94ad68720c89b4fbe41b9090850651e68cb2dd9210ce7ffbff3a94653819"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.3+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f729a06d0257428fd9d997ac8db7e1407bd0262ab016b085b36bc52957c0052d"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9025,7 +9141,7 @@ dependencies = [
  "endi",
  "enumflags2",
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zcheapstr",
  "zvariant_derive 5.15.0",
  "zvariant_utils 4.2.0",
@@ -9078,5 +9194,5 @@ dependencies = [
  "quote",
  "serde",
  "syn 3.0.6",
- "winnow",
+ "winnow 1.0.4",
 ]

@@ -765,6 +765,66 @@ fn fillet_and_chamfer_the_top_loop_of_rounded_overlapping_cylinders() {
     assert!((v - expect).abs() < 1.5, "{v} vs {expect}");
 }
 
+/// #20411: the top edge of an 8 mm extrusion of a closed control-point spline (24 and 48 poles
+/// on the superellipse |x/35.75|⁴ + |y/73.75|⁴ = 1, at equal angles, as the report gives them)
+/// rounds 1 mm. The round along the whole closed edge starts and ends at the wall's seam, and
+/// was taken for a piece of one ball there (its two feet on the wall a rounding apart): it
+/// failed with "the curve's cache is missing" (24) or "Fillet Face Creation Error" (48).
+#[test]
+fn a_closed_control_point_spline_s_extrusion_rounds_its_top_edge() {
+    use std::f64::consts::TAU;
+    let (a, b, h, r) = (35.75_f64, 73.75_f64, 8.0, 1.0);
+    for n in [24_usize, 48] {
+        let round5 = |v: f64| (v * 1e5).round() / 1e5;
+        let poles: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let t = TAU * i as f64 / n as f64;
+                let (c, s) = (t.cos(), t.sin());
+                [round5(a * c.signum() * c.abs().sqrt()), round5(b * s.signum() * s.abs().sqrt())]
+            })
+            .collect();
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.spline.control_point", json!({"points": poles, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": h}));
+        let base = volume(&mut s);
+        // the edge picked 0.2 mm outside its middle on the +x side, as in the report
+        run(&mut s, "solid.fillet", json!({"edges": [[a, 0, h]], "radius": r}));
+        // The outline's length: each span of the uniform cubic B-spline by Simpson's rule.
+        let pole = |i: usize| poles[i % n];
+        let speed = |i: usize, t: f64| {
+            let w = [-3.0 * (1.0 - t).powi(2), 9.0 * t * t - 12.0 * t, -9.0 * t * t + 6.0 * t + 3.0, 3.0 * t * t];
+            let (mut x, mut y) = (0.0, 0.0);
+            for (j, wj) in w.iter().enumerate() {
+                let p = pole(i + n - 1 + j);
+                x += wj * p[0] / 6.0;
+                y += wj * p[1] / 6.0;
+            }
+            x.hypot(y)
+        };
+        let steps = 400;
+        let length: f64 = (0..n)
+            .map(|i| {
+                let dt = 1.0 / steps as f64;
+                (0..steps)
+                    .map(|k| {
+                        let t = k as f64 * dt;
+                        (speed(i, t) + 4.0 * speed(i, t + dt / 2.0) + speed(i, t + dt)) * dt / 6.0
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        // By Pappus: the corner's section, (1 − π/4)·r², swept along the outline drawn in by its
+        // centroid's inset, (10 − 3π)/(3(4 − π))·r; a closed convex outline drawn in by d is
+        // 2πd shorter (its curvature radius is over 14 mm everywhere).
+        let inset = (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)) * r;
+        let removed = (1.0 - PI / 4.0) * r * r * (length - TAU * inset);
+        let v = volume(&mut s);
+        assert!(((base - v) - removed).abs() < 1e-3 * removed, "{n} poles: removed {} vs {removed}", base - v);
+    }
+}
+
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.
 #[test]
 fn box_fillet_cut_part() {
@@ -6796,6 +6856,32 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }
 
+/// Four closed strips laid out as a # cross each other and close off a square in the middle that
+/// lies inside none of them. A cut with `profiles` left out takes the strips and keeps the middle
+/// (#19963); four separate cuts give the same block.
+#[test]
+fn default_extrude_profiles_leave_the_gap_overlapping_loops_enclose() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, 0], "operation": "new_body", "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strips"}));
+    for points in [
+        [[-6, 3], [6, 3], [6, 4], [-6, 4]],
+        [[-6, -4], [6, -4], [6, -3], [-6, -3]],
+        [[-4, -6], [-3, -6], [-3, 6], [-4, 6]],
+        [[3, -6], [4, -6], [4, 6], [3, 6]],
+    ] {
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+    }
+    run(&mut s, "sketch.solve", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Strips", "distance": 5, "start_offset": -1, "operation": "cut", "targets": ["Block"]}));
+    // The block, 300, less the strips inside it: four 10 x 1 x 3 bars less the four 1 x 1 x 3
+    // crossings counted twice. The 6 x 6 middle, the four corners and the four edge pieces stay.
+    let expected = 300.0 - (4.0 * 30.0 - 4.0 * 3.0);
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
+}
+
 /// The face of `body` whose normal points along +x, as a plane pick.
 fn side_face_pick(s: &Session, body: &str) -> Value {
     let world = s.world_state().unwrap();
@@ -7835,6 +7921,61 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     let small = big - h * 5f64.to_radians().tan();
     let expect = PI * h / 3.0 * (big * big + big * small + small * small);
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
+/// #19686: a 2400 x 1600 x 1000 block with a Ø190 blind hole from the top, 500 deep, its four
+/// sides drafted 3° about the base. 3° leans the +X side in by 1000 tan 3° = 52.4 at the top, so a
+/// hole whose wall is nearer the side than that is cut through by the drafted side, which no
+/// draft does: it is refused naming the hole's wall, for the issue's 0.00002 wall as for a 10 one,
+/// and the design is left as it was. A 60 wall stays clear of the drafted side and builds: the
+/// drafted block less the whole hole.
+#[test]
+fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
+    let block = |hole: Option<f64>| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2400, "width": 1600, "height": 1000, "corner": [-1200, -800, 0], "operation": "new", "body_name": "Part"}),
+        );
+        if let Some(x) = hole {
+            run(
+                &mut s,
+                "solid.cylinder",
+                json!({"radius": 95, "height": 500, "base": [x, 0, 500], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+            );
+        }
+        s
+    };
+    let draft = json!({"faces": [[1200, 0, 500], [-1200, 0, 500], [0, 800, 500], [0, -800, 500]], "angle": "3 deg", "neutral": "XY"});
+    for wall in [0.00002, 10.0] {
+        let mut s = block(Some(1200.0 - 95.0 - wall));
+        let features = s.doc.features.len();
+        let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
+        // The whole sentence, the point and depth between its words, with no run of spaces.
+        let words = [
+            "draft: the drafted face would cut through the face at (",
+            concat!(
+                " mm past it without meeting it (a hole's or pocket's wall near the side); ",
+                "a draft only extends or trims the faces around the drafted face: use a smaller draft angle, ",
+                "or move that face farther from the drafted one"
+            ),
+        ];
+        let (Some(start), Some(end)) = (error.find(words[0]), error.find(words[1])) else { panic!("wall {wall}: {error}") };
+        let between = &error[start + words[0].len()..end];
+        assert!(between.contains("), which reaches at least ") && !error.contains("  "), "wall {wall}: {error}");
+        assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
+    }
+    let mut plain = block(None);
+    run(&mut plain, "solid.draft", draft.clone());
+    let mut s = block(Some(1200.0 - 95.0 - 60.0));
+    run(&mut s, "solid.draft", draft);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    drop(state);
+    let expect = volume(&mut plain) - PI * 95.0 * 95.0 * 500.0;
+    assert!(rel(volume(&mut s), expect) < 1e-9, "{} vs {expect}", volume(&mut s));
 }
 
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a

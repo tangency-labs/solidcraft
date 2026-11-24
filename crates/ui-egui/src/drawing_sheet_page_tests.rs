@@ -2514,3 +2514,91 @@ fn offscreen_arrow_tracks_the_edge_and_hides_when_paper_is_visible() {
     assert!(offscreen_arrow(area, sheet_at(260.0, 120.0), 20.0).is_none());
     assert!(offscreen_arrow(area, sheet_at(350.0, 120.0), 110.0).is_none());
 }
+
+/// Every path's points in `shapes`, in paint order: a stroked line or outline.
+fn paths(shapes: &[egui::epaint::ClippedShape]) -> Vec<Vec<Pos2>> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<Vec<Pos2>>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Path(path) => out.push(path.points.clone()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+/// A drag shows a view where it goes with its own lines, but a detail view's callout on the parent (its
+/// outline and letter) stays: the preview of the moving view leaves it out, while lighting the same
+/// view for a hover still draws it (#20981).
+#[test]
+fn a_drags_preview_leaves_a_details_callout_where_it_is() {
+    let line =
+        Item::Stroke { path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }], closed: false, width_mm: 0.35, pattern: None };
+    let ring = Item::Stroke {
+        path: vec![Seg2::Arc { center: Vec2::new(50.0, 50.0), radius: 5.0, start: 0.0, sweep: std::f64::consts::TAU }],
+        closed: true,
+        width_mm: 0.18,
+        pattern: None,
+    };
+    let groups =
+        vec![Group { object: 2, kind: ObjectKind::View, items: vec![line] }, Group { object: 2, kind: ObjectKind::ViewLabel, items: vec![ring] }];
+    let scene = Scene { size_mm: Vec2::new(100.0, 100.0), groups, fonts: Vec::new(), clips: Vec::new() };
+    let marks = Marks::of(&scene, 1, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ctx = egui::Context::default();
+    let pictures = PictureTextures::default();
+    let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
+    // The preview's camera: the view 30 mm to the right, as the drag's offset shifts the paper.
+    let shifted = OnScreen { centre: Pos2::ZERO, target: Vec2::new(-30.0, 0.0), scale: 10.0 };
+    let run = |paint: &dyn Fn(&egui::Painter)| {
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter()));
+        out.textures_delta.clear();
+        out.shapes
+    };
+    let moving = run(&|painter| marks.paint_moving(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
+    let drawn = paths(&moving);
+    assert_eq!(drawn.len(), 1, "only the view's own line moves, not the callout: {drawn:?}");
+    assert!(drawn[0].iter().all(|p| p.y.abs() < 1e-3), "it is the view's line: {drawn:?}");
+    let lit = run(&|painter| marks.paint_lit(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
+    assert_eq!(paths(&lit).len(), 2, "a lit detail still shows its callout");
+}
+
+/// Dragging a detail view moves the detail and leaves its callout on the parent where it was, in the
+/// scene the sheet draws after the release (#20981).
+#[test]
+fn dragging_a_detail_view_leaves_its_callout_in_place() {
+    use solidcraft_engine::Sel;
+    let (mut h, front) = plate_sheet();
+    let made = h
+        .app
+        .run(
+            "drawing.view.detail",
+            json!({"parent": front, "boundary_mm": {"circle": {"centre": [140, 180], "radius": 10}}, "place": {"at": [300, 100]}}),
+        )
+        .unwrap();
+    let detail = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+    let callout = |h: &mut Harness| {
+        let scene = drawing_scene::extract(&mut h.app.session, sheet).unwrap().scene;
+        let found = scene
+            .groups
+            .iter()
+            .find(|g| g.object == detail && g.kind == ObjectKind::ViewLabel && g.items.iter().any(|i| matches!(i, Item::Stroke { .. })));
+        format!("{:?}", found.map(|g| &g.items))
+    };
+    let before = callout(&mut h);
+    assert!(before.contains("Stroke"), "the callout is drawn: {before}");
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    h.app.session.selection = vec![Sel::Drawing { drawing: drawing.id, object: detail }];
+    let from = drawing.view_centre(detail).unwrap();
+    let by = Vec2::new(-40.0, 30.0);
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + by.x, from.y + by.y)], "steps": 6})).unwrap();
+    h.frames(2);
+    let after = h.app.session.drawing("drawing.inspect").unwrap().view_centre(detail).unwrap();
+    let moved = after - from;
+    assert!((moved.x - by.x).abs() < 1.0 && (moved.y - by.y).abs() < 1.0, "the detail moved by {moved:?}, not {by:?}");
+    assert_eq!(callout(&mut h), before, "the callout stays where it was");
+}

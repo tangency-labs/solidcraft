@@ -111,7 +111,7 @@ use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SurfaceCache};
+use crate::surface::surface_cache::p1::{PatchBoundaryBoundingPlanes, SolveModes, SurfaceCache};
 
 use super::p1::{SrfIndex, SurfaceIntersector, TsectPnt};
 use super::p2::{BoundaryPlaneTestResult, TsectCurves};
@@ -566,12 +566,6 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     }
                 })?;
             }
-
-            // Turn off point testing so GlobalPointSolve() keeps all point solutions;
-            // turn on boundary curve processing so LocalSolve looks for drop points on
-            // boundary curves (set here, before the first solve, which reads neither).
-            c.point_test_enabled = false;
-            c.process_boundary_curves = true;
         }
 
         // the boundary bounding planes of both caches (copies: lazily computed)
@@ -720,9 +714,18 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                 .chain(rest)
                 .map(SurfaceCache::clone_for_evaluation)
                 .collect::<Result<Vec<_>>>()?;
-            self.base.find_boundary_start_points_with_queries(
+            // Point testing off so GlobalPointSolve() keeps all point solutions;
+            // boundary curve processing on so LocalSolve looks for drop points on
+            // boundary curves (upstream sets both on its caches before the first
+            // solve; here the boundary solves run in them, the caches keep theirs).
+            let modes = SolveModes {
+                point_test_enabled: false,
+                process_boundary_curves: true,
+            };
+            self.base.find_boundary_start_points_under(
                 k,
                 &mut boundary_caches,
+                [modes; 2],
                 &bbox,
                 &mut out,
                 queries,

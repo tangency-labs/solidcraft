@@ -697,16 +697,44 @@ pub(crate) fn with_body<T: Answer>(
         let mut b = body.lock();
         // the kernel puts the body back on a refusal or a panic; the panic is caught again
         // here only to release the body before it goes on
-        let r = catch_unwind(AssertUnwindSafe(|| {
-            b.with_rollback(
-                |br| f(k, br),
-                // a call cancelled part way returns no result ([`run_with`]): its edit goes too
-                |r| {
-                    let stopped = crate::cancel::is_cancelled();
-                    STOPPED.with(|d| d.set(Some(stopped)));
-                    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
-                },
-            )
+        let r = catch_unwind(AssertUnwindSafe(|| b.with_rollback(|br| f(k, br), kept)));
+        drop(b);
+        r.unwrap_or_else(|p| resume_unwind(p))
+    })
+}
+
+/// Whether [`with_body`] keeps the edit that answered `r`: an answer that is no refusal, of a
+/// call not cancelled part way (a call cancelled part way returns no result ([`run_with`]): its
+/// edit goes too).
+fn kept<T: Answer>(r: &solidcore::Result<T>) -> bool {
+    let stopped = crate::cancel::is_cancelled();
+    STOPPED.with(|d| d.set(Some(stopped)));
+    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
+}
+
+/// Runs a measure with a read-only form on the kernel, under one lock of `body`: `read`
+/// through the body's shared door, which leaves the body and its proof as they are; where it
+/// answers `None` (it found, before doing any work, that the body lacks what the read needs),
+/// `edit` as [`with_body`] runs it, under the same lock: the body's snapshot taken first and
+/// put back on a refusal, a failure or a panic. A panic leaves the body as it was and usable,
+/// released before the panic goes on.
+///
+/// # Errors
+/// As [`with_body`].
+pub(crate) fn read_else_edit<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    read: impl FnOnce(&mut Kernel, &Brep) -> solidcore::Result<Option<T>>,
+    edit: impl FnOnce(&mut Kernel, &mut Brep) -> solidcore::Result<T>,
+) -> Result<T> {
+    if body.is_poisoned() {
+        return Err(unfinished(call));
+    }
+    run_on(call, &[("brep", body)], |k| {
+        let mut b = body.lock();
+        let r = catch_unwind(AssertUnwindSafe(|| match read(k, &b)? {
+            Some(v) => Ok(v),
+            None => b.with_rollback(|br| edit(k, br), kept),
         }));
         drop(b);
         r.unwrap_or_else(|p| resume_unwind(p))
@@ -739,12 +767,16 @@ pub(crate) fn read_held<T: Answer>(
     if body.is_poisoned() {
         return Err(unfinished(call));
     }
-    run_on(call, &[("brep", body)], |k| {
-        let b = body.lock();
-        let r = catch_unwind(AssertUnwindSafe(|| f(k, &b)));
-        drop(b);
-        r.unwrap_or_else(|p| resume_unwind(p))
-    })
+    run_on(call, &[("brep", body)], |k| read_locked(body, |b| f(k, b)))
+}
+
+/// Reads a body within a running kernel call. Release the unchanged body before sending
+/// a panic on to the session, so a failed read does not poison the input.
+pub(crate) fn read_locked<T>(body: &Body, f: impl FnOnce(&crate::body::BodyGuard<'_>) -> T) -> T {
+    let b = body.lock();
+    let r = catch_unwind(AssertUnwindSafe(|| f(&b)));
+    drop(b);
+    r.unwrap_or_else(|p| resume_unwind(p))
 }
 
 /// Runs `f`, a measure that takes the kernel's `&mut Brep` (for its caches) but answers about

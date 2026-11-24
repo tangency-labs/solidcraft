@@ -45,7 +45,7 @@ pub enum SplitTool<'a> {
 }
 
 /// Most segments a sketch tool may hold.
-const MAX_SEGMENTS: usize = 4096;
+pub(crate) const MAX_SEGMENTS: usize = 4096;
 
 fn invalid(what: impl Into<String>) -> KernelError {
     KernelError::Invalid(what.into())
@@ -432,7 +432,7 @@ fn smlib_tools(groups: &[Vec<Patch>], reach: &Aabb3) -> Result<Vec<solidcraft_sm
 }
 
 /// A result checked by SMLib and brought back with its history over `[body]`.
-fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
+pub(crate) fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, r: &solidcraft_smlib::Brep) -> Result<(Body, History)> {
     let check = r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed(name, e))?;
     if !check.is_valid() {
         return Err(failed(name, format!("SMLib's check refuses the result: {check}")));
@@ -445,7 +445,7 @@ fn brought_back(name: &str, body: &Body, ob: &solidcraft_smlib::history::Order, 
 }
 
 /// `body` in SMLib, tagged as operand 0, with its record's order.
-fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
+pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep, solidcraft_smlib::history::Order)> {
     let (sb, ob) = crate::native::smlib_body_ordered(body)?;
     let ob = ob.ok_or_else(|| failed(name, "SMLib numbers the body's faces unlike its record"))?;
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))

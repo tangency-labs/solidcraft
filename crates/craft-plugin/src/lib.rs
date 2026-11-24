@@ -70,7 +70,9 @@ pub mod dialog;
 mod input;
 mod schema_refs;
 pub mod swatches;
-pub use input::{check_input, prepare_input, strict_input_schema};
+pub use input::check_input;
+pub use input::prepare_input;
+pub use input::strict_input_schema;
 
 /// The host imports that change something outside the design. A `read` entry is refused every
 /// one of them, whatever folders its plugin was granted, as it is refused edit commands.
@@ -256,6 +258,29 @@ pub struct FileGrant {
     pub folder: PathBuf,
     pub read: bool,
     pub write: bool,
+}
+
+/// Folder access ordered for install-review prefill, from no access through read to write.
+/// Write includes requests with both flags. This comparison never authorizes file operations:
+/// runtime checks still use the grant's exact `read` and `write` flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum FileAccess {
+    None,
+    Read,
+    Write,
+}
+
+impl FileGrant {
+    /// The highest requested or granted access, only for comparing review starting values.
+    pub fn access(&self) -> FileAccess {
+        if self.write {
+            FileAccess::Write
+        } else if self.read {
+            FileAccess::Read
+        } else {
+            FileAccess::None
+        }
+    }
 }
 
 /// A runtime brackets a whole plugin call in one transaction. Guest failures roll it back.

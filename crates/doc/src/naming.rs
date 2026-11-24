@@ -1272,12 +1272,19 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-/// Names of the faces holding each point (any body; empty when none does).
+/// Names of the faces holding each point within modelling tolerance (any body; empty when none
+/// does). Resolve against the exact trimmed faces: a display chord can put a point near a round
+/// rim nearer the adjacent wall and save that wall's name instead.
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
             let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+                // A point on a body's face, found by exact geometry, names that face (#20260).
+                if let Some(f) = b.body.face_at_point(*p).ok().flatten() {
+                    best = Some((0.0, face_names(b).get(f).cloned().unwrap_or_default()));
+                    break;
+                }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
                 let idx = FaceIndex::new(&b.mesh(), face_count(b));
                 if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
@@ -1414,7 +1421,14 @@ pub fn face_spot(b: &ModelBody, index: usize) -> Option<FaceSpot> {
 pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Result<Vec3, String> {
     let hit = locate_one(st, body, name)?;
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
-    face_spot(b, hit.face).map(|spot| spot.point).ok_or_else(|| format!("face `{name}` has no surface to pick"))
+    // The spot starts on a display triangle. Project it onto the known face before exact
+    // face-name capture; a non-analytic curved face has no analytic projection in `spot`.
+    // When the exact projection finds nothing, the spot itself is returned, as it always was.
+    let spot = face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    match solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face])) {
+        Ok(Some(nearest)) => Ok(nearest.to),
+        _ => Ok(spot.point),
+    }
 }
 
 /// The point on the face this name finds nearest `p`; `None` when the name finds no face (see

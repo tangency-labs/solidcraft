@@ -27,8 +27,11 @@ use crate::schema::frame::{
     ProfileListParams, ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, RemoveMemberParams,
     RemoveMemberResult, SizeFamilyInfo, TRIM_KIND, corner_entry, removed_members, trim_kind, trim_members,
 };
+use crate::schema::frame_plate::{BoltPattern, PlateOutline, PlateParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const PLATE_CONTRACT: TypedContract<PlateParams> = TypedContract::new();
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
@@ -59,6 +62,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); corner?: auto|none|mitre|butt (how members ending at one point are cut; default none); flip?: bool (a butt's other member runs through); fit_ends?: bool (fit free ends to earlier Frame Members' tubes; default false); coped?: bool (cut every butt joint to the other tube's real shape, radii kept: butts, ends on a tube's middle, crossings, overlaps and fitted ends, mitres left as they are; not under none; default false; an older `coped_butt`, the frame's or an override's, reads as butt with coped); corners?: [{members: [2 to 1000 line or pair ids, or {line}], kind: auto|none|mitre|butt, gap?: length expr}] (that corner's, crossing's or overlap's own type, and its own weld gap; the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner; an older script's `corner` reads as `kind`, and its `flip` is saved as the order today's rules give with the first two swapped; an overlap takes no gap); gap?: length expr (the weld gap at every welded end, 0…1000 mm, default 0: each mitre plane half of it back, a butting or fitted end, a crossing's pieces' included, that far off the member it meets; through members keep their length, overlaps are notched without it); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
     )),
+    CommandSpec::new("frame.plate", "Mounting Plate", crate::checked!("frame.plate", plate))
+        .at("WELDMENTS", "CREATE")
+        .icon("frame_plate")
+        .enabled(not_in_sketch)
+        .contract(&PLATE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("face: [x,y,z] on a planar support face (world mm); body?, index?, path?: exact face pick; shape?: rectangle (default) | round; width,height: rectangle length expressions | diameter: round length expression; thickness: positive length expression; offset?, x_offset?, y_offset?: signed length expressions, default 0; angle?: angle expression, default 0; holes?: {pattern: none} (default) | {pattern: rectangle, diameter, pitch_x, pitch_y} (four holes) | {pattern: circle, diameter, pitch_diameter, count: 2…128, angle?}. A mounting/base plate or bolted end flange, kept as a separate body centred on the current face's area centroid, extending along its outward normal; holes must be inside its perimeter and separate. Does not drill the support. name?, body_name?, body_names?, participants? (ignored)"),
     CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
         .icon("library")
         .noundo()
@@ -101,6 +111,85 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params("feature: the Frame Member (id or name); members: [2 to 1000 line or pair ids, or {feature?: the frame's own name, line}] (a corner, crossing or overlap of the frame, the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner); kind?: auto|none|mitre|butt (default auto: the frame's own type, with this order); flip?: bool (the first two in the order today's rules give them, swapped; without it the members are saved as given); gap?: length expr (this corner's weld gap, 0…1000 mm; default the frame's; an overlap takes none); remove?: bool (take the override of these members away, back to the frame's own rules; no kind, flip or gap with it). Replaces the override of the same members (any order) or adds one, as one undo step; the frame stays one timeline entry. Returns the edited feature as frame.member does"),
 ];
+
+/// `frame.plate`: a separate plate body on a planar face, attached to the member that made the face.
+fn plate(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::frame::{PlateHoles, PlateShape};
+    let cmd = "frame.plate";
+    let args: PlateParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let required = |value: Option<crate::schema::LengthExpr>, name: &str| {
+        value.map(|v| v.0).ok_or_else(|| bad(cmd, format!("`{name}` is required for this plate shape")))
+    };
+    let shape = match args.shape {
+        PlateOutline::Rectangle => {
+            if args.diameter.is_some() {
+                return Err(bad(cmd, "`diameter` is only for round plates"));
+            }
+            PlateShape::Rectangle { width: required(args.width, "width")?, height: required(args.height, "height")? }
+        }
+        PlateOutline::Round => {
+            if args.width.is_some() || args.height.is_some() {
+                return Err(bad(cmd, "`width` and `height` are only for rectangular plates"));
+            }
+            PlateShape::Round { diameter: required(args.diameter, "diameter")? }
+        }
+    };
+    let holes = match args.holes {
+        BoltPattern::None => PlateHoles::None,
+        BoltPattern::Rectangle { diameter, pitch_x, pitch_y } => {
+            PlateHoles::Rectangle { diameter: diameter.0, pitch_x: pitch_x.0, pitch_y: pitch_y.0 }
+        }
+        BoltPattern::Circle { diameter, pitch_diameter, count, angle } => PlateHoles::Circle {
+            diameter: diameter.0,
+            pitch_diameter: pitch_diameter.0,
+            count,
+            angle: angle.map(|v| v.0).unwrap_or_else(|| "0 deg".into()),
+        },
+    };
+    let mut pick = json!({"face": args.face.0});
+    if let Some(body) = args.body {
+        pick["body"] = json!(body);
+    }
+    if let Some(index) = args.index {
+        pick["index"] = json!(index);
+    }
+    if let Some(path) = args.path {
+        pick["path"] = json!(path);
+    }
+    let plane = super::sketch::face::capture(s, &pick, cmd)?;
+    // Lines added after Frame Member was made have generated names. Pin the names its own
+    // result gives them before creating a durable attachment, also for members later removed
+    // by another feature. Preserve reserved names of deleted lines.
+    if let Some(anchor) = super::sketch::face::anchor(&plane)
+        && let Some(pins) = super::browser::member_pins(s, anchor.target.origin_feature)
+    {
+        let source = s.doc_mut().feature_mut(anchor.target.origin_feature).ok_or_else(|| bad(cmd, "member producer disappeared"))?;
+        if let FeatureKind::FrameMember { names, .. } = &mut source.kind {
+            if names.len().saturating_add(pins.keys().filter(|line| !names.contains_key(*line)).count()) > frame::MAX_MEMBERS {
+                return Err(bad(cmd, "plate attachment exceeds the frame feature's stored member-name limit"));
+            }
+            names.extend(pins);
+            source.body_names.clear();
+        }
+    }
+    let member = frame::plate_member(&s.doc, &s.model.state(), &plane).map_err(|error| bad(cmd, error.to_string()))?;
+    let kind = FeatureKind::FramePlate {
+        plane: plane.clone(),
+        member,
+        shape,
+        holes,
+        thickness: args.thickness.0,
+        offset: args.offset.map(|v| v.0).unwrap_or_else(|| "0 mm".into()),
+        x_offset: args.x_offset.map(|v| v.0).unwrap_or_else(|| "0 mm".into()),
+        y_offset: args.y_offset.map(|v| v.0).unwrap_or_else(|| "0 mm".into()),
+        angle: args.angle.map(|v| v.0).unwrap_or_else(|| "0 deg".into()),
+    };
+    for (label, expression, kind) in kind.inputs() {
+        check_expr(s, &expression, kind, cmd, label)?;
+    }
+    super::sketch::face::capture_positions(s, &plane)?;
+    super::features::add_feature_local(s, p, kind)
+}
 
 /// The `profile` parameter: its kind and each dimension as given, a number or an expression; or a
 /// standard size by name, alone.

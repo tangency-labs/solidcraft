@@ -356,6 +356,25 @@ fn a_new_launch_checks_even_when_the_last_check_was_today() {
     assert!(h.app.updater.rx.is_none() && h.app.updater.status == Status::Idle);
 }
 
+/// The window froze for good when the check's thread asked for a repaint while a frame read egui's
+/// context inside its own read of it (the tab strip's `ctx.viewport_id()` inside `ctx.data`): the
+/// inner read waited on the repaint, which waited on the outer read (#21091). No frame nests them.
+#[test]
+fn the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let (release, nested) = egui::Context::record_nested_locks(|| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.updater.feed = Some(feed);
+        h.frame();
+        wait_for_check(&mut h);
+        h.frames(3);
+        h.app.updater.release.as_ref().map(|r| r.version().to_string())
+    });
+    assert_eq!(release, Some(version), "the check ran");
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
 #[test]
 fn turning_off_automatic_checks_stops_the_launch_check() {
     let dir = scratch();

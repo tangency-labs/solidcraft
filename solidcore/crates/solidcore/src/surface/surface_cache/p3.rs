@@ -1245,8 +1245,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 let built = self.build_tree(k, false);
                 self.face_containment_done = saved;
                 built?;
+                // (point testing is left on: a surface without a face keeps every
+                // point, `SurfaceCache::point_test_with`)
                 self.process_boundary_curves = true;
-                self.point_test_enabled = false;
                 self.have_t_surface_cache = false;
             } else {
                 self.build_tree(k, false)?;

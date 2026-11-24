@@ -70,6 +70,40 @@ pub enum QueryFailure {
     /// cannot be made stays missing), so the query has no net to read.
     /// [`ErrorKind::Unsupported`].
     SurfaceWithoutNurbs,
+    /// The closest-point search found no point: the solver returned no solution, or the drop
+    /// onto the curve, surface or edge found no foot. Class `failed`.
+    NoClosestPoint,
+    /// An edge of the caller's body has no curve. [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve,
+    /// The solution is on an object of a kind the routine does not take (not a vertex, curve,
+    /// edge, surface or face). [`ErrorKind::Unsupported`].
+    UnsupportedObjectKind,
+    /// The B-rep has no edges to list. Class `failed`.
+    BrepWithoutEdges,
+    /// The B-rep has no faces to list. Class `failed`.
+    BrepWithoutFaces,
+    /// The face has no loops: no upward face use, or none with a loop use. Class `failed`.
+    FaceWithoutLoops,
+    /// An edge use of the caller's body has no edge. [`ErrorKind::InvalidInput`].
+    EdgeuseWithoutEdge,
+    /// An edge use of the caller's body is oriented neither the same as its edge nor
+    /// opposite it. [`ErrorKind::InvalidInput`].
+    EdgeuseOrientationUnset,
+    /// No edge of the B-rep is at the point. Class `failed`.
+    NoEdgeAtPoint,
+    /// No face of the B-rep is at the point. Class `failed`.
+    NoFaceAtPoint,
+    /// A closest point the solve found does not evaluate to a finite point (or its distance
+    /// is not a finite number at least zero). Class `failed`.
+    ClosestPointNotEvaluated,
+    /// The reach given is not finite and at least zero. [`ErrorKind::InvalidInput`].
+    InvalidReach,
+    /// The curve crosses the face's surface outside the tube of the edge's tolerance, so the
+    /// crossing found is another one, not this edge's. Class `failed`.
+    CrossingOffEdge,
+    /// No ray fired from the point found the region it lies in (every ray, both ways, failed
+    /// or found none). Class `failed`.
+    RegionNotFound,
 }
 
 impl QueryFailure {
@@ -81,8 +115,23 @@ impl QueryFailure {
             | Self::BoundOverflows
             | Self::NoStationDropped
             | Self::NoPatchInBox
-            | Self::SurfaceWithoutNurbs => SM_ERR,
-            Self::Missing(_) | Self::FaceWithoutSurface => SM_ERR_NULL_POINTER,
+            | Self::SurfaceWithoutNurbs
+            | Self::NoClosestPoint
+            | Self::UnsupportedObjectKind
+            | Self::BrepWithoutEdges
+            | Self::BrepWithoutFaces
+            | Self::FaceWithoutLoops
+            | Self::EdgeuseWithoutEdge
+            | Self::EdgeuseOrientationUnset
+            | Self::NoEdgeAtPoint
+            | Self::NoFaceAtPoint
+            | Self::ClosestPointNotEvaluated
+            | Self::InvalidReach
+            | Self::CrossingOffEdge
+            | Self::RegionNotFound => SM_ERR,
+            Self::Missing(_) | Self::FaceWithoutSurface | Self::EdgeWithoutCurve => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
         }
     }
@@ -97,8 +146,13 @@ impl QueryFailure {
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::SurfaceWithoutNurbs => ErrorKind::Unsupported,
-            Self::NoPatchInBox | Self::FaceWithoutSurface => ErrorKind::InvalidInput,
+            Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
+            Self::NoPatchInBox
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::EdgeuseWithoutEdge
+            | Self::EdgeuseOrientationUnset
+            | Self::InvalidReach => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -115,6 +169,26 @@ impl core::fmt::Display for QueryFailure {
             Self::NoPatchInBox => f.write_str("no patch of the surface overlaps the UV box"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
             Self::SurfaceWithoutNurbs => f.write_str("the surface has no NURBS net"),
+            Self::NoClosestPoint => f.write_str("no closest point was found"),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::UnsupportedObjectKind => {
+                f.write_str("the solution's object is not a vertex, curve, edge, surface or face")
+            }
+            Self::BrepWithoutEdges => f.write_str("the B-rep has no edges"),
+            Self::BrepWithoutFaces => f.write_str("the B-rep has no faces"),
+            Self::FaceWithoutLoops => f.write_str("the face has no loops"),
+            Self::EdgeuseWithoutEdge => f.write_str("the edge use has no edge"),
+            Self::EdgeuseOrientationUnset => {
+                f.write_str("the edge use's orientation is neither same nor opposite")
+            }
+            Self::NoEdgeAtPoint => f.write_str("no edge is at the point"),
+            Self::NoFaceAtPoint => f.write_str("no face is at the point"),
+            Self::ClosestPointNotEvaluated => f.write_str("a closest point does not evaluate"),
+            Self::InvalidReach => f.write_str("the reach must be finite and at least zero"),
+            Self::CrossingOffEdge => {
+                f.write_str("the crossing on the face's surface is off the edge")
+            }
+            Self::RegionNotFound => f.write_str("no ray fired from the point found its region"),
         }
     }
 }
@@ -226,6 +300,20 @@ pub(super) mod tests {
             (F::NoPatchInBox, SM_ERR, K::InvalidInput),
             (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::SurfaceWithoutNurbs, SM_ERR, K::Unsupported),
+            (F::NoClosestPoint, SM_ERR, K::Failed),
+            (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::UnsupportedObjectKind, SM_ERR, K::Unsupported),
+            (F::BrepWithoutEdges, SM_ERR, K::Failed),
+            (F::BrepWithoutFaces, SM_ERR, K::Failed),
+            (F::FaceWithoutLoops, SM_ERR, K::Failed),
+            (F::EdgeuseWithoutEdge, SM_ERR, K::InvalidInput),
+            (F::EdgeuseOrientationUnset, SM_ERR, K::InvalidInput),
+            (F::NoEdgeAtPoint, SM_ERR, K::Failed),
+            (F::NoFaceAtPoint, SM_ERR, K::Failed),
+            (F::ClosestPointNotEvaluated, SM_ERR, K::Failed),
+            (F::InvalidReach, SM_ERR, K::InvalidInput),
+            (F::CrossingOffEdge, SM_ERR, K::Failed),
+            (F::RegionNotFound, SM_ERR, K::Failed),
         ];
         for (failure, code, kind) in cases {
             let e = SolidError::query("query::op", failure);
@@ -304,8 +392,6 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/query/api_queries.rs", 36),
-            ("solidcore/src/query/brep.rs", 2),
             ("solidcore/src/query/brep/ray.rs", 2),
             ("solidcore/src/query/brep/ray/live.rs", 4),
             ("solidcore/src/query/edge.rs", 10),

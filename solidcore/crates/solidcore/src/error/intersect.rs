@@ -344,6 +344,12 @@ pub enum IntersectFailure {
         /// The number of touches.
         count: usize,
     },
+    /// A touch the loop crossing found on the face's seam drops to a uv point that is not on
+    /// the surface's seam. Class `failed`.
+    SeamTouchOffSeam,
+    /// The uv sector of a vertex use, computed with its status ignored as upstream, names no
+    /// edge use on the side the classified curve leaves along. Class `missing`.
+    NoSectorEdgeuse,
     /// Squeezing out the smallest interval of a classification left its number of intervals
     /// unchanged, so the two classifications of one curve cannot be brought to the same
     /// number of intervals (the squeeze's error, where it gave one, is the cause). Class
@@ -368,6 +374,14 @@ pub enum IntersectFailure {
     /// in: the curve does not classify to that face consistently at its ends. Class
     /// `missing`.
     NoEndSector,
+    /// The two classifications of one curve, which are combined interval by interval, have
+    /// different numbers of intervals (`this` and `other`). Class `failed`.
+    IntervalCountsDiffer {
+        /// The number of intervals of this classification.
+        this: usize,
+        /// The number of intervals of the other classification.
+        other: usize,
+    },
 }
 
 impl IntersectFailure {
@@ -421,10 +435,12 @@ impl IntersectFailure {
             | Self::NoClassFace
             | Self::IntervalIndexPastEnd { .. }
             | Self::ParameterOutsideRange { .. }
+            | Self::SeamTouchOffSeam
             | Self::SqueezeStalled
             | Self::RepairDidNotSettle { .. }
             | Self::IntervalEndMisplaced
-            | Self::PointClassNotInserted => SM_ERR,
+            | Self::PointClassNotInserted
+            | Self::IntervalCountsDiffer { .. } => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -434,6 +450,7 @@ impl IntersectFailure {
             | Self::PolyFaceWithoutEdges
             | Self::CurveNotBSpline
             | Self::SurfaceCacheNotBuilt
+            | Self::NoSectorEdgeuse
             | Self::NoSurfaceCaches
             | Self::SurfaceNotOffset { .. }
             | Self::NoCurveToReverse
@@ -602,6 +619,12 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the {count} touches of the curve against the loops do not pair into arrivals and departures"
             ),
+            Self::SeamTouchOffSeam => {
+                f.write_str("the seam touch does not drop onto the surface's seam")
+            }
+            Self::NoSectorEdgeuse => {
+                f.write_str("the vertex use's uv sector names no edge use on the curve's side")
+            }
             Self::SqueezeStalled => f.write_str(
                 "squeezing out the smallest interval did not shorten the classification",
             ),
@@ -618,6 +641,10 @@ impl core::fmt::Display for IntersectFailure {
             Self::NoEndSector => {
                 f.write_str("no vertex use at an end of the edge has a sector of the face")
             }
+            Self::IntervalCountsDiffer { this, other } => write!(
+                f,
+                "the two classifications have different numbers of intervals ({this} and {other})"
+            ),
             Self::NoSurfaceCaches => f.write_str("no surface caches were given"),
             Self::SelfIntersectionUnsupported => {
                 f.write_str("the basic intersector does not test self intersection")
@@ -1142,11 +1169,18 @@ pub(super) mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
+            (F::SeamTouchOffSeam, SM_ERR, K::Failed),
+            (F::NoSectorEdgeuse, SM_ERR_NULL_POINTER, K::Missing),
             (F::SqueezeStalled, SM_ERR, K::Failed),
             (F::RepairDidNotSettle { restarts: 4 }, SM_ERR, K::Failed),
             (F::IntervalEndMisplaced, SM_ERR, K::Failed),
             (F::PointClassNotInserted, SM_ERR, K::Failed),
             (F::NoEndSector, SM_ERR_NULL_POINTER, K::Missing),
+            (
+                F::IntervalCountsDiffer { this: 2, other: 3 },
+                SM_ERR,
+                K::Failed,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -1209,8 +1243,6 @@ pub(super) mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
-            ("solidcore/src/intersect/curve_class/p4.rs", 26),
-            ("solidcore/src/intersect/curve_class/p5.rs", 8),
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),

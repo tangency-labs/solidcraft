@@ -163,8 +163,8 @@ use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
     curve_on_classify, curve_on_classify_cached, curve_on_classify_mut, face_vertices,
-    point_classify, CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects,
-    PointClassifyOptions,
+    point_classify, point_classify_prepared, CurveOnClassifyBrep, CurveOnClassifyCache,
+    CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::plane::Plane;
@@ -846,19 +846,24 @@ fn cell_directed_max(
         let pos = eval_pos(&mut eval)?;
         let value = pos.x * dir.x + pos.y * dir.y + pos.z * dir.z;
         out.top = out.top.max(value);
-        let classified = ignored(point_classify(
-            k,
-            lb.get_mut()?,
-            f,
-            uv,
-            &mut pt_class,
-            PointClassifyOptions {
-                src_zone_tol_3d: face_zone_tol_3d,
-                do_boundary_intersections: false,
-                use_uv_classification: true,
-                ..PointClassifyOptions::default()
-            },
-        ))?
+        let options = PointClassifyOptions {
+            src_zone_tol_3d: face_zone_tol_3d,
+            do_boundary_intersections: false,
+            use_uv_classification: true,
+            ..PointClassifyOptions::default()
+        };
+        let classified = ignored(match lb {
+            // read only: a classification that would make a UV trim curve or build a
+            // trim cache's tree asks for the B-rep to be prepared
+            LazyBrep::Prepared(b) => point_classify_prepared(k, b, f, uv, &mut pt_class, options)
+                .map_err(|e| match e {
+                    SolidError::Unported { .. } => SolidError::PreparationRequired {
+                        operation: OP_TIGHT,
+                    },
+                    e => e,
+                }),
+            _ => point_classify(k, lb.get_mut()?, f, uv, &mut pt_class, options),
+        })?
         .is_some();
         out.outside =
             out.outside && classified && pt_class.point_class() == PointClassType::Unknown;

@@ -410,9 +410,65 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
         let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
+        let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label(id)));
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
+}
+
+/// The Browser tree panel closes from its own host menu, which left no way back; the View menu
+/// and the Layout setting bring it back (#16058).
+#[test]
+fn the_view_menu_brings_the_browser_tree_back() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    // The tree is closed, as its own host menu closes it.
+    h.app.ui.show_browser = false;
+    h.settle();
+    assert!(!crate::browser::panel_open(&h.app), "the tree starts closed");
+    let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+    let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label("view.browser")));
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    assert!(crate::scenario::rect_of("view:browser_tree").is_some(), "the View menu has the Browser tree row");
+    for open in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:browser_tree"}})).unwrap();
+        h.settle();
+        assert_eq!(crate::browser::panel_open(&h.app), open, "the row turns the tree {open}");
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the row runs the command: {echo}");
+    }
+    // The Layout setting brings the tree back as well.
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Layout"}));
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:browser_tree");
+    let log = h.app.session.log.len();
+    h.step(&json!({"click":{"handle":"prefs:browser_tree"}})).unwrap();
+    h.settle();
+    assert!(crate::browser::panel_open(&h.app), "the Layout setting brings the tree back");
+    assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the setting runs the command: {echo}");
+}
+
+/// Whether the panel layout holds the Browser tree open, and how it is asked to be.
+fn browser_layout_open(app: &crate::SolveApp) -> Option<bool> {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+}
+
+/// The View menu row runs `view.browser` without parameters, which toggles the tree: two quick
+/// toggles leave it open again, not closed (#16058).
+#[test]
+fn a_double_toggle_of_the_browser_tree_leaves_it_open() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the tree starts open in the layout");
+    // The tree closes.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(!h.app.ui.show_browser, "the first toggle closes the tree");
+    // The tree opens again: the second toggle reads the closed state, before the panels sync.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(h.app.ui.show_browser, "the second toggle leaves the tree open");
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the layout holds it open again");
+    assert!(crate::browser::panel_open(&h.app), "the tree is open again");
 }
 
 #[test]
@@ -429,7 +485,7 @@ fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
         h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
         assert_eq!(h.app.preferences.origin_axes_across_view, enabled);
         let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
-        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.origin_axes_across_view")))]);
+        let echo = tr!(language, "ui.command_done", command = language.label(crate::command_label("view.origin_axes_across_view")));
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the Display menu runs the command");
     }
     h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();

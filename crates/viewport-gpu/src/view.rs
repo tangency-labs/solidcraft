@@ -3576,6 +3576,35 @@ pub fn depth_bias(reversed: bool, b: wgpu::DepthBiasState) -> wgpu::DepthBiasSta
     if reversed { wgpu::DepthBiasState { constant: -b.constant, slope_scale: -b.slope_scale, clamp: -b.clamp } } else { b }
 }
 
+/// `ds` with its constant depth bias taken off for the vertex shader to apply (`FACE_PUSH` in
+/// viewport.wgsl), and those steps (positive: away from the eye), where depth is reversed. A
+/// float buffer's constant bias counts steps at the triangle's largest depth, so a triangle
+/// reaching from near the eye (or cut by the near plane) to far away went back by a share of the
+/// depth range where it was near: about half a millimetre 20 mm from the eye, and the face behind
+/// it showed through (#21024). The shader takes the steps of each vertex's own depth instead.
+/// Other formats count steps evenly and keep the GPU's bias (0 steps).
+pub fn split_push(ds: Option<wgpu::DepthStencilState>) -> (Option<wgpu::DepthStencilState>, f64) {
+    match ds {
+        Some(d) if reversed_depth(Some(d.format)) && d.bias.constant != 0 => {
+            let steps = -f64::from(d.bias.constant);
+            (Some(wgpu::DepthStencilState { bias: wgpu::DepthBiasState { constant: 0, ..d.bias }, ..d }), steps)
+        }
+        ds => (ds, 0.0),
+    }
+}
+
+/// The vertex stage's options for a pipeline pushed `push[0].1` steps ([`split_push`]): the
+/// `FACE_PUSH` constant, or none at 0 (so a module without it can take them too).
+pub fn push_options<'a>(push: &'a [(&'static str, f64); 1]) -> wgpu::PipelineCompilationOptions<'a> {
+    let constants: &[(&str, f64)] = if push[0].1 == 0.0 { &[] } else { push };
+    wgpu::PipelineCompilationOptions { constants, ..Default::default() }
+}
+
+/// The `FACE_PUSH` constant for [`push_options`].
+pub fn face_push(steps: f64) -> [(&'static str, f64); 1] {
+    [("FACE_PUSH", steps)]
+}
+
 /// The depth of the far plane, which a depth buffer is cleared to.
 pub fn far_depth(reversed: bool) -> f32 {
     if reversed { 0.0 } else { 1.0 }
@@ -3740,10 +3769,12 @@ impl Renderer {
                         buf: wgpu::VertexBufferLayout<'static>,
                         ds: Option<wgpu::DepthStencilState>,
                         blend: Option<wgpu::BlendState>| {
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
-                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: Default::default() },
+                vertex: wgpu::VertexState { module: &module, entry_point: Some(vs), buffers: &[Some(buf)], compilation_options: push_options(&push) },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                 depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
@@ -3909,6 +3940,8 @@ impl Renderer {
         // `colour`: whether the pipeline writes colour (the cap's depth pass writes none).
         let solid_writes = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource, colour: bool| {
             let fs = source.fragment(fs);
+            let (ds, push) = split_push(ds);
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&solid_layout),
@@ -3920,7 +3953,7 @@ impl Renderer {
                         TriSource::Planned => &evaluated[..],
                         TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
                     },
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
                 depth_stencil: ds,
@@ -4119,6 +4152,8 @@ impl Renderer {
             )
         };
         let pbr = || {
+            let (instanced_depth, push) = split_push(opaque());
+            let push = face_push(push);
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
@@ -4129,10 +4164,10 @@ impl Renderer {
                         module: &module,
                         entry_point: Some("vs_pbr_inst"),
                         buffers: &[Some(shared_layout()), Some(instance_layout())],
-                        compilation_options: Default::default(),
+                        compilation_options: push_options(&push),
                     },
                     primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-                    depth_stencil: opaque(),
+                    depth_stencil: instanced_depth,
                     multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                     fragment: Some(wgpu::FragmentState {
                         module: &module,
@@ -4224,6 +4259,8 @@ impl Renderer {
                     immediate_size: 0,
                 });
                 let pipe_with = |label: &str, vs: &str, fs: &str, depth_stencil: Option<wgpu::DepthStencilState>, blend: Option<wgpu::BlendState>| {
+                    let (depth_stencil, push) = split_push(depth_stencil);
+                    let push = face_push(push);
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(label),
                         layout: Some(&layout),
@@ -4231,7 +4268,7 @@ impl Renderer {
                             module: &module,
                             entry_point: Some(vs),
                             buffers: &[Some(edges::instance_layout())],
-                            compilation_options: Default::default(),
+                            compilation_options: push_options(&push),
                         },
                         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
                         depth_stencil,
@@ -7920,6 +7957,59 @@ mod glass_tests {
         let img = draw(2, segments, Vec::new());
         assert!(green(&img, ahead.0, ahead.1), "the bead ahead");
         assert!(!green(&img, below.0, below.1), "no wedge of bead below the eye");
+    }
+
+    /// An opaque face that reaches behind the eye still hides a face just behind it (#21024).
+    /// With reversed float depth the GPU counted a face's constant bias in steps of its largest
+    /// depth, which the near plane makes 1 for a face it cuts; a millimetre-near view (the near
+    /// plane at 1 µm) then pushed such a face back by a share of the depth range, and the face
+    /// behind (a box's bottom, seen from above, along its front's lower edge) showed through. The
+    /// push now follows each point's own depth.
+    #[test]
+    fn a_face_reaching_behind_the_eye_still_hides_the_face_behind_it() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        if !reversed_depth(Some(depth)) {
+            eprintln!("skipping: no float depth with stencil, so depth is not reversed here");
+            return;
+        }
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        // Looking along -z from the origin, the near plane at 1 µm as `Camera::clip_bounds` puts
+        // it when the model reaches past the eye.
+        let (near, far) = (0.001f32, 1000.0f32);
+        let (a, b) = (-far / (far - near), -far * near / (far - near));
+        let green_surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.1, 0.8, 0.1), 0.0, 0.6, 1.5).unwrap();
+        // The near floor drawn as a plain triangle and as a material (PBR) one: each kind of
+        // opaque face takes the push in its own vertex shader.
+        for pbr in [false, true] {
+            // A renderer of its own: one that drew the first scene keeps it (same frame key).
+            let mut renderer =
+                Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false }, None);
+            let mut sc = GpuScene::default();
+            let (green, red) = (sc.color([0, 200, 0, 255]), sc.color([200, 0, 0, 255]));
+            // A floor at y = -1 running from ahead of the eye to behind it, and another 0.1%
+            // further along the view (y = -1.001) that stays ahead of it.
+            for p in [[-4.0, -1.0, -6.0], [4.0, -1.0, -6.0], [0.0, -1.0, 5.0]] {
+                if pbr {
+                    sc.pbr_tri(p, [0.0, 1.0, 0.0], green_surface);
+                } else {
+                    sc.tri(p, [0.0, 1.0, 0.0], green);
+                }
+            }
+            for p in [[-4.0, -1.001, -6.0], [4.0, -1.001, -6.0], [0.0, -1.001, -0.5]] {
+                sc.tri(p, [0.0, 1.0, 0.0], red);
+            }
+            let mut frame = test_frame(sc, 1.0);
+            frame.view_proj = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, a, -1.0], [0.0, 0.0, b, 0.0]];
+            frame.eye = [0.0, 0.0, 0.0, 1.0];
+            let img = render_frame(&mut renderer, &device, &queue, &frame, true);
+            // Row 42 of the 64 by 64 picture, its middle column: the floor 3 units ahead.
+            let at = (42 * 64 + 32) * 4;
+            let p = img.get(at..at + 3).unwrap_or_default();
+            // The far floor is red; the near one green (a material floor shades dark here, the
+            // frame giving it no lights) and the background white: no red, and something drawn.
+            assert!(p.len() == 3 && p[0] < 40, "the near floor (pbr: {pbr}) hides the one behind it: {p:?}");
+        }
     }
 
     /// A still view shows the picture it drew last: a reused frame (whose filtered picture is

@@ -2536,6 +2536,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.perforate"
                 | "sheet.fold"
                 | "sheet.path_flange"
+                | "sheet.tab"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
@@ -2547,6 +2548,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.end_cap"
                 | "frame.rotate_member"
                 | "frame.member"
+                | "frame.plate"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -2689,6 +2691,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
+    if let FeatureKind::FramePlate { plane, .. } = &old.kind
+        && let Some(anchor) = solidcraft_doc::face_anchor::plane_face_anchor(plane)
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     trial.active_sketch = None;
     trial.sketching_view = None;
     trial.selection = s.selection.clone();
@@ -2735,6 +2742,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && after.to.is_some()
     {
         after.to_body_apart = before.to_body_apart;
+    }
+    // A Pattern on Path saved before the rotation-minimising frame keeps its copies where they
+    // were through an edit that leaves its orientation as it was; choosing the orientation again
+    // gives the frame every pattern made now has.
+    if let (
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: was, follow_frame: before, .. }, .. },
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { orient: is, follow_frame: after, .. }, .. },
+    ) = (&old.kind, &mut new.kind)
+        && was == is
+    {
+        *after = *before;
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);

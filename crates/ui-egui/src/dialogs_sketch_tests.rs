@@ -815,6 +815,58 @@ fn transform_scales_about_a_picked_center() {
     assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
 }
 
+/// #14496: a click inside the outer of two nested rectangles picks that rectangle for
+/// Transform, and turning it by 45 degrees leaves the inner rectangle where it was.
+#[test]
+fn transform_turns_only_the_rectangle_clicked_inside_not_the_one_inside_it() {
+    let mut h = fixture();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,15],"p1":[30,25]})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let corners = |h: &Harness, lines: &[&str]| -> Vec<solidcore_record::Vec2> {
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        lines.iter().map(|l| sk.point(sk.resolve_point(&format!("{l}.start")).unwrap()).unwrap()).collect()
+    };
+    let inner = ["l5", "l6", "l7", "l8"];
+    let before = corners(&h, &inner);
+    h.step(&json!({"start": "sketch.transform"})).unwrap();
+    h.frames(2);
+    // Between the two rectangles: the outer one's region, which has the inner one as its hole.
+    h.step(&json!({"click": {"sketch": [14, 20]}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_ref().expect("the Transform window");
+    let mut picked = crate::sketch_modify_ui::entity_ids(&h.app, &d.inputs, 0);
+    picked.sort();
+    assert_eq!(picked, ["l1", "l2", "l3", "l4"], "the outer rectangle alone");
+    if let Some(Kind::SketchModify(Mod::Transform { angle, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *angle = "45 deg".into();
+    }
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let after = corners(&h, &inner);
+    for (a, b) in before.iter().zip(&after) {
+        assert!(a.dist(*b) < 1e-9, "the inner rectangle stayed: {before:?} -> {after:?}");
+    }
+    let outer = corners(&h, &["l1"]);
+    let edge = corners(&h, &["l2"])[0] - outer[0];
+    assert!((edge.angle().to_degrees() - 45.0).abs() < 1e-6, "the outer rectangle turned by 45 degrees: {edge:?}");
+    // The preference keeps the earlier pick: the region with the curves of its hole.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.app.preferences.region_pick_takes_holes = true;
+    h.settle();
+    h.step(&json!({"start": "sketch.transform"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": [14, 20]}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_ref().expect("the Transform window");
+    let mut picked = crate::sketch_modify_ui::entity_ids(&h.app, &d.inputs, 0);
+    picked.sort();
+    assert_eq!(picked, ["l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8"], "both rectangles with the preference on");
+}
+
 /// An Intersect whose result the sketch hides (Projected Geometries off) said nothing, so it
 /// looked as if the pick had done nothing, and each try laid another point on the first. The
 /// status line now says what was added and why it is not shown, and the same curve again adds

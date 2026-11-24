@@ -794,6 +794,12 @@ fn rail_rolls_on_past_side_edge_walk(
 /// fails, or a failure of the test itself, [`proven_or_main`]) is `false`, and the End is
 /// refused as on main, naming the radius at which the rail reaches the side edge's end.
 ///
+/// `g_end` is `None` where G's rail end missed its own side edge too (a second miss on a
+/// non-cliff End: its rail end was found on the side edge's line continued past the edge's
+/// end, or not at all). That rail end is not a point of the round at the end face, so the
+/// section through it proves nothing, and nothing proves the second miss rolls over either:
+/// `false`, before any lookup, and the End is refused as before #20757.
+///
 /// # Errors
 /// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
 /// unavailable face trims, a spent certificate budget) only.
@@ -806,8 +812,11 @@ fn end_section_rolls_over(
     fil_eu: EdgeuseId,
     other_face: FaceId,
     rail_face: FaceId,
-    g_end: VertexId,
+    g_end: Option<VertexId>,
 ) -> Result<bool> {
+    let Some(g_end) = g_end else {
+        return Ok(false);
+    };
     proven_or_main(end_section_rolled_over_at(
         k, target, pseudo, solvers, fil_eu, other_face, rail_face, g_end,
     ))
@@ -2718,6 +2727,7 @@ pub fn calc_end_edge_geom(
     let Some(miss_fv) = miss_fv else {
         return Ok(EndEdges::Built);
     };
+    let other_end = other_rail_end(miss_fv, start_fv, end_fv, misses);
     let record = pseudo.fillet_vertex(miss_fv)?;
     if record.point_class() != PointClassType::Edgeuse {
         return Ok(EndEdges::Built);
@@ -2818,11 +2828,7 @@ pub fn calc_end_edge_geom(
             fil_eu,
             other_face,
             rail_face(fil_faces, side_faces),
-            if miss_fv == start_fv {
-                end_fv
-            } else {
-                start_fv
-            },
+            other_end,
         )?
     {
         // Not the fork's (#15767): the rail runs past P because the rail's face runs on
@@ -2840,6 +2846,24 @@ pub fn calc_end_edge_geom(
             .map(EndEdges::Refused);
     }
     Ok(EndEdges::Built)
+}
+
+/// The other rail's end for `calc_end_edge_geom`'s roll-over test: of the End's rail ends
+/// `start_fv` and `end_fv` (`misses[0]` and `misses[1]` say whether each missed its side
+/// edge), the one that is not `miss_fv`, or `None` where it missed its side edge too (a
+/// second miss, which only a cliff overflow's `both_miss` handles): the roll-over is proven
+/// for `miss_fv`'s rail only.
+fn other_rail_end(
+    miss_fv: VertexId,
+    start_fv: VertexId,
+    end_fv: VertexId,
+    misses: [bool; 2],
+) -> Option<VertexId> {
+    if miss_fv == start_fv {
+        (!misses[1]).then_some(end_fv)
+    } else {
+        (!misses[0]).then_some(start_fv)
+    }
 }
 
 /// The fork's `SmBlendCorner::CreateEndPatchOfEnd`'s branch for an End at a smooth vertex
@@ -3043,7 +3067,11 @@ mod tests {
 
     /// `end_section_rolls_over` for the other rail's end `g_end` of `pseudo`, on an empty
     /// target with ids the test never reaches.
-    fn rolls_over(pseudo: &FilletBrep, g_end: VertexId, solvers: &FailingSolvers) -> Result<bool> {
+    fn rolls_over(
+        pseudo: &FilletBrep,
+        g_end: Option<VertexId>,
+        solvers: &FailingSolvers,
+    ) -> Result<bool> {
         let k = Kernel::default();
         let mut target = Brep::new();
         end_section_rolls_over(
@@ -3088,7 +3116,7 @@ mod tests {
     #[test]
     fn an_unsolved_other_rail_end_proves_no_roll_over_and_keeps_main_s_refusal() {
         let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Unprocessed);
-        assert!(!rolls_over(&pseudo, g_end, &FailingSolvers(lookup_failed)).unwrap());
+        assert!(!rolls_over(&pseudo, Some(g_end), &FailingSolvers(lookup_failed)).unwrap());
     }
 
     /// #21099: a failure inside the roll-over test (here the solver lookup of a solved rail
@@ -3097,16 +3125,44 @@ mod tests {
     #[test]
     fn a_failed_roll_over_test_keeps_main_s_refusal_but_passes_cancellation_on() {
         let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Processed);
-        assert!(!rolls_over(&pseudo, g_end, &FailingSolvers(lookup_failed)).unwrap());
+        assert!(!rolls_over(&pseudo, Some(g_end), &FailingSolvers(lookup_failed)).unwrap());
         assert!(!rolls_over(
             &pseudo,
-            VertexId::from_index(7),
+            Some(VertexId::from_index(7)),
             &FailingSolvers(lookup_failed)
         )
         .unwrap());
         assert!(matches!(
-            rolls_over(&pseudo, g_end, &FailingSolvers(cancelled)),
+            rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
             Err(SolidError::Cancelled { .. })
         ));
+    }
+
+    /// #20757's review (CodeRabbit): on a non-cliff End both rails can miss their side
+    /// edges. The roll-over is proven for one miss only; the other rail's end lies past its
+    /// own side edge, so the section through it proves nothing. `end_section_rolls_over` is
+    /// then `false` before any lookup, and `calc_end_edges` refuses the End as before #20757
+    /// (`refuse_end_past_side_edge`), not `EndEdges::Built`. The same solved rail end, not
+    /// missed, does reach the section test (its cancelled lookup propagates).
+    #[test]
+    fn a_second_side_edge_miss_proves_no_roll_over_and_keeps_main_s_refusal() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Processed);
+        assert!(!rolls_over(&pseudo, None, &FailingSolvers(cancelled)).unwrap());
+        assert!(matches!(
+            rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
+            Err(SolidError::Cancelled { .. })
+        ));
+    }
+
+    /// The other rail's end `calc_end_edge_geom` hands `end_section_rolls_over`: the rail end
+    /// that is not the miss, or `None` where it missed its side edge too, from either end.
+    #[test]
+    fn the_other_rail_end_is_none_where_it_missed_its_side_edge_too() {
+        let start = VertexId::from_index(3);
+        let end = VertexId::from_index(5);
+        assert_eq!(other_rail_end(start, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(start, start, end, [true, false]), Some(end));
+        assert_eq!(other_rail_end(end, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(end, start, end, [false, true]), Some(start));
     }
 }

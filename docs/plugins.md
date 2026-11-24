@@ -176,7 +176,14 @@ leaves the design and undo history unchanged.
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
-Enter an absolute local path for each requested folder. Each folder shows its requested read/write access.
+Use **Browse…** to choose each requested folder, or type or paste its absolute local path.
+Each folder shows its requested read/write access. When updating an installed plugin, a stored folder
+with the same name is kept as the editable starting value only when the requested access is the same
+or lower, with read access lower than write access (including read and write). Read-to-read and write-to-read updates keep the
+folder; read-to-write updates start empty so you choose the folder again. You can change any kept
+folder before approving it with **Install**. If a kept folder no longer exists, **Install** reports
+the folder error; choose a folder again. The plugin gets only the folders displayed and approved with
+**Install**; choosing or editing a folder grants nothing on its own.
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
 changed), the screen says how much it asks for and what the ceiling is.
 **Install** approves the displayed command groups, folders and memory, publishes the package and stores the
@@ -912,7 +919,14 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
+  code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
+  (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
+  `~/.cache/solidcraft/plugin-compile`), never in the plugin's or a design's folder. It is safe to
+  delete: the next session compiles again. A changed plugin, SolidCraft version or setting gets its own
+  entry; a damaged entry is compiled again, and a folder that can't be written only means compiling
+  each session. The folder holds machine code SolidCraft runs, so it is as trusted as the app itself.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with

@@ -61,7 +61,8 @@ pub(crate) mod tangle;
 pub(crate) mod uv;
 
 pub use size::MAX_ANGLE_BOUNDARY;
-pub use crate::stats::{PlanStats, RefusedFace};
+pub use crate::stats::PlanStats;
+pub use crate::stats::RefusedFace;
 
 use crate::vec::VecExt as _;
 use std::collections::HashMap;

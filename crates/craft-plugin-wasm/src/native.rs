@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
     mpsc,
 };
@@ -1094,7 +1094,7 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         return Err(component_error("this is a core WebAssembly module, not a component"));
     }
     let importer = runtime.is_importer();
-    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer || runtime.is_exporter())?)?;
+    let (engine, component) = compile_with(bytes, stack_bytes(&runtime.limits, options, importer || runtime.is_exporter())?, disk_cache())?;
     let wit = check_imports(&engine, &component)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     let hook = check_dialog_export(manifest, &engine, &component)?;
@@ -1131,9 +1131,39 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
 
 type Compiled = (Arc<[u8]>, usize, Engine, Component);
 /// The most recently compiled component. Compiling a large importer takes tens of seconds; keeping
-/// the compiled code in memory (never on disk, which would need unsafe deserialization) lets the
-/// next file open at once. Every call still gets a fresh instance and store.
+/// the compiled code in memory lets the next file open at once, and [`disk_cache`] lets the next
+/// session skip the compile too. Every call still gets a fresh instance and store.
 static COMPILED: Mutex<Option<Compiled>> = Mutex::new(None);
+
+/// The folder the app chose for compiled components ([`crate::set_compile_cache_dir`]).
+static COMPILE_CACHE_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// Wasmtime's compilation cache in that folder, opened on first use.
+static DISK_CACHE: OnceLock<Option<wasmtime::Cache>> = OnceLock::new();
+
+pub(super) fn set_compile_cache_dir(dir: Option<PathBuf>) -> bool {
+    COMPILE_CACHE_DIR.set(dir).is_ok()
+}
+
+/// Wasmtime's own compilation cache, in the folder the app set, or none. The key covers the
+/// component's bytes, Wasmtime's version and every compile setting (fuel, epoch interruption, the
+/// processor's features), so a changed plugin, a new SolidCraft or another setting never reads
+/// another one's code. An entry that is missing, damaged or from another version is compiled
+/// again; a folder that can't be created or written leaves the compile as it was.
+fn disk_cache() -> Option<wasmtime::Cache> {
+    DISK_CACHE.get_or_init(|| COMPILE_CACHE_DIR.get().cloned().flatten().and_then(|dir| open_disk_cache(&dir))).clone()
+}
+
+fn open_disk_cache(dir: &Path) -> Option<wasmtime::Cache> {
+    let mut config = wasmtime::CacheConfig::new();
+    config.with_directory(dir);
+    match wasmtime::Cache::new(config) {
+        Ok(cache) => Some(cache),
+        Err(e) => {
+            ::log::warn!(target: "craft_plugin_wasm", "compiled plugins are not kept between sessions: {e:#}");
+            None
+        }
+    }
+}
 
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     if let Ok(cache) = COMPILED.lock()
@@ -1143,7 +1173,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((engine.clone(), component.clone()));
     }
-    let (engine, component) = compile_with(bytes, stack_bytes)?;
+    let (engine, component) = compile_with(bytes, stack_bytes, disk_cache())?;
     if let Ok(mut cache) = COMPILED.lock() {
         *cache = Some((Arc::from(bytes), stack_bytes, engine.clone(), component.clone()));
     }
@@ -1199,10 +1229,12 @@ fn check_outer_interfaces(bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Compiles `bytes` under the host's configuration, without the cache.
-fn compile_with(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+/// Compiles `bytes` under the host's configuration, without the in-memory cache, reading and
+/// filling `disk` when there is one.
+fn compile_with(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>) -> Result<(Engine, Component)> {
     check_outer_interfaces(bytes)?;
     let mut config = Config::new();
+    config.cache(disk);
     config.consume_fuel(true).epoch_interruption(true).wasm_memory64(false).wasm_multi_memory(false).max_wasm_stack(stack_bytes);
     // Wasmtime refuses a Wasm stack larger than its async stack, even for synchronous calls.
     config.async_stack_size(stack_bytes.saturating_add(1 << 20));
