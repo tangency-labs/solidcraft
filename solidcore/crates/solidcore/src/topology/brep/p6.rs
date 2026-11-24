@@ -2267,9 +2267,11 @@ fn nest_shells(
     Ok(())
 }
 
-/// Whether every shell of every region of `brep` is a closed face-use shell: no
-/// lamina edge, no wire or vertex shell. Its regions are then a nested solid model, the
-/// region inside each closed shell the opposite of the region outside it
+/// Whether every shell of every region of `brep` is a closed face-use shell
+/// ([`crate::topology::Shell::is_closed`]: a face use's mate lies in another shell), so
+/// no wire or vertex shell and no sheet on its own. A caller that also knows no lamina
+/// edge is left has a nested solid model, the region inside each closed shell the
+/// opposite of the region outside it
 /// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
 ///
 /// # Errors

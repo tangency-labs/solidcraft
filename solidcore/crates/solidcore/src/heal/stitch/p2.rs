@@ -974,10 +974,13 @@ impl Stitch<'_> {
             // Not upstream (WR-21540, as WR-569 for `stitch_into_solid`): each closed shell
             // the glue closed split off a new region, solid, and upstream only finds the
             // infinite region, so the region inside a shell nested in another (a cavity)
-            // stays solid. Where every shell is closed the regions are a nested solid
-            // model: material inside the outer shell, a void inside a shell within it, and
-            // so on. With two regions both settings give the same flags.
-            let void_setting = if regions > 2 && every_shell_closed(b)? {
+            // stays solid. Where no lamina edge is left and every shell is closed the
+            // regions are a nested solid model: material inside the outer shell, a void
+            // inside a shell within it, and so on. The flags are set once the gluing is
+            // done, from the nesting alone: a split cannot tell them, as a cavity's shell
+            // may close before the shell around it. With two regions both settings give
+            // the same flags.
+            let void_setting = if regions > 2 && out.lamina_edges == 0 && every_shell_closed(b)? {
                 SetRegionVoidType::NestedSolid
             } else {
                 SetRegionVoidType::InfiniteRegionSwap
@@ -2136,13 +2139,16 @@ mod tests {
     }
 
     /// (#21540) The same twelve loose faces sewn by `SmBrep::StitchFaces`, the cavity's
-    /// faces turned either way: both shells close, and the region inside the inner shell is
-    /// a void, so every face lies between material and a void. The infinite region holds
-    /// the outer shell, the material region the outer and the inner shell, the cavity the
-    /// inner shell's other side.
+    /// faces turned either way and given before or after the cube's: both shells close
+    /// (twelve edges glued on each cube), and the region inside the inner shell is a void,
+    /// so every face lies between material and a void. The infinite region holds the outer
+    /// shell, the material region the outer shell's other side first, then the inner
+    /// shell, the cavity the inner shell's other side.
     #[test]
     fn stitch_faces_leaves_a_closed_cavity_void() {
-        for inward in [true, false] {
+        for (inward, cavity_first) in [(true, false), (false, false), (true, true), (false, true)]
+        {
+            let case = format!("inward {inward}, cavity first {cavity_first}");
             let mut k = Kernel::default();
             let mut b = crate::topology::brep::p3::new_brep(
                 &mut k,
@@ -2150,16 +2156,17 @@ mod tests {
                 crate::geom::tol::USE_DEFAULT,
             )
             .unwrap();
+            if cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
             add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
-            add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            if !cavity_first {
+                add_cube_faces(&mut k, &mut b, 3.0, 7.0, inward);
+            }
             let r =
                 crate::topology::brep::p4::stitch_faces(&mut k, &mut b, 0.01, None, false).unwrap();
-            assert_eq!(
-                (r.stitched_edges, r.lamina_edges),
-                (24, 0),
-                "inward {inward}"
-            );
-            assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "inward {inward}");
+            assert_eq!((r.stitched_edges, r.lamina_edges), (24, 0), "{case}");
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 12, "{case}");
             let infinite = b.infinite_region().unwrap();
             let mut regions: Vec<(bool, i32, usize)> = bp1::regions(&b, None)
                 .unwrap()
@@ -2170,12 +2177,23 @@ mod tests {
                 })
                 .collect();
             regions.sort_unstable();
-            // (infinite, void flag, shells): the cavity, the material, the infinite region
+            // (infinite, void flag, shells): the material, the cavity, the infinite region
             assert_eq!(
                 regions,
                 vec![(false, 0, 2), (false, 1, 1), (true, 1, 1)],
-                "inward {inward}"
+                "{case}"
             );
+            // the material region's first shell is its outer one, across from the infinite
+            // region's shell
+            let material = bp1::regions(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&r| b.region(r).unwrap().is_void == 0)
+                .unwrap();
+            let outer = b.region(material).unwrap().shells[0];
+            let outside = b.region(infinite).unwrap().shells[0];
+            let mated = b.shell(outer).unwrap().mated_shells(&mut k, &b).unwrap();
+            assert_eq!(mated, vec![outside], "{case}");
         }
     }
 
