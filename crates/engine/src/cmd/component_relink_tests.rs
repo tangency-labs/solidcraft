@@ -1012,6 +1012,46 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
 /// #12227: relinking one placement of several leaves the others on the old source. The placement
 /// shows a component linked to the new design, made once and reused for the next placement.
 #[test]
+fn relink_of_one_placement_names_the_patterns_and_mirrors_it_breaks() {
+    let dir = folder("placement-copies");
+    let (original, taller) = (dir.join("original.solidcraft"), dir.join("taller.solidcraft"));
+    for (path, height, name) in [(&original, 10, "Block"), (&taller, 20, "Tall")] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+    // Two placements of one design; a body pattern and a mirror copy the body at the first.
+    let relink = |which: usize| -> Vec<String> {
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true}));
+        let second = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "matrix": [1,0,0,100, 0,1,0,0, 0,0,1,0]}));
+        run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1,0,0], "count1": 2, "spacing1": 20}));
+        run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
+        let occurrence = [&first, &second][which]["occurrence"].clone();
+        let reply = run(&mut s, "component.relink", json!({"component": first["component"], "occurrence": occurrence, "path": taller}));
+        reply["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|w| w.contains("worked before this relink"))
+            .map(str::to_string)
+            .collect()
+    };
+
+    // The placement nothing copies: the pattern and the mirror keep working, and no warning.
+    assert_eq!(relink(1), Vec::<String>::new());
+    // The placement both copy: each one that now fails is named, with its error.
+    let warned = relink(0);
+    assert_eq!(warned.len(), 2, "{warned:?}");
+    for name in ["RectangularPattern1", "Mirror1"] {
+        let w = warned.iter().find(|w| w.starts_with(&format!("`{name}`"))).unwrap_or_else(|| panic!("{name}: {warned:?}"));
+        assert!(w.contains("fails now: the placement `Block` was copied from no longer shows it"), "{w}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn relink_of_one_placement_leaves_the_others_on_the_old_source() {
     let dir = folder("placement");
     let original = dir.join("original.solidcraft");
