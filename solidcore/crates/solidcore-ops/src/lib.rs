@@ -34,6 +34,7 @@
 
 pub mod affine;
 pub mod axial_section;
+pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
