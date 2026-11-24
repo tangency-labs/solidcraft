@@ -3242,7 +3242,8 @@ pub(super) fn ignored_unless_defect<T>(r: Result<T>) -> Result<Option<T>> {
 // makes both with every link.
 
 /// Why the offset B-rep is not there.
-const NO_OFFSET: &str = "the offset B-rep is not there, though the executive's caller sets it \
+pub(super) const NO_OFFSET: &str =
+    "the offset B-rep is not there, though the executive's caller sets it \
                          before any step that builds into it, and every step that takes it \
                          gives it back";
 /// Why an edge use has no edge.
@@ -3284,7 +3285,7 @@ const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though 
 /// Why a face use has no mate.
 const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
-const OFFSET_FACE_NO_SURFACE: &str =
+pub(super) const OFFSET_FACE_NO_SURFACE: &str =
     "an offset face has no surface, though the offset gives every face it builds one";
 /// Why an offset face has no face use.
 const OFFSET_FACE_NO_FACEUSE: &str =
@@ -3298,7 +3299,8 @@ const DOMAIN_FACE_NOT_PLANAR: &str = "the face made from the four sides of the o
                                       construction makes its face on the plane through its \
                                       curves";
 /// Why a face just built is not returned.
-const NO_NEW_FACE: &str = "the face construction succeeded but returned no face, though a face \
+pub(super) const NO_NEW_FACE: &str =
+    "the face construction succeeded but returned no face, though a face \
                            construction that succeeds returns the face it made";
 
 /// Why the trimmed B-spline curve of the input's `edge` is missing
@@ -5624,12 +5626,13 @@ mod tests {
         let r = uv_curve_bounding_box(&kernel, &mut curve);
         assert!(
             matches!(
-                r,
-                Err(SolidError::Upstream {
-                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
-                    code: 1001,
-                    ..
-                })
+                &r,
+                Err(e) if e.operation() == "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb"
+                    && e.upstream_status() == Some(1001)
+                    && e.nurbs_failure()
+                        == Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                            crate::error::nurbs::BSplineFailure::NoNurbsForm
+                        ))
             ),
             "{r:?}"
         );

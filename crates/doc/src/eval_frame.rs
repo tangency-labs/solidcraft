@@ -38,6 +38,23 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    evaluate_members(doc, vals, f, st)?;
+    // Use the final naming/identity pass: Auto frames may split, notch or drop members.
+    // Metadata must not change whether the frame itself can build.
+    let names: Vec<String> = st.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.to_string()).collect();
+    let picked: Vec<&str> = names.iter().map(String::as_str).collect();
+    if let Ok(lines) = members_of_bodies(doc, st, f, &picked)
+        && lines.len() == names.len()
+    {
+        for (body, line) in st.bodies.iter_mut().filter(|b| b.feature == f.id).zip(lines) {
+            body.frame_member_line = line.map(Into::into);
+        }
+    }
+    Ok(())
+}
+
+// Preserve main's complete flat/grouped evaluation before adding optional provenance.
+fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     if let Some(groups) = frame::group_features(f)? {
         let FeatureKind::FrameMember { profile, names, .. } = &f.kind else {
             return Err(DocError::Invalid("not a frame member feature".into()));

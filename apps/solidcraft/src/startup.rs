@@ -16,6 +16,7 @@
 //!   cleanly without switching. Exhausted retries show a message box with the error.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The environment variable that starts safe mode (any value but `0` or empty).
 pub const SAFE_MODE_ENV: &str = "SOLIDCRAFT_SAFE_MODE";
@@ -425,8 +426,11 @@ pub fn safe_backends(default: eframe::wgpu::Backends, failed: Option<&str>, cras
 
 /// The crash guard (#18683): a graphics driver that crashes the process while its API is started
 /// leaves this file behind, naming the API, so the next launch knows which one it was and never
-/// loads it again on this machine. Written (and flushed) before a backend is started; removed
-/// once the window presented its first frame, or once startup returned without crashing.
+/// loads it again on this machine. Written (and flushed) when a graphics API is about to be loaded
+/// (an API probe, or egui-wgpu creating the window's instance, [`instance_starting`]), not before:
+/// opening the window's event loop comes first and loads no driver, so a crash there (#19643)
+/// blames nothing. Removed once the window presented its first frame, once the probe returned, or
+/// once startup returned without crashing.
 pub const GRAPHICS_ATTEMPT: &str = "graphics-attempt.json";
 /// `graphics.json`'s record of the APIs that crashed the process while starting, each with the
 /// app version it crashed on. Only the current version's entries count: a new version (which may
@@ -603,9 +607,43 @@ impl BackendGuard {
         }
     }
 
+    /// The window will start `backends`, but only once egui-wgpu creates its instance
+    /// ([`instance_starting`]); until then no API is named. What comes first (the window system's
+    /// event loop, which loads libxkbcommon-x11 and panics without it) loads no graphics driver,
+    /// so a crash there must not blame one (#19643). Only the APIs this system has are named:
+    /// wgpu's default set also lists Metal and D3D12 on Linux, which are never loaded.
+    pub fn attempt_when_the_instance_starts(&self, backends: eframe::wgpu::Backends) {
+        if let Ok(mut waiting) = ATTEMPT_AT_INSTANCE.lock() {
+            *waiting = Some((self.clone(), backends & native_backends()));
+        }
+    }
+
+    /// Run `probe` (which loads `backends`' driver to look at its adapters) with its API named on
+    /// disk; once it returned, that API did not crash the process, and the name goes again.
+    pub fn probe<T>(&self, backends: eframe::wgpu::Backends, probe: impl FnOnce() -> T) -> T {
+        self.attempt(backends);
+        let found = probe();
+        self.clear();
+        found
+    }
+
     /// The attempt is over without a crash: the device is up and drew a frame, or startup returned.
     pub fn clear(&self) {
         let _ = std::fs::remove_file(&self.marker);
+    }
+}
+
+/// What [`BackendGuard::attempt_when_the_instance_starts`] keeps for [`instance_starting`].
+static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends)>> = Mutex::new(None);
+
+/// egui-wgpu is about to create the window's graphics instance, which loads the API's driver: the
+/// first moment the window's own start can crash inside one. Names the APIs kept by
+/// [`BackendGuard::attempt_when_the_instance_starts`] on disk, once: a window opened later (the
+/// agent chat, say) goes through the same step, after the first frame removed the file.
+pub fn instance_starting() {
+    let waiting = ATTEMPT_AT_INSTANCE.lock().ok().and_then(|mut waiting| waiting.take());
+    if let Some((guard, backends)) = waiting {
+        guard.attempt(backends);
     }
 }
 
@@ -1202,6 +1240,85 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #19643: a panic from a missing libxkbcommon-x11 (the window system's event loop, before any
+    /// graphics driver is loaded) left the attempt file behind, and the next launches blamed
+    /// Vulkan, Metal and D3D12 in turn. The attempt is named when egui-wgpu creates its instance
+    /// ([`crate::startup_step`]), not before, and only once.
+    #[test]
+    fn a_crash_before_the_graphics_instance_blames_no_api() {
+        let _one_at_a_time = INSTANCE_ATTEMPT_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let v = "0.45.0";
+        let started = native_backends();
+        let dir = scratch("backend-guard-instance");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4}"#).unwrap();
+        let attempt = dir.join(GRAPHICS_ATTEMPT);
+        let (guard, _) = BackendGuard::begin(&dir, &path, v);
+        // The window will start these (what main does before `run_native`), then the event loop
+        // panics before egui-wgpu gets to its instance.
+        guard.attempt_when_the_instance_starts(started);
+        assert!(!attempt.exists(), "no API is named before the instance is created");
+        let (_, skipped) = BackendGuard::begin(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends::default(), "the next launch skips nothing");
+        assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4}), "graphics.json untouched");
+        // Another step of the window's start is not the instance.
+        guard.attempt_when_the_instance_starts(started);
+        crate::startup_step(eframe::egui_wgpu::STEP_SURFACE, "");
+        assert!(!attempt.exists());
+        // The instance is created (its driver loads): the API is named, flushed, and a crash in it counts.
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        assert!(attempt.is_file(), "named before the driver loads");
+        let (_, skipped) = BackendGuard::begin(&dir, &path, v);
+        assert!(!skipped.crashed.is_empty() && skipped.crashed.intersects(started));
+        // Once only: a window opened later goes through the instance step after the first frame
+        // removed the file, and must not name the API again.
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        assert!(!attempt.exists(), "a later window names nothing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An API probe is named while it runs and gone once it returned: what follows (the event
+    /// loop) is not its driver's crash.
+    #[test]
+    fn an_api_probe_that_returned_is_not_blamed_for_a_later_crash() {
+        use eframe::wgpu::Backends;
+        let dir = scratch("backend-guard-probe");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, "{}").unwrap();
+        let (guard, _) = BackendGuard::begin(&dir, &path, "0.45.0");
+        let named = guard.probe(Backends::DX12, || dir.join(GRAPHICS_ATTEMPT).is_file());
+        assert!(named, "a driver that crashes in the probe is blamed");
+        assert!(!dir.join(GRAPHICS_ATTEMPT).exists(), "the probe returned: nothing is left to blame");
+        let (_, skipped) = BackendGuard::begin(&dir, &path, "0.45.0");
+        assert_eq!(skipped, SkippedBackends::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #19643: wgpu's default set names Metal and D3D12 on every system, but a launch only ever
+    /// loads the ones the system has, so only those are blamed, however often it crashes.
+    #[test]
+    fn an_api_the_system_does_not_have_is_never_blamed() {
+        use eframe::wgpu::Backends;
+        let _one_at_a_time = INSTANCE_ATTEMPT_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let v = "0.45.0";
+        let all = Backends::VULKAN | Backends::METAL | Backends::DX12 | Backends::GL;
+        assert!(!(all - native_backends()).is_empty(), "every system lacks one of the four");
+        let dir = scratch("backend-guard-native");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, "{}").unwrap();
+        // Every launch crashes inside the first API it names: the launches the report had. Each one
+        // starts what wgpu would, its default set less the crashed APIs (safe mode's way).
+        for _ in 0..4 {
+            let (guard, skipped) = BackendGuard::begin(&dir, &path, v);
+            guard.attempt_when_the_instance_starts(without_crashed(all, skipped.crashed));
+            crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        }
+        let (_, skipped) = BackendGuard::begin(&dir, &path, v);
+        assert_eq!(skipped.crashed - native_backends(), Backends::empty(), "{:?} names an API this system lacks", skipped.crashed);
+        assert!(!skipped.crashed.is_empty(), "the ones it has are still blamed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A window that failed to start on an API (its device would not start) is kept, so the next
     /// launch of this version goes straight to the next API.
     #[test]
@@ -1301,6 +1418,9 @@ mod tests {
         assert!(!cpu.contains(Backends::VULKAN) && cpu.contains(Backends::GL), "llvmpipe, not lavapipe");
         assert_eq!(choose_backends(false, false, true, None, Backends::empty(), eframe::wgpu::Backends::empty(), |_| true), None);
     }
+
+    /// The attempt kept for the instance step is one per process: its tests run one at a time.
+    static INSTANCE_ATTEMPT_TESTS: Mutex<()> = Mutex::new(());
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("solidcraft-startup-{name}-{}", std::process::id()));
@@ -1669,7 +1789,7 @@ mod tests {
 
     /// #4164: two windows saving at once leave `app.ron` holding one whole save, never a short
     /// save with a longer one's tail behind it, and no temporary files. A window starting
-    /// meanwhile reads one whole save too.
+    /// meanwhile reads one whole save too, reading the way a window does (`eframe::read_settings`).
     #[test]
     fn settings_saved_at_once_from_two_windows_stay_whole() {
         let keys = ["solidcraft.prefs"];
@@ -1689,7 +1809,7 @@ mod tests {
             let reader = s.spawn(|| {
                 let mut damaged = 0;
                 while saving.load(std::sync::atomic::Ordering::Relaxed) {
-                    damaged += usize::from(!std::fs::read_to_string(&path).is_ok_and(|t| whole(&t)));
+                    damaged += usize::from(!eframe::read_settings(&path).is_ok_and(|t| whole(&t)));
                 }
                 damaged
             });

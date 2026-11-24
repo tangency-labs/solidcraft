@@ -60,6 +60,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
+pub mod dialogs_gusset;
 mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
@@ -584,10 +585,11 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
-    /// folder picker: a plugin field shows no Browse button and the text field still accepts
-    /// a pasted path, and the document library cannot choose a folder.
-    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder, starting in the one given (empty: the folder last used).
+    /// `None` on the web build and when the host has no folder picker: a plugin field shows no
+    /// Browse button and the text field still accepts a pasted path, the document library cannot
+    /// choose a folder, and Settings › Design hides the folder settings.
+    pub pick_folder: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -866,6 +868,9 @@ pub struct SolveApp {
     /// The status message is a refused JSON save of a design with binary data in it, and offers
     /// Save as .sc, so that data is never left out.
     pub status_save_sc: bool,
+    /// The status message that came at this time stays until it is dismissed, instead of going
+    /// after a few seconds (an export that left bodies out).
+    pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
@@ -1195,6 +1200,7 @@ impl SolveApp {
             status_is_tool_hint: false,
             status_undo: false,
             status_save_sc: false,
+            status_sticky_at: None,
             quit_requested: false,
             autosave: None,
             locks: None,
@@ -3627,6 +3633,12 @@ impl SolveApp {
         self.status_is_tool_hint = false;
         self.status_undo = false;
         self.status_save_sc = false;
+    }
+
+    /// [`Self::set_status`] for a warning that must not be missed: it stays until dismissed.
+    pub fn set_status_sticky(&mut self, s: impl Into<String>) {
+        self.set_status(s, true);
+        self.status_sticky_at = self.status.as_ref().map(|(_, at, _)| *at);
     }
 
     /// Retain tool guidance while its owner is suspended, without hiding ordinary statuses.
