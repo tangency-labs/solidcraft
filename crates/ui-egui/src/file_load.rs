@@ -2477,9 +2477,10 @@ M30
         let file = dir.join("plate.sc");
         std::fs::write(&file, b"x").unwrap();
         let path = file.to_string_lossy().into_owned();
-        // Another process holds the design, with a fresh lock.
+        // Another computer holds the design, with a fresh lock (a lock left on this computer by a
+        // process that has ended no longer counts, #20522).
         let now = design_lock::now_secs();
-        design_lock::write(&file, &Lock { pid: std::process::id().wrapping_add(1), ..Lock::mine(now) }).unwrap();
+        design_lock::write(&file, &Lock { host: "WORKSHOP-PC".into(), pid: std::process::id().wrapping_add(1), ..Lock::mine(now) }).unwrap();
         let mut app = SolveApp::new(Session::default(), Default::default());
         crate::open_elsewhere::start(&mut app);
         assert!(crate::open_elsewhere::check_open(&mut app, Request::new(&path, Kind::Open)).is_none(), "a plain open asks");
