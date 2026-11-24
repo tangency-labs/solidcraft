@@ -1184,13 +1184,14 @@ impl Dialog {
             }
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
+                let objects_tip = crate::dialogs_align::objects_tip(components);
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
                 let picks =
                     if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS } | selection::SNAP_POINTS;
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
-                        SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true).tip("dialog.align_objects_tip"),
+                        SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true).tip(objects_tip),
                         SelInput::new("From", picks, false),
                         SelInput::new("To", picks, false),
                     ],
@@ -3746,6 +3747,7 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     if ty != cur {
         *components = ty == 1;
         inp.label = if *components { "Components" } else { "Bodies" };
+        inp.tip = Some(crate::dialogs_align::objects_tip(*components));
         let back = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
         let items = std::mem::replace(&mut inp.items, back);
         if let Some(slot) = d.other_objects.get_mut(cur) {

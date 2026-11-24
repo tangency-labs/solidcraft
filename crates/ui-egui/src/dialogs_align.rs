@@ -41,8 +41,12 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
         p
     };
     for (i, key) in [(1, "from"), (2, "to")] {
-        // Bodies take what is under the cursor (Auto); components, which take no frames, as picked.
-        let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or(if *components { "picked" } else { "auto" });
+        // Bodies take what is under the cursor (Auto); components, which take no frames, as picked, a
+        // remembered Auto too (their list has none: it shows As Picked).
+        let snap = match d.extra.get(&format!("{key}_snap")).and_then(Value::as_str) {
+            Some("auto") | None if *components => "picked",
+            snap => snap.unwrap_or("auto"),
+        };
         // A round edge is its circle, not its centre point: a point has no direction for the
         // bodies to turn by, nor for Flip to turn them over.
         // The command takes no frame on what moves as a target: a To pick there stays as picked.
@@ -124,6 +128,11 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
 fn faces_a_way(p: &Value, key: &str) -> bool {
     ["face", "plane", "frame"].iter().any(|k| p.get(format!("{key}_{k}")).is_some())
         || matches!(p.get(key).and_then(|v| v.get("snap")).and_then(Value::as_str), Some("face_center" | "circle_center"))
+}
+
+/// The Bodies or Components input's tooltip: what moves when it is left empty.
+pub(crate) fn objects_tip(components: bool) -> &'static str {
+    if components { "dialog.align_components_tip" } else { "dialog.align_objects_tip" }
 }
 
 /// Why Flip has no effect, as a message id: it needs one side that faces a way. `None` while
