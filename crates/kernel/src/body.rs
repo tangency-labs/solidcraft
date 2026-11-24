@@ -1575,6 +1575,18 @@ impl Body {
         Ok(b)
     }
 
+    /// The exact box [`Body::exact_bounds`] has kept, if it has measured it.
+    pub(crate) fn kept_bounds(&self) -> Option<Aabb3> {
+        *self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Keeps the exact box measured by another SMLib call (`lo`, `hi` as [`Body::exact_bounds`]'s
+    /// SMLib bounds give them), for [`Body::exact_bounds`]; a box kept first stays.
+    pub(crate) fn keep_bounds(&self, lo: [f64; 3], hi: [f64; 3]) -> Aabb3 {
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *slot.get_or_insert(Aabb3 { min: v3(lo), max: v3(hi) })
+    }
+
     /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
     /// or from mesh triangles for mesh bodies.
     pub fn volume_at(&self, _tol: f64) -> Option<f64> {

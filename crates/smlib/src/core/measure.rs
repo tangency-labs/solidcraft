@@ -95,6 +95,14 @@ fn sheet_face(b: &solidcore::Brep, f: FaceId) -> solidcore::Result<bool> {
 /// with no material, and moments about the middle of the box moved to the centroid. A body's area
 /// is every face's: the solid's boundary and its sheet faces (fork 9767916).
 pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<MassProperties> {
+    mass_properties_and_bounds(body, relative_accuracy).map(|(m, _)| m)
+}
+
+/// [`mass_properties`] and [`bounds`] from one tight box: both read the same body's
+/// `brep_bounding_box(k, b, true)`, so the box is computed once. The mass properties and their
+/// refusals are [`mass_properties`]'s; the box is [`bounds`]'s, or `None` where [`bounds`] would
+/// refuse it.
+pub(crate) fn mass_properties_and_bounds(body: &Body, relative_accuracy: f64) -> Result<(MassProperties, Option<([f64; 3], [f64; 3])>)> {
     let accuracy = accuracy(relative_accuracy)?;
     with_body("mass_properties", body, |k, b| {
         let mut material = false;
@@ -124,7 +132,7 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
             if !finite(&[area, c[0], c[1], c[2]]) {
                 return Err(invalid("non-finite result"));
             }
-            return Ok(MassProperties { area, volume: 0.0, centroid: c, moments: [0.0; 3], products: [0.0; 3] });
+            return Ok((MassProperties { area, volume: 0.0, centroid: c, moments: [0.0; 3], products: [0.0; 3] }, corners(bx.min(), bx.max()).ok()));
         }
         let p = brep_properties_in_box(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs, &bx)?;
         let (mass, volume) = (p.mass, p.volume);
@@ -150,7 +158,7 @@ pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<Mas
         if !finite(&[r.area, r.volume]) || !finite(&r.centroid) || !finite(&r.moments) || !finite(&r.products) {
             return Err(invalid("non-finite result"));
         }
-        Ok(r)
+        Ok((r, corners(bx.min(), bx.max()).ok()))
     })
 }
 
@@ -164,13 +172,17 @@ pub(crate) fn area(body: &Body, relative_accuracy: f64) -> Result<f64> {
 pub(crate) fn bounds(body: &Body) -> Result<([f64; 3], [f64; 3])> {
     with_body("bounds", body, |k, b| {
         let x = brep_bounding_box(k, b, true)?;
-        let (lo, hi) = (x.min(), x.max());
-        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-        if !finite(&lo) || !finite(&hi) || lo.iter().zip(&hi).any(|(a, b)| a > b) {
-            return Err(invalid("no box"));
-        }
-        Ok((lo, hi))
+        corners(x.min(), x.max())
     })
+}
+
+/// A tight box's least and greatest corners; refused where they are not finite or not in order.
+fn corners(lo: Point3, hi: Point3) -> std::result::Result<([f64; 3], [f64; 3]), SolidError> {
+    let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+    if !finite(&lo) || !finite(&hi) || lo.iter().zip(&hi).any(|(a, b)| a > b) {
+        return Err(invalid("no box"));
+    }
+    Ok((lo, hi))
 }
 
 /// `smlib_brep_edge_face_distance`: SMLib's own edge/face gap (`SmEdgeuse::CalcMaxEdgeFaceGap`'s

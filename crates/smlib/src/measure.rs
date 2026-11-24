@@ -69,6 +69,13 @@ impl Brep {
         core::mass_properties(self.core(), relative_accuracy)
     }
 
+    /// [`Brep::mass_properties`] and [`Brep::bounds`] together, the tight box measured once for
+    /// both: the same mass properties and refusals, and the same box, or `None` where
+    /// [`Brep::bounds`] would refuse it.
+    pub fn mass_properties_and_bounds(&self, relative_accuracy: f64) -> Result<(MassProperties, Option<([f64; 3], [f64; 3])>)> {
+        core::mass_properties_and_bounds(self.core(), relative_accuracy)
+    }
+
     /// The exact axis-aligned box, least corner then greatest: the extrema of every vertex, edge
     /// and face on its exact curve or surface, not grown by tolerances or control hulls.
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
