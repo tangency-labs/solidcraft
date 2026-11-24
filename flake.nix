@@ -133,8 +133,13 @@
           # neither.
           doCheck = false;
 
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = runtimeLibs pkgs;
+          # zstd is used by the native-format import crates; pkg-config lets them link
+          # the system zstd instead of building it.
+          nativeBuildInputs = [
+            pkgs.makeWrapper
+            pkgs.pkg-config
+          ];
+          buildInputs = (runtimeLibs pkgs) ++ [ pkgs.zstd ];
 
           postInstall = ''
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''

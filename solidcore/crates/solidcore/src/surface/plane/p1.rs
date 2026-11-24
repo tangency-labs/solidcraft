@@ -1034,9 +1034,9 @@ impl Plane {
             && operation != SolverOperation::Normalize
             && operation != SolverOperation::Intersect
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the operation is neither minimize, normalize nor intersect",
+                SurfaceFailure::OperationNotTaken,
             ));
         }
 
@@ -1193,7 +1193,7 @@ impl Plane {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -1337,10 +1337,11 @@ impl Plane {
 
             let det = pu.cross(pv).dot(lt);
             if det.abs() < EFF_ZERO {
-                // should never happen, we're in the non-parallel case here.
-                return Err(SolidError::surface_failed(
+                // the angle test above passed, so a direction or a scale too small to solve
+                // with makes the determinant this small
+                return Err(SolidError::surface(
                     OP_LINE,
-                    "the line is parallel to the plane",
+                    SurfaceFailure::LineCrossingSingular,
                 ));
             }
 
@@ -2503,6 +2504,23 @@ fn surface_drop_curve<O: SolutionObject>(
     })
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Plane {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_uv_domain,
+            uv_scale,
+        } = self;
+        d.tag(0x91A);
+        base.content(d)?;
+        position.content(d)?;
+        anal_uv_domain.content(d)?;
+        uv_scale.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2630,10 +2648,63 @@ mod tests {
             false,
             1e-6,
         );
+        let e = r.err().unwrap();
+        assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(
-            r.err().and_then(|e| e.sm_status()),
-            Some(SM_ERR_INVALID_INPUT)
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineDirectionZero)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// A line square to a plane whose u and v scales are 1e-7 crosses it at a determinant
+    /// of 1e-14, below the kernel's zero: the crossing is singular to solve for, with
+    /// upstream's `SM_ERR`; the fast drop refuses an operation it does not take.
+    #[test]
+    fn a_crossing_too_small_to_solve_and_an_operation_not_taken_are_named() {
+        use crate::geom::global_solver::SolverOperation;
+        use crate::surface::surface::p4::NoObject;
+        let tiny = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1e-7, 1e-7),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let e = tiny
+            .global_line_intersect::<NoObject>(
+                &Kernel::default(),
+                NoObject,
+                &tiny.step_uv_domain(),
+                Point3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                None,
+                false,
+                1e-6,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineCrossingSingular)
+        );
+        let p = unit_plane();
+        let e = p
+            .drop_point_fast::<NoObject>(
+                &p.step_uv_domain(),
+                SolverOperation::Maximize,
+                Point3::new(1.0, 2.0, 4.0),
+                1e-6,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::OperationNotTaken)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

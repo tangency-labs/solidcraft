@@ -193,8 +193,53 @@ pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: 
         recover_numbered_projected_edge(b, name, near)
             .or_else(|| recover_blend_numbered_edge(b, name, near))
             .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
+            .or_else(|| recover_positional_edge(b, name, near))
             .ok_or(miss)
     })
+}
+
+/// The number of face `name` names on body `b` by position (`<body>:face:<k>`): a body past the
+/// naming depth limit names its faces so (see `naming::names`). `None` for any other name.
+fn positional_face(b: &ModelBody, name: &str) -> Option<usize> {
+    let k = name.strip_prefix(b.name.as_str())?.strip_prefix(":face:")?;
+    if k.is_empty() || !k.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    k.parse().ok().filter(|k| *k < b.body.face_count())
+}
+
+/// An edge saved by position (`Cleat:face:0|Cleat:face:2`) on a body that is named from its
+/// history now (#20956). The naming depth counts every feature before, so deleting earlier
+/// features, even ones that never touched the body, can bring a body named past the limit back
+/// under it. The numbers are the faces' places in the kernel's order, which is all such a name
+/// ever said: the one exact edge between those two faces that the saved point lies on.
+fn recover_positional_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let parts = split_top_level_bars(strip_edge_number(name));
+    let [fa, fb] = parts.as_slice() else { return None };
+    let (fa, fb) = (positional_face(b, fa)?, positional_face(b, fb)?);
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        let (p, q) = (p.face as usize, q.face as usize);
+        ((p, q) == (fa, fb) || (q, p) == (fa, fb)) && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
+}
+
+/// A face saved by position (`Cleat:face:3`) on a body named from its history now: face 3 of
+/// that body, when the saved point lies on it (see [`recover_positional_edge`]).
+fn recover_positional_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if !p.is_finite() {
+        return None;
+    }
+    let (body, b, face) =
+        st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).find_map(|(i, b)| Some((i, b, positional_face(b, name)?)))?;
+    let (_, point) = on_face(b, face, p)?;
+    Some(FaceHit { body, face, point, verified: false, on_point: true })
 }
 
 /// Align used to discard its transform's history and give faces it could not find at the
@@ -1115,9 +1160,10 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => {
-            recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)).or_else(|| numbered_sheet_face(st, name, p))
-        }
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round)
+            .or_else(|| replaced_side_line(st, name, p))
+            .or_else(|| numbered_sheet_face(st, name, p))
+            .or_else(|| recover_positional_face(st, name, p)),
         Err(Miss::Several) => None,
     }
 }

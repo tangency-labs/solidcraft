@@ -42,6 +42,8 @@
 //!   `surface.surface_p1`) instead of the tree node and Bezier patch.
 //! - **Iso curves** keep their original concrete surface through `Surface` dispatch
 //!   (`curve.iso_curve` extended by `surface.surface_point_solve_p3`, PR #106).
+//!   An explicit trim domain bounds the fixed parameter for every surface kind, as
+//!   for B-splines: parameters within `EFF_ZERO_SQRT` of a boundary clamp to it.
 //! - **`m_bUseNewPointSolvers`** has no field: its upstream default (`TRUE`) is used and
 //!   the only setter (`SetUseNewPointSolvers`) has no caller. `LocalPointSolve` therefore
 //!   runs `LocalPointSolve_0` only for [`SolverOperation::Maximize`].
@@ -73,6 +75,7 @@ use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
+use crate::error::nurbs::BSplineFailure;
 use crate::error::surface::{SolveInput, SurfaceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd, ExtentPointType};
@@ -105,6 +108,7 @@ use super::p7::{drop_result_verdict, load_guesses, DropVerdict, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
+const OP_ISO: &str = "surface::surface::p5::Surface::create_iso_parametric_curve";
 const OP_LPS0: &str = "surface::surface::p5::Surface::local_point_solve_0";
 const OP_DROP: &str = "surface::surface::p5::Surface::drop_point";
 const OP_SP_LOCAL: &str = "surface::surface::p5::sp_local_solve";
@@ -501,7 +505,8 @@ impl Surface {
     /// surfaces and planes build it exactly (their overrides); other surfaces run the
     /// `SmSurface` body: a point curve at a singularity, else a piecewise Hermite
     /// approximation within `approx_tol_3d` (`0` picks `1e-4 * length`-style old
-    /// tolerance: `length * SM_EFF_ZERO_SQRT * 100`). `domain` trims the curve;
+    /// tolerance: `length * SM_EFF_ZERO_SQRT * 100`). `domain` trims the curve and
+    /// bounds its fixed parameter, clamping within `EFF_ZERO_SQRT` of a boundary;
     /// `want_uv_iso_curve` asks for the 2D UV line.
     ///
     /// # Errors
@@ -518,6 +523,31 @@ impl Surface {
         domain: Option<&Extent2d>,
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
+        let mut iso_parameter = iso_parameter;
+        if let Some(domain) = domain {
+            let interval = if param == SurfParamType::U {
+                domain.u_interval()
+            } else {
+                domain.v_interval()
+            };
+            if !iso_parameter.is_finite()
+                || interval.has_negative_length()
+                || (!interval.contains_value(iso_parameter, 0.0)
+                    && !interval
+                        .is_value_on_boundary(iso_parameter, EFF_ZERO_SQRT)
+                        .0)
+            {
+                return Err(SolidError::b_spline(
+                    OP_ISO,
+                    BSplineFailure::ParameterOutside {
+                        parameter: iso_parameter,
+                        lo: interval.min(),
+                        hi: interval.max(),
+                    },
+                ));
+            }
+            iso_parameter = interval.clamp_value(iso_parameter);
+        }
         match self.kind_with_nurb(k)? {
             // (SmSurfOfExtrusion inherits the B-spline override)
             SurfaceKind::SurfOfExtrusion(_) => {
@@ -2647,6 +2677,121 @@ mod tests {
 
     fn xy_plane() -> Surface {
         Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)))
+    }
+
+    #[test]
+    fn iso_curve_outside_requested_region_is_refused_at_a_singularity() {
+        let k = Kernel::default();
+        // S(u, v) = (u*v, v, 0): v=0 is the apex, excluded by the trim domain.
+        let net = crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+            Vec3::ZERO,
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        )
+        .unwrap();
+        let bare = Surface::from(net);
+        let step = Surface::from(super::super::p1::StepSurface::new(bare.clone(), true).unwrap());
+        let outside = Extent2d::from_bounds(0.2, 0.1, 0.9, 0.7);
+        let includes_apex = Extent2d::from_bounds(0.2, 0.0, 0.9, 0.7);
+        for surface in [bare, step] {
+            assert!(surface
+                .create_iso_parametric_curve(&k, SurfParamType::V, 0.0, 1e-5, Some(&outside), false)
+                .is_err());
+            for domain in [None, Some(&includes_apex)] {
+                let iso = surface
+                    .create_iso_parametric_curve(&k, SurfParamType::V, 0.0, 1e-5, domain, false)
+                    .unwrap();
+                assert_eq!(iso.curve.evaluate_point(&k, 0.5).unwrap(), Vec3::ZERO);
+            }
+        }
+    }
+
+    #[test]
+    fn iso_curves_keep_the_requested_region_across_surface_kinds() {
+        use crate::geom::transform::Transform;
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::srf_in_volume::SrfInVolume;
+        use crate::surface::surface::p1::StepSurface;
+        use crate::surface::volume::{Volume, VolumeKind};
+
+        let k = Kernel::default();
+        let plane = xy_plane();
+        let surfaces = [
+            plane.clone(),
+            Surface::from(StepSurface::new(plane.clone(), true).unwrap()),
+            Surface::from(OffsetSurface::new(&k, 0.25, plane.clone(), true, 0).unwrap()),
+            Surface::from(
+                SrfInVolume::new(
+                    &k,
+                    plane.clone(),
+                    true,
+                    Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
+                    0,
+                    3,
+                )
+                .unwrap(),
+            ),
+        ];
+        let domain = Extent2d::from_bounds(0.2, 0.1, 0.9, 0.7);
+        for surface in surfaces {
+            for param in [SurfParamType::U, SurfParamType::V] {
+                let (fixed, varying) = if param == SurfParamType::U {
+                    (domain.u_interval(), domain.v_interval())
+                } else {
+                    (domain.v_interval(), domain.u_interval())
+                };
+                for value in [
+                    fixed.min() - 2.0 * EFF_ZERO_SQRT,
+                    fixed.max() + 2.0 * EFF_ZERO_SQRT,
+                ] {
+                    assert!(surface
+                        .create_iso_parametric_curve(&k, param, value, 1e-8, Some(&domain), true)
+                        .is_err());
+                }
+                for (value, expected) in [
+                    (fixed.min() - 0.5 * EFF_ZERO_SQRT, fixed.min()),
+                    (fixed.max() + 0.5 * EFF_ZERO_SQRT, fixed.max()),
+                    (0.5, 0.5),
+                ] {
+                    let iso = surface
+                        .create_iso_parametric_curve(&k, param, value, 1e-8, Some(&domain), true)
+                        .unwrap();
+                    let interval = iso.curve.natural_interval();
+                    for (t, varying_value) in [
+                        (interval.min(), varying.min()),
+                        (interval.max(), varying.max()),
+                    ] {
+                        let uv = if param == SurfParamType::U {
+                            Point2::new(expected, varying_value)
+                        } else {
+                            Point2::new(varying_value, expected)
+                        };
+                        let want = surface.evaluate_point(&k, uv).unwrap();
+                        let got = iso.curve.evaluate_point(&k, t).unwrap();
+                        assert!(
+                            want.distance(got) < 1e-8,
+                            "{param:?}: expected {want:?}, got {got:?}"
+                        );
+                    }
+                    let uv_curve = iso.uv_iso_curve.unwrap();
+                    let uv = uv_curve
+                        .evaluate_point(&k, uv_curve.natural_interval().min())
+                        .unwrap();
+                    let got = if param == SurfParamType::U {
+                        uv.x
+                    } else {
+                        uv.y
+                    };
+                    assert_eq!(got, expected);
+                }
+            }
+        }
+        // No trim region: an unbounded plane still admits iso lines beyond its display net.
+        let beyond_net = plane.natural_uv_domain_with_nurb(&k).unwrap().max().x + 1.0;
+        assert!(plane
+            .create_iso_parametric_curve(&k, SurfParamType::U, beyond_net, 1e-8, None, false)
+            .is_ok());
     }
 
     #[test]
