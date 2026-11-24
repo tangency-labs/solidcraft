@@ -6,7 +6,7 @@ manifest, the WIT interface, building the component, permissions, limits, checki
 installing.
 
 The reference for everything here is [Plugins](../../../plugins.md) (placement, dialogs, package
-limits, importers) and [the runtime reference](../../../plugin-runtime.md) (execution and file
+limits, importers, exporters) and [the runtime reference](../../../plugin-runtime.md) (execution and file
 scope). The design behind them is [RFC 0002](../../../rfcs/0002-plugins.md).
 
 ## What a plugin is
@@ -19,6 +19,9 @@ component. SolidCraft runs the component in a sandbox:
   nothing.
 - An **importer** reads a file of a format SolidCraft doesn't read and writes a SolidCraft design.
   The design opens as a new, unsaved design, with a report of what could not be carried over.
+- An **exporter** writes the open design as a file of a format SolidCraft doesn't write. It reads
+  the design through read-only commands and returns the file's bytes; SolidCraft writes them where
+  the user chose. See [Exporters](../../../plugins.md#exporters).
 
 A plugin has no network access, ever. It reads and writes files only in folders the user approved,
 and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
@@ -26,6 +29,10 @@ from the input schema in the manifest.
 
 Plugins can be written in any language that compiles to a WebAssembly component. This guide uses
 Rust.
+
+Both examples are in SolidCraft's source, in `docs/book/plugin-examples`, and are built against
+the current WIT with every change to it (`cargo xtask plugin-examples`), so the code here
+compiles.
 
 ## What you need
 
@@ -60,7 +67,7 @@ Create `plate-maker/plugin.json`:
   "name": "Plate Maker",
   "version": "0.1.0",
   "description": "Adds a square plate.",
-  "capabilities": ["commands@0.1"],
+  "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "plate-maker.wasm",
     "commands": ["solid.box"],
@@ -82,7 +89,7 @@ Create `plate-maker/plugin.json`:
 |---|---|
 | `id` | 1 to 64 lowercase letters, digits and dashes. The package folder has this name. |
 | `name`, `version`, `description` | What the user sees: at most 80, 32 and 240 characters. |
-| `capabilities` | The host interfaces the plugin uses: `commands@0.1` for a command plugin, `formats@0.1` for an importer, plus `evaluate@0.1` for an importer that checks its result. |
+| `capabilities` | The host interfaces the plugin uses: `commands@0.2` for a command plugin, `formats@0.2` for an importer or exporter, plus `evaluate@0.2` for an importer that checks its result. Plugins built for 0.1 still run. |
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
@@ -95,24 +102,9 @@ geometry picked in the viewport, a dropdown, or a picture per option: see
 [Plugins](../../../plugins.md#integration-apis). `slots` place the entry in a ribbon tab or the
 File or Help menu; every entry is in the Plugins menu anyway.
 
-## Step 2: the interface
+## Step 2: the crate
 
-The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
-it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into
-`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.1.0`, and it has two worlds:
-
-- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
-  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
-  SolidCraft calls with the entry's name and its parameters as JSON.
-- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
-  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
-
-Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
-`invalid-input` and the others name their cause, and the user sees them.
-
-## Step 3: write the component
-
-Create the crate:
+Create the crate beside the package folder:
 
 ```sh
 cargo new --lib plate-maker-src
@@ -131,6 +123,35 @@ opt-level = "s"
 lto = true
 strip = true
 ```
+
+## Step 3: the interface
+
+The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
+it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into the
+crate's `wit` folder:
+
+```sh
+mkdir wit
+cp <SolidCraft source>/crates/craft-plugin/wit/plugin.wit wit/plugin.wit
+```
+
+Its package is `craft:plugin@0.2.0`, and it has three worlds:
+
+- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
+  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
+  SolidCraft calls with the entry's name and its parameters as JSON.
+- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
+  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
+- `exporter-plugin` imports `commands` (only the read-only commands its manifest lists), `log`,
+  `control` and `clock`, and exports `formats-provider`, whose `export-file(slot, options)` returns
+  the file's bytes.
+
+Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
+`invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
+plugin's name. Return `unsupported` for a valid file or option your plugin does not handle ("the
+model has no solids"); `invalid-input` is for input that is broken.
+
+## Step 4: write the component
 
 `src/lib.rs`:
 
@@ -173,17 +194,21 @@ export!(Plugin);
 '{...}'` tries one on an empty design. An error from a command (or `?` on it) ends the run, and
 SolidCraft undoes everything the run did.
 
-## Step 4: build it
+## Step 5: build it
+
+In `plate-maker-src`:
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown
 wasm-tools component new target/wasm32-unknown-unknown/release/plate_maker_src.wasm -o ../plate-maker/plate-maker.wasm
+cd ..
 ```
 
 Build for `wasm32-unknown-unknown`, not a WASI target: SolidCraft links no WASI, so a component
-that imports any is refused. `wasm-tools component new` turns the module into a component.
+that imports any is refused. `wasm-tools component new` turns the module into a component. The
+steps after this one run in the folder that holds `plate-maker` and `plate-maker-src`.
 
-## Step 5: check it
+## Step 6: check it
 
 ```sh
 solidcraft-cli plugin check plate-maker
@@ -209,7 +234,7 @@ It takes the package folder or the `.zip`, and `--json` prints the same as data,
 `plugin.check` command (which MCP clients can call too). In a folder, `tests/` and hidden files are
 left out, as they are out of the `.zip`.
 
-## Step 6: test it
+## Step 7: test it
 
 A plugin's tests are JSON files in its `tests` folder, one case per file. Create
 `plate-maker/tests/default-plate.json`:
@@ -248,7 +273,7 @@ installed for you, and your files are not touched. A case is:
 | `design` | A command runs on this design, in the `tests` folder. Default: an empty design. |
 | `file` | An importer opens this file, in the `tests` folder. |
 | `grants` | What the user approved: `command_groups`, `folders` (`[{"name", "read", "write", "from"}]`, each a fresh folder, or a copy of `from` in `tests`), `input_folder` and `memory_mib`. Default: everything the manifest asks for, as Install approves it. |
-| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded`, `invalid_input`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
+| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded` (or, more exactly, `exhausted` when a budget ran out and `over_ceiling` when the app refused it before it ran), `invalid_input`, `unsupported`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
 | `expect.message` | Text the error contains. |
 | `expect.reply` | Values the reply holds: `plugin.run`'s is `{"result": <what the entry returned>}`; `file.import`'s has `bodies`, `features`, `errors` and the `loss_report`. |
 | `expect.model` | Values `inspect.measure` gives for the resulting design, as `solidcraft-cli eval` prints them: `body_count`, `total.volume_mm3`, each body. |
@@ -259,9 +284,11 @@ An expected object needs only the keys you list; an array needs every item. An e
 case runs once with its fields' defaults, if it needs nothing else, and is skipped otherwise.
 `--json` prints pass or fail per case as data, and `--out DIR` keeps each case's resulting design
 and log for a closer look. The command exits with an error when a case fails, so a CI job can run
-it.
+it; `--require-cases` also fails the run when an entry is skipped, so CI catches an entry nobody
+tested. Given the `.zip`, `plugin test` runs the cases in the `tests/` folder the `.zip` holds;
+the `.zip` from Step 8 leaves them out, so test the folder.
 
-## Step 7: install it
+## Step 8: install it
 
 Zip the package, without its tests:
 
@@ -315,8 +342,9 @@ folder fails with `permission_denied`.
 | `plugin.json` | 16 KiB | 16 KiB |
 | Parameters and replies | 1 MiB of JSON each | 1 MiB per read or write, 1 GiB read, a 256 MiB design |
 
-A run that goes past its fuel, memory or deadline stops with `limit_exceeded`, and nothing it did
-is kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
+A run that goes past its fuel, memory, stack or deadline stops with `exhausted`, which names the
+budget and its size ("it used all 100000 fuel it asks for and was stopped"), and nothing it did is
+kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
 under them.
 
 ## An importer
@@ -331,7 +359,7 @@ The manifest, `box-importer/plugin.json`:
   "id": "box-importer",
   "name": "Box Importer",
   "version": "0.1.0",
-  "capabilities": ["formats@0.1"],
+  "capabilities": ["formats@0.2"],
   "runtime": {
     "module": "box-importer.wasm",
     "commands": [],
@@ -419,7 +447,9 @@ holds `20 10 3`, and `box-importer/tests/small.json` is
 }
 ```
 
-A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`.
+A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`. A
+valid file the importer does not convert answers `unsupported`, which SolidCraft shows as
+"Box Importer does not support part.box: ...".
 
 Once installed, **File › Open** offers `.box` files, and `doc.open` and `file.import` open them.
 An importer that converts a large file can ask for more time (`deadline_ms` up to 600,000), stack
@@ -434,5 +464,5 @@ an assembly's other files and checking the result with `evaluate`.
 | `plugin check`: "component imports instance `wasi:...`" | The crate was built for a WASI target, or uses something in `std` that needs it. Build for `wasm32-unknown-unknown`. |
 | `plugin check`: "built against craft:plugin@..." | The WIT came from another SolidCraft version. Copy this version's `plugin.wit` and rebuild. |
 | A run fails with `permission_denied: command ... is not granted` | The command is not in `runtime.commands`. |
-| A run fails with `limit_exceeded: fuel` or `deadline` | The run did more work than its `limits` allow: raise them, or do less per run. |
+| A run fails with `exhausted`: "it used all ... fuel" or "ran longer than its time limit" | The run did more work than its `limits` allow: raise them, or do less per run. |
 | A run fails with `trap` | The plugin panicked or reached `unreachable`; the message says where. Nothing the run did is kept. |

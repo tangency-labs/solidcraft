@@ -11,46 +11,73 @@ pub struct AspectTile<'a> {
 
 /// Three-column compact illustrated choices, using the same control surface as other choices.
 pub fn aspect_grid(ui: &mut Ui, tiles: &[AspectTile<'_>]) -> Option<usize> {
+    aspect_grid_with_captions(ui, tiles, &[], 3)
+}
+
+/// Illustrated choices with a separate caption below each label.
+pub fn aspect_grid_with_captions(ui: &mut Ui, tiles: &[AspectTile<'_>], captions: &[String], column_count: usize) -> Option<usize> {
     let t = Tokens::get();
     let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let mut clicked = None;
-    for (row, tiles) in tiles.chunks(3).enumerate() {
-        ui.columns(3, |columns| {
+    let column_count = column_count.max(1);
+    for (row, tiles) in tiles.chunks(column_count).enumerate() {
+        ui.columns(column_count, |columns| {
             for (column, tile) in tiles.iter().enumerate() {
                 let Some(ui) = columns.get_mut(column) else { continue };
-                let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height * 2.0 + t.space_8), egui::Sense::click());
+                let index = row * column_count + column;
+                let caption = captions.get(index);
+                let extra = if caption.is_some() { t.font_caption + t.space_8 } else { 0.0 };
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), t.control_height * 2.0 + t.space_8 + extra), egui::Sense::click());
                 let fill = if tile.selected {
                     accent.soft
                 } else if response.hovered() {
                     t.hover
+                } else if caption.is_some() {
+                    egui::Color32::TRANSPARENT
                 } else {
                     t.control_fill
                 };
                 let ink = if tile.selected { accent.ink } else { t.form_ink };
                 ui.painter().rect_filled(rect, t.control_radius, fill);
-                ui.painter().rect_stroke(
-                    rect,
-                    t.control_radius,
-                    t.control_border_stroke(if tile.selected { accent.ink } else { t.control_border }),
-                    egui::StrokeKind::Inside,
-                );
+                if tile.selected || caption.is_none() {
+                    ui.painter().rect_stroke(
+                        rect,
+                        t.control_radius,
+                        t.control_border_stroke(if tile.selected { accent.ink } else { t.control_border }),
+                        egui::StrokeKind::Inside,
+                    );
+                }
                 let available = vec2((rect.width() - t.space_16).max(0.0), t.control_height);
                 let aspect = if tile.aspect.is_finite() && tile.aspect > 0.0 { tile.aspect as f32 } else { 1.0 };
                 let width = available.x.min(available.y * aspect);
                 let size = vec2(width, width / aspect);
                 let glyph = Rect::from_center_size(pos2(rect.center().x, rect.top() + t.space_8 + available.y / 2.0), size);
-                ui.painter().rect_stroke(glyph, 0, Stroke::new(1.0, ink), egui::StrokeKind::Inside);
+                let outline = if caption.is_some() && !tile.selected { t.form_dim } else { ink };
+                ui.painter().rect_stroke(glyph, 0, Stroke::new(1.0, outline), egui::StrokeKind::Inside);
+                if caption.is_some() && glyph.width().min(glyph.height()) > t.space_8 {
+                    ui.painter().rect_stroke(glyph.shrink(t.space_4), 0, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
+                }
                 ui.painter().text(
-                    pos2(rect.center().x, rect.bottom() - t.space_8),
+                    pos2(rect.center().x, rect.bottom() - t.space_8 - extra),
                     egui::Align2::CENTER_BOTTOM,
                     tile.label,
-                    egui::FontId::proportional(t.font_small),
+                    if caption.is_some() { crate::type_face::semibold(t.font_label) } else { egui::FontId::proportional(t.font_small) },
                     ink,
                 );
+                if let Some(caption) = caption {
+                    ui.painter().text(
+                        pos2(rect.center().x, rect.bottom() - t.space_8),
+                        egui::Align2::CENTER_BOTTOM,
+                        caption,
+                        egui::FontId::proportional(t.font_caption),
+                        t.form_dim,
+                    );
+                }
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), tile.selected, tile.label));
                 solidcraft_ui_registry::publish_target(tile.id, rect);
                 if response.clicked() {
-                    clicked = Some(row * 3 + column);
+                    clicked = Some(index);
                 }
             }
         });

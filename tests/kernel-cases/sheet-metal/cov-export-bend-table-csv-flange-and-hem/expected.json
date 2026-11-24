@@ -2,7 +2,7 @@
  "sources": [],
  "what": "sheet.export_bend_table as CSV of an 80 x 40 x 2 base with a 60 degree flange on one long edge and a hem on the other",
  "source": "analytic",
- "method": "T = 2, K = 0.5. Bend 1, the flange: 60 degrees up (included 120), R 2, BA = (pi/3)(2 + 1) = 3.141592654, 80 long. Bend 2, the hem on the top edge: 180 degrees down (included 0), its radius the rule's hem gap 0.01, BA = pi(0.01 + 1) = 3.173008580, 80 long",
+ "method": "T = 2, K = 0.5. Bend 1, the flange: 60 degrees up (included 120), R 2, BA = (pi/3)(2 + 1) = 3.141592654, 80 long. Bend 2, the hem on the top edge: 180 degrees down (included 0), its inside radius half the rule's hem gap of 0.01, 0.005, BA = pi(0.005 + 1) = 3.157300617, 80 long",
  "body_count": 1,
  "files": [
   {
@@ -29,8 +29,8 @@
      "bend": 2,
      "angle_deg": 180.0,
      "direction": "down",
-     "radius_mm": 0.01,
-     "allowance_mm": 3.173008580125691,
+     "radius_mm": 0.005,
+     "allowance_mm": 3.1573006168577415,
      "length_mm": 80.0,
      "included_angle_deg": 0.0
     }

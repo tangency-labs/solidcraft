@@ -7,9 +7,10 @@ mod host;
 mod interaction;
 mod layout;
 #[cfg(not(target_arch = "wasm32"))]
-mod native;
+pub(crate) mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ui;
+mod plugin;
 mod preferences;
 mod production;
 mod runtime;
@@ -24,12 +25,20 @@ pub use interaction::*;
 pub use layout::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::NativeMonitor;
+pub(crate) use plugin::queue_selection;
+pub(crate) use preferences::PanelLayoutSnapshot;
+pub(crate) use preferences::panel_layout_matches;
+pub(crate) use preferences::panel_layout_snapshot;
 pub use preferences::*;
-pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
-pub(crate) use production::{
-    PanelVisibilitySnapshot, apply_placement_command, place_assistant, refresh_production, register_content_focus, report_content_composer_height,
-    report_content_extent, shared_content_composer_height, shared_content_measurement,
-};
+pub(crate) use production::PanelVisibilitySnapshot;
+pub(crate) use production::apply_placement_command;
+pub(crate) use production::place_assistant;
+pub(crate) use production::refresh_production;
+pub(crate) use production::register_content_focus;
+pub(crate) use production::report_content_composer_height;
+pub(crate) use production::report_content_extent;
+pub(crate) use production::shared_content_composer_height;
+pub(crate) use production::shared_content_measurement;
 pub use runtime::*;
 pub use specimen::*;
 pub use surfaces::*;

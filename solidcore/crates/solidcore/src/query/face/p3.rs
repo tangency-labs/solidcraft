@@ -115,6 +115,9 @@
 //!   and at the limits it counts with its own bound; a way along which its control
 //!   values are level is not halved. The fork set a cell aside on its solve's value,
 //!   which the surface takes but need not be its greatest.
+//!   Not the fork's (#18809): a procedural blend cell whose net hull, raised by its
+//!   extraction rounding and definition certificate, cannot enlarge the box is skipped
+//!   before solving on the definition, whether the surface is open or closed.
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
@@ -125,10 +128,12 @@
 
 use std::collections::BTreeSet;
 
+use crate::blend::fillet_section::interval::round_up;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{euclidian_step_off, CurveKind, StepOff};
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -136,6 +141,7 @@ use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::point_set::PointContainment;
 use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::solution_array::OperandObject;
 use crate::geom::tol::{is_degenerate_vec3, scaled_zero2, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector2d::Vec2;
 use crate::heal::face_props::{ClassifyLoopIo, ContainmentType, FaceProps, LoopObject, SS_NONE};
@@ -158,8 +164,8 @@ use crate::query::brep::LazyBrep;
 use crate::query::edge as qe;
 use crate::query::face::p2::{
     curve_on_classify, curve_on_classify_cached, curve_on_classify_mut, face_vertices,
-    point_classify, CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects,
-    PointClassifyOptions,
+    point_classify, point_classify_prepared, CurveOnClassifyBrep, CurveOnClassifyCache,
+    CurveOnClassifyObjects, PointClassifyOptions,
 };
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::plane::Plane;
@@ -168,6 +174,7 @@ use crate::surface::surface::p4::global_point_solve_starts;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::p7::{approx_derivative_lengths, drop_vectors_at};
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_point_solve::p1::SurfPtGlobalSolver;
 use crate::surface::volume::Volume;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p2::BinormalEval;
@@ -200,21 +207,24 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(operation, reason)
 }
 
-/// `return(SM_ERR_INVALID_INPUT)`.
-fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
+/// `return(SM_ERR_INVALID_INPUT)` over the vector operation's error `cause`, which stays
+/// the cause.
+fn invalid_status(operation: &'static str, cause: SolidError) -> SolidError {
+    crate::error::Failure::new(operation, QueryFailure::ZeroLengthVector)
+        .caused_by(cause)
+        .into_error()
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
 /// vector.
 fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
-    v.unitize().map_err(|_| invalid_status(operation))
+    v.unitize().map_err(|e| invalid_status(operation, e))
 }
 
 /// `SER(a.AngleBetween(b, ang))`: the angle, or the `SM_ERR_INVALID_INPUT` status of a
 /// zero vector.
 fn angle_ser(a: Vec3, b: Vec3, operation: &'static str) -> Result<f64> {
-    a.angle_between(b).map_err(|_| invalid_status(operation))
+    a.angle_between(b).map_err(|e| invalid_status(operation, e))
 }
 
 /// The point and first derivative of an evaluation (`sPV[0]`, `sPV[1]`).
@@ -770,21 +780,58 @@ fn cell_directed_max(
     cell: &Extent2d,
     dir: Vec3,
 ) -> Result<CellDirectedMax> {
-    let net = solve_on
-        .number_control_points(k, SurfParamType::U)
-        .saturating_mul(solve_on.number_control_points(k, SurfParamType::V));
+    // A blend's net is a seed, never its definition. Restrict only that seed to
+    // the cell: repeatedly reading a whole closed blend's net also repeatedly
+    // starts exact solves beside the trim instead of in the current cell (#18809).
+    let seed = if matches!(solve_on.kind(), SurfaceKind::ProceduralBlend(_)) {
+        cell_patch(k, solve_on, cell)?
+    } else {
+        None
+    };
+    let net = seed.as_ref().map_or_else(
+        || {
+            solve_on
+                .number_control_points(k, SurfParamType::U)
+                .saturating_mul(solve_on.number_control_points(k, SurfParamType::V))
+        },
+        |net| {
+            net.number_control_points(SurfParamType::U)
+                .saturating_mul(net.number_control_points(SurfParamType::V))
+        },
+    );
     k.work_counters
         .add_face_extreme_control_points(u64::try_from(net).unwrap_or(u64::MAX));
-    let solutions = ignored(global_point_solve_starts(
-        k,
-        solve_on,
-        cell,
-        SolverOperation::Signed3dDirectedMaximize,
-        dir,
-        EFF_ZERO_SQRT,
-        SolutionRequested::All,
-    ))?
-    .unwrap_or_default();
+    let starts = || {
+        if let Some(seed) = &seed {
+            let solutions = SurfPtGlobalSolver::new(
+                k,
+                solve_on,
+                cell,
+                SolverOperation::Signed3dDirectedMaximize,
+                dir,
+                EFF_ZERO_SQRT,
+                None,
+                SolutionRequested::All,
+            )?
+            .with_seed_net(seed)
+            .solve(
+                k,
+                Some(OperandObject::Surface(0, solve_on.stand_in_key_domain(k)?)),
+            )?;
+            Ok(solutions.as_slice().iter().map(|s| s.start).collect())
+        } else {
+            global_point_solve_starts(
+                k,
+                solve_on,
+                cell,
+                SolverOperation::Signed3dDirectedMaximize,
+                dir,
+                EFF_ZERO_SQRT,
+                SolutionRequested::All,
+            )
+        }
+    };
+    let solutions = ignored(starts())?.unwrap_or_default();
     let mut out = CellDirectedMax {
         top: -crate::math::BIG_DOUBLE,
         in_face: false,
@@ -803,19 +850,24 @@ fn cell_directed_max(
         let pos = eval_pos(&mut eval)?;
         let value = pos.x * dir.x + pos.y * dir.y + pos.z * dir.z;
         out.top = out.top.max(value);
-        let classified = ignored(point_classify(
-            k,
-            lb.get_mut()?,
-            f,
-            uv,
-            &mut pt_class,
-            PointClassifyOptions {
-                src_zone_tol_3d: face_zone_tol_3d,
-                do_boundary_intersections: false,
-                use_uv_classification: true,
-                ..PointClassifyOptions::default()
-            },
-        ))?
+        let options = PointClassifyOptions {
+            src_zone_tol_3d: face_zone_tol_3d,
+            do_boundary_intersections: false,
+            use_uv_classification: true,
+            ..PointClassifyOptions::default()
+        };
+        let classified = ignored(match lb {
+            // read only: a classification that would make a UV trim curve or build a
+            // trim cache's tree asks for the B-rep to be prepared
+            LazyBrep::Prepared(b) => point_classify_prepared(k, b, f, uv, &mut pt_class, options)
+                .map_err(|e| match e {
+                    SolidError::Unported { .. } => SolidError::PreparationRequired {
+                        operation: OP_TIGHT,
+                    },
+                    e => e,
+                }),
+            _ => point_classify(k, lb.get_mut()?, f, uv, &mut pt_class, options),
+        })?
         .is_some();
         out.outside =
             out.outside && classified && pt_class.point_class() == PointClassType::Unknown;
@@ -1329,7 +1381,9 @@ fn unsolved_cell_top(
 /// solve's value at a point in the face only raises `best`; 3. on their least, less the
 /// subpatch's rounding, above `best` and the zone tolerance, with every solution
 /// classified outside; at the limits it counts with its own bound; and a way along which
-/// its control values are level is not halved. Other faces keep the fork's rules.
+/// its control values are level is not halved. A procedural blend's cell is also skipped
+/// before solving when its net hull, extraction rounding and certificate bound it below
+/// `best` (#18809). Retained blend cells and other faces keep the fork's rules.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1412,10 +1466,28 @@ fn face_directed_max_with<'b>(
     } else {
         None
     };
+    let blend_margin = match surface.kind() {
+        SurfaceKind::ProceduralBlend(pb) if pb.bound().is_finite() && pb.bound() >= 0.0 => {
+            sub_patch_rounding(pb.net())
+                .map(|rounding| round_up(rounding + pb.bound()))
+                .filter(|margin| margin.is_finite())
+        }
+        _ => None,
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
         k.check_cancelled(OP_TIGHT)?;
+        // For a unit-axis direction, S . dir <= hull(B) + extraction rounding +
+        // |S - B|. Both sums are rounded upward. The certificate and the covering
+        // subpatch prove this even for a closed blend; no solve or classification
+        // is needed when the entire cell cannot enlarge the box (#18809).
+        if let Some(margin) = blend_margin {
+            let hull = cell_patch(k, surface, &cell)?.and_then(|patch| patch_hull_max(&patch, dir));
+            if hull.is_some_and(|hull| round_up(hull + margin) <= best) {
+                continue;
+            }
+        }
         // The cell's subpatch and the greatest `P . dir` of its control points, which no
         // point of the cell exceeds (each is a convex combination of them).
         let patch = if by_patch {
@@ -1865,8 +1937,11 @@ fn uv_line<O: ClassObject>(
     // build UVLine
     let start = Point3::new(uv_start.x, uv_start.y, 0.0);
     let end = Point3::new(uv_end.x, uv_end.y, 0.0);
-    Line::create_line_segment(2, start, end, None)
-        .map_err(|_| SolidError::query_missing(OP_UV_LINE, "the UV line"))
+    Line::create_line_segment(2, start, end, None).map_err(|e| {
+        crate::error::Failure::new(OP_UV_LINE, QueryFailure::UvLineNotMade)
+            .caused_by(e)
+            .into_error()
+    })
 }
 
 /// `sm_FaceClassifyUVLine` after the tolerance: loads `line` into `cc`.
@@ -2654,7 +2729,7 @@ fn into_loop_period(
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// edge or loop use, an edge without curve, a face without surface, a missing vertex use
 /// or mate); `SM_ERR_INVALID_INPUT`
-/// ([`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero vector the
+/// ([`QueryFailure::ZeroLengthVector`]) for a zero vector the
 /// projection or step-off tangents unitize or measure angles with (`SER`); those of the
 /// curve and edge evaluations and of `EvaluateNormalAtSingularity`;
 /// [`SolidError::Unported`]: those of `SmEdgeuse::EvaluateBinormal` and a 2D curve on a
@@ -3819,6 +3894,45 @@ mod tests {
         let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let top = unsolved_cell_top(&k, &lb, f, &blend, &cell, Some(0.5), Vec3::Z).unwrap();
         assert!(top >= 0.5 + rounding + bound, "top {top}");
+
+        // The same enclosure decides whether a cell can skip its solve. Its hull
+        // alone is below all three starting values, but the certificate and the
+        // extraction rounding keep the first two cells eligible for an exact solve.
+        for (best, expected_calls) in [
+            (0.5 + bound / 2.0, 1),
+            (0.5 + bound + rounding / 2.0, 1),
+            (0.5 + 2.0 * bound, 0),
+        ] {
+            let mut lb: LazyBrep<'_> = (&b).into();
+            let mut calls = 0;
+            let got = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &blend,
+                &cell,
+                0.0,
+                Vec3::Z,
+                best,
+                SearchLimits {
+                    max_depth: 0,
+                    max_cells: 0,
+                },
+                &mut |_, _, _, _| {
+                    calls += 1;
+                    Ok(CellDirectedMax {
+                        top: best,
+                        in_face: true,
+                        found: true,
+                        face_top: best,
+                        outside: false,
+                    })
+                },
+            )
+            .unwrap();
+            assert_eq!(got, best);
+            assert_eq!(calls, expected_calls, "starting bound {best}");
+        }
     }
 
     /// The surface's global maximum lies inside the trim (no peak outside): the face's
@@ -4932,5 +5046,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.containment, PointContainment::Outside);
+    }
+
+    #[test]
+    fn a_zero_vectors_status_keeps_the_operations_error() {
+        let unit = Vec3::ZERO.unitize().unwrap_err();
+        let e = unitize_ser(Vec3::ZERO, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
+        assert_eq!(e.cause(), Some(&unit));
+        let angle = Vec3::ZERO.angle_between(Vec3::X).unwrap_err();
+        let e = angle_ser(Vec3::ZERO, Vec3::X, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.cause(), Some(&angle));
     }
 }
