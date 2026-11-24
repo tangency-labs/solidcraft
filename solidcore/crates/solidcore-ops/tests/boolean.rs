@@ -92,6 +92,182 @@ fn a_list_unions_level_by_level() {
     assert_eq!(union_all(Vec::new()).unwrap_err(), Error::Argument);
 }
 
+/// Two 2° wedges of a ring (radii 4 to 10, 4 high) grooved by a whole turn of a torus (radii
+/// 7 and 1, its centre circle in the top face), the second the first's mirror image in the
+/// plane at 2°, both through their records: they meet in that plane only, and their union is
+/// 4/360 of the grooved ring, V = (4/360)(π(10² − 4²)·4 − π²·7·1²) (a half torus of the
+/// groove: π²Rr²). The groove's face is a sliver of a whole turn, which the face's box from its
+/// surface (the whole control net) boxes as the whole ring, and the mirror image's faces come
+/// back from its record over their surfaces' whole domains. So the first wedge and its own copy
+/// a quarter turn on, apart from it, paired every face of each with the other's groove; boxed
+/// by what the faces hold, they pair none.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and checks, not ops computing geometry
+fn wedges_of_a_grooved_ring_unite_and_wedges_apart_pair_no_faces() {
+    all_fixes();
+    let step = 2f64.to_radians();
+    let p = |x: f64, z: f64| [x, 0.0, z];
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let section = [
+        line(p(4.0, 0.0), p(10.0, 0.0)),
+        line(p(10.0, 0.0), p(10.0, 4.0)),
+        line(p(10.0, 4.0), p(4.0, 4.0)),
+        line(p(4.0, 4.0), p(4.0, 0.0)),
+    ];
+    let wedge = revolve(&section, [0.0; 3], [0.0, 0.0, 1.0], step, true).unwrap();
+    let tube = [Curve::Arc {
+        center: [7.0, 0.0, 4.0],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 1.0,
+        start: 0.0,
+        end: TAU,
+    }];
+    let torus = revolve(&tube, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let a = boolean(wedge, torus, BooleanOp::Subtract).unwrap().unwrap();
+    let b = a.copy().unwrap();
+    // the reflection in the plane through z at 2°: I - 2nn', n = (-sin, cos, 0)
+    let (s, c) = step.sin_cos();
+    let (nx, ny) = (-s, c);
+    b.transform(&[
+        [1.0 - 2.0 * nx * nx, -2.0 * nx * ny, 0.0, 0.0],
+        [-2.0 * nx * ny, 1.0 - 2.0 * ny * ny, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    // the first wedge a quarter turn on, apart from the first: no face of one meets the other
+    let far = a.copy().unwrap();
+    far.transform(&[
+        [0.0, 1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    let (ra, rb) = (a.to_record().unwrap().0, b.to_record().unwrap().0);
+
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut pairs_of = |x: &Record, y: &Record| {
+        let (kx, _) = solidcore_convert::brep::to_kernel(&mut k, x, true).unwrap();
+        let (ky, _) = solidcore_convert::brep::to_kernel(&mut k, y, true).unwrap();
+        let before = k.work_counters.face_pairs();
+        solidcore::boolean::api_brep::boolean_union(&mut k, kx, ky).unwrap();
+        k.work_counters.face_pairs() - before
+    };
+    let apart = pairs_of(&ra, &far.to_record().unwrap().0);
+    assert_eq!(
+        apart, 0,
+        "the wedges a quarter turn apart paired {apart} faces"
+    );
+
+    let (ua, _) = Body::from_record(&ra, true).unwrap();
+    let (ub, _) = Body::from_record(&rb, true).unwrap();
+    let u = union_all(vec![ua, ub]).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    let want = 4.0 / 360.0 * (PI * (100.0 - 16.0) * 4.0 - PI * PI * 7.0);
+    assert!(near(volume(&u), want), "{}, closed form {want}", volume(&u));
+}
+
+/// The box the boolean pairs faces by holds the face (`proved_bounding_box`): it holds every
+/// vertex of the face and the face's tight box (`SmFace::CalculateTightBoundingBox`, the face's
+/// extreme points inside its trim), on faces whose trims do not bound them alone: a ball's
+/// faces over its poles, a whole turn of a torus, a cylinder's band round its seam, a ball
+/// with a hole through it (a face of inner loops only), a ball capped across its pole and the
+/// grooved ring of the wedges above.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and checks, not ops computing geometry
+fn the_box_a_face_is_paired_by_holds_the_face() {
+    all_fixes();
+    let ring = || {
+        let tube = [Curve::Arc {
+            center: [7.0, 0.0, 0.0],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 1.0,
+            start: 0.0,
+            end: TAU,
+        }];
+        revolve(&tube, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap()
+    };
+    let ball = || make_sphere([0.0; 3], 5.0).unwrap();
+    let rod = || solidcore_ops::make_cylinder([0.0, 0.0, -8.0], 1.5, 16.0).unwrap();
+    let pierced = boolean(ball(), rod(), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let capped = boolean(
+        ball(),
+        make_box([-6.0, -6.0, 3.0], [12.0, 12.0, 4.0]).unwrap(),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let grooved = boolean(
+        solidcore_ops::make_cylinder([0.0, 0.0, -4.0], 10.0, 4.0).unwrap(),
+        ring(),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let mut k = solidcore::Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..solidcore::Kernel::default()
+    };
+    let mut proved = 0;
+    for (name, body) in [
+        ("ball", ball()),
+        ("ring", ring()),
+        ("rod", rod()),
+        ("pierced", pierced),
+        ("capped", capped),
+        ("grooved", grooved),
+    ] {
+        let record = body.to_record().unwrap().0;
+        let (mut b, _) = solidcore_convert::brep::to_kernel(&mut k, &record, true).unwrap();
+        let faces: Vec<_> = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+        for f in faces {
+            // every trim made, so that the narrowing to the trims is what is checked
+            for lu in solidcore::topology::face::p4::upward_loopuses(&b, f, false, None).unwrap() {
+                for eu in solidcore::topology::edgeuse::p1::loopuse_edgeuses(&b, lu).unwrap() {
+                    let _ = solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                        &k, &mut b, eu, false, false, true,
+                    );
+                }
+            }
+            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f).unwrap()
+            else {
+                continue;
+            };
+            proved += 1;
+            let tight =
+                solidcore::query::face::p3::calculate_tight_bounding_box(&k, &b, f).unwrap();
+            let slack = 1e-7;
+            let inside = |p: solidcore::math::Point3| {
+                [p.x, p.y, p.z]
+                    .iter()
+                    .enumerate()
+                    .all(|(i, &x)| x >= bx.min_at(i) - slack && x <= bx.max_at(i) + slack)
+            };
+            for c in tight.corners() {
+                assert!(
+                    inside(c),
+                    "{name} face {f:?}: tight box {tight:?} leaves {bx:?}"
+                );
+            }
+            for v in solidcore::query::face::p2::face_vertices(&b, f, false, None).unwrap() {
+                let p = solidcore::topology::vertex::point(&b, v).unwrap();
+                assert!(inside(p), "{name} face {f:?}: vertex {p:?} outside {bx:?}");
+            }
+        }
+    }
+    assert!(proved >= 6, "only {proved} faces had a proved box");
+}
+
 #[test]
 fn boxes_touching_along_an_edge_union_to_a_closed_body() {
     all_fixes();
@@ -3209,7 +3385,18 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// inside the walls outside the two rounds, its full section there, of height the top's.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, true);
+}
+
+/// #18064 without `simple_coincidence_crossing_is_point` (WR-647 part A): the curve where the
+/// top crosses the corner round reaches the round's floor edge only at its end vertex
+/// (4, 249.15, 7), so the curve/edge range there is that one contact. The top's other
+/// boundary, the floor's line y = 249.15, meets the round's floor arc only at that point, as
+/// its tangent; the face/face tangency witness proves the range is the point from those two
+/// carriers, and the join is the same as with the flag.
+#[test]
+fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, false);
 }
 
 /// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
@@ -3217,14 +3404,33 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
 /// stays within the scaled zero of the round's floor edge for longer before the touch.
 #[test]
 fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, true);
+}
+
+/// The flatter insert of #18064 without `simple_coincidence_crossing_is_point`: the witness
+/// makes the longer range at the round's end vertex the one contact there (WR-647 part A).
+#[test]
+fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness(
+) {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, false);
 }
 
 /// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
 /// less what they share, the insert's corners inside the walls outside the two rounds, its
-/// full section there, of height the top's.
-fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
-    all_fixes();
+/// full section there, of height the top's. `crossing_is_point` keeps
+/// `simple_coincidence_crossing_is_point` on; without it every other fix is on.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64, crossing_is_point: bool) {
+    if crossing_is_point {
+        all_fixes();
+    } else {
+        session::set_thread_fixes(
+            solidcore::kernel::UpstreamFixes::NAMES
+                .iter()
+                .copied()
+                .filter(|n| *n != "simple_coincidence_crossing_is_point"),
+        )
+        .unwrap();
+    }
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
     // insert's height above the floor

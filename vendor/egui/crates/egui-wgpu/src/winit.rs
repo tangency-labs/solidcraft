@@ -641,9 +641,9 @@ impl Painter {
         capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
-        // SolidCraft: a device lost while the frame is drawn, after its probe, panics inside wgpu
-        // at the first queue write to meet it (#10240). That panic is survived like a loss the
-        // probe meets: the painter draws nothing more and the app restarts.
+        // SolidCraft: a device lost while the frame is drawn panics inside wgpu at the first
+        // queue write to meet it (#4172, #10240). That panic is survived: the probe in `survive`
+        // marks the loss, the painter draws nothing more and the app restarts.
         let watch = self.render_state.as_ref().map(|rs| {
             (
                 rs.device_lost.clone(),
@@ -747,6 +747,13 @@ impl Painter {
             && let Err(err) = self.recreate_surface(viewport_id, window)
         {
             log::error!("Failed to recreate surface for {viewport_id:?}: {err}");
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
+            // SolidCraft: nothing else may draw the next frame, which tries again and lets the
+            // app's hang check see the time without a texture grow (#3321 review).
+            self.context
+                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
             return vsync_sec;
         }
 
@@ -787,6 +794,10 @@ impl Painter {
                 now,
             )
         {
+            // SolidCraft: the main window's time without a texture (#3321, `refused_for`).
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
             return vsync_sec;
         }
 
@@ -807,7 +818,18 @@ impl Painter {
             if let Some(error) = failed {
                 log::warn!("The surface gave no frame: {error}");
             }
-            vsync_sec += start.elapsed().as_secs_f32();
+            let elapsed = start.elapsed();
+            vsync_sec += elapsed.as_secs_f32();
+            // SolidCraft: the main window's frames that wait out the acquire are a hung GPU
+            // (#3321); only one that gives a texture ends its time without one.
+            if viewport_id == ViewportId::ROOT {
+                let frame = matches!(
+                    output_frame,
+                    wgpu::CurrentSurfaceTexture::Success(_)
+                        | wgpu::CurrentSurfaceTexture::Suboptimal(_)
+                );
+                crate::note_acquire(elapsed, frame);
+            }
             output_frame
         };
 
@@ -859,25 +881,6 @@ impl Painter {
             let texture = frame.texture.clone();
             crate::AcquiredFrame::new(frame, texture)
         });
-
-        // SolidCraft: before the uploads, a probe asks the driver whether the device is still
-        // there. The first queue write to meet a lost device panics inside wgpu (#4172, #6528);
-        // the probe meets it instead, marks it lost, and the frame is dropped unpresented.
-        if render_state
-            .device_lost
-            .probe(&render_state.device, &render_state.queue)
-        {
-            if let Some(effect) = &render_state.renderer.read().frame_compositor {
-                effect.suspend();
-            }
-            render_queue_guard.commands_submitted = true;
-            log::error!(
-                "The graphics device was lost: {}",
-                render_state.device_lost.reason().unwrap_or_default()
-            );
-            self.context.request_repaint_of(viewport_id);
-            return vsync_sec;
-        }
 
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as

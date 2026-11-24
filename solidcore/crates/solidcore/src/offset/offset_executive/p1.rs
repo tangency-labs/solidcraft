@@ -1766,10 +1766,10 @@ impl OffsetExecutive {
         if let [only] = edges.as_slice() {
             let mut edgeuse = present(eu::primary_edgeuse(original, *only)?, EDGE_NO_EDGEUSE)?;
             if start_vertex(original, edgeuse)? != vertex {
-                edgeuse = present(eu::radial(original, edgeuse)?, EU_NO_RADIAL)?;
+                edgeuse = input_edgeuse_radial(original, edgeuse)?;
             }
             if eu::is_strut(original, edgeuse)? {
-                let faceuse = present(eu::faceuse(original, edgeuse)?, EU_NO_FACEUSE)?;
+                let faceuse = input_edgeuse_faceuse(original, edgeuse)?;
                 let mut faces = self.faceuse_to_faces.seconds(faceuse);
                 if faces.is_empty() {
                     // GetSeconds accepts a null key and returns an empty list upstream.
@@ -2094,10 +2094,8 @@ impl OffsetExecutive {
                         {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
-                                    let radial =
-                                        present(eu::radial(original, edgeuse)?, EU_NO_RADIAL)?;
-                                    let radial_faceuse =
-                                        present(eu::faceuse(original, radial)?, EU_NO_FACEUSE)?;
+                                    let radial = input_edgeuse_radial(original, edgeuse)?;
+                                    let radial_faceuse = input_edgeuse_faceuse(original, radial)?;
                                     for radial_face in self.faceuse_to_faces.seconds(radial_faceuse)
                                     {
                                         relate_surface_pair(
@@ -3216,6 +3214,22 @@ fn input_faceuse_face(original: &Brep, faceuse: FaceuseId) -> Result<FaceId> {
         .ok_or_else(|| failed(OffsetFailure::FaceuseHasNoFace { faceuse }))
 }
 
+/// The radial of `edgeuse`, an edge use of the operation's input: a caller can clear it
+/// with `Brep::edgeuse_mut`, so a missing radial is [`OffsetFailure::EdgeuseHasNoRadial`],
+/// not a defect.
+fn input_edgeuse_radial(original: &Brep, edgeuse: EdgeuseId) -> Result<EdgeuseId> {
+    eu::radial(original, edgeuse)?
+        .ok_or_else(|| failed(OffsetFailure::EdgeuseHasNoRadial { edgeuse }))
+}
+
+/// The face use of `edgeuse`, an edge use of the operation's input: a caller can unlink it
+/// with `Brep::edgeuse_mut` or `Brep::loopuse_mut`, so a missing face use is
+/// [`OffsetFailure::EdgeuseHasNoFaceuse`], not a defect.
+fn input_edgeuse_faceuse(original: &Brep, edgeuse: EdgeuseId) -> Result<FaceuseId> {
+    eu::faceuse(original, edgeuse)?
+        .ok_or_else(|| failed(OffsetFailure::EdgeuseHasNoFaceuse { edgeuse }))
+}
+
 /// `value`, or the defect `why` with `SM_ERR_NULL_POINTER` ([`defect`]): a link or entity
 /// of a B-rep, or of the executive's own data, that is not there.
 #[track_caller]
@@ -3242,7 +3256,8 @@ pub(super) fn ignored_unless_defect<T>(r: Result<T>) -> Result<Option<T>> {
 // makes both with every link.
 
 /// Why the offset B-rep is not there.
-const NO_OFFSET: &str = "the offset B-rep is not there, though the executive's caller sets it \
+pub(super) const NO_OFFSET: &str =
+    "the offset B-rep is not there, though the executive's caller sets it \
                          before any step that builds into it, and every step that takes it \
                          gives it back";
 /// Why an edge use has no edge.
@@ -3263,12 +3278,6 @@ const EU_NO_NEIGHBOUR: &str = "an edge use has no neighbour in its loop, though 
 /// Why an edge use has no mate.
 const EU_NO_MATE: &str =
     "an edge use has no mate, though the kernel makes edge uses in mated pairs";
-/// Why an edge use has no radial.
-const EU_NO_RADIAL: &str = "an edge use has no radial, though the kernel links the uses around \
-                            every edge in a ring";
-/// Why an edge use has no face use.
-const EU_NO_FACEUSE: &str = "an edge use of a face has no face use, though the kernel makes \
-                             every edge use of a face in a loop of its face use";
 /// Why an edge has no edge use.
 const EDGE_NO_EDGEUSE: &str =
     "an edge has no edge use, though the kernel makes every edge with its uses";
@@ -3276,7 +3285,7 @@ const EDGE_NO_EDGEUSE: &str =
 const EDGE_NO_SAME_EDGEUSE: &str = "an edge has no edge use running with its curve, though the \
                                     kernel makes an edge's uses in mated pairs, one each way";
 /// Why an edge has no vertex at an end.
-const EDGE_NO_VERTEX: &str =
+pub(super) const EDGE_NO_VERTEX: &str =
     "an edge has no vertex at an end, though the kernel bounds every edge by its vertices";
 /// Why a vertex of a loop use is missing.
 const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though the kernel \
@@ -3284,7 +3293,7 @@ const LOOP_NO_VERTEX: &str = "a loop use has an edge use with no vertex, though 
 /// Why a face use has no mate.
 const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
 /// Why an offset face has no surface.
-const OFFSET_FACE_NO_SURFACE: &str =
+pub(super) const OFFSET_FACE_NO_SURFACE: &str =
     "an offset face has no surface, though the offset gives every face it builds one";
 /// Why an offset face has no face use.
 const OFFSET_FACE_NO_FACEUSE: &str =
@@ -3298,7 +3307,8 @@ const DOMAIN_FACE_NOT_PLANAR: &str = "the face made from the four sides of the o
                                       construction makes its face on the plane through its \
                                       curves";
 /// Why a face just built is not returned.
-const NO_NEW_FACE: &str = "the face construction succeeded but returned no face, though a face \
+pub(super) const NO_NEW_FACE: &str =
+    "the face construction succeeded but returned no face, though a face \
                            construction that succeeds returns the face it made";
 
 /// Why the trimmed B-spline curve of the input's `edge` is missing
@@ -3795,6 +3805,36 @@ mod tests {
     use crate::surface::plane::Plane;
     use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
+
+    /// A radial or face use missing from an edge use of the input is the caller's input
+    /// (the conversion guide, rule 9): a caller can build such a body with the public record
+    /// mutators, so each names its cause, not a defect.
+    #[test]
+    fn a_missing_input_edgeuse_radial_or_faceuse_is_named() {
+        // an edge use in no loop and with no neighbour around its edge
+        let mut original = Brep::new();
+        let edgeuse = original
+            .add_edgeuse_record(Edgeuse {
+                owner: crate::topology::EdgeuseOwner::Shell(None),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        let input = |e: SolidError, cause: OffsetFailure| {
+            assert!(!e.is_defect(), "{e}");
+            assert_eq!(e.offset_failure(), Some(&cause), "{e}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert_eq!(e.entity(), Some(EntityRef::Edgeuse(edgeuse)), "{e}");
+        };
+        input(
+            input_edgeuse_radial(&original, edgeuse).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoRadial { edgeuse },
+        );
+        input(
+            input_edgeuse_faceuse(&original, edgeuse).unwrap_err(),
+            OffsetFailure::EdgeuseHasNoFaceuse { edgeuse },
+        );
+    }
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
     /// an edge whose mate failed is left out of the merge's no-SSI pairs in the
@@ -5624,12 +5664,13 @@ mod tests {
         let r = uv_curve_bounding_box(&kernel, &mut curve);
         assert!(
             matches!(
-                r,
-                Err(SolidError::Upstream {
-                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
-                    code: 1001,
-                    ..
-                })
+                &r,
+                Err(e) if e.operation() == "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb"
+                    && e.upstream_status() == Some(1001)
+                    && e.nurbs_failure()
+                        == Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                            crate::error::nurbs::BSplineFailure::NoNurbsForm
+                        ))
             ),
             "{r:?}"
         );

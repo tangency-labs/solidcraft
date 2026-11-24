@@ -59,6 +59,14 @@ xattr -dr com.apple.quarantine /Applications/SolidCraft.app
 When updating from a build released under the previous product name, follow the
 [macOS upgrade notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#macos) so you replace it rather than install a second copy.
 
+Tip: For command line convenience, symlink the executable to your `usr/local/bin`, or other location in your `PATH`.
+
+```
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/SolidCraft /usr/local/bin/SolidCraft
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli /usr/local/bin/solidcraft-cli
+```
+`SolidCraft` and `solidcraft-cli` will now work natively in the terminal.
+
 ### Linux AppImage
 
 The first time you open the AppImage it adds a menu entry and icons under `~/.local/share`
@@ -374,6 +382,9 @@ its `--out` and `--save` files, because the bodies lack what those features shou
 feature's `error` in `timeline`, and then exits with status 1 for the same reason and lists the
 failing features on stderr; `eval --allow-errors` exits with status 0, for a design you are
 inspecting because it fails.
+
+A mesh `--out` that cannot mesh one body still writes the others. Each body left out is named
+on its own line on stderr, with the reason, even with `--quiet`.
 
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
