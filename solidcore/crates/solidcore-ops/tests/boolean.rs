@@ -4034,3 +4034,129 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     let got = volume(&r);
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
+
+/// The length of the line through (x, z) parallel to y that lies in the cube −20..20 less a
+/// Ø18 hole along each axis through its centre and Ø8 holes along x at y = −10 and y = 10
+/// (z = 0): 40 less the union of the y intervals the holes take. A hole along y (x² + z² < 81)
+/// takes the whole line.
+#[allow(clippy::disallowed_methods)] // the test's reference, not ops computing geometry
+fn drilled_cube_chord(x: f64, z: f64) -> f64 {
+    if x * x + z * z < 81.0 {
+        return 0.0;
+    }
+    let mut taken = [
+        (0.0, 81.0 - z * z),
+        (0.0, 81.0 - x * x),
+        (-10.0, 16.0 - z * z),
+        (10.0, 16.0 - z * z),
+    ]
+    .map(|(centre, r2): (f64, f64)| {
+        let h = r2.max(0.0).sqrt();
+        ((centre - h).max(-20.0), (centre + h).min(20.0))
+    });
+    taken.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut length, mut lo, mut hi) = (0.0, taken[0].0, taken[0].1);
+    for &(a, b) in &taken[1..] {
+        if a <= hi {
+            hi = hi.max(b);
+        } else {
+            length += hi - lo;
+            (lo, hi) = (a, b);
+        }
+    }
+    40.0 - (length + hi - lo)
+}
+
+/// acid-4's crossfire: a 40 mm cube about the origin drilled by Ø18 holes along x, y and z
+/// and by Ø8 holes along x at y = ±10, then cut by a Ø8 hole along y at x = −10 whose axis
+/// passes 1e-5 above the two Ø8 x holes' axes. Equal holes whose axes cross a hair apart meet
+/// in curves that nearly pinch: each hole's lens in the other's wall ends in a tip 0.009 mm
+/// across, and the two lenses' tips are 0.018 mm apart, the walls within 1e-5 of each other
+/// between them. A face of the new hole runs through that neck, and the midpoint of its edge
+/// round a lens tip, where the radial sector classified it first, lies in the neck: the walls
+/// leave the edge there 0.13 degrees apart, the steps off the edge ran across the neck and on
+/// past the other lens's tip, where the walls have crossed back, and read the face as lying
+/// in the holes' space. Copied into the outside, the face's edges found no face use in the
+/// solid, and the cut was refused. A point of the edge nearer its ends, where the walls cross
+/// at a clear angle (36 degrees at the ends), now decides at the edge, before any point is
+/// stepped off.
+///
+/// The cubes and holes are built as SolidCraft builds them: each hole an extrusion of a circle
+/// starting 0.6131 rad round from its plane's x axis (its seam). The volume the cut removes is
+/// the integral over the hole's section of [`drilled_cube_chord`], by the midpoint rule on a
+/// polar grid (2000 rings of 8000 cells); the rule gives 471.3501 on half that grid each way
+/// and 471.3519 on this one, so 0.01 bounds its error with room.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's reference integral, not ops computing geometry
+fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
+    all_fixes();
+    let seam = 0.6131;
+    let hole = |origin: [f64; 3], x: [f64; 3], y: [f64; 3], r: f64| {
+        let v = |p: [f64; 3]| solidcore_record::Vec3::new(p[0], p[1], p[2]);
+        let plane = Plane {
+            origin: v(origin),
+            x: v(x),
+            y: v(y),
+        };
+        let region = Region2 {
+            outer: Loop2::circle_from(Vec2::new(0.0, 0.0), r, seam),
+            holes: vec![],
+        };
+        extrude_planar_regions(&plane, &[region], 0.0, 42.0).unwrap()
+    };
+    let (ex, ey, ez, mx) = (
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0],
+    );
+    let mut part = make_box([-20.0; 3], [40.0; 3]).unwrap();
+    for tool in [
+        hole([-21.0, 0.0, 0.0], ey, ez, 9.0),
+        hole([0.0, -21.0, 0.0], mx, ez, 9.0),
+        hole([0.0, 0.0, -21.0], ex, ey, 9.0),
+        hole([-21.0, -10.0, 0.0], ey, ez, 4.0),
+        hole([-21.0, 10.0, 0.0], ey, ez, 4.0),
+    ] {
+        part = boolean(part, tool, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let before = volume(&part);
+    let cut = boolean(
+        part,
+        hole([-10.0, -21.0, 1e-5], mx, ez, 4.0),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(cut.is_manifold_solid().unwrap());
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    let (rings, cells) = (2000_u32, 8000_u32);
+    let mut want = 0.0;
+    for i in 0..rings {
+        let rho = 4.0 * (f64::from(i) + 0.5) / f64::from(rings);
+        for j in 0..cells {
+            let t = TAU * (f64::from(j) + 0.5) / f64::from(cells);
+            want += drilled_cube_chord(-10.0 + rho * t.cos(), 1e-5 + rho * t.sin()) * rho;
+        }
+    }
+    want *= (4.0 / f64::from(rings)) * (TAU / f64::from(cells));
+    let removed = before - volume(&cut);
+    assert!(
+        (removed - want).abs() <= 0.01,
+        "removed {removed}, the integral gives {want}"
+    );
+    // Inside the new hole, where it crosses the x hole at y = 10 and where it runs through
+    // material on its own; material beside it.
+    assert_eq!(
+        cut.classify_point([-10.0, 10.0, 3.0]).unwrap(),
+        PointClass::Outside
+    );
+    assert_eq!(
+        cut.classify_point([-10.0, 16.0, 0.0]).unwrap(),
+        PointClass::Outside
+    );
+    assert_eq!(
+        cut.classify_point([-15.0, 16.0, 0.0]).unwrap(),
+        PointClass::Inside
+    );
+}
