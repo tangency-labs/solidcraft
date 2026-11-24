@@ -3322,8 +3322,7 @@ fn mirror_placements_digest(
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
     for (i, path) in placements.iter().enumerate() {
-        let effective = resolve_migrated_placement(doc, st, bodies.get(i), path);
-        let placed = mirror_copy_frame(doc, f.component, &effective);
+        let placed = resolve_migrated_placement(doc, st, bodies.get(i), path).and_then(|effective| mirror_copy_frame(doc, f.component, &effective));
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3341,8 +3340,7 @@ fn mirror_placements_digest(
 fn pattern_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for (i, path) in placements.iter().enumerate() {
-        let effective = resolve_migrated_placement(doc, st, bodies.get(i), path);
-        let placed = mirror_copy_frame(doc, f.component, &effective);
+        let placed = resolve_migrated_placement(doc, st, bodies.get(i), path).and_then(|effective| mirror_copy_frame(doc, f.component, &effective));
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3360,19 +3358,15 @@ fn resolve_migrated_placement<'a>(
     st: Option<&ModelState>,
     body: Option<&crate::BodyName>,
     path: &'a [u64],
-) -> std::borrow::Cow<'a, [u64]> {
+) -> Option<std::borrow::Cow<'a, [u64]>> {
     let Some(mb) = body.and_then(|b| st?.body(&b.0)) else {
-        return std::borrow::Cow::Borrowed(path);
+        return Some(std::borrow::Cow::Borrowed(path));
     };
-    let Some((at, _)) = doc.path_placement(path) else {
-        return std::borrow::Cow::Borrowed(path);
-    };
+    let (at, _) = doc.path_placement(path)?;
     if placement_shows(doc, mb, at) {
-        std::borrow::Cow::Borrowed(path)
-    } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
-        std::borrow::Cow::Owned(migrated)
+        Some(std::borrow::Cow::Borrowed(path))
     } else {
-        std::borrow::Cow::Borrowed(path)
+        migrated_copy_placement(doc, mb, path, at).map(std::borrow::Cow::Owned)
     }
 }
 
@@ -16943,5 +16937,62 @@ mod path_station_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod migrated_placement_digest_tests {
+    use super::*;
+
+    /// When a migrated placement stops resolving (for instance because a sibling occurrence becomes
+    /// active while the body is still owned by its component), the mirror and pattern placement
+    /// digests must change even if the previously unique occurrence had an identity transform, so
+    /// a cached success is never reused in place of the missing-placement error.
+    #[test]
+    fn unresolved_migration_changes_placement_digests_for_identity_occurrence() {
+        let mut doc = Document::default();
+        let comp = doc.add_component(Some("Part"), 0).unwrap();
+        let occ1 = doc.occurrence_of(comp).unwrap().id;
+        let plane = PlaneRef::Origin { name: "XY".into() };
+        let producer = doc
+            .add_feature(
+                FeatureKind::Mirror { features: Vec::new(), plane: plane.clone(), bodies: Vec::new(), combine: false, placements: Vec::new() },
+                Some("CopySource"),
+            )
+            .unwrap();
+        let copy_name = crate::BodyName("Copy".into());
+        let consumer_id = doc
+            .add_feature(
+                FeatureKind::Mirror {
+                    features: Vec::new(),
+                    plane: plane.clone(),
+                    bodies: vec![copy_name.clone()],
+                    combine: false,
+                    placements: vec![Vec::new()],
+                },
+                Some("MirrorConsumer"),
+            )
+            .unwrap();
+        let consumer = doc.feature(consumer_id).unwrap().clone();
+        let mut mb = ModelBody::new("Copy".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap(), producer);
+        mb.component = comp;
+        mb.transferred = true;
+        let mut st = ModelState::default();
+        st.bodies.push(mb);
+
+        let placements = vec![Vec::new()];
+        let bodies = vec![copy_name.clone()];
+        assert_eq!(resolve_migrated_placement(&doc, Some(&st), Some(&copy_name), &[]).as_deref(), Some([occ1].as_slice()));
+        let mirror_ok = mirror_placements_digest(&doc, &consumer, Some(&st), &plane, &placements, &bodies);
+        let pattern_ok = pattern_placements_digest(&doc, &consumer, Some(&st), &placements, &bodies);
+
+        // Activating a second occurrence of `comp` breaks unique downward resolution.
+        doc.add_occurrence(comp, 0, crate::IDENTITY).unwrap();
+        assert_eq!(resolve_migrated_placement(&doc, Some(&st), Some(&copy_name), &[]), None);
+        let mirror_lost = mirror_placements_digest(&doc, &consumer, Some(&st), &plane, &placements, &bodies);
+        let pattern_lost = pattern_placements_digest(&doc, &consumer, Some(&st), &placements, &bodies);
+
+        assert_ne!(mirror_lost, mirror_ok, "mirror digest must invalidate when migration stops resolving");
+        assert_ne!(pattern_lost, pattern_ok, "pattern digest must invalidate when migration stops resolving");
     }
 }
