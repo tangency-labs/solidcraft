@@ -729,10 +729,21 @@ impl<'a> FeatureExecutive<'a> {
         let first = kept.first();
         let at = first.and_then(|f| f.open_loop).map(EntityRef::Edge);
         let refusal = if let (Some(limit), Some(at)) = (first.and_then(|f| f.limit), at) {
-            // the kept feature's limit (#3218), at its open loop edge
-            Failure::new(OP, Reason::Defeature(limit))
-                .at(at)
-                .into_error()
+            // the kept feature's limit (#3218), at its open loop edge, keeping the error the
+            // construction that named it failed with (the loop the limit was read from)
+            let cause = first
+                .and_then(|f| self.features.get(f.feature))
+                .and_then(|feature| {
+                    open_loop(feature)
+                        .filter(|l| l.limit.is_some())
+                        .or_else(|| feature.loops.iter().find(|l| l.limit.is_some()))
+                })
+                .and_then(|l| l.cause.clone());
+            let f = Failure::new(OP, Reason::Defeature(limit)).at(at);
+            match cause {
+                Some(c) => f.caused_by(c).into_error(),
+                None => f.into_error(),
+            }
         } else {
             let cause = first
                 .and_then(|f| self.features.get(f.feature))
