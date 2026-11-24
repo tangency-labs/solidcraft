@@ -558,7 +558,14 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     // What a request does is an agent's action in usage statistics (`usage_stats`).
     #[cfg(feature = "usage-stats")]
     let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
-    crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+    // An agent's request reads and answers with every feature checked, as a script's does: the
+    // checks the window left running end first, and its own evaluations wait for theirs.
+    let background = app.session.background_checks();
+    app.session.set_background_checks(false);
+    app.session.settle_feature_checks(true);
+    let out = crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req));
+    app.session.set_background_checks(background);
+    out
 }
 
 fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
@@ -687,6 +694,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // What is selected, described for an agent (the MCP server adds it to every reply).
+        "document.selection" => ok(json!({"selection": solidcraft_engine::selection_context::selection_reply(&mut app.session)})),
         // A host that keeps the files itself (an editing embed, #8517).
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),

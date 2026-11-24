@@ -115,7 +115,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignored, passed_on, Failure, Result, SolidError};
+use crate::error::{ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -2035,12 +2035,8 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             let mut start = TsectPnt::zeroed();
             start.assign(&tsp);
             let start_id = v.intersector_mut().alloc_point(start);
-            // (status ignored; passed on with `ssi_proto_topology_statuses_pass_on`,
-            // fork bcc6f01)
-            ignored(passed_on(
-                v.intersector_mut().add_start_point(k, start_id),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            // (status ignored upstream; passed on as the fork does, bcc6f01)
+            v.intersector_mut().add_start_point(k, start_id)?;
             v.intersector_mut().point_mut(pid)?.curve_parameter = 0.0;
             if !(opts.start_direction.is_some() && n > 1) {
                 v.intersector_mut().start_point = Some(start_id);
@@ -2049,19 +2045,9 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // the last point ends the curve
             v.intersector_mut().end_point = Some(pid);
         } else {
-            // the points between are through points (status ignored, but linking
-            // a linked point is undefined upstream; passed on with
-            // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-            match v.intersector_mut().add_through_point(pid) {
-                Err(
-                    e @ (SolidError::InvalidInput { .. }
-                    | SolidError::PortInvariant { .. }
-                    | SolidError::Unported { .. }
-                    | SolidError::Cancelled { .. }),
-                ) => return Err(e),
-                Err(e) if k.fixes.ssi_proto_topology_statuses_pass_on => return Err(e),
-                _ => {}
-            }
+            // the points between are through points (status ignored upstream, where
+            // linking a linked point is undefined; passed on as the fork does, bcc6f01)
+            v.intersector_mut().add_through_point(pid)?;
         }
     }
 

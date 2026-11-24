@@ -76,6 +76,7 @@ pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
+pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
@@ -2195,7 +2196,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -4349,6 +4350,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        timeline::tick_feature_checks(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
@@ -4734,6 +4736,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The recovery banner's Discard all asks here (File view lists the designs inline).
+                recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the

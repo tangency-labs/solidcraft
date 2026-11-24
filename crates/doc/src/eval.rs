@@ -1924,6 +1924,16 @@ pub struct Model {
     /// The [`placement_digest`] each [`pose_only`] feature was last evaluated at, by feature id.
     /// Their fingerprints leave it out, so a pose change doesn't reach the features after them.
     poses: std::collections::HashMap<u64, u64>,
+    /// `evaluate` returns without waiting for the SMLib checks of its last features still running
+    /// ([`Model::set_background_checks`]).
+    background_checks: bool,
+    /// The checks the last `evaluate` left running ([`Model::settle_feature_checks`]).
+    feature_checks: Option<Arc<overlap::Pending>>,
+    /// A check refusal settled after its evaluation returned, for the next `evaluate` to fail the
+    /// refused feature with.
+    carried_refusal: Option<overlap::Carried>,
+    /// A check refusal was settled that no evaluation has brought in yet.
+    feature_refusal_owed: bool,
 }
 
 /// A failed sketch built for its editor (#12085): `shown` is the final state `base` with that
@@ -3588,7 +3598,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     };
     // Members map their frame sketch into their own component's frame, 2D lines included.
     let member = matches!(f.kind, FeatureKind::FrameMember { .. });
-    if path.as_ref().is_some_and(|p| member || wired(p)) || rails.iter().any(|r| wired(&r.sketch)) {
+    // A feature that captured its component's frame reads the components it names through that
+    // frame, so their placement still counts (the path of a sweep, the rails of any of them).
+    if path.as_ref().is_some_and(|p| member || wired(p) || has_captured_profile) || rails.iter().any(|r| wired(&r.sketch) || has_captured_profile) {
         if let Some(path) = path {
             reads.sketch(doc, path.0);
         }
@@ -3952,6 +3964,52 @@ fn now() -> web_time::Instant {
 impl Model {
     pub fn new() -> Self {
         Model::default()
+    }
+
+    /// Let `evaluate` return without waiting for the SMLib checks of the bodies its last features
+    /// keep (the checks under [`kernel::Validation::EachFeature`] that run beside the features
+    /// after them): the results show at once and the checks end beside the caller, which settles
+    /// them ([`Model::settle_feature_checks`]). Off (the default), `evaluate` waits for every
+    /// check, as before. The verdicts, results and refusals are the same either way: what a check
+    /// refuses fails its feature in the next evaluation, as it would have failed in this one.
+    /// Until the checks end, their results are held out of the cache and a save keeps no model
+    /// ([`Model::saved_now`]), and the next `evaluate` waits for them before it starts.
+    pub fn set_background_checks(&mut self, on: bool) {
+        self.background_checks = on;
+    }
+
+    /// The SMLib checks the last evaluation left running have not been settled yet
+    /// ([`Model::settle_feature_checks`]).
+    pub fn checking_features(&self) -> bool {
+        self.feature_checks.is_some()
+    }
+
+    /// Settle the SMLib checks the last evaluation left running ([`Model::set_background_checks`])
+    /// once they have ended, or, with `wait`, after waiting for them. Their held results go into
+    /// the cache as the checks before them pass. A check that refused a feature's bodies marks
+    /// that feature and every result after it stale (keeping their geometry until the next
+    /// `evaluate`), and the next `evaluate` fails the feature, on the same inputs, with the
+    /// check's error. Returns whether an evaluation is owed to such a refusal: settled now or by
+    /// an earlier call, and not evaluated since.
+    pub fn settle_feature_checks(&mut self, wait: bool) -> bool {
+        if let Some(pending) = self.feature_checks.clone()
+            && let Some(outcome) = pending.outcome(wait, &self.cache, &self.kept)
+        {
+            self.feature_checks = None;
+            if let Some(refused) = outcome {
+                if let Some(at) = self.results.iter().position(|r| r.id == refused.id) {
+                    for r in self.results.iter_mut().skip(at) {
+                        r.stale = true;
+                    }
+                }
+                // The fingerprints from the refused feature on are no longer the results'.
+                self.fingerprinted = None;
+                self.placement_inputs = None;
+                self.carried_refusal = Some(refused);
+                self.feature_refusal_owed = true;
+            }
+        }
+        self.feature_refusal_owed
     }
 
     /// An import's SMLib check of its parts is still running ([`kernel::ImportReport::checks`]).
@@ -4348,6 +4406,10 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        // The checks the last evaluation left running stand before anything is built on them.
+        self.settle_feature_checks(true);
+        self.feature_refusal_owed = false;
+        let carried = self.carried_refusal.take();
         let prepared_meshes = self.prepared_meshes.take();
         // A failed sketch held for its editor is built again from the evaluated design: when the
         // sketch and every feature after it fail, the results end in the state they ended in
@@ -4563,6 +4625,11 @@ impl Model {
                 }
                 // The same feature on the same inputs: its earlier result.
                 let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
+                // A check that refused this feature's bodies on these inputs after its evaluation
+                // returned: it fails as it would have failed there.
+                if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
+                    checks.refuse(i, c.failure.clone());
+                }
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4769,7 +4836,7 @@ impl Model {
                     };
                     let name = f.name.clone();
                     let (after, inputs) = after;
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
+                    r = checks.start(i, f.id, key.whole, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
                 }
                 if r.is_ok() && cached.is_none() {
                     // Profiles picked by curves that no longer bound a profile exactly were found
@@ -4909,14 +4976,16 @@ impl Model {
                     state: state.clone(),
                 });
             }
-            // Every check still running ends before the results stand.
-            if let Some(refused) = checks.settle(true, &self.cache, &self.kept) {
+            // Every check still running ends before the results stand, unless they are left to end
+            // beside the caller ([`Model::set_background_checks`]): those that ended are settled.
+            if let Some(refused) = checks.settle(!self.background_checks, &self.cache, &self.kept) {
                 back = Some(refused);
                 continue 'pass;
             }
             // Main's evaluate loop ends the pass here; Pattern-of-components reconcile runs from Session::refresh.
             break;
         }
+        self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
@@ -9608,11 +9677,18 @@ fn feature_tools_with_constructor(
                 return regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect();
             }
             // Each path curve in the sketch it is in, mapped into the feature's frame: the path
-            // may join the curves of several sketches (#16168).
-            let curves = path_curves(doc, st, path, *path_sketch, f.component)?;
+            // may join the curves of several sketches (#16168). The profile and the path are read
+            // through the frame captured when the sweep was made, so the body it builds moves with
+            // the sweep's own component; a sweep that reads components of its own keeps the live
+            // placement of each. A guide rail is read through its own live placement, so a sweep
+            // that has one keeps that too.
+            let readers = sweep_readers(doc, sketch.0, path, *path_sketch, rails);
+            let frames = ReadFrames::of(doc, f, &readers, rails.is_empty());
+            let curves = path_curves(doc, st, path, *path_sketch, f.component, &frames)?;
             // The profile joins the path in the feature's frame, whatever sketch each is drawn
             // in (identity when a sketch shares the feature's component).
-            let profile = profile_in_frame(doc, ss, f.component)?;
+            let profile_owner = doc.feature(sketch.0).map(|g| g.component).unwrap_or(0);
+            let profile = profile_with_transform(ss, &frames.relative(doc, profile_owner)?)?;
             let ss = &profile;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
@@ -9810,6 +9886,46 @@ fn profile_in_frame(doc: &Document, sketch: &SolvedSketch, consumer: u64) -> Res
     profile_with_transform(sketch, &relative)
 }
 
+/// The frames a feature reads the geometry of other components through: the frame it captured
+/// when it was made (its own component as it stood then, against the common ancestor of the two
+/// components), so that the body it builds moves with its own component, or the live placement of
+/// the component the geometry is in.
+struct ReadFrames {
+    /// The captured frame and the common ancestor it was captured against.
+    captured: Option<(Mat, u64)>,
+    /// The feature's own component.
+    consumer: u64,
+}
+
+impl ReadFrames {
+    /// The frames a feature reads the components it names through. The captured frame applies
+    /// when every one of them shares the common ancestor it was captured against; else each is
+    /// read through its live placement, as before.
+    fn of(doc: &Document, feature: &Feature, owners: &[u64], use_captured: bool) -> Self {
+        let profile_owner = owners.first().copied().unwrap_or(0);
+        let ancestor = doc.common_ancestor(feature.component, profile_owner);
+        let frame = if use_captured { feature.profile_frame } else { None };
+        let captured = frame.filter(|_| owners.iter().all(|o| doc.common_ancestor(feature.component, *o) == ancestor));
+        Self { captured: captured.map(|frame| (frame, ancestor)), consumer: feature.component }
+    }
+
+    /// The frame of `owner` in the feature's own component's frame.
+    fn relative(&self, doc: &Document, owner: u64) -> Result<Mat> {
+        match self.captured {
+            Some((consumer_in_lca, ancestor)) => {
+                let owner_in_lca = doc.component_transform_in(owner, ancestor);
+                let inverse = crate::mat_inverse(&consumer_in_lca).ok_or_else(|| DocError::Invalid("stored profile frame is singular".into()))?;
+                Ok(crate::mat_mul(&inverse, &owner_in_lca))
+            }
+            None => {
+                let inverse = crate::mat_inverse(&doc.component_transform(self.consumer))
+                    .ok_or_else(|| DocError::Invalid("consumer frame is invalid".into()))?;
+                Ok(crate::mat_mul(&inverse, &doc.component_transform(owner)))
+            }
+        }
+    }
+}
+
 fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<SolvedSketch> {
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
@@ -9824,20 +9940,27 @@ fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<Solve
 /// Stored coordinates are converted once into the feature consumer frame: the sketch's plane
 /// (its planar curves are read through it, #16168) and its 3D wires.
 fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
-    use std::borrow::Cow;
     let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    path_with_frame(sketch, &relative, &inverse)
+}
+
+/// A sketch's plane and its 3D wires in the frame they are read in: the relative frame of the
+/// sketch's component in the consumer's, and the consumer's own frame inverted for the wires
+/// that are in the world.
+fn path_with_frame<'a>(sketch: &'a SolvedSketch, relative: &Mat, inverse: &Mat) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
+    use std::borrow::Cow;
     let mut mapped = sketch.clone();
     mapped.plane = Plane::new(
-        crate::apply_point(&relative, sketch.plane.origin),
-        crate::apply_vector(&relative, sketch.plane.x),
-        crate::apply_vector(&relative, sketch.plane.y),
+        crate::apply_point(relative, sketch.plane.origin),
+        crate::apply_vector(relative, sketch.plane.x),
+        crate::apply_vector(relative, sketch.plane.y),
     )
     .ok_or_else(|| DocError::Invalid("path sketch frame is invalid".into()))?;
     for wire in &mut mapped.sketch.wires {
-        let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { &relative } else { &inverse };
+        let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { relative } else { inverse };
         map_wire(wire, matrix);
     }
     Ok(Cow::Owned(mapped))
@@ -9860,13 +9983,24 @@ fn curves_in(ps: &SolvedSketch, ids: &[String]) -> Vec<PathCurve> {
 /// A sweep's path curves resolved: each entry's curve in its own sketch, each sketch mapped into
 /// the feature's frame (#16168). An entry without a sketch of its own is a curve of the path's
 /// sketch, as designs before cross-sketch paths saved.
-fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_sketch: crate::SketchId, component: u64) -> Result<Vec<PathCurve>> {
+fn path_curves(
+    doc: &Document,
+    st: &ModelState,
+    path: &[crate::PathEntry],
+    path_sketch: crate::SketchId,
+    component: u64,
+    frames: &ReadFrames,
+) -> Result<Vec<PathCurve>> {
     let mut mapped: Vec<(u64, std::rc::Rc<SolvedSketch>)> = Vec::new();
+    // The wires that are in the world stay in the world: they follow what they are linked to.
+    let inverse =
+        crate::mat_inverse(&doc.component_transform(component)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
     for entry in path {
         let (sid, _) = entry.split(path_sketch);
         if !mapped.iter().any(|(s, _)| *s == sid.0) {
             let sk = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid} (it must come earlier in the timeline)")))?;
-            let sketch = std::rc::Rc::new(path_in_frame(doc, sk, component)?.into_owned());
+            let owner = doc.feature(sid.0).map(|f| f.component).unwrap_or(0);
+            let sketch = std::rc::Rc::new(path_with_frame(sk, &frames.relative(doc, owner)?, &inverse)?.into_owned());
             mapped.push((sid.0, sketch));
         }
     }
@@ -9877,6 +10011,19 @@ fn path_curves(doc: &Document, st: &ModelState, path: &[crate::PathEntry], path_
         curves.push(PathCurve { ss: ss.clone(), id: id.to_string() });
     }
     Ok(curves)
+}
+
+/// The components a sweep reads its profile, its path and its rails from.
+fn sweep_readers(doc: &Document, profile: u64, path: &[crate::PathEntry], path_sketch: crate::SketchId, rails: &[crate::SweepRail]) -> Vec<u64> {
+    let owner = |sketch: u64| doc.feature(sketch).map(|f| f.component).unwrap_or(0);
+    let mut owners = vec![owner(profile)];
+    for entry in path {
+        owners.push(owner(entry.split(path_sketch).0.0));
+    }
+    for rail in rails {
+        owners.push(owner(rail.sketch.0));
+    }
+    owners
 }
 
 /// A path that uses 3D sketch curves (wires), as one chain of pieces put in order from the end
