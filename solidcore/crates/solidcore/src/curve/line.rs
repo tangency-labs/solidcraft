@@ -829,6 +829,16 @@ impl Line {
     /// natural endpoints map directly to the analytic endpoints, avoiding a
     /// rounded interpolation.
     pub(crate) fn exact_point_at_parameter(&self, t: f64) -> Option<Point3> {
+        let [x, y, z] = self.point_expansions_at_parameter(t)?.map(|terms| {
+            let coordinate = expansion::to_f64(&terms);
+            (coordinate.is_finite() && expansion::is_zero(&expansion::sub(&terms, &[coordinate])))
+                .then_some(coordinate)
+        });
+        Some(Point3::new(x?, y?, z?))
+    }
+
+    /// Exact coordinates of a line point when the parameter conversion is exact.
+    pub(crate) fn point_expansions_at_parameter(&self, t: f64) -> Option<[Vec<f64>; 3]> {
         if !t.is_finite() {
             return None;
         }
@@ -869,12 +879,12 @@ impl Line {
             (self.point.z, self.vector.z),
         ]
         .map(|(origin, direction)| {
-            let terms = expansion::add(&expansion::scale(&parameter, direction)?, &[origin]);
-            let coordinate = expansion::to_f64(&terms);
-            (coordinate.is_finite() && expansion::is_zero(&expansion::sub(&terms, &[coordinate])))
-                .then_some(coordinate)
+            Some(expansion::add(
+                &expansion::scale(&parameter, direction)?,
+                &[origin],
+            ))
         });
-        Some(Point3::new(x?, y?, z?))
+        Some([x?, y?, z?])
     }
 
     /// Not upstream: the STEP parameter of NURB parameter `t` as

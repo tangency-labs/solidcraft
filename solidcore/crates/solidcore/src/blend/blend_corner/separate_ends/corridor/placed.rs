@@ -3,7 +3,9 @@
 mod levels;
 
 use self::levels::Levels;
-use super::{cardinal, coords, expansion_span, trim, Arm, Corridor, PointBounds};
+use super::{
+    cardinal, coords, expansion_span, line_roundoff, trim, Arm, Corridor, PointBounds, Segment,
+};
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::line::Line;
 use crate::error::Result;
@@ -14,7 +16,7 @@ use crate::math::{Point3, Vec3};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::face::p2 as face2;
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
+use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 pub(super) struct Placed {
     frame: Frame,
@@ -66,6 +68,9 @@ impl Axis {
     fn coordinate(self, point: Point3) -> Option<Ivl> {
         let coordinate = bounded_dot(point, self.direction)?.div_ulp(self.length_squared);
         coordinate.is_finite().then_some(coordinate)
+    }
+    fn coordinate_bounds(self, point: PointBounds) -> Ivl {
+        trim::dot(point, coords(self.direction).map(Ivl::from)).div_ulp(self.length_squared)
     }
 }
 
@@ -231,7 +236,7 @@ impl Placed {
         Ok(bound.then_some(Point3::new(x, y, z)))
     }
 
-    pub(super) fn binds_trim(
+    pub(super) fn bound_trim(
         &self,
         b: &Brep,
         eu: EdgeuseId,
@@ -240,11 +245,21 @@ impl Placed {
         line: &Line,
         [u, v]: [VertexId; 2],
         [a, z]: [Point3; 2],
-    ) -> Result<bool> {
-        if cardinal(coords(a), coords(z)).is_none() {
-            return Ok(false);
+    ) -> Result<Option<Segment>> {
+        // Only locally resolved support levels constrain this trim.
+        let (from, to) = (coords(a), coords(z));
+        let Some((axis, _)) = cardinal(from, to) else {
+            return Ok(None);
+        };
+        let (Some(&from), Some(&to), Some(margin)) =
+            (from.get(axis), to.get(axis), self.foreign_margin())
+        else {
+            return Ok(None);
+        };
+        if Ivl::from(from.max(to)).sub_ulp(Ivl::from(from.min(to))).lo <= margin {
+            return Ok(None);
         }
-        Ok(trim::bound_affine_trim(
+        trim::bound_affine_trim(
             b,
             eu,
             e,
@@ -253,8 +268,92 @@ impl Placed {
             [u, v],
             [a, z].map(|p| self.frame.world(coords(p))),
             self.zone,
-        )?
-        .is_some())
+        )
+    }
+
+    /// Keep the entire lifted segment except where a shared intrinsic UV
+    /// boundary certifies contact with an open side of this rectangle.
+    pub(super) fn support_trim(
+        &self,
+        k: &Kernel,
+        b: &Brep,
+        arm: Arm,
+        (face, eu, e, line): (FaceId, EdgeuseId, EdgeId, &Line),
+        endpoints: [(VertexId, Point3); 2],
+        raw: Segment,
+    ) -> Result<Option<Segment>> {
+        let [wall, floor] = arm.rail_faces;
+        let [near_a, near_z] = arm.near_caps;
+        let on_rail = arm.rail_faces.contains(&face);
+        let (Some(&axial), Some(&near)) = (arm.spans.get(arm.along), arm.origin.get(arm.along))
+        else {
+            return Ok(None);
+        };
+        let far = if near == axial.lo { axial.hi } else { axial.lo };
+        let boundaries = [
+            (wall, arm.across, arm.origin.get(arm.across).copied()),
+            (floor, arm.above, arm.origin.get(arm.above).copied()),
+            (near_a, arm.along, on_rail.then_some(near)),
+            (near_z, arm.along, on_rail.then_some(near)),
+            (arm.far_cap, arm.along, on_rail.then_some(far)),
+        ];
+        let Some(plane) = read_plane(b, face)? else {
+            return Ok(None);
+        };
+        let interval = edge::interval(b, e)?;
+        let Some(arithmetic) =
+            line_roundoff(line, &interval).and_then(|error| self.frame.width(error))
+        else {
+            return Ok(None);
+        };
+        let Some(spatial) = trim::line_endpoints(line, &interval) else {
+            return Ok(None);
+        };
+        let project = |point| self.frame.axes.map(|axis| axis.coordinate_bounds(point));
+        let spatial = spatial.map(project);
+        let mut projected = raw.map(project);
+        let rounding = Ivl::new(-arithmetic, arithmetic);
+        let mut regenerated = None;
+        for ((bounds, (vertex, nominal)), spatial) in
+            projected.iter_mut().zip(endpoints).zip(spatial)
+        {
+            for (other, axis, level) in boundaries {
+                let Some(level) = level else {
+                    continue;
+                };
+                if other == face || coords(nominal).get(axis) != Some(&level) {
+                    continue;
+                }
+                let (Some(value), Some(spatial)) = (bounds.get_mut(axis), spatial.get(axis)) else {
+                    return Ok(None);
+                };
+                // The trim and its independent spatial carrier must both
+                // reach this level within the line's arithmetic enclosure.
+                let reaches_level = |range: Ivl| {
+                    let range = range.add_ulp(rounding);
+                    range.is_finite() && range.lo <= level && level <= range.hi
+                };
+                if !reaches_level(*value) || !reaches_level(*spatial) {
+                    continue;
+                }
+                let same_support = |peer| self.levels.same_support(peer, other);
+                let mut proof = trim::on_iso_seam(k, b, face, plane, eu, vertex, same_support)?;
+                if !proof && trim::touches_support(b, eu, vertex, same_support)? {
+                    if regenerated.is_none() {
+                        regenerated = Some(trim::reprojects(k, b, eu, face, plane)?);
+                    }
+                    proof = regenerated == Some(true);
+                }
+                if proof {
+                    *value = Ivl::from(level);
+                }
+            }
+        }
+        Ok(projected
+            .iter()
+            .flatten()
+            .all(|bound| bound.is_finite())
+            .then_some(projected))
     }
 
     pub(super) fn width(&self, physical: f64) -> Option<f64> {

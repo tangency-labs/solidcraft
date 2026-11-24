@@ -482,7 +482,7 @@ impl LoopEnd {
 /// enclosure is used only to exclude the whole face from the sweep.
 #[derive(Clone, Copy)]
 enum TrimUse {
-    Support,
+    Support { arm: Arm, face: FaceId },
     OtherFace,
 }
 
@@ -495,6 +495,7 @@ struct TrimSegment {
 
 /// Bind a straight polygon segment to the edge's 3D line and lifted UV trim.
 fn segment(
+    k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     plane: &Plane,
@@ -514,12 +515,28 @@ fn segment(
         let (Some(a), Some(z)) = (placed.point(b, u)?, placed.point(b, v)?) else {
             return Ok(None);
         };
-        if !placed.binds_trim(b, eu, e, plane, line, [u, v], [a, z])? {
+        let Some(lifted) = placed.bound_trim(b, eu, e, plane, line, [u, v], [a, z])? else {
             return Ok(None);
-        }
-        // The placed chart already pads the foreign check by the zone of
-        // both the swept surface and the affine trim.
-        (point_bounds(a), point_bounds(z), None)
+        };
+        let lifted = match use_ {
+            TrimUse::Support { arm, face } => {
+                let Some(lifted) = placed.support_trim(
+                    k,
+                    b,
+                    arm,
+                    (face, eu, e, line),
+                    [(u, a), (v, z)],
+                    lifted,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Some(lifted)
+            }
+            // The placed foreign check already budgets both zones.
+            TrimUse::OtherFace => None,
+        };
+        (point_bounds(a), point_bounds(z), lifted)
     } else {
         let (Some(a), Some(z)) = (vertex_bounds(b, u)?, vertex_bounds(b, v)?) else {
             return Ok(None);
@@ -698,7 +715,7 @@ fn segments(
                 start,
                 end,
                 lifted: actual,
-            }) = segment(b, eu, plane, use_, placed)?
+            }) = segment(k, b, eu, plane, use_, placed)?
             else {
                 return Ok(None);
             };
@@ -1053,7 +1070,9 @@ fn clears_arm(
             false,
         ),
     ] {
-        let Some(path) = planar_polygon(k, b, face, TrimUse::Support, placed, extent)? else {
+        let Some(path) =
+            planar_polygon(k, b, face, TrimUse::Support { arm, face }, placed, extent)?
+        else {
             return Ok(None);
         };
         match clear_rectangle(&path, arm, plane, axes, inside) {

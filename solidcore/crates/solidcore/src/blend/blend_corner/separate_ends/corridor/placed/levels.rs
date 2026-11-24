@@ -19,6 +19,7 @@ struct Support {
 
 pub(super) struct Levels {
     vertices: Vec<(VertexId, [f64; 3])>,
+    face_roots: Vec<(FaceId, usize)>,
 }
 
 fn reserve<T>(items: &mut Vec<T>, count: usize) -> Result<()> {
@@ -110,46 +111,45 @@ impl Levels {
 
         let mut faces = Vec::new();
         reserve(&mut faces, supports.len())?;
-        let Some(margin) = frame.width(2.0 * b.tolerance()) else {
-            return Ok(None);
-        };
-        let mut levels = Vec::new();
-        reserve(&mut levels, supports.len())?;
+        let mut face_roots: Vec<(FaceId, usize)> = Vec::new();
+        reserve(&mut face_roots, supports.len())?;
         for (i, support) in supports.iter().enumerate() {
-            let Some(rep) = representative(&supports, i) else {
-                return Ok(None);
+            k.check_cancelled(OP)?;
+            // Parents precede their children, so the cached parent coordinate
+            // already belongs to the lowest-ID face of the whole class.
+            let coordinate = if support.parent == i {
+                support.coordinate.mid()
+            } else {
+                let Some(&coordinate) = faces.get(support.parent) else {
+                    return Ok(None);
+                };
+                coordinate
             };
-            let Some(source) = supports.get(rep) else {
-                return Ok(None);
-            };
-            let coordinate = source.coordinate.mid();
             let zone = face2::tolerance(b, support.face)?.min(b.tolerance());
             let Some(gap) = frame.plane_gap(support.axis, support.coordinate, coordinate) else {
                 return Ok(None);
             };
-            if !zone.is_finite() || gap > zone {
+            if !(zone.is_finite() && gap <= zone) {
                 return Ok(None);
-            }
-            if rep == i {
-                levels.push((support.axis, coordinate));
             }
             faces.push(coordinate);
-        }
-
-        // Distinct levels must remain ordered throughout their admitted bands.
-        levels.sort_unstable_by(|(a, x), (b, z)| a.cmp(b).then_with(|| x.total_cmp(z)));
-        for pair in levels.windows(2) {
-            let [(a, x), (b, z)] = pair else {
-                return Ok(None);
+            let root = if support.parent == i {
+                i
+            } else {
+                let Some(&(_, root)) = face_roots.get(support.parent) else {
+                    return Ok(None);
+                };
+                root
             };
-            if a == b && Ivl::from(*z).sub_ulp(Ivl::from(*x)).lo <= margin {
-                return Ok(None);
-            }
+            face_roots.push((support.face, root));
         }
 
+        // Separate classes may share coordinates. The corridor bounds its
+        // trims and tests foreign contacts locally, where proximity matters.
         let mut vertices = Vec::new();
         reserve(&mut vertices, fans.len())?;
         for (vertex, [a, b, c]) in fans {
+            k.check_cancelled(OP)?;
             let (Some(a), Some(b), Some(c)) = (faces.get(a), faces.get(b), faces.get(c)) else {
                 return Ok(None);
             };
@@ -157,7 +157,21 @@ impl Levels {
         }
         vertices.sort_unstable_by_key(|(vertex, _)| *vertex);
 
-        Ok(Some(Self { vertices }))
+        Ok(Some(Self {
+            vertices,
+            face_roots,
+        }))
+    }
+
+    pub(super) fn same_support(&self, a: FaceId, b: FaceId) -> bool {
+        let root = |face| {
+            let i = self
+                .face_roots
+                .binary_search_by_key(&face, |&(id, _)| id)
+                .ok()?;
+            self.face_roots.get(i).map(|&(_, root)| root)
+        };
+        root(a).zip(root(b)).is_some_and(|(a, b)| a == b)
     }
 
     pub(super) fn vertex(&self, vertex: VertexId) -> Option<[f64; 3]> {

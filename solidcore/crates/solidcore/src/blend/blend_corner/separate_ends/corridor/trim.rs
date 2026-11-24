@@ -2,12 +2,13 @@
 
 use super::{coords, expansion_span, lift_component, measured_span, resolved_vertex};
 use crate::blend::fillet_section::interval::Ivl;
-use crate::curve::curve::CurveKind;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::Result;
 use crate::geom::certified::next_up;
 use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
+use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::math::{CPoint, NOW};
 use crate::surface::plane::Plane;
@@ -302,6 +303,233 @@ pub(super) fn lifted_trim(
         _ => None,
     };
     Ok(uv.map(|uv| uv_bounds(plane, uv)))
+}
+
+fn uv_terms(b: &Brep, eu: EdgeuseId) -> Result<Option<[[Vec<f64>; 2]; 2]>> {
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(None);
+    };
+    let Some(curve) = eu1::uv_trim_curve(b, eu)?.0 else {
+        return Ok(None);
+    };
+    let interval = edge::interval(b, e)?;
+    terms_for_curve(curve, interval)
+}
+
+fn terms_for_curve(curve: &Curve, interval: Extent1d) -> Result<Option<[[Vec<f64>; 2]; 2]>> {
+    Ok(match curve.kind() {
+        CurveKind::BSpline(spline)
+            if spline.dim() == 2
+                && spline.degree()? == 1
+                && curve.natural_interval() == interval =>
+        {
+            spline_uv_endpoints(spline.control_points()?)
+                .map(|ends| ends.map(|p| p.map(|c| vec![c.lo])))
+        }
+        CurveKind::Line(line) if line.dim() == 2 => {
+            let ends = [interval.min(), interval.max()].map(|t| {
+                line.point_expansions_at_parameter(t)
+                    .map(|[u, v, _]| [u, v])
+            });
+            match ends {
+                [Some(a), Some(z)] => Some([a, z]),
+                _ => None,
+            }
+        }
+        _ => None,
+    })
+}
+
+/// Compare the affine restriction of a stored trim to the kernel's
+/// deterministic planar drop of its own spatial edge.
+pub(super) fn reprojects(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    face: FaceId,
+    plane: &Plane,
+) -> Result<bool> {
+    Ok(reprojected_axes(k, b, eu, face, plane)? == [true; 2])
+}
+
+fn reprojected_axes(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    face: FaceId,
+    plane: &Plane,
+) -> Result<[bool; 2]> {
+    let (Some(e), Some(actual)) = (eu1::edge(b, eu)?, uv_terms(b, eu)?) else {
+        return Ok([false; 2]);
+    };
+    let Some(spatial) = edge::curve(b, e)? else {
+        return Ok([false; 2]);
+    };
+    if !matches!(spatial.kind(), CurveKind::Line(_)) {
+        return Ok([false; 2]);
+    }
+    let interval = edge::interval(b, e)?;
+    let domain = face2::uv_domain(b, face)?;
+    let generated = plane.drop_curve(
+        k,
+        &domain,
+        spatial,
+        &interval,
+        edge::tolerance(b, e)?,
+        false,
+        true,
+        None,
+    )?;
+    let [expected] = generated.uv_curves.as_slice() else {
+        return Ok([false; 2]);
+    };
+    let Some(expected) = terms_for_curve(expected, interval)? else {
+        return Ok([false; 2]);
+    };
+    let mut agrees = [true; 2];
+    for (actual, expected) in actual.into_iter().zip(expected) {
+        for ((agrees, a), z) in agrees.iter_mut().zip(actual).zip(expected) {
+            *agrees &= expansion::is_zero(&expansion::sub(&a, &z));
+        }
+    }
+    Ok(agrees)
+}
+
+fn exact_uv_ends(b: &Brep, eu: EdgeuseId) -> Result<Option<[[Option<f64>; 2]; 2]>> {
+    let exact = |terms: Vec<f64>| {
+        let at = expansion::to_f64(&terms);
+        (at.is_finite() && expansion::is_zero(&expansion::sub(&terms, &[at]))).then_some(at)
+    };
+    Ok(uv_terms(b, eu)?.map(|ends| ends.map(|uv| uv.map(exact))))
+}
+
+fn uv_at(b: &Brep, eu: EdgeuseId, vertex: VertexId) -> Result<Option<[Option<f64>; 2]>> {
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(None);
+    };
+    let Some([from, to]) = exact_uv_ends(b, eu)? else {
+        return Ok(None);
+    };
+    let (first, last) = edge::start_end_vertices(b, e)?;
+    Ok(if first == Some(vertex) {
+        Some(from)
+    } else if last == Some(vertex) {
+        Some(to)
+    } else {
+        None
+    })
+}
+
+fn neighbors(b: &Brep, eu: EdgeuseId) -> Result<[Option<EdgeuseId>; 2]> {
+    let face = eu1::face(b, eu)?;
+    let mut neighbors = [eu1::cw_edgeuse(b, eu)?, eu1::ccw_edgeuse(b, eu)?];
+    for neighbor in &mut neighbors {
+        if let Some(id) = *neighbor {
+            if id == eu || eu1::face(b, id)? != face {
+                *neighbor = None;
+            }
+        }
+    }
+    Ok(neighbors)
+}
+
+/// Identify a rail or cap only through a radial seam at this loop endpoint.
+pub(super) fn touches_support(
+    b: &Brep,
+    eu: EdgeuseId,
+    vertex: VertexId,
+    matches_support: impl Fn(FaceId) -> bool,
+) -> Result<bool> {
+    let [previous, next] = neighbors(b, eu)?;
+    for occurrence in [Some(eu), previous, next].into_iter().flatten() {
+        let (Some(e), Some(radial)) = (eu1::edge(b, occurrence)?, eu1::radial(b, occurrence)?)
+        else {
+            continue;
+        };
+        if !eu1::face(b, radial)?.is_some_and(&matches_support) {
+            continue;
+        }
+        let (from, to) = edge::start_end_vertices(b, e)?;
+        if from == Some(vertex) || to == Some(vertex) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn verified_iso_seam(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    plane: &Plane,
+    eu: EdgeuseId,
+    matches_cap: &impl Fn(FaceId) -> bool,
+) -> Result<Option<(usize, f64)>> {
+    let Some(radial) = eu1::radial(b, eu)? else {
+        return Ok(None);
+    };
+    if !eu1::face(b, radial)?.is_some_and(matches_cap) {
+        return Ok(None);
+    }
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(None);
+    };
+    let (Some(from), Some(to)) = edge::start_end_vertices(b, e)? else {
+        return Ok(None);
+    };
+    let Some([a, z]) = exact_uv_ends(b, eu)? else {
+        return Ok(None);
+    };
+    let Some((axis, Some(level))) = a
+        .into_iter()
+        .zip(z)
+        .enumerate()
+        .find_map(|(i, (a, z))| (a.is_some() && a == z).then_some((i, a)))
+    else {
+        return Ok(None);
+    };
+    let neighbors = neighbors(b, eu)?;
+    let mut joined = [false; 2];
+    for (joined, vertex) in joined.iter_mut().zip([from, to]) {
+        for neighbor in neighbors.into_iter().flatten() {
+            *joined |= uv_at(b, neighbor, vertex)?.and_then(|p| p.get(axis).copied().flatten())
+                == Some(level);
+        }
+    }
+    // The transverse coordinate can agree exactly even when rotating the
+    // charts introduces rounding along the seam.
+    let proven = joined.into_iter().any(|same| same)
+        || reprojected_axes(k, b, eu, face, plane)?.get(axis) == Some(&true);
+    Ok(proven.then_some((axis, level)))
+}
+
+/// At a shared seam, certify the fixed support parameter with the adjacent
+/// trims or by independently projecting the spatial edge onto this face.
+pub(super) fn on_iso_seam(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    plane: &Plane,
+    eu: EdgeuseId,
+    vertex: VertexId,
+    matches_cap: impl Fn(FaceId) -> bool,
+) -> Result<bool> {
+    if verified_iso_seam(k, b, face, plane, eu, &matches_cap)?.is_some() {
+        return Ok(true);
+    }
+    let Some(at) = uv_at(b, eu, vertex)? else {
+        return Ok(false);
+    };
+    for neighbor in neighbors(b, eu)?.into_iter().flatten() {
+        let Some((axis, level)) = verified_iso_seam(k, b, face, plane, neighbor, &matches_cap)?
+        else {
+            continue;
+        };
+        if at.get(axis).copied().flatten() == Some(level) && uv_at(b, neighbor, vertex)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Both incident plane charts select a unique straight carrier. Affine trims
