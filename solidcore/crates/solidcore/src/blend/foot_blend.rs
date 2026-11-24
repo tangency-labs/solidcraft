@@ -226,7 +226,8 @@ fn binormal_reading(
     eu: crate::topology::EdgeuseId,
     t: f64,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
-    // shortcut: one copy of the part per reading (twenty per edge), not one per edge
+    // shortcut: one copy of the part per reading (twenty per edge), not one per edge; share
+    // one copy per edge when beads on large parts get slow
     target.with_rollback_untouched(
         |copy| evaluate_binormal(k, copy, eu, t, true, &BinormalOptions::default()),
         |_| false,
@@ -718,14 +719,22 @@ impl FootBlend {
     /// leader's knots in the interval, at least 4 between each two and 32 in all (sampled),
     /// each foot's parameters
     /// classified on its face (trims included). Stations not made are skipped (the build
-    /// refuses them). `target` is only read.
+    /// refuses them). `within` the spans' leader parameters, ascending (none: the whole
+    /// interval): only the stations inside them and their ends, as the bead covers no more.
+    /// `target` is only read.
     ///
     /// # Errors
     ///
     /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
     /// toe found off its face, naming the face and the edge, with the largest leg on that side
     /// whose toes stay on the face at those stations; those of the classification.
-    pub fn toes_on_faces(&self, k: &Kernel, target: &Brep, legs: [f64; 2]) -> Result<()> {
+    pub fn toes_on_faces(
+        &self,
+        k: &Kernel,
+        target: &Brep,
+        legs: [f64; 2],
+        within: &[[f64; 2]],
+    ) -> Result<()> {
         check_legs(legs)?;
         let breaks = self.breaks()?;
         // at least 32 stations, and 4 between each two knots
@@ -738,6 +747,15 @@ impl FootBlend {
             ts.extend((0..per).map(|i| lo + (hi - lo) * i as f64 / per as f64));
         }
         ts.extend(breaks.last().copied());
+        if !within.is_empty() {
+            // shortcut: a tapered or rounded end is checked at the span's full legs, so one
+            // whose smaller legs would fit near a face's end is refused; check the end's own
+            // legs when such a refusal comes up
+            ts.extend(within.iter().flatten().copied());
+            ts.retain(|t| within.iter().any(|&[a, b]| (a..=b).contains(t)));
+            ts.sort_by(f64::total_cmp);
+            ts.dedup();
+        }
         // each support's domain and periods: a foot past a periodic support's seam is moved
         // into the domain by whole periods before it is classified
         let mut frames = Vec::new();
@@ -2056,20 +2074,20 @@ impl FootBlendDefinition {
     ///
     /// # Errors
     ///
-    /// Native invalid input for a scale that is not uniform (as a draft's): the legs, measured
-    /// straight from the root, would no longer be the net's.
+    /// Native invalid input for a motion that is not rigid (a scale other than 1, a mirror):
+    /// the legs, the sagitta and the bound would no longer be the net's. A face does not ask
+    /// for one ([`crate::surface::procedural_blend::KeptDefinition::follows`] leaves the
+    /// definition behind).
     pub fn transform(
         &mut self,
         rotate_n_move: &crate::geom::axis2_placement::Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
-        if let Some(sc) = scale {
-            if !(sc.x == sc.y && sc.x == sc.z && sc.x > 0.0 && sc.x.is_finite()) {
-                return Err(SolidError::invalid_input(
-                    OP,
-                    "a weld bead moves rigidly or by a uniform scale",
-                ));
-            }
+        if scale.is_some_and(|s| s.x != 1.0 || s.y != 1.0 || s.z != 1.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a weld bead's definition moves only rigidly",
+            ));
         }
         self.motions.push(Motion {
             rotate_n_move: *rotate_n_move,

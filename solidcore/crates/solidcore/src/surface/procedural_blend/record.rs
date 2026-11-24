@@ -1145,7 +1145,7 @@ pub struct FootBlendRecord {
     /// The arc's height over the chord: `> 0` convex, `< 0` concave, 0 the chord.
     pub sagitta: f64,
     /// The weld's spans along the leader, as its parameters, ascending and not overlapping
-    /// (they may touch, as [`crate::surface::procedural_blend::bead::BeadSpan::along`] allows); the face's
+    /// ([`crate::surface::procedural_blend::bead::BeadSpan::along`] joins two that touch); the face's
     /// piece lies in one of them.
     pub spans: Vec<[f64; 2]>,
     /// The end shape at each span's start and end.

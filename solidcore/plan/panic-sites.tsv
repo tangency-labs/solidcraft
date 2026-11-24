@@ -401,12 +401,12 @@ crates/solidcore/src/blend/foot_blend.rs	FootBlend::segment	windows	1	proven	win
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::segment	windows	2	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::toes_on_faces	int-div	1	proven	div_ceil(breaks.len().saturating_sub(1).max(1))	divisor is max(.., 1) >= 1
 crates/solidcore/src/blend/foot_blend.rs	FootBlend::toes_on_faces	windows	1	proven	windows(2)	constant non-zero size
-crates/solidcore/src/blend/foot_blend.rs	boundary_holds	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/blend/foot_blend.rs	strip_face	with_capacity	1	proven	Vec::with_capacity(9)	constant capacity
 crates/solidcore/src/blend/hcr.rs	-	int-div	1	proven	usize::MAX / 2	constant non-zero divisor
 crates/solidcore/src/blend/law_corners.rs	LawCornerPieces::classify	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	1	proven	Vec::with_capacity(9)	constant capacity
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	2	proven	Vec::with_capacity(9)	constant capacity
+crates/solidcore/src/blend/weld_bead.rs	boundary_holds	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/blend/weld_bead.rs	frame	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/boolean/merge/p2.rs	MergeState::merge_added_body	Vec::remove	1	proven	remove(i)	i is position() in the same Vec
 crates/solidcore/src/boolean/merge/p4.rs	classify_edge_faces	step_by	1	proven	step_by(2)	constant non-zero step

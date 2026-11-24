@@ -1,6 +1,7 @@
 //! Weld beads as bodies of their own (#15129, the welds epic #15132): a bead built from its own
 //! faces, apart from the body it is laid on, which is left as it was. No boolean with the
-//! body and no copy of it, so the cost does not grow with the body.
+//! body. The foot blend reads the edge's binormals on copies of the body, one per reading
+//! (a shortcut in [`crate::blend::foot_blend`]), so that cost grows with the body.
 //!
 //! Between planes along a straight edge the exact bead's body ([`beads_apart`]) is its
 //! section swept along the edge: the edge's point, the feet at the setbacks on each face, and
@@ -923,7 +924,8 @@ pub fn bead_body(
             .into_iter()
             .find(|f| along.contains(f));
         let blend = FootBlend::of_edge(k, target, e, first)?;
-        blend.toes_on_faces(k, target, legs)?;
+        let params = span_parameters(k, &blend, &spans)?;
+        blend.toes_on_faces(k, target, legs, &params)?;
         if shaped {
             // the shaped ends: the planar sweep's, cut at its ends
             let gap = if !between_planes(target, e)? {
@@ -942,7 +944,6 @@ pub fn bead_body(
             }
             continue;
         }
-        let params = span_parameters(k, &blend, &spans)?;
         let mut made = Vec::new();
         for &p in &params {
             made.extend(blend.add_span(k, &mut body, legs, sagitta, tol, p)?);

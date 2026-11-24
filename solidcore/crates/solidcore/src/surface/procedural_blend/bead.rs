@@ -363,7 +363,8 @@ impl BeadSpan {
     }
 
     /// Spans along one edge, checked: each valid, in order along the edge, none overlapping
-    /// the next (two may meet end to start).
+    /// the next. Two that meet end to start are one span: apart, each would end in its own
+    /// cap on the same section.
     ///
     /// # Errors
     ///
@@ -385,7 +386,11 @@ impl BeadSpan {
                     "a bead's spans are in order along the edge and do not overlap",
                 ));
             }
-            out.push(span);
+            if let Some(last) = out.last_mut().filter(|last| last.to == span.from) {
+                last.to = span.to;
+            } else {
+                out.push(span);
+            }
         }
         Ok(out)
     }
