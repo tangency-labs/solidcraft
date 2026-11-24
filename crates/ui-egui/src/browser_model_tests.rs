@@ -729,6 +729,8 @@ fn placements_start_closed_and_the_preference_opens_them_as_before() {
     }
     let mut h = crate::scenario::Harness::new();
     h.app.ui.show_browser = true;
+    // The browser lists Display States above the bodies; a taller window keeps every row drawn.
+    h.call("ui.resize", json!({"width":1600,"height":1400}));
     let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap();
     let outer = vec![sub["occurrence"].as_u64().unwrap()];
     let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["occurrence"].as_u64().unwrap();
