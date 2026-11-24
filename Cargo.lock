@@ -787,6 +787,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cadmpeg-codec-iges"
+version = "0.6.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1046e958878d8d52df443b516bb275bb611a2853f5d91369888e8e7bfbc66a66"
+dependencies = [
+ "cadmpeg-core",
+ "cadmpeg-ir",
+ "memchr",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml 1.1.8+spec-1.1.0",
+]
+
+[[package]]
 name = "cadmpeg-codec-rhino"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -899,6 +914,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b101aa07edb4e12a2b0afcf7d5583793ebd45a131422b956a4fd2f7bd22a275a"
 dependencies = [
  "cadmpeg-codec-freecad",
+ "cadmpeg-codec-iges",
  "cadmpeg-codec-rhino",
  "cadmpeg-codec-step",
  "cadmpeg-codec-usd",
@@ -909,7 +925,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
@@ -1371,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "image",
  "schemars",
@@ -1382,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "craft-plugin-wasm"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "cap-std",
  "craft-plugin",
@@ -1861,6 +1877,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339ee130d97a610ea5a5872d2bbb130fdf68884ff09d3028b81bec8a1ac23bbc"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2175,7 +2212,7 @@ dependencies = [
  "cc",
  "memchr",
  "rustc_version",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
  "vswhom",
  "winreg",
 ]
@@ -3997,6 +4034,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
 ]
 
 [[package]]
@@ -4196,6 +4234,30 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-thumbnailing"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac8e00da1ca87ffe3ea8d20981026f013df91072a140432f0f88da9a356d9b3c"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-quick-look-ui"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef5bce23577f7bcbb88339d4f4fcba83bcc376ca6a7f556d1707e49e7986d329"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -5053,6 +5115,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "737970939a87c6fa31e7acad13307bccbb017a073b695b6089a2c484f929e20e"
 dependencies = [
  "bitflags 2.13.2",
+]
+
+[[package]]
+name = "redox_users"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
+dependencies = [
+ "getrandom 0.2.17",
+ "libredox",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6030,7 +6103,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -6059,9 +6132,11 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-look",
+ "solidcraft-mcp",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
+ "solidcraft-ui-kit",
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
@@ -6075,11 +6150,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.46.2"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "image",
  "log",
@@ -6097,11 +6172,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.46.2"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -6110,7 +6185,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "egui",
  "image",
@@ -6120,7 +6195,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6128,8 +6203,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-design-preview"
+version = "0.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "solidcraft-develop"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "solidcore-ops",
  "solidcore-record",
@@ -6138,11 +6222,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-display-units"
-version = "0.46.2"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "log",
  "serde",
@@ -6167,7 +6251,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6178,7 +6262,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
@@ -6186,6 +6270,7 @@ dependencies = [
  "image",
  "log",
  "png",
+ "quick-xml",
  "resvg",
  "schemars",
  "serde",
@@ -6209,6 +6294,7 @@ dependencies = [
  "solidcraft-ui-text",
  "solidcraft-viewport",
  "solidcraft-views",
+ "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
  "toml_edit",
@@ -6219,8 +6305,9 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-format"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
+ "crc32fast",
  "serde_json",
  "sha2 0.10.9",
  "zip",
@@ -6228,7 +6315,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6241,7 +6328,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "image",
  "log",
@@ -6266,7 +6353,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -6306,6 +6393,7 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-sketch",
  "solidcraft-testkit",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "tiny-skia",
@@ -6316,7 +6404,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "log",
  "proptest",
@@ -6331,25 +6419,26 @@ dependencies = [
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
+ "sysinfo",
  "thiserror 2.0.21",
  "web-time",
 ]
 
 [[package]]
 name = "solidcraft-look"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "egui",
  "log",
  "solidcraft-theme",
  "solidcraft-ui-kit",
  "tiny-skia",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "image",
  "serde_json",
@@ -6359,18 +6448,20 @@ dependencies = [
  "solidcraft-mcp-server",
  "solidcraft-viewport",
  "solidcraft-viewport-gpu",
+ "tempfile",
+ "wat",
 ]
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-panel-layout"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "schemars",
  "serde",
@@ -6380,15 +6471,32 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "serde_json",
  "web-time",
 ]
 
 [[package]]
+name = "solidcraft-quicklook"
+version = "0.48.0"
+dependencies = [
+ "block2 0.6.2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "objc2-quick-look-thumbnailing",
+ "objc2-quick-look-ui",
+ "solidcraft-design-preview",
+]
+
+[[package]]
 name = "solidcraft-render"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "image",
@@ -6411,7 +6519,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "harfrust",
  "serde",
@@ -6427,7 +6535,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "log",
@@ -6441,18 +6549,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-testkit"
-version = "0.46.2"
+version = "0.48.0"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "egui",
  "serde",
@@ -6462,11 +6570,12 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "arboard",
  "egui",
  "egui-wgpu",
+ "flate2",
  "getrandom 0.2.17",
  "image",
  "log",
@@ -6508,7 +6617,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-kit"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "arboard",
  "egui",
@@ -6531,15 +6640,16 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-registry"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
+ "flate2",
  "log",
  "serde_json",
  "sys-locale",
@@ -6548,7 +6658,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "image",
  "serde",
@@ -6560,7 +6670,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -6571,7 +6681,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "log",
  "naga",
@@ -6587,7 +6697,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-views"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "schemars",
  "serde",
@@ -6597,7 +6707,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "eframe",
  "egui",
@@ -6934,6 +7044,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
+version = "0.9.12+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml"
 version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
@@ -6941,10 +7066,19 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.7.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
@@ -6963,10 +7097,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
 dependencies = [
  "indexmap",
- "toml_datetime",
+ "toml_datetime 1.1.2+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -6975,7 +7109,7 @@ version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
- "winnow",
+ "winnow 1.0.4",
 ]
 
 [[package]]
@@ -7106,7 +7240,7 @@ dependencies = [
 
 [[package]]
 name = "ui-kit-gallery"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "eframe",
  "egui",
@@ -7513,6 +7647,7 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.254.2",
  "wasmtime-environ",
+ "wasmtime-internal-cache",
  "wasmtime-internal-component-macro",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
@@ -7522,6 +7657,7 @@ dependencies = [
  "wasmtime-internal-jit-icache-coherence",
  "wasmtime-internal-unwinder",
  "wasmtime-internal-versioned-export-macros",
+ "wasmtime-internal-winch",
  "windows-sys 0.61.2",
 ]
 
@@ -7554,6 +7690,26 @@ dependencies = [
  "wasmprinter",
  "wasmtime-internal-component-util",
  "wasmtime-internal-core",
+]
+
+[[package]]
+name = "wasmtime-internal-cache"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e6294e00c31bc4ad09b5354825cf32b08fbcfc19aaa49691fefe705ea088c82"
+dependencies = [
+ "base64 0.22.1",
+ "directories-next",
+ "log",
+ "postcard",
+ "rustix 1.1.6",
+ "serde",
+ "serde_derive",
+ "sha2 0.10.9",
+ "toml 0.9.12+spec-1.1.0",
+ "wasmtime-environ",
+ "windows-sys 0.61.2",
+ "zstd",
 ]
 
 [[package]]
@@ -7670,6 +7826,23 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "wasmtime-internal-winch"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "849d03032a216778879ea6f5cc5dae3a963472c6ff7425c3c56475a7e50d3d95"
+dependencies = [
+ "cranelift-codegen",
+ "gimli",
+ "log",
+ "object",
+ "target-lexicon",
+ "wasmparser 0.254.2",
+ "wasmtime-environ",
+ "wasmtime-internal-cranelift",
+ "winch-codegen",
 ]
 
 [[package]]
@@ -8121,6 +8294,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
+name = "winch-codegen"
+version = "48.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d501dbdf26da1b21761ab091f5494327af23d23c7ae671b0c92229118708dda"
+dependencies = [
+ "cranelift-assembler-x64",
+ "cranelift-codegen",
+ "gimli",
+ "regalloc2",
+ "smallvec",
+ "target-lexicon",
+ "thiserror 2.0.21",
+ "wasmparser 0.254.2",
+ "wasmtime-environ",
+ "wasmtime-internal-core",
+ "wasmtime-internal-cranelift",
+]
+
+[[package]]
 name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8446,6 +8638,12 @@ dependencies = [
 
 [[package]]
 name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+
+[[package]]
+name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
@@ -8637,7 +8835,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.46.2"
+version = "0.48.0"
 dependencies = [
  "flate2",
  "proc-macro2",
@@ -8646,7 +8844,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "syn 2.0.119",
- "toml",
+ "toml 1.1.8+spec-1.1.0",
  "wit-component",
  "zip",
 ]
@@ -8741,7 +8939,7 @@ dependencies = [
  "uds_windows",
  "uuid",
  "windows-sys 0.61.2",
- "winnow",
+ "winnow 1.0.4",
  "zbus_macros 5.19.0",
  "zbus_names 4.3.4",
  "zvariant 5.15.0",
@@ -8817,7 +9015,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8bf88b4a3ff53e883001e0e0115b297a9d53c31b9c1edd2bfdd853e3428624e"
 dependencies = [
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zvariant 5.15.0",
 ]
 
@@ -8828,7 +9026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1586c021a01ca0a9216dcd874e546382e156a5cbab5fab6cb5f10087e22682a"
 dependencies = [
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zbus_names 4.3.4",
  "zvariant 5.15.0",
 ]
@@ -8978,6 +9176,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "zstd"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50adf04cf3ec914b0b9905c9dde90c80fe74bfd701e331fc80a39c512c525278"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498d94ad68720c89b4fbe41b9090850651e68cb2dd9210ce7ffbff3a94653819"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.3+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f729a06d0257428fd9d997ac8db7e1407bd0262ab016b085b36bc52957c0052d"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9014,7 +9240,7 @@ dependencies = [
  "endi",
  "enumflags2",
  "serde",
- "winnow",
+ "winnow 1.0.4",
  "zcheapstr",
  "zvariant_derive 5.15.0",
  "zvariant_utils 4.2.0",
@@ -9067,5 +9293,5 @@ dependencies = [
  "quote",
  "serde",
  "syn 3.0.6",
- "winnow",
+ "winnow 1.0.4",
 ]

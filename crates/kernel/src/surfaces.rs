@@ -488,7 +488,7 @@ pub(crate) fn picked_chain(body: &Body, at: &[Vec3]) -> Result<(Chain, bool)> {
     let r = body.record();
     let mut edges: Vec<usize> = Vec::new();
     for p in at {
-        let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))?;
+        let e = edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p}")))?;
         if !edges.contains(&e) {
             edges.push(e);
         }
@@ -784,12 +784,14 @@ pub(crate) fn stitch_no_worse(bodies: &[&Body], tol: f64, exempt: &[u32]) -> Res
 /// ([`crate::offset_backend::thicken`]).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
-    // SMLib holds a sheet's faces with both sides and thickens along their surfaces' natural
-    // normals; a sheet turned to its back (every face used against its natural normal) grows the
-    // other way.
-    let sides = face_sides(body.record());
-    let turned = !sides.is_empty() && sides.iter().all(|forward| !forward);
-    imp::thicken(body, if turned { -thickness } else { thickness }, symmetric)
+    // SMLib's import gives each face its record's side in its surface, which SMLib thickens along;
+    // its thicken grows a sheet one way, so a sheet whose faces face apart is refused by name.
+    if let Some([a, b]) = solidcore_ops::record_check::faces_facing_apart(body.record()) {
+        return Err(invalid(format!(
+            "not supported yet: thickening a sheet whose faces face different ways (faces {a} and {b}): turn them to one side with Reverse Normal first"
+        )));
+    }
+    imp::thicken(body, thickness, symmetric)
 }
 
 /// The faces `picked` of `body` (indices in its face order) offset one by one by SMLib, each onto
@@ -802,15 +804,11 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     if distance == 0.0 {
         return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    // SMLib offsets along the surface's normal, so a face the body uses from its surface's back moves the other way.
-    let sides = face_sides(r);
-    let moved = picked
-        .iter()
-        .map(|f| imp::offset_face(r, *f, if sides.get(*f).copied().unwrap_or(true) { distance } else { -distance }))
-        .collect::<Result<Vec<_>>>()?;
+    // SMLib offsets along the surface's normal, which its import turns to the face's side.
+    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
-    let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
+    let (result, h) = imp::stitched_offsets(&c.brep, tolerance.max(c.brep.tolerance))?;
     let offset = |k: usize, _: usize| FaceOrigin::Offset { operand: 0, face: picked.get(k).copied().unwrap_or(0) };
     let faces = h
         .and_then(|h| carried(&h, &c, &offsets, 1, offset))
@@ -838,7 +836,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     // The outer loop runs counter-clockwise about the surface's natural normal.
     let n = du.cross(dv).normalized().ok_or_else(|| invalid("a planar face with no normal"))?;
     let [b::Loop::Edges { edges: rim }] = face.loops.as_slice() else { return Err(invalid("not supported yet: extending a surface with holes")) };
-    let chosen: Vec<usize> = at.iter().map(|p| edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p:?}")))).collect::<Result<_>>()?;
+    let chosen: Vec<usize> = at.iter().map(|p| edge_near(body, *p).ok_or_else(|| invalid(format!("no edge at {p}")))).collect::<Result<_>>()?;
     let m = rim.len();
     // Each edge as a line (point, direction along the loop), moved outward when chosen.
     let mut lines = Vec::with_capacity(m);
@@ -978,6 +976,26 @@ fn swept_from(r: &Brep, start: &Plane, pieces: &[Numbered]) -> Vec<FaceProv> {
     from.iter().map(|set| if set.is_empty() { record::generated(Vec::new()) } else { record::profile(set.iter()) }).collect()
 }
 
+/// The sheet `r` swept from `pieces` that start on `start`, each face turned where it faces away
+/// from the side the curves give it: the curve's direction crossed with `start`'s normal, as
+/// [`extrude_sheet`]'s faces face. Each curve is sampled at its middle and solidcore judges the
+/// faces through it (`Query::faces_against`); a face no sample lies on keeps its side, and a
+/// closed shell (a solid) is left as it is.
+fn faced_by_curves(r: Brep, start: &Plane, pieces: &[Numbered]) -> Result<Brep> {
+    if r.edges.iter().all(|e| e.uses.len() >= 2) {
+        return Ok(r);
+    }
+    // each curve at its middle, with its direction there
+    let samples: Vec<(Vec3, Vec3)> = pieces.iter().map(|(s, _)| (start.to_world(s.point_at(0.5)), start.dir_to_world(s.derivative(0.5)))).collect();
+    let accept = 4.0 * r.edges.iter().map(|e| e.tolerance).fold(r.tolerance, f64::max).max(1e-6);
+    let against = solidcore_ops::query::Query::new(&r).faces_against(start.normal(), &samples, accept);
+    if against.is_empty() {
+        return Ok(r);
+    }
+    let picked: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, against.contains(&f))).collect();
+    Ok(Parts::of(&r, &picked)?.canonical()?.brep)
+}
+
 /// A sheet of SMLib's pieces (each a record with its faces' history), joined into one record and,
 /// with `stitch`, sewn where pieces share edges (at ten times the pieces' tolerance).
 pub(crate) fn sheet_of(pieces: Vec<(Brep, Vec<FaceProv>)>, stitch: bool, operands: &[&Body]) -> Result<Body> {
@@ -1048,7 +1066,22 @@ pub(crate) fn revolved_record(plane: &Plane, segs: &[Seg2], origin: Vec3, axis: 
 /// stays put there (a cone's apex, a sphere's pole). The walls form one surface body with no caps,
 /// or a solid where they close (a full turn of a closed curve, or of a curve from the axis back to
 /// it); its history has no operands: every face is new.
+///
+/// A sheet's faces face the side [`extrude_sheet`]'s do: the curve's direction crossed with the
+/// sketch normal, so out of a profile (its outer loop runs counter-clockwise about the normal, its
+/// holes clockwise), and the faces of one chain agree across the edges they share.
 pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
+    revolved_sheet(plane, chains, (axis_origin, axis_dir), start, sweep, true)
+}
+
+/// [`revolve_sheet`] as designs saved before it faced its faces built it: each face along its
+/// surface's own normal (a plane's, a cylinder's outward one), whichever way the curve runs, so
+/// the faces of a profile can disagree.
+pub fn revolve_sheet_legacy_sides(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axis_dir: Vec2, start: f64, sweep: f64) -> Result<Body> {
+    revolved_sheet(plane, chains, (axis_origin, axis_dir), start, sweep, false)
+}
+
+fn revolved_sheet(plane: &Plane, chains: &[Vec<Seg2>], (axis_origin, axis_dir): (Vec2, Vec2), start: f64, sweep: f64, faced: bool) -> Result<Body> {
     use std::f64::consts::TAU;
     if !crate::build::frame_ok(plane) || !axis_origin.is_finite() || !axis_dir.is_finite() {
         return Err(invalid("revolve frame is not finite and orthonormal"));
@@ -1084,6 +1117,7 @@ pub fn revolve_sheet(plane: &Plane, chains: &[Vec<Seg2>], axis_origin: Vec2, axi
         let turned = Plane { origin: crate::build::rotate_about(plane.origin, origin, a, start), x: turn(plane.x), y: turn(plane.y) };
         let (k, angle) = if sweep < 0.0 { (a * -1.0, -sweep) } else { (a, sweep) };
         let r = imp::revolved(&turned, &chain, origin, k, angle.min(TAU))?;
+        let r = if faced { faced_by_curves(r, &turned, &chain)? } else { r };
         let h = swept_from(&r, &turned, &chain);
         pieces.push((r, h));
     }
@@ -1334,6 +1368,12 @@ mod imp {
         stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
+    /// [`stitched`] for Surface Offset's faces, not checked when the evaluation's validation mode
+    /// is off (`crate::validation`). Under the other modes the stitch is checked here, as before.
+    pub(super) fn stitched_offsets(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
+        if crate::validation::skipped() { stitched_with(r, tol, |_, _| Ok(())) } else { stitched(r, tol) }
+    }
+
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the
     /// input's does.
     pub(super) fn stitched_no_worse(r: &Brep, tol: f64, exempt: &[u32]) -> Result<(Body, Option<History>)> {
@@ -1368,11 +1408,13 @@ mod imp {
         crate::offset_backend::thicken(body, thickness, symmetric)
     }
 
-    /// The face `f` of `r` alone, offset by `d` along its normal (`smlib_offset_sheet`).
+    /// The face `f` of `r` alone, offset by `d` along its normal (`smlib_offset_sheet`), checked
+    /// unless the evaluation's validation mode is off (`crate::validation`).
     pub(super) fn offset_face(r: &Brep, f: usize, d: f64) -> Result<Brep> {
         let one = Parts::of(r, &[(f, false)])?.canonical()?;
         let sheet = SmBrep::from_record(&one.brep, true).map_err(sm("offset"))?;
-        checked(&sheet.offset_sheet(d).map_err(sm("offset"))?, "offset")
+        let moved = sheet.offset_sheet(d).map_err(sm("offset"))?;
+        if crate::validation::skipped() { moved.to_native().map_err(|e| failed(format!("SMLib offset: {e}"))) } else { checked(&moved, "offset") }
     }
 
     fn curves(plane: &Plane, chain: &[Numbered]) -> Result<Vec<Curve>> {
@@ -1684,6 +1726,7 @@ mod tests {
     use super::*;
     use crate::{box_solid, cylinder, measure, trim};
     use solidcore_record::Loop2;
+    use solidcraft_geom::brep::eval::SurfaceEval;
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)
@@ -1746,6 +1789,102 @@ mod tests {
         let ring = measure(&sheet(sq.segs.clone(), 0.0, 2.0 * PI)).unwrap();
         close(ring.area, 2.0 * PI * (2.0 + 3.0 + 2.5 + 2.5));
         close(ring.volume, 2.0 * PI * 2.5);
+    }
+
+    /// A revolved sheet's faces face the side Surface Extrude's do, the curve's direction crossed
+    /// with the sketch normal: out of a square profile on every wall, and along a single line the
+    /// way it runs. The legacy build keeps each face along its surface's own normal, so two of the
+    /// square's walls face into it there.
+    #[test]
+    fn revolve_sheet_faces_follow_the_curves() {
+        use std::f64::consts::FRAC_PI_2;
+        let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+        // The unit normal of the face of `body` whose surface passes through `p`.
+        let normal = |body: &Body, p: Vec3| {
+            let faces = crate::blend::Faces::of(body).unwrap();
+            let on = |f: usize| {
+                let surface = SurfaceEval::new(faces.rec.faces.get(f)?.parameters()).ok()?;
+                surface.point(surface.project(p, None, 1e-6)?).filter(|q| q.dist(p) < 1e-6)
+            };
+            let found: Vec<Vec3> = (0..faces.rec.faces.len()).filter(|f| on(*f).is_some()).filter_map(|f| faces.normal_at(f, p, 1e-6)).collect();
+            assert_eq!(found.len(), 1, "one face through {p:?}: {found:?}");
+            found[0]
+        };
+        let near = |a: Vec3, b: Vec3| assert!(a.dist(b) < 1e-6, "{a:?} vs {b:?}");
+        let sq = Loop2::polygon(&[Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::new(2.0, 1.0)]);
+        let walls = [
+            (Vec3::new(2.0, 0.5, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+            (Vec3::new(3.0, 0.5, 0.0), Vec3::new(1.0, 0.0, 0.0)),
+            (Vec3::new(2.5, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+            (Vec3::new(2.5, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+        ];
+        for (start, sweep) in [(0.0, FRAC_PI_2), (-FRAC_PI_2 / 2.0, FRAC_PI_2), (0.0, -FRAC_PI_2)] {
+            let ring = revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), start, sweep).unwrap();
+            assert!(ring.is_surface());
+            for (p, out) in walls {
+                near(normal(&ring, p), out);
+            }
+        }
+        let legacy = revolve_sheet_legacy_sides(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, FRAC_PI_2).unwrap();
+        let inward = walls.iter().filter(|(p, out)| normal(&legacy, *p).dot(*out) < 0.0).count();
+        assert_eq!(inward, 2, "the legacy build faces two walls into the square");
+        for (a, b, side) in [((3.0, 0.0), (3.0, 1.0), 1.0), ((3.0, 1.0), (3.0, 0.0), -1.0)] {
+            let wall = revolve_sheet(&Plane::XY, &[vec![line(a, b)]], Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, FRAC_PI_2).unwrap();
+            near(normal(&wall, Vec3::new(3.0, 0.5, 0.0)), Vec3::new(side, 0.0, 0.0));
+        }
+    }
+
+    /// A quarter turn of a square profile, its faces facing out of it, trimmed and split by the
+    /// plane through the axis halfway round: each wall left keeps facing out (#13640, #19447).
+    /// Some of its faces are turned over in the record (`forward: false`), which the kernel
+    /// refused before #13640 ("SMLib numbers the body's faces unlike its record").
+    #[test]
+    fn a_revolved_profile_trims_and_splits_with_its_walls_facing_out() {
+        use std::f64::consts::FRAC_PI_8;
+        let sq = Loop2::polygon(&[Vec2::new(2.0, 0.0), Vec2::new(3.0, 0.0), Vec2::new(3.0, 1.0), Vec2::new(2.0, 1.0)]);
+        let ring =
+            revolve_sheet(&Plane::XY, std::slice::from_ref(&sq.segs), Vec2::ZERO, Vec2::new(0.0, 1.0), 0.0, std::f64::consts::FRAC_PI_2).unwrap();
+        // the turn runs from +x towards +z or -z about +y
+        let s = if measure(&ring).unwrap().bbox.max.z > 1.0 { 1.0 } else { -1.0 };
+        let radial = |a: f64| Vec3::new(a.cos(), 0.0, s * a.sin());
+        // a point on each wall at angle a round the turn, with the way it faces out of the square
+        let walls = |a: f64| {
+            [
+                (radial(a) * 2.0 + Vec3::Y * 0.5, radial(a) * -1.0),
+                (radial(a) * 3.0 + Vec3::Y * 0.5, radial(a)),
+                (radial(a) * 2.5, Vec3::new(0.0, -1.0, 0.0)),
+                (radial(a) * 2.5 + Vec3::Y, Vec3::Y),
+            ]
+        };
+        let normal = |body: &Body, p: Vec3| {
+            let faces = crate::blend::Faces::of(body).unwrap();
+            let on = |f: usize| {
+                let surface = SurfaceEval::new(faces.rec.faces.get(f)?.parameters()).ok()?;
+                surface.point(surface.project(p, None, 1e-6)?).filter(|q| q.dist(p) < 1e-6)
+            };
+            let found: Vec<Vec3> = (0..faces.rec.faces.len()).filter(|f| on(*f).is_some()).filter_map(|f| faces.normal_at(f, p, 1e-6)).collect();
+            // after the split, a wall's two pieces share its surface: they must face alike
+            let first = *found.first().unwrap_or_else(|| panic!("no face through {p:?}"));
+            assert!(found.iter().all(|n| n.dist(first) < 1e-9), "faces through {p:?} disagree: {found:?}");
+            first
+        };
+        let faces_out = |body: &Body, a: f64| {
+            for (p, out) in walls(a) {
+                let n = normal(body, p);
+                assert!(n.dist(out) < 1e-6, "at {p:?}: {n:?} vs {out:?}");
+            }
+        };
+        faces_out(&ring, FRAC_PI_8);
+        let halfway = Plane::new(Vec3::ZERO, Vec3::Y, radial(2.0 * FRAC_PI_8)).unwrap();
+        let tool = crate::SplitTool::Plane(halfway);
+        let kept = trim(&ring, &tool, walls(FRAC_PI_8)[1].0).unwrap();
+        assert_eq!(kept.face_count(), 4);
+        faces_out(&kept, FRAC_PI_8);
+        let all: Vec<usize> = (0..ring.face_count()).collect();
+        let split = crate::split_faces(&ring, &all, &tool).unwrap();
+        assert_eq!(split.face_count(), 8);
+        faces_out(&split, FRAC_PI_8);
+        faces_out(&split, 3.0 * FRAC_PI_8);
     }
 
     #[test]
@@ -1985,6 +2124,136 @@ mod tests {
         let down = measure(&thicken(&turned, 2.0, false).unwrap()).unwrap().bbox;
         assert!((up.min.z - down.min.z - 2.0).abs() < 1e-9 && (up.max.z - down.max.z - 2.0).abs() < 1e-9, "{up:?} vs {down:?}");
         assert!(reverse_faces(&box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap(), &[]).is_err());
+    }
+
+    /// A half tube wall (the arc of radius 5 from 0 to π, swept 10 up z) thickens out by 1 to the
+    /// half tube between radii 5 and 6, π/2·(36 − 25)·10; turned over, in to the one between 4
+    /// and 5, π/2·(25 − 16)·10, and so does its half x > 0 trimmed off after the turn, half of
+    /// that (#13640). A square patch of 10 with a hole of 2 at its middle, turned over and
+    /// trimmed at x = 5, keeps (100 − 4)/2 = 48, and thickened by 1 it grows on its turned side.
+    #[test]
+    fn a_turned_tube_wall_and_a_turned_holed_patch_keep_their_sides() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        let wall = extrude_sheet(&Plane::XY, &[arc], 0.0, 10.0).unwrap();
+        let volume = |b: &Body| measure(&thicken(b, 1.0, false).unwrap()).unwrap().volume;
+        let (out, inward) = (PI / 2.0 * 11.0 * 10.0, PI / 2.0 * 9.0 * 10.0);
+        assert!(rel(volume(&wall), out) < 1e-9, "{} vs {out}", volume(&wall));
+        let turned = reverse_faces(&wall, &[]).unwrap();
+        assert!(rel(volume(&turned), inward) < 1e-9, "{} vs {inward}", volume(&turned));
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::ZERO, Vec3::Y, Vec3::Z).unwrap());
+        let quarter = trim(&turned, &cut, Vec3::new(4.0, 3.0, 5.0)).unwrap();
+        assert!(rel(measure(&quarter).unwrap().area, 25.0 * PI) < 1e-6, "{}", measure(&quarter).unwrap().area);
+        assert!(rel(volume(&quarter), inward / 2.0) < 1e-9, "{} vs {}", volume(&quarter), inward / 2.0);
+
+        let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
+        let hole = Loop2::polygon(&[Vec2::new(4.0, 4.0), Vec2::new(4.0, 6.0), Vec2::new(6.0, 6.0), Vec2::new(6.0, 4.0)]);
+        let patch = patch_region(&Plane::XY, &Region2 { outer: square, holes: vec![hole] }).unwrap();
+        let z = |b: &Body| {
+            let bb = measure(&thicken(b, 1.0, false).unwrap()).unwrap().bbox;
+            (bb.min.z, bb.max.z)
+        };
+        let (lo, hi) = z(&patch);
+        let up: f64 = if hi > 0.5 { 1.0 } else { -1.0 };
+        assert!((lo.min(hi) - up.min(0.0)).abs() < 1e-9 && (lo.max(hi) - up.max(0.0)).abs() < 1e-9, "{lo}..{hi}");
+        let turned = reverse_faces(&patch, &[]).unwrap();
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = trim(&turned, &cut, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        assert!(rel(measure(&half).unwrap().area, 48.0) < 1e-9, "{}", measure(&half).unwrap().area);
+        for b in [&turned, &half] {
+            let (lo, hi) = z(b);
+            assert!((lo - (-up).min(0.0)).abs() < 1e-9 && (hi - (-up).max(0.0)).abs() < 1e-9, "{lo}..{hi} vs up {up}");
+        }
+    }
+
+    /// Every analytic kind a sheet face of revolution holds (a cone, a sphere's zone, a torus's
+    /// zone) turns over: turned, the face trims, and its offset by d and thickening by t are
+    /// the unturned face's by −d and −t (its side is the other one, its surface the same)
+    /// (#13640). None of them refuses its turn.
+    #[test]
+    fn turned_faces_of_revolution_offset_and_thicken_the_other_way() {
+        use std::f64::consts::PI;
+        let revolved = |seg: Seg2| revolve_sheet(&Plane::XZ, &[vec![seg]], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), 0.0, PI).unwrap();
+        let sheets = [
+            ("cone", revolved(Seg2::Line { a: Vec2::new(2.0, 0.0), b: Vec2::new(6.0, 8.0) })),
+            ("sphere zone", revolved(Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: -1.0, sweep: 2.0 })),
+            ("torus zone", revolved(Seg2::Arc { center: Vec2::new(10.0, 0.0), radius: 2.0, start: 0.0, sweep: 2.0 })),
+        ];
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(0.5, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        for (name, s) in &sheets {
+            let all: Vec<usize> = (0..s.face_count()).collect();
+            let turned = reverse_faces(s, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            trim(&turned, &cut, Vec3::new(4.0, 0.1, 1.0)).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let area = |b: &Body, d: f64| measure(&crate::offset_surface(b, &all, d, 0.01).unwrap()).unwrap().area;
+            let volume = |b: &Body, t: f64| measure(&thicken(b, t, false).unwrap()).unwrap().volume;
+            assert!(rel(area(&turned, 0.5), area(s, -0.5)) < 1e-9, "{name}: {} vs {}", area(&turned, 0.5), area(s, -0.5));
+            assert!(rel(volume(&turned, 0.5), volume(s, -0.5)) < 1e-9, "{name}: {} vs {}", volume(&turned, 0.5), volume(s, -0.5));
+        }
+    }
+
+    /// An L of two walls (30 along x at y = 0, then 20 along y at x = 30, 20 up z) with only the
+    /// first turned over: each face keeps its own side, the first's −y now +y and the second's
+    /// +x as it was, and trimmed at x = 10 the half kept faces so too (#13640). Its faces face
+    /// apart, so Thicken, which grows a sheet one way, refuses it by name (on main it gave the
+    /// slabs of the faces' natural sides, the turn ignored). Both turned, the walls thicken into
+    /// the corner's inside, (30·2 + 20·2 − 2·2)·20 = 1920.
+    #[test]
+    fn a_sheet_turned_in_part_keeps_each_faces_side() {
+        let l =
+            vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(30.0, 0.0) }, Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 20.0) }];
+        let s = extrude_sheet(&Plane::XY, &[l], 0.0, 20.0).unwrap();
+        let sides = |b: &Body| {
+            let mut v: Vec<(i64, Vec3)> =
+                b.faces(0.01).unwrap().iter().map(|f| ((f.centroid.x * 1e3).round() as i64, f.plane_normal.unwrap())).collect();
+            v.sort_by_key(|(x, _)| *x);
+            v
+        };
+        let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-9;
+        let before = sides(&s);
+        let m = reverse_faces(&s, &[Vec3::new(10.0, 0.0, 10.0)]).unwrap();
+        let after = sides(&m);
+        assert!(near(before[0].1, Vec3::new(0.0, -1.0, 0.0)) && near(before[1].1, Vec3::X), "{before:?}");
+        assert!(near(after[0].1, Vec3::Y) && near(after[1].1, Vec3::X), "{after:?}");
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(10.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = sides(&trim(&m, &cut, Vec3::new(20.0, 0.0, 5.0)).unwrap());
+        assert!(half.len() == 2 && near(half[0].1, Vec3::Y) && near(half[1].1, Vec3::X), "{half:?}");
+        let e = thicken(&m, 2.0, false).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            "invalid input: not supported yet: thickening a sheet whose faces face different ways (faces 0 and 1): turn them to one side with Reverse Normal first"
+        );
+        // turned to one side, it thickens: both walls turned, into the corner's inside
+        let both = reverse_faces(&s, &[]).unwrap();
+        assert!(rel(measure(&thicken(&both, 2.0, false).unwrap()).unwrap().volume, 1920.0) < 1e-9);
+    }
+
+    /// A wall (the line y = 0 from x = 0 to 10, swept 10 up z) offset by 2 moves to y = ±2 along
+    /// its normal; turned over, the same offset moves it 2 the other way, and so does a half of
+    /// it trimmed off at x = 5 after the turn (#13640). Thickened by 1, the turned wall grows on
+    /// that side too.
+    #[test]
+    fn a_turned_wall_offsets_and_thickens_to_its_new_side() {
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }];
+        let wall = extrude_sheet(&Plane::XY, &[line], 0.0, 10.0).unwrap();
+        let turned = reverse_faces(&wall, &[]).unwrap();
+        let y = |b: &Body| {
+            let bb = measure(b).unwrap().bbox;
+            (bb.min.y, bb.max.y)
+        };
+        let (a, _) = y(&crate::offset_surface(&wall, &[0], 2.0, 0.01).unwrap());
+        let side = if a > 1.0 { 1.0 } else { -1.0 };
+        assert!(((a - 2.0 * side).abs()) < 1e-9, "{a}");
+        let (b, _) = y(&crate::offset_surface(&turned, &[0], 2.0, 0.01).unwrap());
+        assert!((b + 2.0 * side).abs() < 1e-9, "{b} vs side {side}");
+        let cut = crate::SplitTool::Plane(Plane::new(Vec3::new(5.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap());
+        let half = crate::trim(&turned, &cut, Vec3::new(1.0, 0.0, 5.0)).unwrap();
+        let (c, _) = y(&crate::offset_surface(&half, &[0], 2.0, 0.01).unwrap());
+        assert!((c + 2.0 * side).abs() < 1e-9, "{c} vs side {side}");
+        let (lo, hi) = y(&thicken(&turned, 1.0, false).unwrap());
+        let (want_lo, want_hi) = if side > 0.0 { (-1.0, 0.0) } else { (0.0, 1.0) };
+        assert!((lo - want_lo).abs() < 1e-9 && (hi - want_hi).abs() < 1e-9, "{lo}..{hi} vs side {side}");
+        let (lo, hi) = y(&thicken(&half, 1.0, false).unwrap());
+        assert!((lo - want_lo).abs() < 1e-9 && (hi - want_hi).abs() < 1e-9, "half: {lo}..{hi} vs side {side}");
     }
 
     /// A box's top taken away without healing: a five-face surface; patching the opening and

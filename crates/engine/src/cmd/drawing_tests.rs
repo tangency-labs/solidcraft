@@ -283,7 +283,7 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     assert!(d.sheets[0].border.is_some(), "the ISO border");
     let built_in = template::built_in(template::default_for(false)).unwrap().unwrap();
     assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the built-in block");
-    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 61.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");
@@ -5018,4 +5018,30 @@ fn an_open_drawing_allows_every_model_command_it_would_without_one() {
     s.model_focus = true;
     run(&mut s, "select.all", json!({}));
     assert!(!s.selection.is_empty(), "Select All in Design picks the model's bodies with a drawing open");
+}
+
+/// A circumscribed polygon's size naming a source parameter works on a sheet sketch: the support
+/// circle's dimension keeps the expression and no model parameter is defined (#20920).
+#[test]
+fn sheet_circumscribed_polygon_keeps_a_parameter_named_size_as_a_sheet_expression() {
+    use solidcraft_sketch::{ConstraintKind, CurveKind};
+    for (key, expr, want_r) in [("radius", "SheetR", 7.0), ("diameter", "2 * SheetR", 7.0)] {
+        let (mut s, d, sk, _) = sheet_editor();
+        s.doc_mut().set_param("SheetR", "7 mm", Some("mm"), None).unwrap();
+        let source = s.doc.clone();
+        let out = run(&mut s, "sketch.polygon.circumscribed", json!({"center":[60,45], key: expr, "sides":4}));
+        assert_eq!((&s.doc.params, &s.doc.features), (&source.params, &source.features), "{key}: no source parameter is defined");
+        let record = s.doc.drawing(d).unwrap().sheet_sketch(sk).unwrap();
+        let support = out["support_circle"].as_str().unwrap();
+        let index = record.sketch.curve_index(support).unwrap();
+        let CurveKind::Circle { r, .. } = record.sketch.curves[index].kind else { panic!("support circle") };
+        assert!((r - want_r).abs() < 1e-6, "{key}: radius {r}");
+        let dim = record
+            .sketch
+            .constraints
+            .iter()
+            .find(|c| matches!(c.kind, ConstraintKind::Radius { c, .. } | ConstraintKind::Diameter { c, .. } if c == index))
+            .expect("the support circle is dimensioned");
+        assert_eq!(dim.param.as_deref(), Some(expr), "{key}: the authored expression stays on the dimension");
+    }
 }

@@ -52,7 +52,7 @@ const PLANE_SAMPLES: u32 = 8;
 /// surface may miss the B-spline one. The surface replaces the B-spline, so the curve
 /// must be a line or arc to rounding, not only within the caller's (B-rep) tolerance:
 /// a short wavy curve lies within a B-rep tolerance of 1e-6 of some arc.
-const FIT_REL: f64 = 1.0e-9;
+pub const FIT_REL: f64 = 1.0e-9;
 
 /// The analytic surface swept by revolving `curve` (over its natural interval) by
 /// `angle_deg` degrees about the axis through `base_pt` along `axis`: a cylinder for a

@@ -667,6 +667,40 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn overlapping_text_glyphs_deboss_and_emboss() {
+    // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
+    // polynomial spline edges across sequential profile booleans. Both with and without an explicit
+    // face pick, deboss and emboss build one valid closed body with equal removed/added volume.
+    let box_vol = 115.0 * 17.5 * 10.0;
+    for face in [Some([0.0, -8.75, 5.0]), None] {
+        let mut vols = [0.0; 2];
+        for (i, mode) in ["deboss", "emboss"].into_iter().enumerate() {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 115, "width": 17.5, "height": 10, "corner": [-57.5, -8.75, 0], "body_name": "Plate"}));
+            run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -8.75, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+            run(&mut s, "sketch.text", json!({"text": "te", "at": [0, 2], "height": 5, "align": "center", "letter_spacing": -1.2}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut params = json!({"sketch": "Text", "depth": "1.2", "mode": mode});
+            if let Some(f) = face {
+                params["face"] = json!(f);
+            }
+            run(&mut s, "solid.emboss", params);
+            assert_eq!(measure(&mut s)["body_count"], 1, "{mode} {face:?}");
+            let state = s.model.state();
+            let body = &state.body("Plate").unwrap().body;
+            assert!(body.validity().is_empty(), "{mode} {face:?}: {:?}", body.validity());
+            assert_eq!(body.shell_count(), 1, "{mode} {face:?}");
+            drop(state);
+            vols[i] = volume(&mut s);
+        }
+        let removed = box_vol - vols[0];
+        let added = vols[1] - box_vol;
+        assert!(removed > 0.0, "{face:?}: removed={removed}");
+        assert!(rel(removed, added) < 1e-6, "{face:?}: removed={removed} added={added}");
+    }
+}
+
+#[test]
 fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
     // Two squares over a 40 x 40 top, one of them beside it: the emboss is refused as a whole
     // rather than raising one square and leaving the other out.
@@ -3999,4 +4033,29 @@ fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
         }
         Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
     }
+}
+
+/// #18541: a 3° draft of the side of an extruded closed spline outline is refused, and the
+/// refusal says what about the face it cannot handle: the side is neither a plane nor a cone or
+/// cylinder. It used to read "not supported yet: SMLib draft for this geometry". The body is
+/// left as it was.
+#[test]
+fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    let outline = [[30.0, 0.0], [22.7, 15.1], [0.0, 18.0], [-22.7, 15.1], [-30.0, 0.0], [-19.7, -13.1], [0.0, -22.0], [19.7, -13.1]];
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 25, "operation": "new", "body_name": "Base"}));
+    let shape = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Base").unwrap().body;
+        [b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()]
+    };
+    let (before, volume) = (shape(&s), body_volume(&s, "Base"));
+    let draft = json!({"faces": [[-30, 0, 12.5]], "angle": "3 deg", "neutral": "XY", "body": "Base"});
+    let e = s.execute("solid.draft", &draft).unwrap_err().to_string();
+    assert!(e.contains("a drafted face is neither a plane nor a cone or cylinder"), "{e}");
+    assert!(!e.contains("for this geometry"), "{e}");
+    assert_eq!(shape(&s), before);
+    assert_eq!(body_volume(&s, "Base"), volume);
 }

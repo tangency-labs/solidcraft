@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_trim")
         .contract(&SURFACE_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
+        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|face_normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction; face_normal: projected along the surface's own normal, each point of a curve to its nearest point of the surface, and `keep` picks regions)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", crate::checked!("surface.extrude", surface_extrude)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_revolve")
         .contract(&SURFACE_REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -424,7 +424,11 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle2")?;
     }
     let symmetric = bool_(p, "symmetric").unwrap_or(false) || str_(p, "direction").is_some_and(|d| d.eq_ignore_ascii_case("symmetric"));
-    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric })
+    let faced = match p.get("faced") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
+    };
+    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced })
 }
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
@@ -790,24 +794,19 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
                         .collect::<Result<Vec<_>>>()?
                 }
             };
-            let direction = match c.get("direction").filter(|v| !v.is_null()) {
-                None => None,
-                Some(Value::String(d)) if d.trim() == "normal" => None,
-                Some(Value::String(d)) if d.trim() == "face_normal" => {
-                    return Err(bad(
-                        cmd,
-                        "not supported yet: projecting curves along the surface's normal (#767); project along the sketch's normal or a direction",
-                    ));
-                }
+            let (direction, face_normal) = match c.get("direction").filter(|v| !v.is_null()) {
+                None => (None, false),
+                Some(Value::String(d)) if d.trim() == "normal" => (None, false),
+                Some(Value::String(d)) if d.trim() == "face_normal" => (None, true),
                 Some(v) => {
-                    let d = vec3(v).ok_or_else(|| bad(cmd, "`curves.direction` must be normal or [x, y, z]"))?;
+                    let d = vec3(v).ok_or_else(|| bad(cmd, "`curves.direction` must be normal, face_normal or [x, y, z]"))?;
                     if !(d.len() > 1e-12) {
                         return Err(bad(cmd, "`curves.direction` must not be zero"));
                     }
-                    Some(d)
+                    (Some(d), false)
                 }
             };
-            (xy(), None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir) }))
+            (xy(), None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir), face_normal }))
         }
         (None, None) => (plane_param(s, p.get("plane"), cmd)?, None, None),
     };
@@ -1115,6 +1114,49 @@ mod tests {
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"], "axis": {"origin": [3, 2, 0], "dir": [1, 0, 0]}})).is_err());
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"]})).is_err());
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"], "axis": "y", "angle": "400 deg"})).is_err());
+    }
+
+    /// A surface revolve's walls face out of the profile, as Surface Extrude's do: the end faces
+    /// of a rectangle turned half a turn face away from each other. A design saved before `faced`
+    /// keeps the faces it built (both ends facing -Z) through an edit, a redefine and reopening,
+    /// and a new surface revolve in it faces its faces.
+    #[test]
+    fn surface_revolve_faces_follow_the_profile_and_older_designs_keep_theirs() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let turn = |name: &str, body: &str| json!({"sketch": "R", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "180 deg", "symmetric": true, "name": name, "body_name": body});
+        run(&mut s, "surface.revolve", turn("Turn", "Ring"));
+        // The z of the unit normals of the end faces at z = 0 and z = 10.
+        let ends = |s: &Session, body: &str| {
+            let st = s.world_state().unwrap();
+            let faces = st.body(body).unwrap().body.faces(1e-6).unwrap();
+            let at = |z: f64| faces.iter().find(|f| (f.centroid.z - z).abs() < 1e-6).and_then(|f| f.plane_normal).unwrap().z;
+            (at(0.0).round(), at(10.0).round())
+        };
+        let faced = |s: &Session, name: &str| matches!(s.doc.find_feature(name).unwrap().kind, FeatureKind::SurfaceRevolve { faced: true, .. });
+        assert_eq!(ends(&s, "Ring"), (-1.0, 1.0));
+        assert!(faced(&s, "Turn"));
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("faced");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "timeline.edit", json!({"feature": "Turn", "set": {"angle": "90 deg"}}));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut params = turn("Turn", "Ring");
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": "surface.revolve", "params": params}));
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "surface.revolve", turn("NewTurn", "NewRing"));
+        assert!(faced(&s, "NewTurn"));
+        assert_eq!(ends(&s, "NewRing"), (-1.0, 1.0));
     }
 
     /// Surface Sweep: a line along y carried up a path in the XZ plane, straight then round a
@@ -1774,7 +1816,7 @@ mod tests {
     /// its normal onto a half cylinder (radius 10 about Z, y ≥ 0, 40 high): the piece inside is
     /// ∫∫ R / √(R² − x²) dx dz over the slot, the straight run 16 · 2R·asin(3/R) and the round
     /// ends one disc (Simpson in φ, x = 3 sin φ). Picking the inside region gives the same
-    /// piece; a direction along the face's normal is not supported yet.
+    /// piece.
     #[test]
     fn trim_a_cylinder_by_a_projected_slot() {
         let pi = std::f64::consts::PI;
@@ -1821,11 +1863,85 @@ mod tests {
         run(&mut s, "surface.trim", json!({"body": "Half", "curves": {"sketch": "Slot"}, "keep": [10, 0, 20]}));
         let rest = pi * r * 40.0 - inside;
         assert!((area(&s, "Half") - rest).abs() < rest * 1e-3, "{} vs {rest}", area(&s, "Half"));
+    }
+
+    /// The same slot (|x| ≤ 3, round ends at z = 12 and 28) drawn on a plane 20 in front of XZ
+    /// (y = 20) and projected along the half cylinder's own normal (radius 10 about Z, y ≥ 0,
+    /// 40 high). A point (x, 20, z) of the sketch goes to its nearest point of the cylinder, at
+    /// the angle atan2(20, x) and its own height, so a width 2w of the slot lands on the arc
+    /// 2R·atan(w/d): the straight run covers 16 · 2R·atan(a/d), the two round ends
+    /// (w = √(a² − t²)) together 2πR·(√(a² + d²) − d), as ∫₀ᵃ atan(√(a² − t²)/d) dt =
+    /// (π/2)(√(a² + d²) − d). The piece inside is their sum, 61.7033…; the sketch's normal would
+    /// give [`trim_a_cylinder_by_a_projected_slot`]'s 126.1 from any distance. The area is the
+    /// kernel's integral over the trimmed face; the dropped round ends lie within a millionth of
+    /// the body's size (under 45) of their true drop and are no longer than their arcs, 2πa
+    /// together, so the area is within 45e-6 · 2πa < 1e-3 of the closed form. The piece keeps
+    /// the cylinder face's name; undo, redo and reopening rebuild it.
+    #[test]
+    fn trim_a_cylinder_by_a_slot_projected_along_the_surface_normal() {
+        let pi = std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]}))["created"]["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": [arc], "distance": 40, "body_name": "Half"}));
+        let source = names(&s, "Half");
+        run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 20, "name": "Front20"}));
+        // XZ sketches have v along −Z.
+        run(&mut s, "sketch.create", json!({"plane": "Front20", "name": "Slot"}));
+        run(&mut s, "sketch.slot.overall", json!({"p0": [0, -9], "p1": [0, -31], "width": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let (r, a, d): (f64, f64, f64) = (10.0, 3.0, 20.0);
+        let inside = 32.0 * r * (a / d).atan() + 2.0 * pi * r * ((a * a + d * d).sqrt() - d);
+        let all = pi * r * 40.0;
+        let bound = 45e-6 * 2.0 * pi * a;
+        // The kernel's own integral over the trimmed faces, to a relative 1e-8.
+        let exact_area = |s: &Session| area(s, "Half");
+        let normal = json!({"sketch": "Slot", "direction": "face_normal"});
+        run(&mut s, "surface.trim", json!({"body": "Half", "curves": normal, "keep": [0, 10, 20]}));
+        assert!((exact_area(&s) - inside).abs() < bound, "{} vs {inside}", exact_area(&s));
+        assert_eq!(names(&s, "Half"), source, "the piece is the cylinder's face");
+        assert!(exact(&s, "Half", 0));
+        // The choice is saved with the design, and a reopened design rebuilds the same piece.
+        let saved = s.doc.to_json();
+        assert!(
+            saved.contains("\"face_normal\":true") || saved.contains("\"face_normal\": true"),
+            "the saved trim says how its curves are projected"
+        );
+        let cold = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!((exact_area(&cold) - inside).abs() < bound, "{}", exact_area(&cold));
         run(&mut s, "edit.undo", json!({}));
+        assert!((exact_area(&s) - all).abs() < all * 1e-9, "{}", exact_area(&s));
+        run(&mut s, "edit.redo", json!({}));
+        assert!((exact_area(&s) - inside).abs() < bound);
+        run(&mut s, "edit.undo", json!({}));
+        // The rest of the wall, and both regions at once (the wall in two faces).
+        run(&mut s, "surface.trim", json!({"body": "Half", "curves": normal, "keep": [10, 0, 20]}));
+        assert!((exact_area(&s) - (all - inside)).abs() < bound, "{} vs {}", exact_area(&s), all - inside);
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.trim", json!({"body": "Half", "curves": normal, "keep": [[0, 10, 20], [10, 0, 20]]}));
+        assert_eq!(s.world_state().unwrap().body("Half").unwrap().body.face_count(), 2);
+        assert!((exact_area(&s) - all).abs() < all * 1e-9, "{}", exact_area(&s));
+        run(&mut s, "edit.undo", json!({}));
+        // Projected along the sketch's normal instead, the slot lands on the wider piece.
+        run(&mut s, "surface.trim", json!({"body": "Half", "curves": {"sketch": "Slot"}, "keep": [0, 10, 20]}));
+        assert!((area(&s, "Half") - 126.1053).abs() < 126.1053 * 1e-3, "{}", area(&s, "Half"));
+        run(&mut s, "edit.undo", json!({}));
+        // Refusals leave the design as it was: a point on the slot's own edge picks no region,
+        // and a word that is no direction is refused before anything is built.
+        let before = s.doc.to_json();
+        let on_edge = [r * a / (a * a + d * d).sqrt(), r * d / (a * a + d * d).sqrt(), 20.0];
+        let e = s.execute("surface.trim", &json!({"body": "Half", "curves": normal, "keep": on_edge})).unwrap_err().to_string();
+        assert!(e.contains("pick inside the region to keep"), "{e}");
         let e = s
-            .execute("surface.trim", &json!({"body": "Half", "curves": {"sketch": "Slot", "direction": "face_normal"}, "keep": [0, 10, 20]}))
-            .unwrap_err();
-        assert!(e.to_string().contains("not supported yet"), "{e}");
+            .execute("surface.trim", &json!({"body": "Half", "curves": {"sketch": "Slot", "direction": "surface"}, "keep": [0, 10, 20]}))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("normal, face_normal or [x, y, z]"), "{e}");
+        assert_eq!(s.doc.to_json(), before);
     }
 
     /// A U-shaped sheet (legs at x = 0 and 10, 10 high; base along y = 0; 10 deep) cut by the

@@ -42,6 +42,11 @@
 //! `stubs4-delete-edge-bottle-e8-r0.1` and `topology.brep_p10` `gen0020` (their edge
 //! tolerances, each certified in `certify::trim_tolerance`), so their entries are deleted too.
 //!
+//! #20939's `edge::set_interval` clears the gaps cached over the old interval, so the UV trim
+//! recovery of `create_uv_trim_curves` leaves the gap-cache flags of the
+//! `own_reader_open_shell_uv_trim_f<k>_rebuild` rows of `topology.face_p3` at 0 where main's
+//! row has 1; their 12 entries are deleted.
+//!
 //! The kept-trim cover (tangency-labs/solidcraft#19295) raises, after the healer, the
 //! tolerance of an edge whose kept UV trim runs farther from it than its tolerance, to a
 //! proved bound on that distance, and records each raise it makes with the value before
@@ -84,6 +89,11 @@
 //! line to the bit (its hash, taken from main's expected file, which holds these four lines
 //! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
 //! were of an older main's run, not of the line main now commits.)
+//!
+//! #20179 (the point test asks the face whether to test) adds five UV trims to the result
+//! body of six `blend.fillet_executive_p3` `sphere_diff_3cylinders` rows: their put-back
+//! runs are hashed without them ([`run_without_classified_trims`], proved in `wr493_rows`'
+//! `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`).
 //!
 //! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
 //! `zone_tol3d(gain * 2 * gap)`. Its raises on these reads were recorded the same way
@@ -155,6 +165,19 @@ fn run_raw(u: &dyn UnitDiff, case: &Case) -> crate::Output {
         u.run_rust(case)
     };
     out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
+}
+
+/// [`run`] without the UV trims #20179's face classification adds: a fillet row's result
+/// body without them (`wr493_rows::without_classified_trims`, which proves them), other
+/// rows with main's read of the file put back (`state::strip_classified_trims`; rows of
+/// other files as [`run`]). The row main's run gives, for the put-back runs.
+fn run_without_classified_trims(u: &dyn UnitDiff, case: &Case) -> Value {
+    if u.id() == "blend.fillet_executive_p3" {
+        let mut out = run_raw(u, case);
+        crate::wr493_rows::without_classified_trims(u.id(), &case.name, &mut out);
+        return encode(&case.name, &out);
+    }
+    state::strip_classified_trims(|| run(u, case)).0
 }
 
 fn hash(v: &Value) -> u64 {
@@ -294,7 +317,8 @@ fn replay_trim_cover(unit_id: &str) -> usize {
     let mut failures = Vec::new();
     let mut n = 0;
     let refit_run = |case: &Case, failures: &mut Vec<String>| {
-        let (line, replaced) = crate::refit::with_fitted_spheres(|| run(u.as_ref(), case));
+        let (line, replaced) =
+            crate::refit::with_fitted_spheres(|| run_without_classified_trims(u.as_ref(), case));
         if replaced == 0 {
             failures.push(format!("{}: no found sphere refit", case.name));
         }
@@ -339,7 +363,7 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
             refit_run(case, &mut failures)
         } else {
-            run(u.as_ref(), case)
+            run_without_classified_trims(u.as_ref(), case)
         };
         let Some(Mode::Substitute {
             reads,
@@ -355,7 +379,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -431,10 +458,12 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
 
 /// The [`TRIM_COVER`] rows whose cover raises the WR-493 retirement moves by less than the
 /// goldens' comparator (the cover measures the kept trims on the file's NURB here, on the
-/// fitted NURB on main): their committed line stays main's.
+/// fitted NURB on main): their committed line stays main's. (#20179 re-blessed
+/// `corpus.parity`'s `Fillet__sphere_diff_3cylinders.smb` and `topology.face_p3`'s
+/// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move: their put-back
+/// above is main's hash, and their committed line is now this branch's run.)
 const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("blend.fillet_removal", "nurb_fillet_face18"),
-    ("corpus.parity", "Fillet__sphere_diff_3cylinders.smb"),
     ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
     ("heal.stitch_p1", "file_nurb_fillet.smb_advanced"),
     (
@@ -468,31 +497,7 @@ const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ),
     (
         "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f0",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f1",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f4",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f5",
-    ),
-    (
-        "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f8",
-    ),
-    (
-        "topology.face_p3",
-        "own_reader_sphere_diff_3cylinders_uv_trim_f9",
     ),
 ];
 
@@ -568,7 +573,7 @@ replay_tests! {
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
-    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
+    face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 36;
 }
 
 macro_rules! replay_trim_cover_tests {
@@ -652,26 +657,31 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
+/// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
+/// step latch (#18916). The drop tracer's clamped-sliver rule (a span whose clamped UV image
+/// is one point within the drop's tolerances is left out) moves all four in their
+/// `mass_properties` only, so each hash is of the row with that rule;
+/// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xbab5_3857_5f4c_54b2,
+        0x751d_c931_5b45_292d,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x0879_39f6_c276_2c27,
+        0x5132_edc0_4baf_f026,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xaa56_e948_548e_16f9,
+        0xc413_26f0_108d_e3f1,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x87dc_a442_4a0e_39cd,
+        0xd7e9_450b_63e6_d0d1,
     ),
 ];
 
@@ -679,6 +689,7 @@ const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
 /// branch's committed line.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
+    let mut failures = Vec::new();
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
         assert!(
             !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
@@ -692,13 +703,17 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
+        if hash(&line) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's line ({:#018x})",
+                hash(&line)
+            ));
+        }
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{unit_id} {name}: not the committed line"));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
@@ -731,4 +746,181 @@ fn record() {
         let _ = writeln!(out, "{rec}");
     }
     std::fs::write(std::env::var("TOLSUB_OUT").unwrap(), out).unwrap();
+}
+
+/// The rows that read `Fillet/sphere_diff_3cylinders.smb` and move with #20179 (besides
+/// `blend.fillet_executive_p3`'s, which `wr493_rows` proves), with main's row hash
+/// (`goldens` at the PR's base, 4c275ffb7d, MEASURED). The twelve `topology.face_p3`
+/// `_rebuild` rows hold main's row after #18490 moved them (main at 0cfdad69ff: the hash of
+/// main's blessed line, MEASURED equal to this branch's run with the trims put back); the eight
+/// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
+/// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
+/// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
+/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
+/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
+/// (`certify::trim_tolerance` certifies its moved tolerance).
+const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
+    (
+        "corpus.parity",
+        "Fillet__sphere_diff_3cylinders.smb",
+        0x0fe4ffda86f0023a,
+    ),
+    ("topology.brep_p10", "gen0026", 0xc2f31f04dbd827bb),
+    (
+        "topology.brep_p10",
+        "read_Fillet_sphere_diff_3cylinders",
+        0xd5b48ce479ae2618,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f0",
+        0x7743ee2b9d99803b,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f0_rebuild",
+        0xc4a920b322329987,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f1",
+        0xb10d395946aaa1a5,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f10",
+        0x913d9dc3e316de70,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f10_rebuild",
+        0x42934528e6779089,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f11",
+        0x234465c42f5694be,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f11_rebuild",
+        0xdec945d4e624bdce,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f1_rebuild",
+        0x1e49694bff2783c8,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f2",
+        0x287ded99c94c1089,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f2_rebuild",
+        0x5d8eae594ea92b9c,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f3",
+        0xd02ee7b36ac19415,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f3_rebuild",
+        0xcc8e58869406a559,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f4",
+        0x8fcb5e3dee081b8f,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
+        0x5bca12f6769919d2,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f5",
+        0x66b68d6a73c6eda2,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f5_rebuild",
+        0x09f860420df241b3,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f6",
+        0x8212305e228c5d3b,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild",
+        0x8e918074b11ab263,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f7",
+        0x467d1e66deace095,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
+        0x50fca59ea3c3d0cc,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f8",
+        0xfebe25a2bec0a563,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f8_rebuild",
+        0x9857e670ca50f05f,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f9",
+        0x78eb4a9ce31b574d,
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f9_rebuild",
+        0xd8bd3415a29dbaa0,
+    ),
+];
+
+/// #20179: each [`CLASSIFIED_READ_ROWS`] row, run with main's read of the file put back
+/// (`state::strip_classified_trims`: the five UV trims the read's face classification now
+/// makes taken off, the vertex gaps setting them cleared computed again, and in a healed
+/// read the healer's raises on those trims' edges and vertices, each first checked to
+/// cover its entity's gaps, back at the zone tolerance), is main's row to the bit: everything else in these
+/// rows is the same code giving the same bits, and the rows move only through those trims
+/// (which `wr493_rows::sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`
+/// certifies within their edges' tolerances).
+#[test]
+fn classified_read_rows_are_mains_without_the_trims() {
+    let mut failures = Vec::new();
+    let mut by_unit: BTreeMap<&str, BTreeMap<String, Case>> = BTreeMap::new();
+    for &(unit_id, name, main_hash) in CLASSIFIED_READ_ROWS {
+        let u = unit(unit_id);
+        let all = by_unit.entry(unit_id).or_insert_with(|| cases(u.as_ref()));
+        let case = all
+            .get(name)
+            .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
+        let (line, reads) = state::strip_classified_trims(|| run(u.as_ref(), case));
+        if reads == 0 {
+            failures.push(format!("{unit_id} {name}: no read put back"));
+        }
+        if hash(&line) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's row ({:#018x})",
+                hash(&line)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
