@@ -5484,11 +5484,14 @@ fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &m
     }
 }
 
-/// The plane an extrude's picked profiles lie in: the first pick's sketch plane, or its planar face.
+/// The plane an extrude's picked profiles lie in: the first pick's sketch plane (a profile's or a
+/// thin extrude's curve's), or its planar face.
 fn profile_plane(s: &Session, first: &Sel) -> Option<solidcore_record::Plane> {
     let st = crate::open_meshing::session_world(s);
     match first {
         Sel::Profile { sketch, .. } => st.sketch(*sketch).map(|ss| ss.plane),
+        // A thin extrude's curve: its sketch's plane (no sketch named: the active one's).
+        Sel::SketchCurve { sketch, .. } => st.sketch(sketch.or(s.active_sketch)?).map(|ss| ss.plane),
         Sel::Face { body, index, .. } => st.body(body)?.body.planar_face(*index),
         _ => None,
     }
@@ -6758,10 +6761,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             } else {
                 // Each curve's sketch, resolved one pick at a time: the path may join the curves
                 // of several sketches (#16168), so a pick in another sketch is saved with that
-                // sketch. A pick whose sketch cannot be resolved still refuses the path.
+                // sketch. A pick whose sketch cannot be resolved still refuses the path. A pick
+                // whose sketch no longer holds the curve is stale (the curve was deleted or
+                // renamed there): it is left out, so the path can be picked again (#17550).
+                let st = crate::open_meshing::session_world(s);
                 let mut resolved: Vec<(String, u64)> = Vec::new();
                 for sel in sels(d, 1) {
-                    let Sel::SketchCurve { id, .. } = sel else { continue };
+                    let Sel::SketchCurve { id, sketch: named } = sel else { continue };
+                    if let Some(sk) = named
+                        && !sketch_holds_curve(&st, *sk, id)
+                    {
+                        continue;
+                    }
                     let sk = picks_sketch(app, std::slice::from_ref(sel), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
                     resolved.push((id.clone(), sk));
                 }
@@ -7660,6 +7671,12 @@ pub(crate) fn curves_sketch(app: &SolveApp, ids: &[String], not: Option<u64>) ->
         return Some(a);
     }
     st.sketches.iter().rev().map(|ss| ss.feature).find(|sid| Some(*sid) != not && has(*sid))
+}
+
+/// Whether the sketch `sketch` still holds the curve `id` (a 3D wire counts): a curve deleted
+/// or renamed in that sketch leaves a pick of it naming nothing the app can use (#17550).
+fn sketch_holds_curve(st: &solidcraft_engine::doc::ModelState, sketch: u64, id: &str) -> bool {
+    st.sketch(sketch).is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.wire_index(id).is_some())
 }
 
 /// An axis selection as a line: a point on it and its unit direction (origin axes, or a straight
@@ -9210,9 +9227,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
                     None => path
                         .iter()
-                        .map(|e| {
+                        .filter_map(|e| {
                             let (sketch, curve) = e.split(*path_sketch);
-                            crate::selection::curve_pick(curve, sketch.0, s.active_sketch)
+                            // A curve the sketch no longer holds is left out: the path must be
+                            // picked again (#17550).
+                            if !sketch_holds_curve(&st, sketch.0, curve) {
+                                return None;
+                            }
+                            Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch))
                         })
                         .collect(),
                 };
