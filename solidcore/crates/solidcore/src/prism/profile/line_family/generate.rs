@@ -15,11 +15,21 @@ type Result<T> = std::result::Result<T, Invalid>;
 const MAX_INDEX: f64 = 4_503_599_627_370_496.0;
 const MAX_EXACT_INDEX: i128 = 1i128 << 52;
 
-/// One generated mark in paper millimetres. Dots remain points, not degenerate lines.
+/// One generated mark. Dots remain points, not degenerate lines.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark {
-    Line { a: Vec2, b: Vec2 },
-    Dot { at: Vec2 },
+    /// A stroke between its clipped endpoints.
+    Line {
+        /// First clipped endpoint.
+        a: Vec2,
+        /// Last clipped endpoint.
+        b: Vec2,
+    },
+    /// A dot at its centre.
+    Dot {
+        /// Centre.
+        at: Vec2,
+    },
 }
 
 /// Clip each family's lines, in turn, to a supported polygon, disk or concentric annulus.

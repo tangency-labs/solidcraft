@@ -727,13 +727,13 @@ fn circle_output(
     r: &Region2,
     limits: Option<Limits>,
 ) -> Result<Vec<Mark>, super::Invalid> {
-    let pattern_before = p.clone();
+    let pattern_before = p.to_vec();
     let region_before = r.clone();
     let result = match limits {
         Some(limits) => clip_with_limits(p, r, limits),
         None => clip(p, r),
     };
-    assert_eq!(p, &pattern_before);
+    assert_eq!(p, pattern_before.as_slice());
     assert_eq!(r, &region_before);
     result
 }
