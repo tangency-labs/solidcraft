@@ -76,6 +76,7 @@ pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
+pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
@@ -1370,12 +1371,15 @@ impl SolveApp {
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                     built.target.samples = 1;
                     msaa_fallback = true;
-                    eprintln!("SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session", scene.samples);
+                    solidcraft_engine::note!(
+                        "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
+                        scene.samples
+                    );
                 }
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
-                    eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                    solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                 }
-                Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+                Err(error) => solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
         WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback }
@@ -2192,7 +2196,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -4731,6 +4735,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The recovery banner's Discard all asks here (File view lists the designs inline).
+                recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
@@ -4797,6 +4803,7 @@ impl SolveApp {
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        library::drag_cursor(self, ui.ctx());
         if view_tiles::focus_pressed(self) {
             ui.ctx().request_repaint();
         }
