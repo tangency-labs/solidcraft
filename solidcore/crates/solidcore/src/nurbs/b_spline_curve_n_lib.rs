@@ -2840,7 +2840,7 @@ impl BSplineCurve {
                 if k.fixes.bspline_trim_preserves_uv_spans && self.dim != 3 {
                     // a UV curve loses its pole end spans only: upstream's removal would
                     // also cut every other span shorter than the 3D zone tolerance
-                    cur1 = without_pole_end_spans(&cur1, zone_tol_1d_min, zone_tol_1d_max)?;
+                    cur1 = without_pole_end_spans(&cur1)?;
                 } else {
                     let removal = cur1
                         .remove_degen_segs(zone_tol_3d)
@@ -2958,55 +2958,49 @@ fn short_end_span_is_pole(cpts: &[CPoint], degree: usize, head: bool, tail: bool
             && end_span_is_pole(cpts, n_cpts - 1 - degree, degree, pole_tol))
 }
 
-/// `cur` without the run of spans at its start that collapse to poles as check test #15
-/// measures one ([`end_span_is_pole`] with its tolerance `SM_ZONE_TOL_3D / 10`) and end
-/// within `head_tol_1d` of the start, and the same run at its end within `tail_tol_1d`,
-/// never its last span. The rest is the curve's exact restriction ([`crv_trim`]) with
-/// its knots mapped linearly back onto the curve's interval (`N_CrvReparam`): its control
-/// points, its image and every other span, however short, stay. Each removed span moves
-/// that end by at most the pole tolerance when the weights are positive, as a span lies
-/// in the hull of its control points. Not upstream (#2129, #21524).
-fn without_pole_end_spans(cur: &Curve, head_tol_1d: f64, tail_tol_1d: f64) -> Result<Curve> {
-    let pole_tol = ZONE_TOL_3D / 10.0;
-    let degree = cur.degree();
-    let cpts = cur.cpts();
-    // every knot span, with the index of the first control point acting on it
-    let mut spans = Vec::new();
-    for (at, pair) in cur.knots().windows(2).enumerate() {
-        if let (&[lo, hi], Some(first)) = (pair, at.checked_sub(degree)) {
-            if hi > lo {
-                spans.push((lo, hi, first));
-            }
+/// `cur` without the spans at its ends that collapse to poles as check test #15 measures
+/// one ([`end_span_is_pole`] with its tolerance `SM_ZONE_TOL_3D / 10`), never its last
+/// span: the curve's exact restriction ([`crv_trim`]) to the knots that bound the rest,
+/// with its knots mapped linearly back onto the curve's interval (`N_CrvReparam`). Its
+/// image and every other span, however short, stay. A span is judged on the restriction
+/// that would keep it: cutting a pole span off moves the first control point of the next
+/// span, which can make that span a pole too. Each removed span moves that end along the
+/// curve by at most twice the pole tolerance when the weights are positive, as the span
+/// lies in the hull of its control points, all within the pole tolerance of its first.
+/// Not upstream (#2129, #21524).
+fn without_pole_end_spans(cur: &Curve) -> Result<Curve> {
+    // the distinct knots, which bound the spans
+    let mut bounds: Vec<f64> = Vec::new();
+    for &u in cur.knots() {
+        if bounds.last().is_none_or(|&b| u > b) {
+            bounds.push(u);
         }
     }
-    let (Some(&(start, ..)), Some(&(_, end, _))) = (spans.first(), spans.last()) else {
+    let (Some(&start), Some(&end)) = (bounds.first(), bounds.last()) else {
         return Ok(cur.clone());
     };
-    let is_pole =
-        |&&(_, _, first): &&(f64, f64, usize)| end_span_is_pole(cpts, first, degree, pole_tol);
-    let others = spans.len().saturating_sub(1);
-    let head = spans
-        .iter()
-        .take(others)
-        .take_while(|s| s.1 - start < head_tol_1d && is_pole(s))
-        .count();
-    let tail = spans
-        .iter()
-        .rev()
-        .take(others.saturating_sub(head))
-        .take_while(|s| end - s.0 < tail_tol_1d && is_pole(s))
-        .count();
-    if head == 0 && tail == 0 {
-        return Ok(cur.clone());
+    // the kept spans run from bounds[lo] to bounds[hi]
+    let (mut lo, mut hi) = (0, bounds.len().saturating_sub(1));
+    let mut kept = cur.clone();
+    loop {
+        let (cpts, degree) = (kept.cpts(), kept.degree());
+        let head = hi.saturating_sub(lo) > 1 && short_end_span_is_pole(cpts, degree, true, false);
+        let tail = hi.saturating_sub(lo) > 1 + usize::from(head)
+            && short_end_span_is_pole(cpts, degree, false, true);
+        if !head && !tail {
+            break;
+        }
+        lo += usize::from(head);
+        hi = hi.saturating_sub(usize::from(tail));
+        let (Some(&a), Some(&b)) = (bounds.get(lo), bounds.get(hi)) else {
+            return Err(invalid(OP_TRIM, "pole end spans outside the knots"));
+        };
+        kept = crv_trim(cur, a, b).map_err(SolidError::nurbs_routine(OP_TRIM))?;
     }
-    let lo = spans.get(head).map(|s| s.0);
-    let hi = spans.get(others.saturating_sub(tail)).map(|s| s.1);
-    let (Some(lo), Some(hi)) = (lo, hi) else {
-        return Err(invalid(OP_TRIM, "pole end spans outside the knots"));
-    };
-    let mut kept = crv_trim(cur, lo, hi).map_err(SolidError::nurbs_routine(OP_TRIM))?;
-    kept.reparam(start, end)
-        .map_err(SolidError::nurbs_routine(OP_TRIM))?;
+    if lo > 0 || hi + 1 < bounds.len() {
+        kept.reparam(start, end)
+            .map_err(SolidError::nurbs_routine(OP_TRIM))?;
+    }
     Ok(kept)
 }
 
