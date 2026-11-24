@@ -1375,7 +1375,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if !edits {
         v.push(activate.clone());
     }
-    if id != 0 && doc.links.contains_key(&id) {
+    if id != 0 && doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
         v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
     }
@@ -1409,7 +1409,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id == 0 {
         own.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
-    if doc.links.contains_key(&id) {
+    if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
@@ -2295,6 +2295,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
+        "ui.historyClear" => crate::timeline::clear_history(app),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {

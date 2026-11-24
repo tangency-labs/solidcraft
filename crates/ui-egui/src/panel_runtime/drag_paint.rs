@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use egui::{
     Context, LayerId, Rect, Ui,
     epaint::{ClippedShape, Shape},
-    layers::{PaintList, ShapeIdx},
+    layers::ShapeIdx,
 };
 use solidcraft_engine::panels::{Destination, InstanceId};
 use solidcraft_theme::Tokens;
@@ -115,77 +115,36 @@ impl DragPaint {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-/// A copy of a panel's body paint from this pass, for the desktop window a
-/// drag would open it in. Like the in-app preview, it runs no second body.
-pub(crate) struct WindowCard {
-    bounds: Rect,
-    shapes: Vec<ClippedShape>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl WindowCard {
-    /// `body` is the part of the card below its header.
-    pub(super) fn copy(ctx: &Context, card: &CardPaint, body: Rect) -> Self {
-        let shapes = ctx.graphics(|graphics| graphics.get(card.layer).map_or_else(Vec::new, |list| card_entries(list, card).cloned().collect()));
-        Self { bounds: body, shapes }
-    }
-
-    /// Paint the panel's body at `bounds` on `ui`'s layer.
-    pub(crate) fn paint(&self, ui: &Ui, bounds: Rect) {
-        let clip = ui.clip_rect();
-        ui.ctx().graphics_mut(|graphics| {
-            let list = graphics.entry(ui.layer_id());
-            for (clip, shape) in relocated(self.shapes.iter().cloned(), self.bounds, bounds, clip, 1.0) {
-                list.add(clip, shape);
-            }
-        });
-    }
-}
-
-fn card_entries<'a>(list: &'a PaintList, card: &CardPaint) -> impl Iterator<Item = &'a ClippedShape> {
-    list.all_entries().skip(card.start).take(card.end.saturating_sub(card.start))
-}
-
 fn replace_shapes(ctx: &Context, card: &CardPaint, bounds: Option<Rect>, clip: Rect, opacity: f32) {
     ctx.graphics_mut(|graphics| {
         let Some(list) = graphics.get_mut(card.layer) else { return };
-        let shapes: Vec<_> = if bounds.is_some() { card_entries(list, card).cloned().collect() } else { Vec::new() };
+        let shapes: Vec<_> =
+            if bounds.is_some() { list.all_entries().skip(card.start).take(card.end - card.start).cloned().collect() } else { Vec::new() };
         for index in card.start..card.end {
             list.set(ShapeIdx(index), Rect::NOTHING, Shape::Noop);
         }
         let Some(bounds) = bounds else { return };
-        for (clip, shape) in relocated(shapes, card.bounds, bounds, clip, opacity) {
-            list.add(clip, shape);
+        let visible = bounds.intersect(clip);
+        if !visible.is_positive() {
+            return;
+        }
+        let offset = bounds.min - card.bounds.min;
+        for ClippedShape { clip_rect, mut shape, .. } in shapes {
+            let old = clip_rect.intersect(card.bounds);
+            let translated = if relocate_shape(&mut shape, card.bounds, bounds) { visible } else { old.translate(offset).intersect(visible) };
+            if !translated.is_positive() {
+                continue;
+            }
+            if opacity < 1.0 {
+                egui::epaint::shape_transform::adjust_colors(&mut shape, move |color| {
+                    if *color != egui::Color32::PLACEHOLDER {
+                        *color = color.gamma_multiply(opacity);
+                    }
+                });
+            }
+            list.add(translated, shape);
         }
     });
-}
-
-/// `shapes` painted inside `original`, moved to `bounds` and clipped to `clip`.
-fn relocated(
-    shapes: impl IntoIterator<Item = ClippedShape>,
-    original: Rect,
-    bounds: Rect,
-    clip: Rect,
-    opacity: f32,
-) -> impl Iterator<Item = (Rect, Shape)> {
-    let visible = bounds.intersect(clip);
-    let offset = bounds.min - original.min;
-    shapes.into_iter().filter(move |_| visible.is_positive()).filter_map(move |ClippedShape { clip_rect, mut shape, .. }| {
-        let old = clip_rect.intersect(original);
-        let translated = if relocate_shape(&mut shape, original, bounds) { visible } else { old.translate(offset).intersect(visible) };
-        if !translated.is_positive() {
-            return None;
-        }
-        if opacity < 1.0 {
-            egui::epaint::shape_transform::adjust_colors(&mut shape, move |color| {
-                if *color != egui::Color32::PLACEHOLDER {
-                    *color = color.gamma_multiply(opacity);
-                }
-            });
-        }
-        Some((translated, shape))
-    })
 }
 
 // The captured frame already carries the correct fill, stroke, radius
