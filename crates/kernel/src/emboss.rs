@@ -18,7 +18,7 @@ use crate::history::Change;
 use crate::numbered::{NumberedLoop, NumberedRegion};
 use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
-use solidcore_record::brep::{Brep, Curve, Curve2, Frame, Loop, Surface};
+use solidcore_record::brep::{Brep, Curve, Curve2, Frame, Loop, OrientedEdge, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::form;
@@ -50,15 +50,32 @@ fn wall_frame(normal: Vec3, w: Vec3, a: Vec3, r: f64, convex: bool, tol: f64) ->
     Some((Vec3::from(f.radial), Vec3::from(f.tangent)))
 }
 
+/// The wall face's outer loop of four edge uses: its only loop or, on a wall an earlier emboss
+/// left footprints in, the four-use loop whose arcs about `axis` lie furthest apart along it.
+fn wall_outer_loop(b: &Brep, face: usize, axis: Vec3) -> Option<&[OrientedEdge]> {
+    let loops = &b.faces.get(face)?.loops;
+    let span = |edges: &[OrientedEdge]| {
+        let hs = || {
+            edges.iter().filter_map(|u| match &b.edges.get(u.edge as usize)?.curve {
+                Curve::Circle { frame, .. } => Some(Vec3::from(frame.origin).dot(axis)),
+                _ => None,
+            })
+        };
+        hs().fold(f64::NEG_INFINITY, f64::max) - hs().fold(f64::INFINITY, f64::min)
+    };
+    let edges = loops.iter().map(|l| if let Loop::Edges { edges } = l { Some(edges.as_slice()) } else { None });
+    let mut fours = edges.collect::<Option<Vec<_>>>()?.into_iter().filter(|e| e.len() == 4);
+    if loops.len() == 1 {
+        return fours.next();
+    }
+    fours.map(|e| (e, span(e))).filter(|(_, s)| s.is_finite()).max_by(|x, y| x.1.total_cmp(&y.1)).map(|(e, _)| e)
+}
+
 /// The angles a wall face spans about the axis, seen from `radial`: from one of its arcs about
-/// the axis (a face of one loop of four edge uses: two arcs and two lines, or a whole turn's two
+/// the axis (a face whose outer loop has four edge uses: two arcs and two lines, or a whole turn's two
 /// circles and its seam used twice).
 fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent: Vec3) -> Option<(f64, f64)> {
-    let f = b.faces.get(face)?;
-    let [Loop::Edges { edges }] = f.loops.as_slice() else { return None };
-    if edges.len() != 4 {
-        return None;
-    }
+    let edges = wall_outer_loop(b, face, axis)?;
     for u in edges {
         let e = b.edges.get(u.edge as usize)?;
         let Curve::Circle { frame, .. } = &e.curve else { continue };
@@ -790,16 +807,12 @@ fn complete_wall(rec: &Brep, surfaces: &[Option<Surf>], o: Vec3, axis: Vec3, r: 
     Some(WholeWall { lo: a.min(*b), hi: a.max(*b), inner, outer })
 }
 
-/// Whether wall face `face` is a rectangle in angle and height: one loop of four uses, two arcs
+/// Whether wall face `face` is a rectangle in angle and height: an outer loop of four uses, two arcs
 /// of circles square to `axis` (each at one height) and two lines (along the axis on a cylinder),
 /// or a whole turn's two circles and its seam used twice. Its angles are then [`wall_angles`] and
 /// its heights [`face_axial_bounds`].
 fn rectangular_wall(rec: &Brep, face: usize, axis: Vec3) -> bool {
-    let Some(f) = rec.faces.get(face) else { return false };
-    let [Loop::Edges { edges }] = f.loops.as_slice() else { return false };
-    if edges.len() != 4 {
-        return false;
-    }
+    let Some(edges) = wall_outer_loop(rec, face, axis) else { return false };
     let mut arcs = 0;
     for u in edges {
         match rec.edges.get(u.edge as usize).map(|e| &e.curve) {
