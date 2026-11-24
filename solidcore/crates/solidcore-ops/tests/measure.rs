@@ -308,6 +308,45 @@ fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     }
 }
 
+/// Every point where the ray meets a face, nearest first: along +x at y = 3, z = 4 the tube's
+/// one face gives (-4, 3, 4) at 16 and (4, 3, 4) at 24, the first where `face_hit_by_ray` lands; from inside, only the far side; facing away, none.
+/// What is no ray is refused as `face_hit_by_ray` refuses it.
+#[test]
+fn a_ray_through_a_tube_hits_both_sides_nearest_first() {
+    all_fixes();
+    let (b, _, order) = tube();
+    let hits = b
+        .face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+    for (hit, (at, distance)) in hits
+        .iter()
+        .zip([([-4.0, 3.0, 4.0], 16.0), ([4.0, 3.0, 4.0], 24.0)])
+    {
+        assert!(close(hit.point, at), "{hits:?}");
+        assert!(near(hit.distance, distance, 1e-6), "{hits:?}");
+    }
+    let first = b
+        .face_hit_by_ray(&order, [-20.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.face, hits[0].face);
+    assert!(close(first.point, hits[0].point), "{first:?} {hits:?}");
+    let inside = b
+        .face_hits_by_ray(&order, [0.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap();
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    assert!(close(inside[0].point, [4.0, 3.0, 4.0]), "{inside:?}");
+    assert_eq!(
+        b.face_hits_by_ray(&order, [20.0, 3.0, 4.0], [1.0, 0.0, 0.0]),
+        Ok(vec![])
+    );
+    assert_eq!(
+        b.face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [0.0, 0.0, 0.0]),
+        Err(Error::Argument)
+    );
+}
+
 /// What, the body, the line's point and direction, and the parameters it meets faces at.
 type LineCase = (&'static str, Body, [f64; 3], [f64; 3], Vec<f64>);
 
