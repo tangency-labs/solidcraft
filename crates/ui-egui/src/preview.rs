@@ -296,6 +296,23 @@ pub struct PreviewState {
 }
 
 impl PreviewState {
+    /// Tests: wait until the running preview worker has answered, and leave its result for the
+    /// next frame's poll, as a frame drawn once the worker is done would find it. Whether a
+    /// result then shows is decided by that poll, as in the app. False when nothing runs.
+    #[cfg(test)]
+    pub(crate) fn wait_for_worker(&mut self) -> bool {
+        let Some((key, rx)) = self.running.take() else { return false };
+        let job = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(job) => job,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the preview failed".into()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("the preview worker did not answer in 60 s"),
+        };
+        let (tx, done) = std::sync::mpsc::channel();
+        let _ = tx.send(job);
+        self.running = Some((key, done));
+        true
+    }
+
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
@@ -612,6 +629,7 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.as_built"
                     | "joint.edit"
                     | "joint.limits"
+                    | "joint.dynamics"
                     | "joint.gear"
                     | "joint.rack_pinion"
                     | "joint.screw"
