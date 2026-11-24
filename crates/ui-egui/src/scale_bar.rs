@@ -1,6 +1,7 @@
 //! The 3D view's scale bar (#375): a line in the view's bottom left corner and the length it stands
 //! for, a round number in the design's units, so a distance on screen can be read without
-//! measuring. Off by default (`scale_bar`, Preferences › Graphics › In the view).
+//! measuring. Off by default; the navigation bar's View menu turns it on (`view.scale_bar`), and
+//! the app remembers the choice (`scale_bar`).
 //!
 //! The scale is exact at the camera's target, the point the view turns about, which is the centre
 //! of the view. An orthographic view has that scale everywhere; in a perspective view nearer
@@ -166,17 +167,24 @@ mod tests {
         assert_eq!(mm_per_point(&Camera { distance: f64::NAN, ..cam }, 200.0), None);
     }
 
-    /// Off by default; turned on, the bar sits in the view's bottom left corner, above History and
-    /// clear of the Browser.
+    /// Off by default; the View menu turns it on, and then the bar sits in the view's bottom left
+    /// corner, above History and clear of the Browser. The choice survives a settings reload, and
+    /// the `view.scale_bar` command turns it off again.
     #[test]
-    fn the_bar_shows_only_when_turned_on_in_the_bottom_left_corner() {
+    fn the_view_menu_shows_the_bar_in_the_bottom_left_corner() {
         assert!(!crate::prefs::Prefs::default().scale_bar);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length": 10, "width": 20, "height": 30})).unwrap();
         h.frames(3);
         assert!(crate::scenario::rect_of("view:scale_bar").is_none(), "off by default");
-        h.call("ui.prefs", serde_json::json!({"scale_bar": true}));
+        h.step(&serde_json::json!({"click":{"handle":"nav:view"}})).unwrap();
+        h.step(&serde_json::json!({"click":{"handle":"view:scale_bar_toggle"}})).unwrap();
+        assert!(h.app.preferences.scale_bar, "the View menu turns it on");
+        h.step(&serde_json::json!({"click":{"handle":"nav:view"}})).unwrap();
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.scale_bar, "turning it on survives a settings reload");
         h.frames(3);
         let r = crate::scenario::rect_of("view:scale_bar").expect("the bar is drawn");
         let screen = h.ctx.content_rect();
@@ -187,7 +195,9 @@ mod tests {
         for covered in crate::shell::covered_rects(&h.app) {
             assert!(!covered.intersects(r), "{r:?} clear of {covered:?}");
         }
-        h.call("ui.prefs", serde_json::json!({"scale_bar": false}));
+        let reply = h.call("engine.execute", serde_json::json!({"command": "view.scale_bar", "params": {"enabled": false}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(!h.app.preferences.scale_bar);
         h.frames(2);
         assert!(crate::scenario::rect_of("view:scale_bar").is_none(), "turned off again");
     }
@@ -199,7 +209,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", serde_json::json!({"width": 700, "height": 520}));
-        h.call("ui.prefs", serde_json::json!({"scale_bar": true, "viewport_analysis_status": false}));
+        h.call("ui.prefs", serde_json::json!({"viewport_analysis_status": false}));
+        h.app.run("view.scale_bar", serde_json::json!({"enabled": true})).unwrap();
         h.app.run("solid.box", serde_json::json!({"length": 10, "width": 20, "height": 30})).unwrap();
         h.app.run("inspect.draft", serde_json::json!({"angle": 3.5})).unwrap();
         h.frames(3);

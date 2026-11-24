@@ -2680,56 +2680,6 @@ pub(super) const QUICK_MEASURE: Figure = Figure {
     ],
 };
 
-pub(super) const SCALE_BAR: Figure = Figure {
-    size: [120.0, 64.0],
-    ops: &[
-        Op::Rect { r: [0.0, 0.0, 120.0, 64.0], radius: 0.0, fill: Some(P { ink: Ink::Ground, a: 1.0 }), line: None },
-        Op::Poly {
-            pts: &[[68.742, 20.5], [80.0, 27.0], [80.0, 40.0], [68.742, 33.5]],
-            closed: true,
-            fill: Some(P { ink: Ink::Left, a: 1.0 }),
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 0.9, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Poly {
-            pts: &[[91.258, 20.5], [80.0, 27.0], [80.0, 40.0], [91.258, 33.5]],
-            closed: true,
-            fill: Some(P { ink: Ink::Right, a: 1.0 }),
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 0.9, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Poly {
-            pts: &[[80.0, 14.0], [91.258, 20.5], [80.0, 27.0], [68.742, 20.5]],
-            closed: true,
-            fill: Some(P { ink: Ink::Top, a: 1.0 }),
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 0.9, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Poly {
-            pts: &[[12.0, 53.0], [52.0, 53.0]],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Accent, a: 1.0, w: 1.6, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Poly {
-            pts: &[[12.0, 49.5], [12.0, 56.5]],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Accent, a: 1.0, w: 1.4, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Poly {
-            pts: &[[52.0, 49.5], [52.0, 56.5]],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Accent, a: 1.0, w: 1.4, dash: [0.0, 0.0], round: false }),
-        },
-        Op::Text { at: [32.0, 46.0], size: 7.0, anchor: 1, ink: Ink::Accent, a: 1.0, s: "20 mm", bold: true },
-    ],
-};
-
 pub(super) const SELECT_BODIES: Figure = Figure {
     size: [120.0, 64.0],
     ops: &[
@@ -4362,11 +4312,6 @@ pub fn paint_quick_measure(p: &Painter, rect: Rect) {
     paint(p, rect, &QUICK_MEASURE, None, None);
 }
 
-/// The `scale-bar` figure of `docs/design/preferences/figures`.
-pub fn paint_scale_bar(p: &Painter, rect: Rect) {
-    paint(p, rect, &SCALE_BAR, None, None);
-}
-
 /// The `select-bodies` figure of `docs/design/preferences/figures`.
 pub fn paint_select_bodies(p: &Painter, rect: Rect) {
     paint(p, rect, &SELECT_BODIES, None, None);
@@ -4508,7 +4453,6 @@ pub const FIGURES: &[(&str, [f32; 2], fn(&Painter, Rect))] = &[
     ("orbit-cursor", ORBIT_CURSOR.size, paint_orbit_cursor),
     ("orbit-origin", ORBIT_ORIGIN.size, paint_orbit_origin),
     ("quick-measure", QUICK_MEASURE.size, paint_quick_measure),
-    ("scale-bar", SCALE_BAR.size, paint_scale_bar),
     ("select-bodies", SELECT_BODIES.size, paint_select_bodies),
     ("select-faces-edges", SELECT_FACES_EDGES.size, paint_select_faces_edges),
     ("sketch-conflict", SKETCH_CONFLICT.size, paint_sketch_conflict),

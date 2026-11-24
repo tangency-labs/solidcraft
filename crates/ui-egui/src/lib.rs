@@ -2087,6 +2087,9 @@ impl SolveApp {
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.scale_bar" {
+                self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
             if id == "select.mode"
                 && let Some(mode) = v.get("mode").and_then(|m| serde_json::from_value(m.clone()).ok())
             {
@@ -2761,6 +2764,10 @@ impl SolveApp {
         }
         if id == "view.origin_axes_across_view" {
             let _ = self.run(id, json!({"enabled": !self.preferences.origin_axes_across_view}));
+            return;
+        }
+        if id == "view.scale_bar" {
+            let _ = self.run(id, json!({"enabled": !self.preferences.scale_bar}));
             return;
         }
         // Another command ends Edit Text (its dialog is not a feature edit to keep).

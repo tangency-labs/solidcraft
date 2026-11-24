@@ -206,7 +206,6 @@ pub use preferences_figure_data::paint_aa_off;
 pub use preferences_figure_data::paint_ao_on;
 pub use preferences_figure_data::paint_frame_rate;
 pub use preferences_figure_data::paint_quick_measure;
-pub use preferences_figure_data::paint_scale_bar;
 pub use preferences_figure_data::paint_tess_coarse;
 pub use preferences_figure_data::paint_tess_fine;
 pub use preferences_figure_data::paint_tess_normal;

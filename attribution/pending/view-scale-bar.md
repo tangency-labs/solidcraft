@@ -1,2 +1,0 @@
-| docs/design/preferences/figures/scale-bar.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Scale bar tile (#375) in the house style of the Preferences figures | MIT OR Apache-2.0 |
-| docs/design/preferences/figures/scale-bar.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Scale bar tile (#375) in the house style of the Preferences figures | MIT OR Apache-2.0 |

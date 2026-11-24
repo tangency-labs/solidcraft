@@ -61,12 +61,12 @@ what they measure: an edge's length (Ø and R for a round one), a face's area an
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
 (I) does more.
 
-**Scale bar** (off by default; turn it on under Preferences › Graphics › In the view): the view's
+**Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
 number (1, 2 or 5 times a power of ten) in the design's units, and it changes as you zoom. In an
 orthographic view the scale is the same everywhere. In a perspective view, nearer things look
 larger, so the bar gives the scale at the centre of the view, and its label says so. The control
-channel turns it on with `ui.prefs {"scale_bar": true}`.
+channel and assistants turn it on with the `view.scale_bar` command, `{"enabled": true}`.
 
 Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
 operation from what their material does, until you pick one: **Join** when it makes one body with
