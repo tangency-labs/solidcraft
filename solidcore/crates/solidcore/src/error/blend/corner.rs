@@ -109,24 +109,29 @@ pub enum CornerInput {
     /// A corner edge of the pseudo-B-rep with no curve (a rail's is
     /// [`FilletSetUp::RailCurve`], a target-body edge's [`BlendFailure::EdgeWithoutCurve`]).
     EdgeWithoutCurve,
-    /// An edge of the body at a chamfer corner's vertex, or an End's side edge, with no
-    /// vertex at an end.
+    /// An edge of the body at a chamfer or setback corner's vertex, or an End's side edge,
+    /// with no vertex at an end.
     EdgeWithoutVertex,
     /// A corner whose event or patches do not hold together: a facet without crossings or a
-    /// unit normal, a patch order that does not run round its crossings, or patches and
-    /// loops that do not pair up.
+    /// unit normal, a patch order that does not run round its crossings, patches and
+    /// loops that do not pair up, or a setback corner whose setbacks, least setbacks, room or fill
+    /// patches are not one per edge (two per edge for the patches).
     EventMalformed,
-    /// A ball, chamfer or Mixed corner, a Swept turn or an End with no event of its kind
-    /// (ball members, chamfer, Mixed or Swept event, or an End's cap).
+    /// A ball, chamfer, Mixed or setback corner, a Swept turn or an End with no event of its
+    /// kind (ball members, chamfer, Mixed, setback or Swept event, or an End's cap).
     EventNotSet,
     /// A ring face of a ball corner whose kind or offset is not the one the corner's
-    /// classification took.
+    /// classification took, or a setback corner whose faces were not classified.
     FaceNotAsClassified,
-    /// A chamfer or Mixed corner with no faces' geometry for its patch step, or a Swept turn
-    /// with no torus for it.
+    /// A chamfer or Mixed corner with no faces' geometry for its patch step, a setback corner
+    /// with no fill for it, or a Swept turn with no torus for it.
     FacesNotBuilt,
     /// A chamfer facet event with no normal.
     FacetNormalNotSet,
+    /// A fill given to a setback containment bound that is not one the setback split
+    /// builds: two one-span patches per round with positive weights, and a round and a face
+    /// per edge.
+    FillNotFromSetbackSplit,
     /// A corner patch step given no fillet B-rep.
     FilletBrepNotGiven,
     /// A corner of kind `kind` with no filleted edge uses (an Nx2 corner's two, an end
@@ -156,16 +161,23 @@ pub enum CornerInput {
     NoOtherCornerVertex,
     /// A concave corner with no rail-cross-edge-use vertex between two fillet geometries.
     NoRailXEdgeUseVertex,
-    /// A ball corner or an End with no ring of edge uses round its vertex.
+    /// A ring edge use of a ball or setback corner whose edge (or its mate's) has no fillet
+    /// solver.
+    RingEdgeUseWithoutSolver,
+    /// A ball or setback corner or an End with no ring of edge uses round its vertex (a
+    /// setback corner's: all of them, or those of its solvers).
     RingNotSet,
+    /// A round given to the setback fill whose surface has degree 0 across its rails (a
+    /// B-spline surface's degrees are not checked when it is made from data).
+    RoundOfDegreeZeroAcross,
     /// A Roll-over's seam cap whose corner edges do not close one loop through the seam's
     /// split vertex.
     SeamCapLoopOpen,
     /// A squeezed corner edge neither of whose vertices is to be deleted.
     SqueezedEdgeKeepsBothVertices,
-    /// A ball, chamfer or Mixed corner, a Swept turn or an End whose vertices or edges are
-    /// not the count or kind its topology makes (an End without its end rib, or whose
-    /// vertex's edges do not hold its blended edge's two others).
+    /// A ball, chamfer, Mixed or setback corner, a Swept turn or an End whose vertices or
+    /// edges are not the count or kind its topology makes (an End without its end rib, or
+    /// whose vertex's edges do not hold its blended edge's two others).
     TopologyMismatch,
     /// A Swept turn whose vertex has no edge use besides its two rounds' (none to find the
     /// side edge from).
@@ -180,8 +192,8 @@ pub enum CornerInput {
     },
     /// A squeezed corner edge's deleted vertex that is not among the corner's vertices.
     VertexNotInCorner,
-    /// A vertex of a chamfer or Mixed corner, of a Swept turn or of an End's cap that is not
-    /// processed.
+    /// A vertex of a chamfer, Mixed or setback corner, of a Swept turn or of an End's cap
+    /// that is not processed.
     VertexNotProcessed,
     /// A vertex of a convex `NxN` corner of at most three vertices that is not where two
     /// rails cross.
@@ -213,6 +225,7 @@ impl CornerInput {
             Self::FaceNotAsClassified => SM_ERR,
             Self::FacesNotBuilt => SM_ERR_NULL_POINTER,
             Self::FacetNormalNotSet => SM_ERR_NULL_POINTER,
+            Self::FillNotFromSetbackSplit => SM_ERR,
             Self::FilletBrepNotGiven => SM_ERR_NULL_POINTER,
             Self::FilletedEdgeUsesNotGiven { .. } => SM_ERR_NULL_POINTER,
             Self::FilletedEdgeUsesNotTwo { .. } => SM_ERR,
@@ -222,7 +235,9 @@ impl CornerInput {
             Self::MixedCornerWithoutOnExtendedEdgeEdge => SM_ERR_NULL_POINTER,
             Self::NoOtherCornerVertex => SM_ERR_NULL_POINTER,
             Self::NoRailXEdgeUseVertex => SM_ERR_NULL_POINTER,
+            Self::RingEdgeUseWithoutSolver => SM_ERR_NULL_POINTER,
             Self::RingNotSet => SM_ERR_NULL_POINTER,
+            Self::RoundOfDegreeZeroAcross => SM_ERR,
             Self::SeamCapLoopOpen => SM_ERR,
             Self::SqueezedEdgeKeepsBothVertices => SM_ERR,
             Self::TopologyMismatch => SM_ERR,
@@ -237,8 +252,9 @@ impl CornerInput {
     }
 }
 
-/// The step of a ball or chamfer corner's, a Swept turn's or a blend end's construction that
-/// has no result for the corner's geometry ([`BlendFailure::CornerUnbuildable`]).
+/// The step of a ball, chamfer or setback corner's, a Swept turn's or a blend end's
+/// construction that has no result for the corner's geometry
+/// ([`BlendFailure::CornerUnbuildable`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CornerStep {
@@ -303,9 +319,44 @@ pub enum CornerStep {
     /// A side face of an End at a smooth vertex does not meet the cap's plane between the
     /// cap edge's ends. Not found.
     EndSideFaceMissesCap,
+    /// An open setback corner's two rails meet the fill's end section along parallel
+    /// directions, so its springs have no crossing. Degenerate.
+    OpenSetbackRailsParallel,
+    /// A setback corner's round has its rail square to its edge at the end section (or the
+    /// two directions' product is not finite), so the corner's side of the section is
+    /// undecided. Degenerate.
+    RailSquareToEdge,
+    /// A setback fill's round is not one Bezier span along its rails beside its end
+    /// section once its knots there are raised (a span of no length, or rows past its
+    /// net). Unsupported.
+    RoundEndSpanNotBezier,
     /// A round's end section has its two offset points farther apart than the tolerance.
     /// Not within tolerance.
     RoundSectionOffsetsApart,
+    /// A setback fill's round has a fillet surface with no B-spline form to take its end
+    /// section from. Unsupported.
+    RoundSurfaceNotBSpline,
+    /// A setback fill's normal is not certified regular and to one side of its rounds'
+    /// (the fill may fold). Unsupported.
+    SetbackFillMayFold,
+    /// A G2 setback fill whose every interior map up to degree 9 that meets its setback
+    /// patches' conditions leaves a patch whose control net turns back. Unsupported.
+    SetbackG2NetTurnsBack,
+    /// A setback corner grown beside a curved face does not place its rounds' ends again at
+    /// the scale its growth certified (the setback vertices placed afresh from the trials'
+    /// last positions). Not within tolerance.
+    SetbackGrowthUnplaced,
+    /// No interior map of a setback fill up to degree 9 meets its setback patches'
+    /// conditions. Not found.
+    SetbackNoInteriorMap,
+    /// A setback patch of a fill does not meet the fill's interior within the tolerance.
+    /// Not within tolerance.
+    SetbackPatchMissesInterior,
+    /// A patch of a setback fill has a weight that is not positive. Degenerate.
+    SetbackPatchWeightNotPositive,
+    /// A setback fill's spring meets the side of its round farther than the tolerance from
+    /// the end of the rail it springs from. Not within tolerance.
+    SetbackSpringSideOffRailEnd,
     /// No face of the side edge an End or a Join sizes its ball on, besides the fillet's
     /// other face, is one of the blend solver's faces: no fillet surface lies on the side
     /// face. Not found.
@@ -368,7 +419,18 @@ impl CornerStep {
             Self::EndRailNotPastSideEdge => ErrorKind::NotWithinTolerance,
             Self::EndSideEdgeChainBroken => ErrorKind::NotFound,
             Self::EndSideFaceMissesCap => ErrorKind::NotFound,
+            Self::OpenSetbackRailsParallel => ErrorKind::Degenerate,
+            Self::RailSquareToEdge => ErrorKind::Degenerate,
+            Self::RoundEndSpanNotBezier => ErrorKind::Unsupported,
             Self::RoundSectionOffsetsApart => ErrorKind::NotWithinTolerance,
+            Self::RoundSurfaceNotBSpline => ErrorKind::Unsupported,
+            Self::SetbackFillMayFold => ErrorKind::Unsupported,
+            Self::SetbackG2NetTurnsBack => ErrorKind::Unsupported,
+            Self::SetbackGrowthUnplaced => ErrorKind::NotWithinTolerance,
+            Self::SetbackNoInteriorMap => ErrorKind::NotFound,
+            Self::SetbackPatchMissesInterior => ErrorKind::NotWithinTolerance,
+            Self::SetbackPatchWeightNotPositive => ErrorKind::Degenerate,
+            Self::SetbackSpringSideOffRailEnd => ErrorKind::NotWithinTolerance,
             Self::SideEdgeOffSolverFaces => ErrorKind::NotFound,
             Self::SweptArcNotFound => ErrorKind::NotFound,
             Self::SweptBallRadiiDiffer => ErrorKind::NotWithinTolerance,
@@ -405,7 +467,18 @@ impl CornerStep {
             Self::EndRailNotPastSideEdge => "the End's rail at the round's radius does not run past its side edge's far end",
             Self::EndSideEdgeChainBroken => "the End's side edge chain has no continuation towards the corner's vertex",
             Self::EndSideFaceMissesCap => "a side face of the End does not meet the cap's plane between the cap edge's ends",
+            Self::OpenSetbackRailsParallel => "an open setback corner's rails meet the fill's end section along parallel directions",
+            Self::RailSquareToEdge => "a setback round's rail is square to its edge at the end section",
+            Self::RoundEndSpanNotBezier => "a setback fill's round is not one Bezier span along its rails beside its end section",
             Self::RoundSectionOffsetsApart => "a round's end section has its offset points farther apart than the tolerance",
+            Self::RoundSurfaceNotBSpline => "a setback fill's round has a fillet surface with no B-spline form",
+            Self::SetbackFillMayFold => "a setback fill's normal is not certified regular and to one side of its rounds' (the fill may fold)",
+            Self::SetbackG2NetTurnsBack => "every G2 setback fill up to degree 9 has a patch whose control net turns back",
+            Self::SetbackGrowthUnplaced => "a setback corner grown beside a curved face does not place its rounds' ends at the scale it certified",
+            Self::SetbackNoInteriorMap => "no interior map of a setback fill up to degree 9 meets its setback patches' conditions",
+            Self::SetbackPatchMissesInterior => "a setback patch does not meet the fill's interior within the tolerance",
+            Self::SetbackPatchWeightNotPositive => "a patch of a setback fill has a weight that is not positive",
+            Self::SetbackSpringSideOffRailEnd => "a setback fill's spring meets its round's side farther than the tolerance from the rail's end",
             Self::SideEdgeOffSolverFaces => "no fillet surface lies on the face of the side edge the ball is sized on",
             Self::SweptArcNotFound => "the Swept turn's torus has no boundary curve for the corner's arc edge",
             Self::SweptBallRadiiDiffer => "the Swept turn's two balls have radii farther apart than the tolerance",

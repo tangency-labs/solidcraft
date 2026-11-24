@@ -250,7 +250,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -260,7 +259,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_extension_from_base = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }

@@ -2288,6 +2288,34 @@ fn the_summary_row_stays_above_the_waiting_rows_when_one_unfolds() {
     assert_eq!(places, (1..=MAX_WAITING_SHOWN).map(|n| n.to_string()).collect::<Vec<_>>(), "in queue order: {shown:?}");
 }
 
+/// A plugin run is a row of the operations panel named for the plugin and its entry, and its X
+/// stops it: nothing of it lands.
+#[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn a_plugin_run_is_an_operation_named_for_the_plugin_and_its_x_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let root = plugin_package_for_worker_test("operations");
+    let path = root.join("sample").to_string_lossy().into_owned();
+    let inspected = h.app.run("plugin.inspect", json!({"path":path})).unwrap();
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let reply = ask(&tx, "engine.execute", json!({"command":"plugin.run","params":{"path":path,"approval":inspected["approval"],"entry":"make"}}));
+    h.frames(1);
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("the run is an operation");
+    assert_eq!(row.label, "sample: make");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    let response = reply_to(&mut h, &reply);
+    assert_eq!((response["ok"].clone(), response["stopped"].clone()), (json!(false), json!(true)), "{response}");
+    release.send(()).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// A block whose length is the parameter `len` (60 mm), with a boss and a hole placed by `len`: a
 /// change of `len` recomputes every feature. Every command computes off the window thread.
 fn block_of_len() -> Harness {
@@ -2412,4 +2440,38 @@ fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
         assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
         assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);
     }
+}
+
+/// #15333: an agent's interference check of a motion study ran on the window thread, so a slow
+/// pair froze the window until the app was closed as not responding (the session then ended
+/// without a clean exit). The check only reads the design, so it is read on a copy now, as
+/// `inspect.interference` is, and answers from there.
+#[test]
+fn an_interference_check_of_a_motion_study_is_read_on_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("A", 0), ("B", 20)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.ground", json!({"occurrence": "A:1", "grounded": true})).unwrap();
+    h.app.run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"})).unwrap();
+    h.app.run("joint.drive", json!({"joint": "Rail", "value": 10})).unwrap();
+    h.app.run("motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, -5]]}]})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let check = ask(&tx, "engine.execute", json!({"command": "motion.interference", "params": {"study": "Push"}}));
+    h.frames(1);
+    assert_eq!(h.app.control_answering.len(), 1, "read on a copy, off the window thread");
+    let r = reply_to(&mut h, &check);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["result"]["study"], json!("Push"), "{r}");
+    // B slides into A over the study: they collide from step 11 on.
+    let hits = r["result"]["collisions"].as_array().cloned().unwrap_or_default();
+    assert_eq!(hits.len(), 1, "{r}");
+    assert_eq!((&hits[0]["a"], &hits[0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{r}");
 }
