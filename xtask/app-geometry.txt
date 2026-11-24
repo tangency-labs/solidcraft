@@ -649,13 +649,13 @@ crates/engine/src/mesh_lines/scene.rs:Shared::new triangles
 crates/engine/src/mesh_lines/scene.rs:drawing triangles
 crates/engine/src/mesh_lines/scene.rs:edge_on dot,triangles
 crates/engine/src/mesh_lines/scene.rs:triangle triangles
+crates/engine/src/pick_pieces.rs:grouped_selection_in triangles
 crates/engine/src/point_cloud_pick.rs:pick_cloud_ray dot,normalized
 crates/engine/src/point_cloud_pick.rs:pick_cloud_screen dot,normalized
 crates/engine/src/render_lights.rs:patch cross
 crates/engine/src/render_lights.rs:position atan2
 crates/engine/src/schema/drawing_view.rs:LinesStatsResult::from triangles
 crates/engine/src/schema/plastic.rs:vector normalized
-crates/engine/src/selection_context.rs:grouped_selection_in triangles
 crates/engine/src/snap.rs:arc_middle cross,dot,normalized
 crates/engine/src/snap.rs:area_centre cross
 crates/engine/src/snap.rs:axis_ends dot

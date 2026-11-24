@@ -9,7 +9,8 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::viewport::Hit;
 
-pub(crate) use solidcraft_engine::selection_context::{polyline_mid, same_item};
+pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
+pub(crate) use solidcraft_engine::selection_context::same_item;
 
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).

@@ -9568,7 +9568,7 @@ pub(crate) fn picked_selection(s: &solidcraft_engine::Session, sel: &Sel) -> Vec
     grouped_selection(s, sel)
 }
 
-pub(crate) use solidcraft_engine::selection_context::{edge_pieces, grouped_selection, grouped_selection_in, polyline_mid};
+pub(crate) use solidcraft_engine::pick_pieces::{edge_pieces, grouped_selection, grouped_selection_in, polyline_mid};
 
 /// Measure keeps one entry per visible item, rather than using its two slots for kernel halves.
 /// A whole circle's pieces are one entry; a piece of an open edge a seam splits stays itself, as

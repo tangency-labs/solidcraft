@@ -5425,7 +5425,8 @@ fn every_reply_carries_the_selection_and_none_when_nothing_is_selected() {
 #[test]
 fn the_instructions_tell_the_agent_to_use_the_selection() {
     let mut s = server();
-    let r = call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let r =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
     let text = r["result"]["instructions"].as_str().unwrap();
     assert!(text.contains("The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it."), "{text}");
 }

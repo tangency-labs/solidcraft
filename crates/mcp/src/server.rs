@@ -123,9 +123,12 @@ struct Agent {
 impl Agent {
     /// The selection block for a reply, `None` when nothing is selected or the backend cannot say
     /// (no app listening, an app from before `document.selection`).
-    fn selection(&mut self, result: &Value) -> Option<String> {
-        let failed_to_reach = result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(crate::backend::NOT_RUNNING))));
-        if failed_to_reach {
+    fn selection(&mut self, tool: &str, result: &Value) -> Option<String> {
+        // `running` and `pending` ask how an earlier request is getting on: they never wait for
+        // another question to the app. Neither does a reply that says a request is still running,
+        // or one that never reached the app.
+        let says = |what: &str| result["content"].as_array().is_some_and(|c| c.iter().any(|t| t["text"].as_str().is_some_and(|t| t.contains(what))));
+        if matches!(tool, "running" | "pending") || says(crate::backend::NOT_RUNNING) || says(crate::backend::STILL_RUNNING) {
             return None;
         }
         let reply = self.backend.call("document.selection", json!({})).ok()?;
@@ -191,7 +194,7 @@ impl Tools for Agent {
             content.push(json!({"type": "text", "text": note}));
         }
         // What the user has selected goes with every reply, so "this" and "these" mean something.
-        if let Some(block) = self.selection(&result)
+        if let Some(block) = self.selection(name, &result)
             && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
         {
             content.push(json!({"type": "text", "text": block}));
