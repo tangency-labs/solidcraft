@@ -3,6 +3,9 @@
 //! picture always was; +X lays them down, turning the stripes a quarter turn) and its white
 //! share; and a mesh coloured by its vertices' values. Skipped, with the reason printed, on a
 //! machine without a GPU adapter (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use solidcore_record::Vec3;
 use solidcraft_color::AnalysisColors;

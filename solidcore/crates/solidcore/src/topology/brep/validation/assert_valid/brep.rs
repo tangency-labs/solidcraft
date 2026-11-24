@@ -18,10 +18,18 @@
 //! and the unused outputs are not returned. Not upstream (WR-679): the update grows a
 //! vertex past half its tolerance, not the whole. Edge-use marks are a local set.
 //! `CollectRegions`' linear stack and result searches use companion sets (same order).
+//! `AssertValid` does not run `ContainsCoincidentTopology`, which is not ported: upstream
+//! folds in a result that is always true and leaves its report (test 15) commented out, so
+//! the search's own answer never counted (it did edit the body: its queries created the
+//! faces' missing UV trim curves and moved the ends of existing ones, which the later tests
+//! then saw). It cannot be a validity test: the bodies solidcore builds keep
+//! coincident topology on purpose (a pinch where a hole is tangent to a face, solids
+//! touching along an edge, a sweep's glued lamina edges). A face's own coincident vertices
+//! and edges are its tests 32, 33 and 34.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::{contains_coincident_topology, ERROR};
+use super::super::ERROR;
 use super::{base, brep_object, class, edge, face, loops, seams, shell, vertex, Cx, Rep, Test};
 use crate::error::{EntityRef, Result};
 use crate::geom::tol;
@@ -35,8 +43,15 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, RegionId, VertexId, VertexuseId};
 
 const C: i64 = class::BREP;
 
-/// `SmBrep::AssertValid`.
-pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) -> Result<bool> {
+/// `SmBrep::AssertValid`; without `pointers` its `ValidatePointers` is taken as succeeding
+/// with no report (see `check_brep_with_keys`).
+pub(super) fn brep(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    walk: bool,
+    pointers: bool,
+) -> Result<bool> {
     let this = brep_object();
 
     // Init rtn value, and invoke higher-level checks.
@@ -48,8 +63,19 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let (status, exclusion_failed) =
-        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
+    let (status, exclusion_failed) = if pointers {
+        super::validate_pointers_excluding(
+            k,
+            b,
+            cx.rep.array.as_deref_mut(),
+            0,
+            walk,
+            cx.keys,
+            false,
+        )?
+    } else {
+        (super::SUCCESS, false)
+    };
     if status != super::SUCCESS {
         return Ok(false);
     }
@@ -188,11 +214,6 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     let ok = !cx.rep.need(0) || common == num_regions;
     rtn &= cx.rep.this_bool(b, C, this, 19, ok)?;
 
-    // See about running coincident-topology checks (its default level 0, first pair).
-    rtn &=
-        contains_coincident_topology(k, b, -1.0, false, cx.rep.array.as_deref_mut(), 0, cx.keys)?
-            .found;
-
     // Shell context checks (intrinsic).
     for _ in &shells {
         rtn &= cx.rep.this_bool(b, C, this, 13, true)?;
@@ -265,12 +286,15 @@ pub(super) fn validate_and_update(
     rep: &mut Rep<'_>,
     validate_only: bool,
 ) -> Result<(i32, ToleranceGaps)> {
-    // Don't change the brep if we are just validating
-    let saved = b.validate_only();
-    b.set_validate_only(if validate_only { true } else { saved });
-    let result = validate_and_update_body(k, b, rep, validate_only);
-    b.set_validate_only(saved);
-    result
+    // Don't change the brep if we are just validating. Not upstream (#21105): upstream sets
+    // `m_bValidateOnly` on the B-rep for the pass and restores it after, so that a UV trim
+    // built during the pass raises no tolerance; here the pass's argument holds the raise on
+    // the kernel for the pass instead, and the B-rep it checks is not written.
+    if validate_only {
+        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true))
+    } else {
+        validate_and_update_body(k, b, rep, false)
+    }
 }
 
 use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};

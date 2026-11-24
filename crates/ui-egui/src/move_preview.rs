@@ -326,6 +326,7 @@ impl MovePreview {
         let motions: Vec<Mat> = cache.frames.iter().map(motion).collect::<Option<_>>()?;
         let replaced = if copy { Vec::new() } else { bodies };
         let built = |scene: GpuScene, bounds: Aabb3, layer: Option<Layer>| Built {
+            interaction: None,
             scene,
             sketches: Vec::new(),
             applied: None,
@@ -333,6 +334,7 @@ impl MovePreview {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            centrelines: Vec::new(),
             tapered: Vec::new(),
             replaced,
             outlines: Vec::new(),
@@ -340,6 +342,7 @@ impl MovePreview {
             bounds,
             layer,
             joints: Vec::new(),
+            plugin_view: None,
         };
         // One motion for every body that the GPU can take, in a view that draws a layer, of
         // bodies a layer draws as finely as building them does: nothing is built at this change

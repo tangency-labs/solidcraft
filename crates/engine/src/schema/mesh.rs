@@ -2,7 +2,7 @@
 //! reply, [`super::features::FeatureResult`].
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::types::{LengthExpr, StringList};
 
@@ -33,6 +33,37 @@ pub struct MeshConvertParams {
     /// conversion changes only `body`, whatever this lists.
     #[serde(default)]
     pub participants: Option<StringList>,
+}
+
+/// Create a reduced mesh in the source body's component, leaving the source unchanged.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeshReduceParams {
+    /// Mesh body name; omitted or blank uses the selected body.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Desired positive triangle count. Specify this or `percentage`, not both.
+    #[serde(default)]
+    pub triangle_count: Option<usize>,
+    /// Percentage of triangles to retain, strictly between 0 and 100.
+    #[serde(default)]
+    pub percentage: Option<f64>,
+    /// Timeline feature name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Existing participating bodies.
+    #[serde(default)]
+    pub participants: Option<StringList>,
+}
+
+/// Feature result with the requested and actual triangle counts.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MeshReduceResult {
+    #[serde(flatten)]
+    pub feature: super::features::FeatureResult,
+    pub original_triangles: usize,
+    pub target_triangles: usize,
+    pub achieved_triangles: usize,
 }
 
 #[cfg(test)]

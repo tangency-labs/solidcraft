@@ -13,7 +13,7 @@ use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_geom::paper::annotate::Leader;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::PaperFonts;
+use solidcraft_sketch::{PaperFonts, TextStyle};
 
 use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
 
@@ -24,7 +24,7 @@ const RADIUS_MM: f64 = 5.0;
 /// in lines `line_mm` wide, its leader ending at `tip` when its edge was found: its group.
 pub fn balloon_group(balloon: &Balloon, item: Option<&str>, tip: Option<Vec2>, line_mm: f64, lettering: &PaperFonts) -> OnPaper {
     let centre = Vec2::new(balloon.at[0], balloon.at[1]);
-    let text = Text::set(item, TEXT_MM, lettering);
+    let text = Text::set(item, TEXT_MM, lettering, &TextStyle::default());
     // Round the number's corners, a gap clear of them.
     let radius = RADIUS_MM.max(text.half.len() + GAP_MM);
     let mut items = vec![Item::Stroke { path: Loop2::circle(centre, radius).segs, closed: true, width_mm: line_mm, pattern: None }];

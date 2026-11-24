@@ -242,6 +242,118 @@ impl Drawing {
     }
 }
 
+/// Where a drawing's record keeps its image files, their placements and its logos when it has any:
+/// fields of their own at its top level (also in the drawing reader's record fields), which a release that can't read image parts (0.45.0) sets
+/// aside, keeps as they came and writes back, opening the rest of the drawing. Its logo cells show
+/// their text there; nothing is lost when it saves.
+pub(super) const FILES: &str = "image_files";
+pub(super) const PLACED: &str = "placed_images";
+pub(super) const LOGOS: &str = "logo_cells";
+
+/// A logo's on-disk placement, separate from the text cell it accompanies.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LogoCell {
+    #[serde(with = "crate::ids")]
+    pub sheet: u64,
+    #[serde(rename = "cell")]
+    _cell: String,
+    #[serde(with = "crate::ids")]
+    pub image: u64,
+}
+
+/// Moves a drawing record's image files, placements and logos to the fields of their own above.
+pub(super) fn set_aside(v: &mut serde_json::Value) {
+    use serde_json::{Value, json};
+    let Some(top) = v.as_object_mut() else { return };
+    let files = top.remove("images").unwrap_or(Value::Null);
+    let placed = top.remove("sheet_images").unwrap_or(Value::Null);
+    if files.as_array().is_none_or(Vec::is_empty) {
+        return;
+    }
+    let mut logos = Vec::new();
+    for sheet in top.get_mut("sheets").and_then(Value::as_array_mut).into_iter().flatten() {
+        let id = sheet.get("id").cloned().unwrap_or(Value::Null);
+        for cell in sheet.pointer_mut("/title_block/cells").and_then(Value::as_array_mut).into_iter().flatten() {
+            let name = cell.get("name").cloned().unwrap_or(Value::Null);
+            if let Some(image) = cell.pointer_mut("/kind/text").and_then(Value::as_object_mut).and_then(|text| text.remove("image")) {
+                logos.push(json!({"sheet": id, "cell": name, "image": image}));
+            }
+        }
+    }
+    top.insert(FILES.into(), files);
+    if placed.as_array().is_some_and(|p| !p.is_empty()) {
+        top.insert(PLACED.into(), placed);
+    }
+    if !logos.is_empty() {
+        top.insert(LOGOS.into(), Value::Array(logos));
+    }
+}
+
+/// Puts a record's set-aside image files, placements and logos back where the drawing reads them.
+/// A placement on a sheet the drawing no longer has, or a logo for a cell that is gone or no
+/// longer text (an older release changed the drawing around them), is left out, and so is a file
+/// nothing then uses: the rest of the drawing reads.
+pub(super) fn take_back(v: &mut serde_json::Value) {
+    use serde_json::Value;
+    let Some(top) = v.as_object_mut() else { return };
+    let Some(files) = top.remove(FILES) else { return };
+    let placed = top.remove(PLACED);
+    let logos = top.remove(LOGOS);
+    let sheet_ids: BTreeSet<String> = top
+        .get("sheets")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.get("id").and_then(Value::as_str).map(String::from))
+        .collect();
+    let mut used = BTreeSet::new();
+    let placed: Vec<Value> = placed
+        .and_then(|p| p.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| p.get("sheet").and_then(Value::as_str).is_some_and(|s| sheet_ids.contains(s)))
+        .inspect(|p| {
+            if let Some(image) = p.get("image").and_then(Value::as_str) {
+                used.insert(image.to_string());
+            }
+        })
+        .collect();
+    for logo in logos.and_then(|l| l.as_array().cloned()).unwrap_or_default() {
+        let (Some(sheet), Some(cell), Some(image)) =
+            (logo.get("sheet").and_then(Value::as_str), logo.get("cell").and_then(Value::as_str), logo.get("image").and_then(Value::as_str))
+        else {
+            continue;
+        };
+        let text = top
+            .get_mut("sheets")
+            .and_then(Value::as_array_mut)
+            .and_then(|sheets| sheets.iter_mut().find(|s| s.get("id").and_then(Value::as_str) == Some(sheet)))
+            .and_then(|s| s.pointer_mut("/title_block/cells"))
+            .and_then(Value::as_array_mut)
+            .and_then(|cells| cells.iter_mut().find(|c| c.get("name").and_then(Value::as_str) == Some(cell)))
+            .and_then(|c| c.pointer_mut("/kind/text"))
+            .and_then(Value::as_object_mut);
+        if let Some(text) = text {
+            text.insert("image".into(), Value::String(image.to_string()));
+            used.insert(image.to_string());
+        }
+    }
+    let files: Vec<Value> = files
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| f.get("id").and_then(Value::as_str).is_some_and(|id| used.contains(id)))
+        .collect();
+    if !files.is_empty() {
+        top.insert("images".into(), Value::Array(files));
+    }
+    if !placed.is_empty() {
+        top.insert("sheet_images".into(), Value::Array(placed));
+    }
+}
+
 /// A file's own rules, from its record alone: what every edit keeps, without decoding it.
 fn check_image(i: &ImageFile) -> Result<()> {
     require(matches!(i.format.as_str(), "png" | "jpeg"), || "it is a PNG or a JPEG".into())?;

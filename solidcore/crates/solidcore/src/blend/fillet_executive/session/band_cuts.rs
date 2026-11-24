@@ -36,8 +36,9 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::p2::EllipseOptions;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
+use crate::error::blend::BlendFailure;
 use crate::error::EntityRef;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -59,6 +60,37 @@ use crate::topology::{face, vertex, Brep, FaceId, VertexId};
 use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::band_cuts";
+
+/// A reviewed defect for something the band cut reads that the kernel built and should be
+/// there, `why` saying why (status `SM_ERR_NULL_POINTER`, the fork's `NER`).
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// The solver's first edge use, `edgeuse`, has no edge. The caller passes both the body and
+/// the solver (whose edge uses are public), so this is the caller's input:
+/// [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status `SM_ERR_NULL_POINTER`.
+fn edge_use_without_edge(edgeuse: crate::topology::EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        OP,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
+/// Why a ball section's solver has both offset surfaces: the section was found on them
+/// ([`ball_section_at`] reads both), and nothing between takes one away.
+const BALL_OFFSETS: &str = "a ball section's solver has no offset surface on a side: the section \
+     was just found on both offset surfaces, and nothing since removes one";
+
+/// The curve of `edge`, the filleted edge of the caller's body.
+fn filleted_edge_curve(target: &Brep, edge: crate::topology::EdgeId) -> Result<Curve> {
+    edge::evaluation_curve(target, edge)?.ok_or_else(|| {
+        SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+    })
+}
 
 /// `lSteps`: the sections along the edge.
 const STEPS: usize = 32;
@@ -245,15 +277,10 @@ fn edges_crossing_plane(
             tol,
         )?;
         for sol in solutions.as_slice() {
-            let t =
-                sol.start.parameters.first().copied().ok_or_else(|| {
-                    SolidError::blend_missing(OP, "the crossing's edge parameter")
-                })?;
+            let [t, ..] = sol.start.parameters;
             crossings.push(edge.curve.evaluate_point(k, t)?);
             if sol.solution_type == SolutionType::RangeOfValues {
-                let t = sol.end.parameters.first().copied().ok_or_else(|| {
-                    SolidError::blend_missing(OP, "the crossing's end parameter on the edge")
-                })?;
+                let [t, ..] = sol.end.parameters;
                 crossings.push(edge.curve.evaluate_point(k, t)?);
             }
         }
@@ -380,11 +407,7 @@ fn keeps_material_behind(
                 if sol.solution_type == SolutionType::RangeOfValues {
                     return Ok(true); // the section runs along the face's surface
                 }
-                let params = &sol.start.parameters;
-                let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
-                else {
-                    return Err(SolidError::blend_missing(OP, "the crossing's parameters"));
-                };
+                let [t, u, v, ..] = sol.start.parameters;
                 let at = section.evaluate_point(k, t)?;
                 if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
                     continue; // the section's own ends, on the blended faces
@@ -457,13 +480,13 @@ fn section_points(
     {
         let slot = base
             .surface_mut(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            .ok_or_else(|| null_defect(BALL_OFFSETS))?;
         at[0] = slot.surface.surface.evaluate_point_extending(k, uvs[0])?;
     }
     for (rail, uv) in uvs.into_iter().enumerate() {
         let slot = base
             .surface(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            .ok_or_else(|| null_defect(BALL_OFFSETS))?;
         let offset = &slot.surface.surface;
         let p = offset.base_surface().evaluate_point(k, uv)?;
         if let Some(dst) = at.get_mut(rail + 1) {
@@ -1523,11 +1546,7 @@ fn section_breaks_through(
                         )
                 })?;
             for sol in solutions.as_slice() {
-                let params = &sol.start.parameters;
-                let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
-                else {
-                    return Err(SolidError::blend_missing(OP, "the crossing's parameters"));
-                };
+                let [t, u, v, ..] = sol.start.parameters;
                 let at = section.evaluate_point(k, t)?;
                 if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
                     continue; // the section's own ends, on the blended faces
@@ -1633,7 +1652,10 @@ impl Pieces<'_> {
             return Ok(*known);
         }
         let (Some(&t0), Some(&t1)) = (self.at.get(i), self.at.get(i + 1)) else {
-            return Err(SolidError::blend_missing(OP, "the piece's end parameters"));
+            return Err(null_defect(
+                "a band piece has no end parameters: each piece runs between two \
+                 consecutive cut parameters, which hold one more than the pieces",
+            ));
         };
         let class = if !(t1 - t0 > 0.0) {
             Piece::Point
@@ -1759,11 +1781,8 @@ pub(crate) fn band_cuts_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-    let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
-        .clone();
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| edge_use_without_edge(edgeuse))?;
+    let curve = filleted_edge_curve(target, edge_id)?;
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
     if !rolls || on_edge {
@@ -1791,9 +1810,9 @@ pub(crate) fn band_cuts_the_part_cached(
         ts.push(t);
         let pv = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
-            return Err(SolidError::blend_missing(
-                OP,
-                "the edge curve's point and tangent",
+            return Err(null_defect(
+                "the filleted edge's curve evaluated with its first derivative gives no point \
+                 or tangent: the evaluation returns the point and each derivative asked",
             ));
         };
         if !(tangent.length() > EFF_ZERO) {
@@ -1954,10 +1973,8 @@ pub(crate) fn band_breaks_through_the_part_cached(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(None);
     };
-    let edge_id = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
-    let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| edge_use_without_edge(edgeuse))?;
+    let curve = filleted_edge_curve(target, edge_id)?;
     let ivl = edge::interval(target, edge_id)?;
     let (rolls, on_edge) = rolls_a_ball(solver);
     if !rolls || on_edge {
@@ -2192,5 +2209,61 @@ mod tests {
         assert!(least_on_arc(1.0, 1.0, 0.0, f64::NAN, 1.0).is_nan());
         assert!(least_on_arc(1.0, 1.0, 0.0, 0.0, f64::NAN).is_nan());
         assert!(!(least_on_arc(1.0, f64::NAN, 0.0, 0.0, 1.0) >= 0.0));
+    }
+
+    /// #19824 review: the caller passes both the body and the solver, so a solver whose
+    /// first edge use has no edge in the body is the caller's input
+    /// (`BlendFailure::EdgeUseWithoutEdge` at the edge use, `SM_ERR_NULL_POINTER`), not a
+    /// defect, for both entries.
+    #[test]
+    fn a_solver_edge_use_without_an_edge_is_the_callers_input() {
+        use crate::blend::fillet_executive::session::SolverObject;
+        use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
+        use crate::blend::fillet_standard_solver::p1::constant_radius_from_edgeuse;
+        use crate::error::{EntityRef, ErrorKind, SM_ERR_NULL_POINTER};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::edgeuse::p1 as eu;
+        use crate::Kernel;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let edgeuse = eu::primary_edgeuse(&b, e).unwrap().unwrap();
+        let mut pseudo = FilletBrep::new();
+        let solver = constant_radius_from_edgeuse(
+            &k,
+            &mut b,
+            &mut pseudo,
+            FilletSolverId(0),
+            1e-6,
+            0.5,
+            0.03,
+            1.0,
+            edgeuse,
+            None,
+        )
+        .unwrap();
+        let mut solver = SolverObject::ConstantRadius(Box::new(solver));
+        b.edgeuse_mut(edgeuse).unwrap().edge = None;
+        for breaks in [false, true] {
+            let error = if breaks {
+                super::band_breaks_through_the_part(&k, &mut b, &mut solver)
+            } else {
+                super::band_cuts_the_part(&k, &mut b, &mut solver)
+            }
+            .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::InvalidInput, "{error:?}");
+            assert!(!error.is_defect(), "{error:?}");
+            assert_eq!(
+                error.entity(),
+                Some(EntityRef::Edgeuse(edgeuse)),
+                "{error:?}"
+            );
+            assert_eq!(
+                error.upstream_status(),
+                Some(SM_ERR_NULL_POINTER),
+                "{error:?}"
+            );
+        }
     }
 }

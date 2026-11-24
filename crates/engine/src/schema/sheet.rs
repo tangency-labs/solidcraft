@@ -409,7 +409,8 @@ pub struct FlangeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "IdOrName")]
     pub sketch: Option<IdOrName>,
-    /// Base: which of the sketch's profiles become the sheet. Default: all of them.
+    /// Base: which of the sketch's profiles become the sheet. When omitted, nested loops
+    /// alternate material and holes, as for Extrude. Explicit "all" includes every profile.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProfilesParam")]
     pub profiles: Option<ProfilesParam>,
@@ -523,6 +524,38 @@ pub struct PerforateParams {
     pub common: FeatureCommon,
 }
 
+/// Add a tab to a sheet metal body: the closed profiles of a sketch drawn on a flat face of the
+/// sheet (either side, or in a plane level with one) join that panel through the sheet's
+/// thickness, part of its outline. The body stays one sheet: the tab unfolds with its panel (the
+/// flat pattern and DXF carry it), and later flanges, hems and folds can use its edges. Refused
+/// when the profile doesn't touch or overlap the face's outline, adds nothing to it, reaches into
+/// a bend zone, or would overlap another panel once folded or in the flat pattern, and while the
+/// sheet is unfolded. Makes no body.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabParams {
+    /// The tab's sketch, by id or name, drawn on a flat face of the sheet. Default: the active
+    /// sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's closed profiles make the tab. Default: all of them.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick in `profiles` is exactly the region it names. Without it, a pick
+    /// on a drawn profile that reference geometry (the face's projected outline) cuts into
+    /// regions takes the whole drawn profile. The dialogs send `true`.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// The sheet metal body to add the tab to. Default: the first sheet with a face in the
+    /// sketch's plane that the profile meets.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Add hems: the sheet folded back on itself along edges. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -608,6 +641,11 @@ pub struct UnfoldParams {
     /// (refold).
     #[serde(default)]
     pub body: Option<String>,
+    /// Unfold: a point on the flat panel that stays where it is, so the flat lies in its plane.
+    /// Default: the largest flat panel, or the one an earlier unfold of the sheet fixed.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "FixedPoint")]
+    pub fixed: Option<FixedPoint>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1082,6 +1120,11 @@ pub struct ExportDxfParams {
     /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,
+    /// A DXF profile: which layer, colour and linetype each role is written with, and the roles
+    /// left out. A profile file's path, or the profile itself as an object
+    /// (`docs/formats/dxf-profiles.md`). Default: the standard layers. Not with `layers: single`.
+    #[serde(default)]
+    pub profile: Option<DxfProfileParam>,
     /// A file for every sheet body, or their DXF texts when there is no `path`. Not with `body`.
     /// Default: false.
     #[serde(default)]
@@ -1146,6 +1189,39 @@ impl JsonSchema for DxfLayersParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "roles or single, in any case.", "type": "string", "pattern": "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"})
+    }
+}
+
+/// A DXF export's `profile`: the path of a profile file, or the profile as an object. The export
+/// reads and checks it (`sheet::dxf_profile`), so its refusals name the role and the value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DxfProfileParam {
+    Path(String),
+    Profile(serde_json::Map<String, Value>),
+}
+
+impl<'de> Deserialize<'de> for DxfProfileParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(path) if !path.trim().is_empty() => Ok(DxfProfileParam::Path(path)),
+            Value::Object(profile) => Ok(DxfProfileParam::Profile(profile)),
+            _ => Err(D::Error::custom("must be a DXF profile file's path or a profile object")),
+        }
+    }
+}
+
+impl JsonSchema for DxfProfileParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfProfile".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A DXF profile file's path, or the profile itself: {format: \"solidcraft-dxf-profile\", version?, name?, note?, roles?: {<role>: {on?, layer?, color?, linetype?}}}.",
+            "anyOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "object", "required": ["format"]}
+            ]
+        })
     }
 }
 
