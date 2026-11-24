@@ -68,6 +68,7 @@ pub mod hatch;
 pub mod heal;
 pub mod history;
 pub mod hlr;
+pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
