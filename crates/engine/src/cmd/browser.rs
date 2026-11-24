@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("Ctrl+Shift+I")
         .contract(&TOGGLE_CONTRACT)
         .output(output_schema_for::<BrowserVisibilityResult>)
-        .params("(no parameters) as browser.visibility with visible:true and unisolate:true: puts back what the isolates hid"),
+        .params("(no parameters) as browser.visibility with visible:true and unisolate:true: puts back what the isolates hid; with nothing isolated it is an error and shows nothing"),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
         .contract(&TOGGLE_CONTRACT)
@@ -715,8 +715,12 @@ fn isolate_selection(s: &mut Session, _p: &Value) -> Result<Value> {
     visibility(s, &json!({"visible": true, "items": bodies, "isolate": true}))
 }
 
-/// `browser.unisolate`: Unisolate, for its key (#3504).
+/// `browser.unisolate`: Unisolate, for its key (#3504). With no Isolate in effect it refuses and
+/// changes nothing; it never falls back to showing everything, as `unisolate: true` does.
 fn unisolate_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    if s.visibility.before_isolate.is_none() {
+        return Err(bad("browser.unisolate", "nothing is isolated"));
+    }
     visibility(s, &json!({"visible": true, "unisolate": true}))
 }
 
@@ -2276,6 +2280,10 @@ mod tests {
         assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
         run(&mut s, "browser.unisolate", json!({}));
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        // With nothing isolated, Ctrl+Shift+I leaves what the user hid alone.
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        assert!(s.execute("browser.unisolate", &json!({})).is_err(), "nothing is isolated");
+        assert_eq!(s.visibility.hidden_bodies, ["C"], "and nothing is shown");
     }
 
     /// #8120: a body hidden before the Isolate and renamed during it stays hidden after Unisolate,
