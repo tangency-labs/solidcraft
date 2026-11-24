@@ -382,7 +382,12 @@ fn ruled_far_row(b: CPoint, i: CPoint, t: f64, cb: f64) -> CPoint {
     } else {
         NOZ
     };
-    CPoint::new(k * b.x - t * i.x, k * b.y - t * i.y, z, k * b.w - t * i.w)
+    // (the weight in its factored form: `k w_B - t w_I` cancels for a large `t` in the
+    // column with the largest ratio, down to zero or below, where this form keeps it at
+    // least `cb w_B`: `cb - c` rounds to zero or more, `c` rounded as `mixed_ratio` does)
+    let c = i.w / b.w;
+    let w = b.w * (cb + t * (cb - c));
+    CPoint::new(k * b.x - t * i.x, k * b.y - t * i.y, z, w)
 }
 
 /// Not upstream (#21383): the largest weight ratio `w_I / w_B` along a side of a
@@ -1787,6 +1792,30 @@ mod tests {
                 assert!(same(q[4][j], CPoint::combine2(0.5, far, 0.5, pw[3][j])));
             }
         }
+    }
+
+    /// #21383 review: a far `par` (here `t = 4 (par - 1) = 2^54`) cancels `k w_B - t w_I`
+    /// to zero in the column with the largest ratio; the factored weight
+    /// `w_B (cb + t (cb - c))` keeps every far weight at least `cb w_B > 0`, as the
+    /// derivation at `ruled_far_row` requires.
+    #[test]
+    fn g1r_far_step_keeps_far_weights_positive() {
+        let s = weighted_srf(|i, j| 1.0 + 0.25 * (i * j) as f64);
+        let pw = s.cpts();
+        let e = g1r_end(&s, 4_503_599_627_370_497.0);
+        let q = e.cpts();
+        let cb = (0..3)
+            .map(|j| pw[2][j].w / pw[3][j].w)
+            .fold(f64::MIN, f64::max);
+        let last = q.len() - 1;
+        for j in 0..3 {
+            assert!(
+                q[last][j].w >= cb * pw[3][j].w,
+                "column {j}: {}",
+                q[last][j].w
+            );
+        }
+        assert!(q.iter().flatten().all(|c| c.w > 0.0));
     }
 
     /// #21383: equal ratios (`w = a_i b_j`, with `b_j` powers of two so the rounded

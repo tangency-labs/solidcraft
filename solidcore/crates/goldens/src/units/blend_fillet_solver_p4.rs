@@ -1707,17 +1707,18 @@ mod tests {
 
 }
 
-/// #21383: the 16 rows the G1R change moved. A solver point outside a mate's domain
-/// is computed on the mate's G1R extension; every rational mate of each row is certified
-/// by `crate::g1r_cert::certify_surface_sides` (each of its four sides extended by a
-/// G1R step with the ruled span `Q + t I = k B`, one `k`, the knots' `t > 0`, positive
-/// weights, and the step's input kept bit for bit), and at least one side of one mate has
-/// varying weight ratios (the new row). The solver is unchanged: its new value is the
-/// same computation on a G1 extension of the same mates (ARGUED from the certificate).
+/// #21383: the 16 rows the G1R change moved, each replayed: the case's own
+/// `ComputePointValues` runs, and then every extension the solver's offset surfaces (and
+/// any offset nested in their bases) hold is certified (`crate::g1r_cert::ExtensionWatch`):
+/// bit for bit the extension a fresh G1R evaluation of the base's NURB builds, each of
+/// its steps certified by `certify_step`. Every row's solver holds at least one
+/// extension, and at least one step has varying weight ratios (the new row): the moved
+/// values are solved on certified G1 extensions (PROVEN, up to the rounding the
+/// certificate's header bounds).
 #[cfg(test)]
 mod g1r_moved_rows {
     use super::*;
-    use crate::g1r_cert::certify_surface_sides;
+    use crate::g1r_cert::ExtensionWatch;
 
     const MOVED: [&str; 16] = ["gen0062", "gen0086", "gen0174", "gen0178", "gen0206", "gen0246", "gen0268", "gen0313", "gen0323", "gen0339", "gen0376", "gen0381", "gen0389", "gen0404", "gen0474", "gen0476"];
 
@@ -1731,20 +1732,39 @@ mod g1r_moved_rows {
                 continue;
             }
             seen += 1;
-            let Inputs::PointValues(p) = c.parse::<Inputs>().unwrap() else {
+            let Inputs::PointValues(i) = c.parse::<Inputs>().unwrap() else {
                 panic!("{}: not a point case", c.name)
             };
-            let mut surfaces = vec![rust_surface(&k, &p.a).unwrap().unwrap()];
-            if let Some(b) = &p.b {
-                surfaces.push(rust_surface(&k, b).unwrap().unwrap());
+            let a = rust_surface(&k, &i.a).unwrap().unwrap();
+            let b = i.b.as_ref().map(|s| rust_surface(&k, s).unwrap().unwrap());
+            let b_id = u32::from(b.is_some());
+            let bs = b.unwrap_or_else(|| a.clone());
+            let inner = cr_solver(&k, i.tol, i.ang_tol, i.tangency_tol, i.radii, i.orient, a, bs, b_id)
+                .unwrap_or_else(|_| panic!("{}: solver", c.name));
+            let mut ops = ShimSolver { inner, fd: i.fd, extend: None };
+            let mut point = rust_point(&point_values(&i.point)).unwrap();
+            let prev = i.prev.as_ref().map(|p| rust_point(&point_values(p)).unwrap());
+            let _ = FilletSolver::compute_point_values(
+                &mut ops,
+                &k,
+                i.uv.map(p2),
+                &ext(i.dom1),
+                &ext(i.dom2),
+                i.dir,
+                &mut point,
+                prev.as_ref(),
+            );
+            let (mut growths, mut mixed) = (0, 0);
+            for slot in ops.solver().surfaces.iter().flatten() {
+                let mut w = ExtensionWatch::default();
+                w.observe(&k, &slot.surface.surface)
+                    .unwrap_or_else(|e| panic!("{}: {e}", c.name));
+                growths += w.growths;
+                mixed += w.mixed;
             }
-            let mut mixed = 0;
-            for s in &surfaces {
-                mixed += certify_surface_sides(&k, s)
-                    .unwrap_or_else(|why| panic!("{}: {why}", c.name))
-                    .unwrap_or(0);
-            }
-            assert!(mixed > 0, "{}: no mate side with varying ratios", c.name);
+            eprintln!("{}: {growths} extensions, {mixed} mixed steps", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+            assert!(mixed > 0, "{}: no step with varying ratios", c.name);
         }
         assert_eq!(seen, MOVED.len());
     }
