@@ -1111,7 +1111,12 @@ impl FilletSolver {
             start_pnt0 -= ext0;
             start_pnt1 -= ext1;
             center0 -= center_ext;
-            radius0 = center0.distance(start_pnt0);
+            // Not the fork (#18913): a class's round keeps the ball's radius (the centre and
+            // rails move alike, and supports off the class by their construction's rounding
+            // would give the extended foot's distance instead)
+            if class.is_none() {
+                radius0 = center0.distance(start_pnt0);
+            }
         }
 
         // when extending the end of the fillet
@@ -1127,6 +1132,16 @@ impl FilletSolver {
         let mut x_vec = start_pnt0 - center0;
         let mut y_vec = start_pnt1 - center0;
         let axis_of_revolution = center1 - center0;
+        // Not the fork (#18913): a class's round is the class's cylinder, about the class's
+        // line. The frame's x is the foot on the first face square to that line: supports
+        // off the class by their construction's rounding (a cylinder 1.56e-12 rad off
+        // parallel to its plane, `wr_570_knife_edge_rounds`) have feet off square to it,
+        // and the frame would turn the round's axis off the line.
+        if class.is_some() {
+            let a = axis_of_revolution.unitize()?;
+            x_vec = x_vec - a * x_vec.dot(a);
+            y_vec = y_vec - a * y_vec.dot(a);
+        }
         let height = axis_of_revolution.length();
 
         // Get angle of revolution
