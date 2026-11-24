@@ -5462,17 +5462,16 @@ mod tests {
     /// The cap on a structured trim's answer on `s`: `1e-9` off a cone, and on the full-turn
     /// cylinders of radius 12.5 these tests build `1e-9` plus the seam snap's reach
     /// (#20643): `Ellipse::step_inversion` snaps a polar point within `τ = 1e-7` of the
-    /// domain's end onto the seam, so the surface is up to `(π/2) √2 τ r / rx` (`L = √2` the
-    /// map's norm for an orthonormal frame; `r = rx = 12.5` here: 2.2e-7) off its net there (measured 9e-8
-    /// at 1e-7 before the end: `a_full_turn_cones_seam_snap_is_inside_the_bound`), and the
-    /// bound counts it; 1% over for the bound's frame factor and margins. Still far below
-    /// the `1e-5` the bisection was asked for.
+    /// domain's end onto the seam, so the surface is up to `asin(τ / rx) r ≤ (π/3) τ r / rx`
+    /// (the map's norm `1` for an orthonormal frame and a round circle; `r = rx = 12.5` here:
+    /// 1.05e-7) off its net there (measured 4.5e-8 at 5e-8 before the end, 9e-8 at 1e-7:
+    /// `a_full_turn_cones_seam_snap_is_inside_the_bound`), and the bound counts it; 1% over
+    /// for the bound's frame factor and margins. Still far below the `1e-5` the bisection was
+    /// asked for.
     fn trim_cap(s: &Surface) -> f64 {
         use crate::surface::surface::SurfaceKind;
         match s.kind() {
-            SurfaceKind::Cone(_) => {
-                1e-9 + std::f64::consts::FRAC_PI_2 * std::f64::consts::SQRT_2 * 1e-7 * 1.01
-            }
+            SurfaceKind::Cone(_) => 1e-9 + std::f64::consts::FRAC_PI_3 * 1e-7 * 1.01,
             _ => 1e-9,
         }
     }

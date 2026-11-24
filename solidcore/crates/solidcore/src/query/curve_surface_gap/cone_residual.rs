@@ -1305,14 +1305,13 @@ mod tests {
     /// The derived allowance a full turn adds: the seam snap of `Ellipse::step_inversion`
     /// moves a point whose rounded polar point is within `τ = 1e-7` (the default zone
     /// tolerance over 100) of the domain's end onto the seam, an angle of at most
-    /// `asin(D / rx) ≤ (π/2) D / rx` off its own, `D = L τ` plus the roundings (`L = √2` for
-    /// an orthonormal frame and a round circle; the roundings under `1e-12 (1 + r)`), seen at
-    /// the radius `r` (`|S − N| ≤ r Δα`), with 1% over for the `√(1 + g)` frame factor and the
-    /// bound's own margins.
+    /// `asin(D / rx) ≤ (π/3) D / rx` off its own (`D ≤ rx / 2`), `D = L τ` plus the
+    /// roundings (`L = 1`, the map's operator norm for an orthonormal frame and a round
+    /// circle; the roundings under `1e-12 (1 + r)`), seen at the radius `r`
+    /// (`|S − N| ≤ r Δα`), with 1% over for the `√(1 + g)` frame factor and the bound's own
+    /// margins.
     fn seam_allowance(r: f64, rx: f64) -> f64 {
-        std::f64::consts::FRAC_PI_2 * (std::f64::consts::SQRT_2 * 1.0e-7 + 1.0e-12 * (1.0 + r)) * r
-            / rx
-            * 1.01
+        std::f64::consts::FRAC_PI_3 * (1.0e-7 + 1.0e-12 * (1.0 + r)) * r / rx * 1.01
     }
 
     #[test]
