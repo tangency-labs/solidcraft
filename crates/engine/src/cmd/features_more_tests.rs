@@ -5029,3 +5029,18 @@ fn align_refuses_a_round_face() {
     let e = align_error(&mut s, json!({"bodies": ["B"], "from_face": [55, 5, 0], "to_face": [-25, 5, 5]}));
     assert!(e.contains("`to_face`") && e.contains("planar"), "{e}");
 }
+
+/// An unknown snap kind and a point too far out are refused, saying what is wanted.
+#[test]
+fn align_refuses_an_unknown_snap_and_a_point_too_far_out() {
+    let mut s = blocks_and_pin();
+    let e = align_error(&mut s, json!({"bodies": ["B"], "from": {"snap": "corner", "at": [50, 0, 0]}, "to": [0, 0, 0]}));
+    assert!(e.contains("`from.snap` must be vertex, edge_mid, face_center, circle_center"), "{e}");
+    for (p, key) in [
+        (json!({"bodies": ["B"], "from": [50, 0, 0], "to": [1e300, 0, 0]}), "`to`"),
+        (json!({"bodies": ["B"], "from": {"snap": "vertex", "at": [0, -1e12, 0]}, "to": [0, 0, 0]}), "`from`"),
+    ] {
+        let e = align_error(&mut s, p);
+        assert!(e.contains(key) && e.contains("within 1e9 mm"), "{e}");
+    }
+}
