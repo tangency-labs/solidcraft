@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{RecvTimeoutError, Sender, TryRecvError};
@@ -49,13 +49,27 @@ pub(crate) struct State {
     ctx: Option<egui::Context>,
     #[cfg(not(target_arch = "wasm32"))]
     watch: Option<Watch>,
+    /// The [`signature`] of what the latest scan read, taken by the scan's worker before it reads:
+    /// the watcher compares the folder with this, so a change made while a scan runs, or before
+    /// the watcher's first look, is never taken as the settled state.
+    #[cfg(not(target_arch = "wasm32"))]
+    scanned_signature: Arc<AtomicU64>,
+}
+
+/// What the watcher and the scan read: the plugins' directory and the packages inspected from
+/// elsewhere (`plugin.inspect`), which the scan reads as well.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, PartialEq)]
+struct Watched {
+    root: Option<PathBuf>,
+    inspected: Vec<PathBuf>,
 }
 
 /// A thread that looks at the plugins' directory every [`WATCH_MS`], and asks for a frame only
 /// when what it holds changed: the alternative to rescanning the folder on a timer.
 #[cfg(not(target_arch = "wasm32"))]
 struct Watch {
-    root: Option<PathBuf>,
+    watched: Watched,
     changed: Arc<AtomicBool>,
     /// Dropped with the window (or when another root is watched): the thread's wait ends at once
     /// and it stops, without the window waiting for it.
@@ -164,7 +178,8 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let root = app.session.plugin_state.plugins_dir();
-        start_watch(app, root.clone(), std::time::Duration::from_millis(WATCH_MS));
+        let inspected = app.session.plugin_state.packages.values().map(PathBuf::from).collect();
+        start_watch(app, Watched { root: root.clone(), inspected }, std::time::Duration::from_millis(WATCH_MS));
         // A finished scan lands here: the worker asked for this frame once, when it had the result.
         if let Some(rx) = &app.plugin_slots.discovery {
             match rx.try_recv() {
@@ -196,8 +211,12 @@ pub(crate) fn refresh(app: &mut SolveApp) {
 fn start_scan(app: &mut SolveApp, root: Option<PathBuf>) {
     let inspected = app.session.plugin_state.packages.clone();
     let ctx = app.plugin_slots.ctx.clone();
+    let scanned = app.plugin_slots.scanned_signature.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     let spawned = std::thread::Builder::new().name("plugin-discovery".into()).spawn(move || {
+        // Before the read: a change made during it differs from this, so the watcher asks again.
+        let watched = Watched { root: root.clone(), inspected: inspected.values().map(PathBuf::from).collect() };
+        scanned.store(signature(&watched), Ordering::Relaxed);
         let (plugins, skipped) = plugins::inventory(root.as_deref(), inspected.values());
         let _ = tx.send(Inventory { root, plugins, skipped });
         if let Some(ctx) = ctx {
@@ -211,90 +230,97 @@ fn start_scan(app: &mut SolveApp, root: Option<PathBuf>) {
     }
 }
 
-/// Watch the plugins' directory for changes, once per root: a plugin dropped in while the app
-/// runs asks for a frame, which rescans the folder. Nothing is read while it stays the same.
+/// Watch the plugins' directory (and inspected packages) for changes, once per set: a plugin
+/// dropped in or edited while the app runs asks for a frame, which rescans the folder. Nothing is
+/// read while it stays the same.
 #[cfg(not(target_arch = "wasm32"))]
-fn start_watch(app: &mut SolveApp, root: Option<PathBuf>, every: std::time::Duration) {
+fn start_watch(app: &mut SolveApp, watched: Watched, every: std::time::Duration) {
     let Some(ctx) = app.plugin_slots.ctx.clone() else { return };
-    if app.plugin_slots.watch.as_ref().is_some_and(|w| w.root == root) {
+    if app.plugin_slots.watch.as_ref().is_some_and(|w| w.watched == watched) {
         return;
     }
     // A watcher that cannot start is harmless: the folder is read when the design opens and when
     // Preferences or the Plugins menu ask, and a restart finds a plugin dropped in meanwhile.
-    if let Some(watch) = spawn_watch(root, every, None, move || ctx.request_repaint()) {
+    let scanned = app.plugin_slots.scanned_signature.clone();
+    if let Some(watch) = spawn_watch(watched, every, scanned, move || ctx.request_repaint()) {
         app.plugin_slots.watch = Some(watch);
     }
 }
 
-/// The watcher's thread. Its first look happens on the thread (the window never reads the folder)
-/// unless `seen` gives it; tests give it, so a change they make is never taken for the first look.
+/// The watcher's thread: every `every` it compares what it watches with what the latest scan read
+/// (`scanned`), and wakes the window once for each new state that differs. It never takes a
+/// state as settled by itself, so nothing that changed around a scan is missed.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_watch(root: Option<PathBuf>, every: std::time::Duration, seen: Option<u64>, wake: impl Fn() + Send + 'static) -> Option<Watch> {
+fn spawn_watch(watched: Watched, every: std::time::Duration, scanned: Arc<AtomicU64>, wake: impl Fn() + Send + 'static) -> Option<Watch> {
     let changed = Arc::new(AtomicBool::new(false));
     let (stop, stopped) = std::sync::mpsc::channel::<()>();
-    let (flag, watched) = (changed.clone(), root.clone());
+    let (flag, looked_at) = (changed.clone(), watched.clone());
     let spawned = std::thread::Builder::new().name("plugin-folder".into()).spawn(move || {
-        let mut seen = seen.unwrap_or_else(|| signature(watched.as_deref()));
+        let mut woken_for = None;
         // Nothing is ever sent: the wait times out between looks, and ends when the Watch drops.
         while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-            let now = signature(watched.as_deref());
-            if now != seen {
-                seen = now;
+            let now = signature(&looked_at);
+            if now != scanned.load(Ordering::Relaxed) && woken_for != Some(now) {
+                woken_for = Some(now);
                 flag.store(true, Ordering::Relaxed);
                 wake();
             }
         }
     });
-    spawned.ok().map(|_| Watch { root, changed, _stop: stop })
+    spawned.ok().map(|_| Watch { watched, changed, _stop: stop })
 }
 
-/// What the plugins' directory holds, cheaply: whether it exists, each entry's name, size and
-/// modification time, and the same for what each plugin folder holds directly (its
-/// `plugin.json` and images), because rewriting a file in place changes no folder's time. A
-/// dropped-in, replaced, edited or removed plugin changes it; nothing else does. Symbolic links
-/// are described as links, as the scan reads them (it skips a linked folder or manifest).
+/// What the plugins' directory and the inspected packages hold, cheaply: whether the directory
+/// exists, each entry's name, size and modification time, and for each plugin folder its
+/// `plugin.json` and what else it holds directly (its images), because rewriting a file in place
+/// changes no folder's time. A dropped-in, replaced, edited or removed plugin changes it; nothing
+/// else does. Symbolic links are described as links, as the scan reads them (it skips a linked
+/// folder or manifest).
 #[cfg(not(target_arch = "wasm32"))]
-fn signature(dir: Option<&Path>) -> u64 {
+fn signature(watched: &Watched) -> u64 {
     use std::hash::{Hash, Hasher};
-    // The scan reads at most 1024 folders; a folder far past that is still bounded here.
-    const MAX_ENTRIES: usize = 16_384;
-    fn entry(entry: &std::fs::DirEntry) -> Option<(std::ffi::OsString, u64, u128, bool)> {
-        let meta = entry.metadata().ok()?;
-        let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
-        Some((entry.file_name(), meta.len(), modified, meta.is_dir()))
-    }
-    let mut items: Vec<(std::ffi::OsString, Vec<(std::ffi::OsString, u64, u128, bool)>)> = Vec::new();
-    let present = dir.is_some_and(Path::exists);
-    let mut budget = MAX_ENTRIES;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let dir = watched.root.as_deref();
+    dir.is_some_and(Path::exists).hash(&mut h);
+    let mut items: Vec<(std::ffi::OsString, Option<Described>, Vec<Described>)> = Vec::new();
     if let Some(entries) = dir.and_then(|dir| std::fs::read_dir(dir).ok()) {
-        for top in entries.flatten() {
-            if budget == 0 {
-                break;
-            }
-            budget -= 1;
-            let Some(described) = entry(&top) else { continue };
-            let mut inner = Vec::new();
-            if described.3
-                && let Ok(children) = std::fs::read_dir(top.path())
-            {
-                for child in children.flatten() {
-                    if budget == 0 {
-                        break;
-                    }
-                    budget -= 1;
-                    inner.extend(entry(&child));
-                }
-            }
-            inner.sort();
-            inner.push(described);
-            items.push((top.file_name(), inner));
+        // The scan reads at most 1024 folders; files and hidden entries come on top of those.
+        for top in entries.flatten().take(4096) {
+            let path = top.path();
+            let own = describe(&path);
+            let inner = if own.as_ref().is_some_and(|d| d.3) { plugin_folder(&path) } else { Vec::new() };
+            items.push((top.file_name(), own, inner));
         }
     }
     items.sort();
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    present.hash(&mut h);
     items.hash(&mut h);
+    for package in &watched.inspected {
+        (describe(package), plugin_folder(package)).hash(&mut h);
+    }
     h.finish()
+}
+
+/// A name, size, modification time and whether it is a folder, without following a link.
+#[cfg(not(target_arch = "wasm32"))]
+type Described = (std::ffi::OsString, u64, u128, bool);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn describe(path: &Path) -> Option<Described> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    Some((path.file_name().map(std::ffi::OsStr::to_os_string).unwrap_or_default(), meta.len(), modified, meta.is_dir()))
+}
+
+/// A plugin folder's `plugin.json` always, then up to 256 of the other entries it holds directly,
+/// so a folder with very many files neither hides its manifest nor costs much to look at.
+#[cfg(not(target_arch = "wasm32"))]
+fn plugin_folder(dir: &Path) -> Vec<Described> {
+    let mut inner: Vec<Described> = std::fs::read_dir(dir)
+        .map(|children| children.flatten().filter(|c| c.file_name() != "plugin.json").take(256).filter_map(|c| describe(&c.path())).collect())
+        .unwrap_or_default();
+    inner.sort();
+    inner.extend(describe(&dir.join("plugin.json")));
+    inner
 }
 pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
     app.plugin_slots
@@ -580,24 +606,34 @@ mod tests {
     fn the_folder_signature_tracks_what_it_holds() {
         let h = crate::scenario::Harness::new();
         let dir = h.dir.join("installed");
-        assert_eq!(signature(Some(&dir)), signature(Some(&dir)), "a missing folder is stable");
+        assert_eq!(sig(&dir), sig(&dir), "a missing folder is stable");
         std::fs::create_dir_all(&dir).unwrap();
-        let empty = signature(Some(&dir));
-        assert_ne!(empty, signature(Some(&dir.join("absent"))), "a folder appearing is a change");
-        assert_eq!(empty, signature(Some(&dir)), "an empty folder is stable");
+        let empty = sig(&dir);
+        assert_ne!(empty, sig(&dir.join("absent")), "a folder appearing is a change");
+        assert_eq!(empty, sig(&dir), "an empty folder is stable");
         std::fs::create_dir_all(dir.join("helper")).unwrap();
-        assert_ne!(empty, signature(Some(&dir)), "a dropped-in plugin folder is a change");
-        let folder = signature(Some(&dir));
+        assert_ne!(empty, sig(&dir), "a dropped-in plugin folder is a change");
+        let folder = sig(&dir);
         std::fs::write(dir.join("helper").join("plugin.json"), b"{}").unwrap();
-        assert_ne!(folder, signature(Some(&dir)), "its manifest arriving is a change");
-        let with_manifest = signature(Some(&dir));
-        assert_eq!(with_manifest, signature(Some(&dir)), "a settled plugin is stable");
+        assert_ne!(folder, sig(&dir), "its manifest arriving is a change");
+        let with_manifest = sig(&dir);
+        assert_eq!(with_manifest, sig(&dir), "a settled plugin is stable");
         // Rewritten in place (same file, no rename), so the plugin folder's own time stays put.
         std::fs::write(dir.join("helper").join("plugin.json"), b"{\"id\":\"helper\"}").unwrap();
-        assert_ne!(with_manifest, signature(Some(&dir)), "an edited manifest is a change");
+        assert_ne!(with_manifest, sig(&dir), "an edited manifest is a change");
         std::fs::remove_dir_all(dir.join("helper")).unwrap();
-        assert_eq!(empty, signature(Some(&dir)), "removing it is a change back");
-        assert_eq!(signature(None), signature(None), "no folder at all is stable");
+        assert_eq!(empty, sig(&dir), "removing it is a change back");
+        let none = Watched { root: None, inspected: Vec::new() };
+        assert_eq!(signature(&none), signature(&none), "no folder at all is stable");
+        // A package inspected from elsewhere is read by the scan too, so its edits count.
+        let package = h.dir.join("elsewhere");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("plugin.json"), b"{}").unwrap();
+        let inspected = Watched { root: Some(dir.clone()), inspected: vec![package.clone()] };
+        let before = signature(&inspected);
+        assert_eq!(before, signature(&inspected), "a settled inspected package is stable");
+        std::fs::write(package.join("plugin.json"), b"{\"id\":\"elsewhere\"}").unwrap();
+        assert_ne!(before, signature(&inspected), "an inspected package's edited manifest is a change");
     }
 
     /// A frame with the folder settled starts no scan and asks for no frame; the scan that does
@@ -636,21 +672,21 @@ mod tests {
         h.app.session.plugin_state.plugins_dir = Some(dir.clone());
         let ctx = egui::Context::default();
         set_context(&mut h.app, &ctx);
-        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let count = woken.clone();
-        // A short look interval, and the first look taken here before the change, so the test
-        // neither waits 2 s nor races the thread's first look; the frame's own `refresh` keeps
-        // this watcher (its root is the same).
-        let seen = Some(signature(Some(&dir)));
-        let wake = move || {
-            count.fetch_add(1, Ordering::Relaxed);
-        };
-        h.app.plugin_slots.watch = spawn_watch(Some(dir.clone()), std::time::Duration::from_millis(10), seen, wake);
-        assert!(h.app.plugin_slots.watch.is_some(), "the watcher started");
         invalidate(&mut h.app);
         refresh(&mut h.app);
         wait_for_discovery(&mut h.app);
-        assert_eq!(woken.load(Ordering::Relaxed), 0, "a settled folder wakes nothing");
+        // A short look interval, so the test does not wait 2 s; the frame's own `refresh` keeps
+        // this watcher (it watches the same).
+        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = woken.clone();
+        let inspected = h.app.session.plugin_state.packages.values().map(PathBuf::from).collect();
+        let watched = Watched { root: Some(dir.clone()), inspected };
+        let scanned = h.app.plugin_slots.scanned_signature.clone();
+        let wake = move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        };
+        h.app.plugin_slots.watch = spawn_watch(watched, std::time::Duration::from_millis(10), scanned, wake);
+        assert!(h.app.plugin_slots.watch.is_some(), "the watcher started");
         std::fs::create_dir_all(dir.join("helper")).unwrap();
         wait_until(|| woken.load(Ordering::Relaxed) >= 1);
         assert!(h.app.plugin_slots.watch.as_ref().is_some_and(|w| w.changed.load(Ordering::Relaxed)), "the change waits for a frame");
@@ -658,10 +694,36 @@ mod tests {
         assert!(h.app.plugin_slots.discovery.is_some(), "a changed folder is read again");
         wait_for_discovery(&mut h.app);
         assert!(h.app.plugin_slots.watch.as_ref().is_some_and(|w| !w.changed.load(Ordering::Relaxed)), "the change was taken");
+        assert_eq!(woken.load(Ordering::Relaxed), 1, "one change wakes the window once");
+    }
+
+    /// The watcher compares the folder with what the latest scan read, not with its own first
+    /// look: a plugin added after the scan read the folder but before the watcher's first look
+    /// still wakes the window.
+    #[test]
+    fn a_plugin_added_before_the_watchers_first_look_is_not_missed() {
+        let h = crate::scenario::Harness::new();
+        let dir = h.dir.join("installed");
+        std::fs::create_dir_all(&dir).unwrap();
+        let watched = Watched { root: Some(dir.clone()), inspected: Vec::new() };
+        let scanned = Arc::new(AtomicU64::new(signature(&watched)));
+        std::fs::create_dir_all(dir.join("helper")).unwrap();
+        let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = woken.clone();
+        let watch = spawn_watch(watched.clone(), std::time::Duration::from_millis(10), scanned, move || {
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        assert!(watch.is_some(), "the watcher started");
+        wait_until(|| woken.load(Ordering::Relaxed) >= 1);
+        assert!(watch.as_ref().is_some_and(|w| w.changed.load(Ordering::Relaxed)), "the plugin asks for a scan");
     }
 
     /// Polls a condition another thread makes true. The limit only bounds a failing run, so it is
     /// generous: a slow CI runner waits longer, it never fails a passing run.
+    fn sig(dir: &Path) -> u64 {
+        signature(&Watched { root: Some(dir.to_path_buf()), inspected: Vec::new() })
+    }
+
     fn wait_until(mut done: impl FnMut() -> bool) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !done() {
