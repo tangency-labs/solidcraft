@@ -1827,9 +1827,21 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
     Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
 }
 
+/// The most items a selection lists: `select.set` refuses more, and Select All lists the shown
+/// bodies up to this many. Above it Select All selects them as a scope
+/// ([`Session::selection_all_bodies`]) instead of a list.
+pub(crate) const MAX_SELECTION: usize = 10_000;
+
+/// Select All's bodies: the shown ones as a list, as always, up to [`MAX_SELECTION`]; `None` when
+/// there are more, for the whole-body scope.
+pub(crate) fn listed_bodies(shown: impl Iterator<Item = Sel>) -> Option<Vec<Sel>> {
+    let listed: Vec<Sel> = shown.take(MAX_SELECTION + 1).collect();
+    (listed.len() <= MAX_SELECTION).then_some(listed)
+}
+
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-    if items.len() > 10_000 {
+    if items.len() > MAX_SELECTION {
         return Err(bad("select.set", "too many items"));
     }
     let mut sel: Vec<Sel> = Vec::new();
@@ -2009,7 +2021,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                 .chain(&on.balloons)
                 .chain(&on.notes)
                 .filter(|object| d.has_object(**object))
-                .take(10_001)
+                .take(MAX_SELECTION + 1)
                 .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
@@ -2027,17 +2039,26 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                             .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
                             .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
                     )
-                    .take(10_001)
+                    .take(MAX_SELECTION + 1)
                     .collect()
             }
             None => {
-                // A whole-body selection is a scope, not a list: see `Session::selection_all_bodies`.
-                whole_bodies = true;
-                Vec::new()
+                // The shown bodies, listed, as on any design; past the cap a list would be refused
+                // (and slow to show), so they are selected as a scope: see
+                // `Session::selection_all_bodies`.
+                let hidden = &s.visibility.hidden_bodies;
+                let st = s.world_state()?;
+                match listed_bodies(st.bodies.iter().filter(|b| !hidden.contains(&b.name)).map(|b| Sel::Body { name: b.name.clone() })) {
+                    Some(listed) => listed,
+                    None => {
+                        whole_bodies = true;
+                        Vec::new()
+                    }
+                }
             }
         },
     };
-    if all.len() > 10_000 {
+    if all.len() > MAX_SELECTION {
         return Err(bad("select.all", "too many items"));
     }
     s.selection = all;
@@ -2062,7 +2083,7 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
 /// body selected together with faces or edges of it is the body they invert in, not a body to
 /// swap for the others. Bodies swap for the other shown bodies. Other items stay as they are.
 fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
-    const MAX: usize = 10_000;
+    const MAX: usize = MAX_SELECTION;
     // Select All holds every shown body: inverted, nothing shown is left to select.
     if s.all_bodies_selected() {
         s.clear_selection();

@@ -3073,12 +3073,19 @@ fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
     }
 }
 
+/// What Select All does on a design with more shown bodies than `select.set` takes: the
+/// whole-body scope. The tests below take it on small designs, where Select All lists the bodies.
+fn select_every_shown_body(app: &mut SolveApp) {
+    app.session.clear_selection();
+    app.session.selection_all_bodies = true;
+}
+
 #[test]
-fn select_all_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
+fn a_whole_body_selection_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
     let mut app = sample_app();
     app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
     app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
-    app.run("select.all", json!({})).unwrap();
+    select_every_shown_body(&mut app);
     // The menus build their body lists here: a whole-body selection names every shown body.
     let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     let bodies = context_menu::sel_bodies(&app);
@@ -3094,11 +3101,11 @@ fn select_all_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
 }
 
 #[test]
-fn select_all_then_appearance_covers_every_shown_body() {
+fn a_whole_body_selection_then_appearance_covers_every_shown_body() {
     let mut app = sample_app();
     app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
     app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
-    app.run("select.all", json!({})).unwrap();
+    select_every_shown_body(&mut app);
     let bodies = context_menu::sel_bodies(&app);
     app.run("appearance.assign", json!({"bodies": bodies, "color": "#208040"})).unwrap();
     for name in ["Block", "Spare"] {
@@ -3107,12 +3114,12 @@ fn select_all_then_appearance_covers_every_shown_body() {
 }
 
 #[test]
-fn select_all_preselects_every_shown_body_for_move() {
+fn a_whole_body_selection_preselects_every_shown_body_for_move() {
     use crate::selection::SelectionExt;
     let mut app = sample_app();
     app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
     app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
-    app.run("select.all", json!({})).unwrap();
+    select_every_shown_body(&mut app);
     app.start("solid.move");
     let d = app.dialog.as_ref().expect("the Move dialog opened");
     let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
@@ -3120,11 +3127,11 @@ fn select_all_preselects_every_shown_body_for_move() {
 }
 
 #[test]
-fn select_all_holds_every_shown_body_and_ctrl_click_takes_one_out() {
+fn a_whole_body_selection_holds_every_shown_body_and_ctrl_click_takes_one_out() {
     let mut app = sample_app();
     app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
     app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
-    app.run("select.all", json!({})).unwrap();
+    select_every_shown_body(&mut app);
     // A right-click on a body the scope covers keeps the selection for the menu.
     assert!(crate::selection::holds_body(&app.session, "Spare"), "Select All holds every shown body");
     // Ctrl+click on one of them leaves the others selected.
