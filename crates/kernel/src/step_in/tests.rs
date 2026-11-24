@@ -3874,7 +3874,7 @@ fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     assert_eq!((m.faces, m.edges, m.vertices, m.shells), (3, 3, 2, 1));
     // The wall is straight: a cylinder of radius 5 between its rims' centres, each the middle of
     // two opposite on-circle control points of the rim as written in the file.
-    let (a, b) = ([686.1452, 187.491, 53.9195], [682.2074, 232.5003, 70.1262]);
+    let (a, b): ([f64; 3], [f64; 3]) = ([686.1452, 187.491, 53.9195], [682.2074, 232.5003, 70.1262]);
     let length = ((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])).sqrt();
     let volume = std::f64::consts::PI * 25.0 * length;
     assert!(rel(m.volume, volume) < 1e-6, "volume {} against {volume}", m.volume);
