@@ -3471,13 +3471,10 @@ impl SolveApp {
             return false;
         }
         let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
-        // The preference only changes how a person opens an existing sketch.
+        // The Palette choice only changes how a person opens an existing sketch.
         // Scripted edits and new sketches retain the previous view behaviour.
-        let remembered = if turn {
-            self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis)
-        } else {
-            None
-        };
+        let remembered =
+            if turn { self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis) } else { None };
         let turn = turn && (remembered.is_some() || self.preferences.sketch_open_look_at);
         let _ = documents::with_sketch_camera(self, view, |app| {
             let before = if painted == view { before } else { app.settled_cam() };

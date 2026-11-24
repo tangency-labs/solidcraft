@@ -809,8 +809,8 @@ mod open_view_preference {
 /// per-design view state in the running app, never an edit to the sketch's saved geometry.
 mod remembered_sketch_views {
     use super::*;
-    use crate::sketch_palette::SketchOpenView;
     use crate::scenario::Harness;
+    use crate::sketch_palette::SketchOpenView;
     use solidcraft_engine::Session;
 
     #[test]
@@ -955,7 +955,6 @@ mod remembered_sketch_views {
         assert_eq!(h.app.ui.sketch_open_view, SketchOpenView::Last);
         assert_eq!(crate::UiState::default().sketch_open_view, SketchOpenView::Face);
     }
-
 }
 
 #[test]
