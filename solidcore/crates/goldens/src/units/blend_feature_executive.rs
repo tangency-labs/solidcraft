@@ -396,6 +396,8 @@ impl UnitDiff for Runner {
                 return Output::unported(&e).ok_or_else(|| herr(format!("rust read: {e}")));
             }
         };
+        // (a probe's input, for the result's soundness: capture off, nothing)
+        crate::soundness::input(Some(&b));
         match run_script(&mut k, &mut b, &i) {
             Ok(RustRun::PastFixture) => Ok(Output::rejected(
                 "index past the fixture's faces or edges",
