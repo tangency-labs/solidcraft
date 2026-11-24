@@ -1217,7 +1217,8 @@ fn copper_overlay_clips_a_drill_crossing_a_zone_boundary() {
       (via (at 2.1 10) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (zone (net 1) (net_name "GND") (layer "F.Cu")
         (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18)))))"#;
-    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    // The via is drilled: by default only mounting holes are.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, holes: KicadHoles::All, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "crossing.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -1243,7 +1244,7 @@ fn modelled_copper_is_a_closed_prism() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
       (via (at 14 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "prism.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -1313,7 +1314,7 @@ fn a_wide_trace_reaches_the_copper_it_ends_on() {
       (segment (start 20 5) (end 30 5) (width 1.0) (layer "F.Cu") (net 1))
       (footprint "test:TH" (layer "F.Cu") (at 30 5)
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "wide.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -1343,7 +1344,7 @@ fn trace_into_a_via_stops_at_its_drill() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 10 5) (end 16 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -1361,7 +1362,7 @@ fn a_trace_crossing_a_hole_is_cut_at_the_hole() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 6 5) (end 14 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -1397,7 +1398,7 @@ fn traces_stop_at_drilled_holes() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
     // Only the trace's copper: the pad's own ring is not built.
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "trace.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -1429,7 +1430,7 @@ fn via_copper_is_a_ring_around_its_drill() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
@@ -1447,7 +1448,7 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (property "Reference" "J1")
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "pad.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (1.0 - 0.25);
@@ -1472,7 +1473,8 @@ fn a_pad_offset_moves_the_copper_off_its_hole() {
                 (property "Reference" "J1")
                 {pad}))"#
         );
-        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+        // The pad holes come in: by default only mounting holes are drilled.
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, holes: KicadHoles::Pads, ..Default::default() };
         let mut load = |_: &str| Err("not used".to_string());
         let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
         let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
@@ -1727,7 +1729,7 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
       (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (footprint "part" (layer "F.Cu") (at 0 0)
         (pad "1" smd rect (at 5 5) (size 3 3) (layers "F.Cu" "F.Mask"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "unplated.kicad_pcb", &options, &mut load).unwrap();
     // A bare pad stands above the masked copper, so it is PAD_PROUD thicker.
@@ -2115,4 +2117,71 @@ fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_rep
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert!(!meshes.iter().any(|mesh| mesh.name.contains("In1")), "no inner copper in a board thinner than the foil");
     assert!(imported.feature.warnings.iter().any(|w| w.contains("thinner")), "{:?}", imported.feature.warnings);
+}
+
+/// One hole of each kind: a via, a plated pin, a peg's unplated hole, a mounting hole's plated
+/// pad, and a pin cut in half by the board's edge (a castellated hole).
+const HOLES: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+  (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+    (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+    (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask")))
+  (footprint "MountingHole:MountingHole_3.2mm_M3_Pad" (layer "F.Cu") (at 22 5)
+    (pad "1" thru_hole circle (at 0 0) (size 6 6) (drill 3.2) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Castellated" (layer "F.Cu") (at 27 10)
+    (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+
+#[test]
+fn each_holes_choice_keeps_its_own_holes() {
+    let (via, pin, peg, mounting, edge) = ([5.0, -5.0], [10.0, -5.0], [15.0, -5.0], [22.0, -5.0], [27.0, -10.0]);
+    for (holes, expected) in [
+        (KicadHoles::None, vec![edge]),
+        (KicadHoles::Mounting, vec![peg, mounting, edge]),
+        (KicadHoles::Pads, vec![pin, peg, mounting, edge]),
+        (KicadHoles::All, vec![via, pin, peg, mounting, edge]),
+    ] {
+        let mut board = parse_kicad_board(HOLES.as_bytes(), "holes.kicad_pcb").unwrap();
+        keep_holes(&mut board, holes);
+        let mut centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        centres.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(centres, expected, "{holes:?}");
+    }
+}
+
+#[test]
+fn holes_default_to_mounting_holes_only() {
+    assert_eq!(KicadOptions::default().holes, KicadHoles::Mounting);
+    for holes in [KicadHoles::None, KicadHoles::Mounting, KicadHoles::Pads, KicadHoles::All] {
+        assert_eq!(KicadHoles::parse(holes.as_str()), Some(holes));
+    }
+    assert_eq!(KicadHoles::parse(" Vias "), None);
+}
+
+#[test]
+fn a_hole_left_out_is_left_out_of_every_layer() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    // The substrate is whole.
+    let mut board = parse_kicad_board(source.as_bytes(), "closed.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+    assert!((volume - 200.0 * 1.6).abs() < 1e-6, "{volume}");
+    // The copper closes over the holes: the via is a disc, the pin's pad is whole, and the peg,
+    // which is only a hole, leaves nothing.
+    let options = KicadOptions { holes: KicadHoles::None, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "closed.kicad_pcb", &options, &mut load).unwrap();
+    let via = copper_area(&imported, "Copper F.Cu", 0.035);
+    assert!((via - std::f64::consts::PI * 0.36).abs() < 0.01, "via: {via}");
+    let pads = copper_area(&imported, "Copper F.Cu pads", 0.035 + 0.005);
+    assert!((pads - std::f64::consts::PI).abs() < 0.02, "pads: {pads}");
 }
