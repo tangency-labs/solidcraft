@@ -109,6 +109,10 @@ mod measure;
 mod normal_drop;
 #[path = "../offset_history.rs"]
 mod offset_history;
+#[path = "../offset_surface.rs"]
+mod offset_surface;
+#[path = "../pick.rs"]
+mod pick;
 #[path = "../pie_slices_off_centre_arc.rs"]
 mod pie_slices_off_centre_arc;
 #[path = "../plane_cv_edit.rs"]

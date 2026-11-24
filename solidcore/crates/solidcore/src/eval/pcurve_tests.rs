@@ -81,6 +81,92 @@ fn radial_order_uses_exact_face_directions_in_every_input_order() {
     }
 }
 
+/// #21183: a Ø0.12 hole 0.44 off a Ø1 bar's axis touches its wall along the bar's seam line, so
+/// their rays tie in pairs (up to rounding once turned off the axes). The hole curves away faster:
+/// about +z, bar back, hole back, hole forward, bar forward, so wall and space alternate.
+#[test]
+fn faces_tangent_along_an_edge_are_ordered_by_how_fast_they_curve_away() {
+    let seam = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [0., 1.]],
+    };
+    for turn in [0.0f64, 0.3, 1.1, 2.5, 4.0] {
+        let (s, c) = turn.sin_cos();
+        let at = |r: f64, z: f64| [r * c, r * s, z];
+        let turned = |origin: [f64; 3]| frame(origin, [c, s, 0.], [-s, c, 0.]);
+        let bar = Surface::Cylinder {
+            frame: turned([0.; 3]),
+            radius: 0.5,
+        };
+        let hole = Surface::Cylinder {
+            frame: turned(at(0.44, 0.)),
+            radius: 0.06,
+        };
+        let curve = Curve::Line {
+            start: at(0.5, 0.),
+            end: at(0.5, 1.),
+        };
+        let uses = [(&bar, false), (&hole, false), (&hole, true), (&bar, true)];
+        for perm in 0..24usize {
+            let mut pool: Vec<usize> = (0..4).collect();
+            let mut k = perm;
+            let mut input = Vec::new();
+            for n in (1..=4).rev() {
+                input.push(pool.remove(k % n));
+                k /= n;
+            }
+            let faces: Vec<_> = input
+                .iter()
+                .map(|&i| RadialFace {
+                    surface: uses[i].0,
+                    pcurve: &seam,
+                    forward: uses[i].1,
+                })
+                .collect();
+            let order = radial_order(&curve, [0., 1.], &faces).unwrap();
+            let got: Vec<_> = order.into_iter().map(|i| input[i]).collect();
+            let expected: Vec<_> = (0..4).map(|n| (input[0] + n) % 4).collect();
+            assert_eq!(got, expected, "turn {turn}, {input:?}");
+        }
+    }
+    let bar = |turn: f64| {
+        let (s, c) = turn.sin_cos();
+        Surface::Cylinder {
+            frame: frame([0.; 3], [c, s, 0.], [-s, c, 0.]),
+            radius: 0.5,
+        }
+    };
+    let (s, c) = 0.3f64.sin_cos();
+    let curve = Curve::Line {
+        start: [0.5 * c, 0.5 * s, 0.],
+        end: [0.5 * c, 0.5 * s, 1.],
+    };
+    // These turns give bends a rounding apart (-2 ± 2 ulps).
+    for turn in [0.0519, 0.2249] {
+        let (low, high) = (bar(0.3), bar(0.3 + turn));
+        let below = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[-turn, 0.], [-turn, 1.]],
+        };
+        let faces = [
+            RadialFace {
+                surface: &low,
+                pcurve: &seam,
+                forward: true,
+            },
+            RadialFace {
+                surface: &high,
+                pcurve: &below,
+                forward: true,
+            },
+        ];
+        assert!(
+            matches!(radial_order(&curve, [0., 1.], &faces), Err(Error::Failed(m)) if m.contains("tangent faces")),
+            "turn {turn}"
+        );
+    }
+}
+
 #[test]
 fn radial_order_refuses_undefined_and_indistinguishable_directions() {
     let curve = Curve::Line {
@@ -999,6 +1085,113 @@ fn closes_around_the_box(
             );
         }
     }
+}
+
+/// A loop that starts on a closed spline's seam, its lowest point a hair below the range's start
+/// (an edge a few µm off the seam line, a writer's rounding: 1e-6 of the period, about 2e-5 mm on
+/// this cylinder of radius 3), stays on the range at a tolerance that covers that: moved a whole
+/// period on, past the range's end, the face's pcurves lay off its NURBS form, which measured it
+/// short. At a tolerance below it the loop stays where its lowest point puts it.
+#[test]
+fn a_loop_a_hair_below_a_closed_splines_range_stays_on_it() {
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [[0., TAU], [0., 4.]],
+    )
+    .unwrap();
+    let dom = SurfaceEval::new(&cylinder).unwrap().domain();
+    let (a, b) = dom.range[0].unwrap();
+    let period = dom.period[0].unwrap();
+    let (lo, hi) = (a - 1e-6 * period, a + 0.75 * period);
+    let line = |p: [f64; 2], q: [f64; 2]| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![p, q],
+    };
+    // Three quarters of a turn, counter-clockwise in (u, v).
+    let given = [
+        line([lo, 0.], [hi, 0.]),
+        line([hi, 0.], [hi, 4.]),
+        line([hi, 4.], [lo, 4.]),
+        line([lo, 4.], [lo, 0.]),
+    ];
+    let edge = Curve::Line {
+        start: [0.; 3],
+        end: [1., 0., 0.],
+    };
+    let l: Vec<EdgeUse<'_>> = given
+        .iter()
+        .enumerate()
+        .map(|(e, g)| EdgeUse {
+            edge: e as u32,
+            curve: &edge,
+            interval: [0., 1.],
+            forward: true,
+            tolerance: 0.0,
+            given: Some(g),
+        })
+        .collect();
+    let pcs = pcurves(&cylinder, std::slice::from_ref(&l), 1e-4).unwrap();
+    for pc in &pcs[0] {
+        for q in points(pc) {
+            assert!(
+                (lo - 1e-12..=hi + 1e-12).contains(&q[0]) && q[0] < b,
+                "on the range [{a}, {b}]: {q:?}"
+            );
+        }
+    }
+    let pcs = pcurves(&cylinder, &[l], 1e-7).unwrap();
+    for (got, given) in pcs[0].iter().zip(&given) {
+        let moved: Vec<[f64; 2]> = points(given)
+            .iter()
+            .map(|q| [q[0] + period, q[1]])
+            .collect();
+        assert_eq!(points(got), moved, "below the tolerance: a period on");
+    }
+}
+
+#[test]
+fn stored_trim_hulls_leaving_a_base_period_request_a_topology_edit() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 3., 3.],
+        points: [[-2., -2.], [2., -2.], [2., 2.], [-2., 2.], [-2., -2.]]
+            .map(|[x, y]| vec![[x, y, 0.], [x, y, 3.]])
+            .to_vec(),
+    };
+    let domain = SurfaceEval::new(&surface).unwrap().domain();
+    let line = |a, b| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![a, b],
+    };
+    for u in [0.0, 4.0] {
+        assert!(!leaves_base_period(domain, &line([u, 0.], [u, 3.])));
+    }
+    assert!(leaves_base_period(domain, &line([3.9, 0.], [4.1, 3.])));
+    assert!(leaves_base_period(domain, &line([-0.1, 0.], [0.1, 3.])));
+    // The analogous cut in v is handled the same way; an open direction is not a seam.
+    let Surface::Spline {
+        u_knots,
+        v_knots,
+        points,
+    } = &surface
+    else {
+        unreachable!()
+    };
+    let transposed = Surface::Spline {
+        u_knots: v_knots.clone(),
+        v_knots: u_knots.clone(),
+        points: (0..2)
+            .map(|j| points.iter().map(|row| row[j]).collect())
+            .collect(),
+    };
+    assert!(leaves_base_period(
+        SurfaceEval::new(&transposed).unwrap().domain(),
+        &line([0., 3.9], [3., 4.1])
+    ));
+    assert!(!leaves_base_period(domain, &line([0., -1.], [4., 4.])));
 }
 
 /// A full-period loop with a small overrun at its cut belongs around the base

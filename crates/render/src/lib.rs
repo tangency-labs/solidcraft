@@ -31,14 +31,38 @@ pub mod texture_sampling;
 pub mod transmission;
 mod visual_style;
 
-pub use backend::{
-    Availability, BackendDescriptor, BackendId, ExecutorDescriptor, ExecutorId, MAX_RENDER_ID_BYTES, RenderFeature, RenderFormat, RenderLimits,
-    RenderMode, RenderOperation, RenderPolicy, RenderProfile, RenderRequest, ResolveError, ResolvedRequest, ScratchLayout, builtin_backend,
-    resolve_request,
-};
-pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
+pub use backend::Availability;
+pub use backend::BackendDescriptor;
+pub use backend::BackendId;
+pub use backend::ExecutorDescriptor;
+pub use backend::ExecutorId;
+pub use backend::MAX_RENDER_ID_BYTES;
+pub use backend::RenderFeature;
+pub use backend::RenderFormat;
+pub use backend::RenderLimits;
+pub use backend::RenderMode;
+pub use backend::RenderOperation;
+pub use backend::RenderPolicy;
+pub use backend::RenderProfile;
+pub use backend::RenderRequest;
+pub use backend::ResolveError;
+pub use backend::ResolvedRequest;
+pub use backend::ScratchLayout;
+pub use backend::builtin_backend;
+pub use backend::resolve_request;
+pub use curve_display::PixelCurveView;
+pub use curve_display::SampledPath;
+pub use curve_display::SamplingBudget;
+pub use curve_display::SamplingQuality;
+pub use curve_display::sample_segment;
+pub use curve_display::sample_segment_unclipped;
 pub use gif::gif;
 pub use model_bounds::view_bounds;
-pub use product::{FaceAppearance, ProductMesh, ProductScene};
-pub use silhouette::{PreparedSilhouettes, SilhouetteBuilder, SilhouetteEdge, SilhouetteView};
+pub use product::FaceAppearance;
+pub use product::ProductMesh;
+pub use product::ProductScene;
+pub use silhouette::PreparedSilhouettes;
+pub use silhouette::SilhouetteBuilder;
+pub use silhouette::SilhouetteEdge;
+pub use silhouette::SilhouetteView;
 pub use visual_style::VisualStyle;

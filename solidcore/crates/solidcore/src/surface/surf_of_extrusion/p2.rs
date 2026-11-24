@@ -3791,6 +3791,67 @@ mod tests {
         }
     }
 
+    /// #18903 (a review comment on #18771): the unit UV box of a plane whose origin
+    /// is at `x0`, swept along `(1, -1)` by the fold `(3, 0)`-`(d, 0)`-`(2, 1)`
+    /// (`d = 2^-10`) over a long interval: the slab `mu = u + w >= d` cuts the corner
+    /// off the box, a pentagon of area `1 - d^2 / 2` with a `d sqrt 2` edge. At
+    /// `x0 = 0` the boundary is that pentagon. At `x0 = 1e12` its two cut vertices,
+    /// `(d, 0)` and `(0, d)`, are one point to their bounds (about `2e-2`) and merge;
+    /// keeping one of them turned the other's side into a chord across the box (a
+    /// quadrilateral of area about `1 - d / 2`, an area error `d / 2`). They merge into
+    /// the corner `(0, 0)` where their sides meet: the boundary is the box itself,
+    /// every edge on a side of it, its area `1` within `d^2 / 2` of the exact one.
+    /// The answer's ends are then the plane points of the box corners, bit for bit,
+    /// and each curve's deviation covers the corner's `d / sqrt 2` from the region
+    /// the extrusion covers.
+    #[test]
+    fn slab_merges_a_far_cut_corner_into_the_corner() {
+        let k = k();
+        let d = 2f64.powi(-10);
+        for x0 in [0.0, 1e12] {
+            let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+            let mut plane = Plane::new(
+                Point3::new(x0, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                crate::geom::vector2d::Vec2::new(1.0, 1.0),
+                &dom,
+            );
+            plane.make_nurb().unwrap();
+            let gen = [(3.0, 0.0), (d, 0.0), (2.0, 1.0)];
+            let r = uv_polyline(&k, &plane, &gen, (1.0, -1.0), (-10.0, 10.0));
+            if x0 == 0.0 {
+                assert_eq!(r.curves_3d.len(), 5);
+                let short = shortest_curve(&r);
+                assert!(short > d && short < 2.0 * d, "{short:e}");
+                assert_region_closing_to(&r, &plane, 1.0 - d * d / 2.0, 2.0 * f64::EPSILON);
+                continue;
+            }
+            assert_eq!(r.curves_3d.len(), 4);
+            let corners: Vec<Point3> = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+                .iter()
+                .map(|&(u, w)| plane.evaluate_point_fast(Point2::new(u, w)))
+                .collect();
+            for c in &r.curves_3d {
+                let canon = gen_base(c).unwrap().canonical().unwrap();
+                assert_eq!(canon.degree, 1);
+                for end in [
+                    canon.control_points[0],
+                    *canon.control_points.last().unwrap(),
+                ] {
+                    assert!(corners.contains(&end), "end {end:?} is no box corner");
+                }
+            }
+            assert_region_closing_to(&r, &plane, 1.0, 2.0 * f64::EPSILON);
+            // The corner `(0, 0)` is off the region the extrusion covers (`u + w >= d`)
+            // by `d / sqrt 2` in the plane: every curve's deviation bounds it.
+            assert_eq!(r.deviations.len(), 4);
+            for &dev in &r.deviations {
+                assert!(dev >= d / 2f64.sqrt(), "deviation {dev:e}");
+            }
+        }
+    }
+
     /// Review r5: a `0.5 x 0.5` swept square at `x = 1e12`, swept
     /// along `x` and along `y`. Its directrices (`0.5` long) are below `SM_EFF_ZERO`
     /// of their coordinates (`1.0`) but are real edges: the boundary is the whole

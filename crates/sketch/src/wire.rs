@@ -328,6 +328,7 @@ impl Sketch {
                 edge_name: None,
                 vertex_name: None,
                 curve_edges: Vec::new(),
+                profile_boundary: Vec::new(),
                 auto_face: false,
                 lost: false,
                 name_dropped: false,
