@@ -150,7 +150,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              measure (inspect.measure), compare_picture (inspect.compare_picture, numbers only: no overlay PNG), \
              inspect_design (document.inspect), undo, redo, export, save, open, new_design, crash_reports; screenshot, \
              body_topology, batch and pending can't be steps. On an error the steps already run are undone (unless \
-             rollback: false), so the batch is all-or-nothing; the reply names the failing step (index from 0), its error, \
+             rollback: false). Connected to the desktop, rollback batches refuse known commands that open or switch design tabs. \
+             If the steps must run one at a time, this server must recognize every command in a rollback batch. \
+             The reply names the failing step (index from 0), its error, \
              every result before it, whether the design really went back (rolled_back), the steps whose changes are in the \
              design (applied) and those never sent (not_run). The usual way to build a part: sketch, draw, dimension, \
              finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
@@ -1722,6 +1724,9 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
     };
+    // Discovery can change the backend while the headless session is still empty. Use one
+    // session for preflight, every step, and the final expectation or checkpoint restore.
+    let b = if let Some(active) = b.batch_backend() { active } else { b };
     match batch_run(b, a) {
         (reply, true) => text_result(&reply, true, opts),
         (reply, false) => with_expectation(b, reply, expect, opts),
@@ -1752,6 +1757,16 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     (reply, true)
 }
 
+fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool) -> (Value, bool) {
+    let mut reply = refusal.reply(count, rollback);
+    reply["ok"] = json!(false);
+    reply["applied"] = json!([]);
+    if let Some(command) = refusal.command.as_deref() {
+        reply["failed"]["error"] = Value::String(command_error(command, refusal.error));
+    }
+    (reply, true)
+}
+
 /// The batch itself: its reply and whether it failed.
 fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let from_file = match script_file(a) {
@@ -1776,13 +1791,25 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     let mut mapped: Vec<Value> = Vec::with_capacity(steps.len());
     let mut narrows: Vec<(usize, Narrow)> = Vec::new();
     for (i, step) in steps.iter().enumerate() {
-        // The window goes to another design's tab for these, however the step names them: the
-        // batch's later steps and its rollback would land in the wrong design.
+        // Inspect the canonical command after mapping tool names and execute wrappers. A
+        // desktop checkpoint is local to its tab, so it cannot roll back across a tab change.
         let step_result = batch_step(step).and_then(|(command, params, narrow)| {
-            let id = if command.is_empty() { step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or("") } else { &command };
+            let (id, command_params) = if command.is_empty() {
+                (step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or(""), step.get("params"))
+            } else {
+                (command.as_str(), Some(&params))
+            };
             match solidcraft_engine::find_command(id).map(|spec| spec.id) {
                 Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
                     Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
+                }
+                Some(c)
+                    if rollback
+                        && b.has_ui()
+                        && (matches!(c, "view.next_tab" | "view.previous_tab" | "document.activate" | "doc.open" | "file.import")
+                            || (c == "file.new" && command_params.and_then(|p| p.get("new_tab")).and_then(Value::as_bool) == Some(true))) =>
+                {
+                    Err(format!("`{c}` can change the active design tab: run it separately or use `rollback: false`"))
                 }
                 _ => Ok((command, params, narrow)),
             }
@@ -1823,15 +1850,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len(), rollback);
-        if let Some(o) = reply.as_object_mut() {
-            o.insert("ok".into(), Value::Bool(false));
-            o.insert("applied".into(), json!([]));
-        }
-        if let (Some(command), Some(failed)) = (refusal.command.as_deref(), reply.get_mut("failed").and_then(Value::as_object_mut)) {
-            failed.insert("error".into(), Value::String(command_error(command, refusal.error.clone())));
-        }
-        return (reply, true);
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
     // a `measure {summary: true}` step's reply summarised.
@@ -1865,6 +1884,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 }
                 return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
             }
+            // A newer app may know about tab-switching commands this server cannot preflight.
+            Err(e) if rollback && e.starts_with("engine.batch unavailable:") && e.ends_with("switches to another design") => {
+                return (Value::String(e), true);
+            }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
@@ -1894,6 +1917,17 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                 "atomic layout batch exceeds transport size cap"
             },
         );
+    }
+    // Without the desktop's batch preflight, an unrecognized command could switch tabs.
+    // Check IDs here and leave parameter checking to the app that executes the steps.
+    if rollback
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback);
     }
     let start = if rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
