@@ -1444,3 +1444,140 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
     let expected = 9.0 - std::f64::consts::PI * 0.3 * 0.3;
     assert!((area - expected).abs() < 0.05, "{area} vs {expected}");
 }
+
+/// Base64 text of `bytes`, wrapped over lines the way a board file stores an embedded file.
+fn base64_wrapped(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            text.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        text.extend(std::iter::repeat_n('=', 3 - chunk.len()));
+    }
+    let lines: Vec<&str> = text.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect();
+    lines.join("\n\t\t\t")
+}
+
+/// A 10 x 20 x 30 mm box as a STEP file, packed the way KiCad embeds it (one zstd frame).
+fn packed_box_step() -> Vec<u8> {
+    let block = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let text = solidcraft_kernel::step_export(&[&block], "").unwrap();
+    ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest)
+}
+
+/// A synthetic board with one footprint whose model is `kicad-embed://box.step`, the file stored
+/// in the board's own `embedded_files` block with `data` (base64 text) and `checksum`; the
+/// footprint lists it with `footprint_checksum`.
+fn embedded_board(data: &str, checksum: &str, footprint_checksum: &str) -> String {
+    format!(
+        r#"(kicad_pcb (version 20240108) (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "{footprint_checksum}")))
+        (model "kicad-embed://box.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))
+      (embedded_files
+        (file
+          (name "box.step")
+          (type model)
+          (data |{data}|)
+          (checksum "{checksum}"))))"#
+    )
+}
+
+fn embedded_import(source: &str) -> KicadImport {
+    let mut load = |path: &str| Err(format!("{path}: an embedded model is not looked up on disk"));
+    read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap()
+}
+
+/// KiCad 8 and later store a model inside the board and name it `kicad-embed://<name>`: the
+/// footprint's model is that file, not one found on disk.
+#[test]
+fn a_model_embedded_in_the_board_comes_in_on_its_footprint() {
+    let source = embedded_board(&base64_wrapped(&packed_box_step()), "0123456789ABCDEF0123456789ABCDEF", "0123456789abcdef0123456789abcdef");
+    let board = parse_kicad_board(source.as_bytes(), "board.kicad_pcb").unwrap();
+    assert_eq!(board.embedded_files.len(), 2, "the footprint's entry and the board's own: {:?}", board.embedded_files);
+    let imported = embedded_import(&source);
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["box".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1);
+    assert_eq!(imported.plan.places[0].name.as_deref(), Some("U1"));
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    // The model itself: a 10 x 20 x 30 mm box, in the component's own frame.
+    assert!(!meshes.is_empty(), "the embedded model's body");
+    let mut low = [f64::MAX; 3];
+    let mut high = [f64::MIN; 3];
+    for point in meshes.iter().flat_map(|m| m.positions.as_chunks::<3>().0.iter()) {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(point[axis]);
+            high[axis] = high[axis].max(point[axis]);
+        }
+    }
+    let mut size: Vec<f64> = (0..3).map(|axis| high[axis] - low[axis]).collect();
+    size.sort_by(f64::total_cmp);
+    for (got, want) in size.iter().zip([10.0, 20.0, 30.0]) {
+        assert!((got - want).abs() < 1e-3, "size {size:?}");
+    }
+}
+
+/// A damaged embedded file is one warning that names it; the board and its other parts still
+/// come in, and nothing panics.
+#[test]
+fn a_corrupt_embedded_model_is_a_warning_naming_the_file() {
+    let packed = packed_box_step();
+    let mut truncated = packed.clone();
+    truncated.truncate(packed.len() / 2);
+    let cases = [
+        ("not base64", "!!!! this is not base64 !!!!".to_string(), "not base64"),
+        ("not compressed", base64_wrapped(b"ISO-10303-21; plain text, not a zstd frame"), "not compressed"),
+        ("truncated", base64_wrapped(&truncated), ""),
+        ("empty", String::new(), "corrupt"),
+    ];
+    for (what, data, want) in cases {
+        let source = embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "0123456789ABCDEF0123456789ABCDEF");
+        let imported = embedded_import(&source);
+        let warnings = &imported.feature.warnings;
+        assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains(want)), "{what}: {warnings:?}");
+        assert!(imported.plan.places.is_empty(), "{what}: no model, no placement");
+        assert!(imported.board_step.is_some(), "{what}: the board still comes in");
+    }
+}
+
+/// The checksums the board records for one file must agree; a file whose data is missing, or
+/// whose name no entry has, is a warning too.
+#[test]
+fn an_embedded_model_that_changed_or_is_missing_is_reported() {
+    let data = base64_wrapped(&packed_box_step());
+    let imported = embedded_import(&embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"));
+    assert!(imported.feature.warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("checksums disagree")), "{:?}", imported.feature.warnings);
+    assert!(imported.plan.places.is_empty());
+
+    let no_data = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "AB")))
+        (model "kicad-embed://box.step")
+        (model "kicad-embed://gone.step")))"#;
+    let imported = embedded_import(no_data);
+    let warnings = &imported.feature.warnings;
+    assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("does not hold its data")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.starts_with("gone.step: ") && w.contains("not in the board file")), "{warnings:?}");
+}
+
+/// A small compressed file must not grow into memory: a frame that unpacks past the limit is
+/// refused, and so is text that is not base64.
+#[test]
+fn embedded_data_is_bounded_and_decoded_strictly() {
+    let big = vec![0u8; MAX_EMBEDDED_FILE_BYTES + 1];
+    let packed = ruzstd::encoding::compress_to_vec(&big[..], ruzstd::encoding::CompressionLevel::Fastest);
+    assert!(unpack_zstd(&packed, MAX_EMBEDDED_FILE_BYTES).unwrap_err().contains("too large"));
+    assert_eq!(decode_base64("TWFu"), Some(b"Man".to_vec()));
+    assert_eq!(decode_base64("TWE="), Some(b"Ma".to_vec()));
+    assert_eq!(decode_base64("TQ"), Some(b"M".to_vec()));
+    assert_eq!(decode_base64("T"), None);
+    assert_eq!(decode_base64("TW-u"), None);
+    assert_eq!(decode_base64("TQ==="), None);
+    // An unterminated `|…|` text is an error, not a hang or a panic.
+    assert!(parse_kicad_board(b"(kicad_pcb (embedded_files (file (data |abc", "x.kicad_pcb").is_err());
+}
