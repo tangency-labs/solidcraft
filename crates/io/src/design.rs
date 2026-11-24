@@ -136,7 +136,7 @@ const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_
 
 /// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since the
 /// bytes don't come from outside and a save may be over that limit (#18686).
-const WRITTEN_LIMITS: Limits = Limits { max_expanded: || usize::MAX, check_size: |_| Ok(()), ..LIMITS };
+const WRITTEN_LIMITS: Limits = Limits { check_size: |_| Ok(()), ..SAVE_LIMITS };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
@@ -175,7 +175,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(SAVE_LIMITS))
+        PackageWriter(Writer::for_save(SAVE_LIMITS, max_expanded))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -734,10 +734,10 @@ pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
 /// The provenance records a container carries, without verifying them. That is what a save
 /// appends to; verification is [`read_design_provenance`].
 pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
-    if bytes.len() > max_design() {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
         return None;
     }
-    written_design_provenance_chain(bytes)
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
 }
 
 /// [`read_design_provenance_chain`] for a container this process just wrote: no open-size limit,
@@ -747,7 +747,7 @@ pub fn written_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> 
     if !is_design_container(bytes) {
         return None;
     }
-    provenance::read_chain(&mut PackageReader(Reader::new(Cursor::new(bytes), WRITTEN_LIMITS).ok()?))
+    DesignContainerReader::from_written_bytes(bytes).ok()?.provenance_chain()
 }
 
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
@@ -863,6 +863,19 @@ fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignP
 /// This type does not turn untrusted cached data into editable geometry.
 pub struct DesignContainerReader<R: Read + Seek> {
     reader: PackageReader<R>,
+}
+
+impl<'a> DesignContainerReader<Cursor<&'a [u8]>> {
+    /// Inspect only bytes this process just wrote. Report the expanded opening limit separately so
+    /// an oversized save can still inspect its cache and keep its provenance chain.
+    pub fn from_written_bytes(bytes: &'a [u8]) -> Result<Self> {
+        Ok(Self { reader: PackageReader(Reader::with_open_limits(Cursor::new(bytes), WRITTEN_LIMITS, Some(LIMITS))?) })
+    }
+
+    /// Whether the directory of the just-written container exceeds a part or total opening limit.
+    pub fn exceeds_expanded_open_limit(&self) -> bool {
+        self.reader.exceeds_expanded_open_limit
+    }
 }
 
 impl<R: Read + Seek> DesignContainerReader<R> {
@@ -2245,6 +2258,42 @@ mod tests {
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+    }
+
+    #[test]
+    fn optional_caches_keep_a_compressible_design_within_the_expanded_open_limit() {
+        let mut doc = Document::new("Compressible imports");
+        for pad in ["a", "b"] {
+            doc.add_feature(
+                FeatureKind::Import {
+                    file: format!("{pad}.step"),
+                    step: pad.repeat(2 << 20).into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let required = write_design_container_with_cache(&doc, DesignCompression::Fast, None, None).unwrap();
+        let expanded: usize = parts(&required).values().map(Vec::len).sum();
+        // Both imports fit individually. Together the required entries leave at most one
+        // byte for optional parts, despite plenty of space in the compressed file.
+        crate::limits::test_cap::set(Some(expanded.div_ceil(2)));
+        let preview = DesignPreview { meshes: vec![mesh()] };
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, Some(&preview), Some(&native_geometry())).unwrap();
+        let reopened = crate::read_design(&bytes);
+        assert!(!DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+
+        // Lower the cap just enough that only the sum of the required entries exceeds it.
+        crate::limits::test_cap::set(Some((expanded - 1) / 2));
+        assert!(bytes.len() < max_design());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).is_err());
+        assert!(DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+        crate::limits::test_cap::set(None);
+        assert_eq!(reopened.unwrap().to_json(), doc.to_json());
+        assert_eq!(bytes, required);
     }
 
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
