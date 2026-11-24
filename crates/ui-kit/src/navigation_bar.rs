@@ -39,6 +39,14 @@ pub struct Catalogue {
     pub value_menus: &'static [&'static str],
     /// Menu slots that show only their icon, whatever the stored options say.
     pub icon_menus: &'static [&'static str],
+    /// Action slots that always show their name beside the icon, even on a bar of icons: ones
+    /// the bar adds for a while, whose icon alone would read as another slot's.
+    pub named: &'static [&'static str],
+}
+
+/// Whether slot `id` always shows its name ([`Catalogue::named`]).
+pub fn named(id: &str) -> bool {
+    installed().is_some_and(|catalogue| catalogue.named.contains(&id))
 }
 
 /// The host's catalogue, installed once per process ([`install_catalogue`]).

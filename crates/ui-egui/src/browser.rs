@@ -610,8 +610,8 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ]);
     if g.folder == "bodies" {
-            v.push(isolate_bodies_item(app, &group_bodies(app, id)));
-        }
+        v.push(isolate_bodies_item(app, &group_bodies(app, id)));
+    }
     v
 }
 

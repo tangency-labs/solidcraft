@@ -376,34 +376,40 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
-/// Returns an isolation menu item for the given bodies. If any body is hidden, the item
-/// toggles to "Unisolate" and restores the previous visibility state.
+/// An Isolate is in effect: one ran since the last Unisolate or Show All. Not kept in a saved
+/// design, so a reopened one offers Isolate again (the empty-space Unisolate still shows all).
+fn isolating(app: &SolveApp) -> bool {
+    app.session.visibility.before_isolate.is_some()
+}
+
+/// The one Unisolate entry every menu shares: it puts back what the Isolates hid (#8120).
+fn unisolate_item() -> Item {
+    act("ui.unisolate", "Unisolate", "body")
+}
+
+/// Isolate, or Unisolate on what an Isolate left on screen (#8120).
 pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
-    let any_hidden = bodies.iter().any(|b| app.session.visibility.hidden_bodies.contains(b));
-    let action = if any_hidden { "ui.unisolate" } else { "ui.isolate" };
-    let label = if any_hidden { "Unisolate" } else { "Isolate" };
-    act(action, label, "body").with(json!({ "bodies": bodies }))
+    if !bodies.is_empty() && isolating(app) && bodies.iter().all(|b| app.session.body_visible(b)) {
+        return unisolate_item();
+    }
+    act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).on(!bodies.is_empty())
 }
 
-/// Returns an isolation menu item for the occurrence at `path`. If the occurrence is
-/// hidden, the item toggles to "Unisolate" and restores the previous visibility state.
+/// Isolate this placement, or Unisolate when an Isolate left it on screen (#8120).
 pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
-    let hidden = app.session.occurrence_hidden(path);
-    let action = if hidden { "ui.unisolate" } else { "ui.isolate" };
-    let label = if hidden { "Unisolate" } else { "Isolate" };
-    act(action, label, "body").with(json!({ "path": path }))
+    if !path.is_empty() && isolating(app) && !app.session.occurrence_hidden(path) {
+        return unisolate_item();
+    }
+    act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path }))
 }
 
-/// Returns an isolation menu item for a component. If all its bodies are hidden, the
-/// item toggles to "Unisolate" and restores the previous visibility state.
+/// Returns an isolation menu item for a component. When its bodies are the only ones left on
+/// screen the item toggles to "Unisolate" and restores the previous state.
 pub fn isolate_component_item(app: &SolveApp, id: u64, bodies: &[String]) -> Option<Item> {
     if bodies.is_empty() || id == 0 {
         return None;
     }
-    let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
-    let action = if all_hidden { "ui.unisolate" } else { "ui.isolate" };
-    let label = if all_hidden { "Unisolate" } else { "Isolate" };
-    Some(act(action, label, "body").with(json!({ "bodies": bodies })))
+    Some(isolate_bodies_item(app, bodies))
 }
 
 /// The eight radial commands, clockwise from the top.
@@ -446,7 +452,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             cmd(app, "select.set", "Select").with(json!({"items":[Sel::Body {name:name.clone()}]})),
             cmd(app, "select.same_look", "Select Same Look").with(json!({"body":name})),
             Item::sep(),
-            act("ui.isolate", "Isolate", "body").with(json!({"bodies":[name]})),
+            isolate_bodies_item(app, std::slice::from_ref(name)),
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
@@ -971,7 +977,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let anything_hidden =
             can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(can_unisolate));
+        // The same Unisolate as the toggled Isolate entry on the item menus (#8120).
+        v.push(act("ui.unisolate", "Unisolate", "eye").on(can_unisolate || isolating(app)));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -1022,10 +1029,10 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         // F2 renames the selection: with several bodies selected, it is Rename Selected Bodies.
         act("ui.rename", "Rename", "rename").key(if several.is_some() { "" } else { "F2" }).with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
-                act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
-                act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
-                isolate_bodies_item(app, bodies),
-            ];
+        act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
+        act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
+        isolate_bodies_item(app, bodies),
+    ];
     if browser {
         let at = v.len() - 1;
         v.insert(at + 1, zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), true));
@@ -1281,11 +1288,11 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.enabled = true;
         }
         "ui.isolate" => {
-                    let new_item = isolate_occurrence_item(app, path);
-                    item.id = new_item.id;
-                    item.label = new_item.label;
-                    item.params = new_item.params;
-                }
+            let new_item = isolate_occurrence_item(app, path);
+            item.id = new_item.id;
+            item.label = new_item.label;
+            item.params = new_item.params;
+        }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
@@ -1469,12 +1476,12 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(!visibility_bodies.is_empty()),
     );
     if bodies_hidden(app) {
-            v.push(act("ui.showAll", "Show All Bodies", "eye"));
-        }
-        if let Some(item) = isolate_component_item(app, id, &bodies) {
-            v.push(item);
-        }
-        v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
+        v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    }
+    if let Some(item) = isolate_component_item(app, id, &bodies) {
+        v.push(item);
+    }
+    v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
     v.push(Item::sep());
     let mut organize = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
     if id != 0 {
@@ -1977,30 +1984,18 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
         "ui.isolate" => {
-                    // The picked bodies stay (shown if they were hidden) and everything else goes, other
-                    // components as components (#7896), in one step.
-                    if !bodies.is_empty() {
-                        let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
-                    }
-                }
-                "ui.unisolate" => {
-                    // Restore the visibility state from before the last isolation.
-                    if let Some(prev) = app.session.visibility.prev_visibility.take() {
-                        app.session.visibility.hidden_bodies = prev.hidden_bodies;
-                        app.session.visibility.hidden_occurrences = prev.hidden_occurrences;
-                        app.session.visibility.hidden_origin = prev.hidden_origin;
-                        app.session.visibility.hidden_sketches = prev.hidden_sketches;
-                        app.session.visibility.shown_sketches = prev.shown_sketches;
-                        app.session.visibility.hidden_joints = prev.hidden_joints;
-                        app.session.visibility.origin_hidden = prev.origin_hidden;
-                        app.session.visibility.shown_component_origins = prev.shown_component_origins;
-                        app.session.visibility.hidden_profiles = prev.hidden_profiles;
-                        app.session.visibility.shown_dimensions = prev.shown_dimensions;
-                        app.session.visibility.locked_bodies = prev.locked_bodies;
-                        app.session.visibility.hidden_folders = prev.hidden_folders;
-                    }
-                }
-                "ui.lock" => {
+            // The picked bodies stay (shown if they were hidden) and everything else goes, other
+            // components as components (#7896), in one step.
+            if !bodies.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
+            }
+        }
+        "ui.unisolate" => {
+            // What the Isolates hid comes back, or everything when none is in effect (#8120); one
+            // undo step, as Isolate is.
+            let _ = app.run("browser.visibility", json!({ "visible": true, "unisolate": true }));
+        }
+        "ui.lock" => {
             let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
             if locked {
                 app.session.visibility.locked_bodies.retain(|b| !bodies.contains(b));

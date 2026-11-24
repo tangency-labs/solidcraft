@@ -143,7 +143,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements); \
+         or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or show everything). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
@@ -604,8 +605,6 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     if keys.is_empty() {
         return Err(bad(cmd, "isolate needs `paths` or `items` (bodies)"));
     }
-    // Save current visibility state before isolating.
-    s.visibility.prev_visibility = Some(Box::new(s.visibility.clone()));
     let world = s.world_state()?;
     let keep: Vec<String> = keys
         .iter()
@@ -636,6 +635,8 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
     // again. Their other bodies are hidden one by one above, as the root's are.
     let shown_folders = folders_holding(s, &keep);
+    // Kept only now, once nothing above can fail, for Unisolate.
+    s.visibility.remember_before_isolate();
     s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
     s.visibility.hidden_occurrences = hidden;
     s.visibility.hidden_bodies = hidden_bodies;
@@ -677,9 +678,33 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
     keys
 }
 
+/// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
+/// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "unisolate requires visible:true"));
+    }
+    if ["items", "folder", "features", "joints", "paths", "tree_folders", "isolate"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "unisolate takes no targets"));
+    }
+    let Some(before) = s.visibility.before_isolate.take() else {
+        return visibility(s, &json!({ "folder": "all", "visible": true }));
+    };
+    s.visibility.hidden_bodies = before.hidden_bodies;
+    s.visibility.hidden_occurrences = before.hidden_occurrences;
+    s.visibility.hidden_folders = before.hidden_folders;
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(cmd, BrowserVisibilityResult { visible: true, changed: None, isolated: None, visibility, param_warnings: Vec::new() })
+}
+
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
+    if bool_(p, "unisolate").unwrap_or(false) {
+        return unisolate(s, p, visible);
+    }
     if let Some(value) = p.get("tree_folders") {
         if ["items", "folder", "joints", "paths"].iter().any(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, "give `tree_folders`, `items`, `folder`, `joints` or `paths`, not several"));
@@ -746,36 +771,35 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 Ok(path)
             })
             .collect::<Result<_>>()?;
-                    if bool_(p, "isolate").unwrap_or(false) {
-                        if !visible {
-                            return Err(bad(cmd, "isolate requires visible:true"));
-                        }
-                        // Save current visibility state before isolating.
-                        s.visibility.prev_visibility = Some(Box::new(s.visibility.clone()));
-                        let mut hidden = Vec::new();
-                        let mut ancestor_bodies = Vec::new();
-                        let mut stack = vec![Vec::<u64>::new()];
-                        let mut count = 0;
-                        while let Some(parent) = stack.pop() {
-                            for child in s.occurrence_children(&parent)? {
-                                count += 1;
-                                if count > 100_000 {
-                                    return Err(bad(cmd, "isolate exceeds 100000 placements"));
-                                }
-                                if paths.iter().any(|selected| child.path.starts_with(selected)) {
-                                    continue;
-                                }
-                                if paths.iter().any(|selected| selected.starts_with(&child.path)) {
-                                    ancestor_bodies.extend(child.bodies.into_iter().map(|b| b.world));
-                                    stack.push(child.path);
-                                } else {
-                                    hidden.push(child.path);
-                                }
-                            }
-                        }
+        if bool_(p, "isolate").unwrap_or(false) {
+            if !visible {
+                return Err(bad(cmd, "isolate requires visible:true"));
+            }
+            let mut hidden = Vec::new();
+            let mut ancestor_bodies = Vec::new();
+            let mut stack = vec![Vec::<u64>::new()];
+            let mut count = 0;
+            while let Some(parent) = stack.pop() {
+                for child in s.occurrence_children(&parent)? {
+                    count += 1;
+                    if count > 100_000 {
+                        return Err(bad(cmd, "isolate exceeds 100000 placements"));
+                    }
+                    if paths.iter().any(|selected| child.path.starts_with(selected)) {
+                        continue;
+                    }
+                    if paths.iter().any(|selected| selected.starts_with(&child.path)) {
+                        ancestor_bodies.extend(child.bodies.into_iter().map(|b| b.world));
+                        stack.push(child.path);
+                    } else {
+                        hidden.push(child.path);
+                    }
+                }
+            }
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);
+            s.visibility.remember_before_isolate();
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
             s.refresh_display();
@@ -855,8 +879,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     // Showing all of a kind also shows the browser folders and groups that hold it.
     if visible && let Some(f) = str_(p, "folder") {
         if f == "all" {
-            // Everything includes the folders and groups themselves.
+            // Everything includes the folders and groups themselves, and nothing is isolated.
             s.visibility.hidden_folders.clear();
+            s.visibility.before_isolate = None;
         } else {
             let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == f).map(|g| format!("/g{}", g.id)).collect();
             let own = format!("/{f}");
@@ -2168,6 +2193,35 @@ mod tests {
             Ok(v) => v,
             Err(e) => panic!("selection.delete: {e}"),
         }
+    }
+
+    /// #8120: Unisolate puts back what the Isolates hid, as it was before the first one, is one
+    /// undo step, and is never saved with the design.
+    #[test]
+    fn unisolate_restores_what_isolate_hid() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let hidden = |s: &Session| s.visibility.hidden_bodies.clone();
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": true, "isolate": true}));
+        assert_eq!(hidden(&s).len(), 2, "only B is shown");
+        assert!(!serde_json::to_string(&s.visibility).unwrap().contains("isolate"), "the snapshot is not saved");
+        let undo = s.undo.len();
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert_eq!(hidden(&s), ["C"], "back to before the first Isolate, C still hidden by hand");
+        assert!(s.visibility.before_isolate.is_none());
+        assert_eq!(s.undo.len(), undo + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(hidden(&s).len(), 2, "undo brings the isolation back");
+        assert!(s.visibility.before_isolate.is_some(), "and Unisolate with it");
+        run(&mut s, "edit.redo", json!({}));
+        // With no Isolate in effect, Unisolate shows everything.
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert!(hidden(&s).is_empty());
+        assert!(s.execute("browser.visibility", &json!({"visible": false, "unisolate": true})).is_err());
+        assert!(s.execute("browser.visibility", &json!({"visible": true, "unisolate": true, "items": ["A"]})).is_err());
     }
 
     #[test]

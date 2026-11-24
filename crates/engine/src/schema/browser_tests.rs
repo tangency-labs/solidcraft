@@ -149,7 +149,7 @@ fn browser_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BrowserOrderParams>(), &["component", "folder", "order"]);
     assert_keys(
         input_schema_for::<BrowserVisibilityParams>(),
-        &["features", "folder", "isolate", "items", "joints", "path", "paths", "tree_folders", "visible"],
+        &["features", "folder", "isolate", "items", "joints", "path", "paths", "tree_folders", "unisolate", "visible"],
     );
     assert_keys(input_schema_for::<BrowserFoldParams>(), &["component", "path"]);
 }
@@ -210,6 +210,8 @@ fn browser_strict_keeps_todays_errors() {
         ("browser.visibility", json!({"visible": true, "paths": [[]]})),
         ("browser.visibility", json!({"visible": true, "paths": [["a"]]})),
         ("browser.visibility", json!({"visible": true, "paths": [deep]})),
+        ("browser.visibility", json!({"visible": false, "unisolate": true})),
+        ("browser.visibility", json!({"visible": true, "unisolate": true, "items": ["A"]})),
         ("browser.visibility", json!({"visible": true, "joints": []})),
         ("browser.visibility", json!({"visible": true, "joints": [true]})),
         ("browser.visibility", json!({"visible": true, "folder": "nowhere"})),
@@ -315,7 +317,8 @@ fn the_visibility_reply_type_matches_the_design_s() {
         shown_dimensions: vec![8],
         locked_bodies: vec!["B".into()],
         hidden_folders: vec!["c0/bodies".into()],
-        prev_visibility: None,
+        // Never saved, so the reply leaves it out too.
+        before_isolate: Some(solidcraft_doc::BeforeIsolate::default()),
     };
     assert_eq!(serde_json::to_value(VisibilityState::from(&v)).unwrap(), serde_json::to_value(&v).unwrap());
     let empty = solidcraft_doc::Visibility::default();

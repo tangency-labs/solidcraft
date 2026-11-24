@@ -970,7 +970,7 @@ pub struct BrowserToggleParams {}
 
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
-/// change; the camera is not. With `isolate`, everything else is hidden.
+/// change; the camera is not. With `isolate`, everything else is hidden; `unisolate` undoes that.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = visible_required)]
 pub struct BrowserVisibilityParams {
@@ -1011,6 +1011,11 @@ pub struct BrowserVisibilityParams {
     /// everything else, other placements as placements. Default: false.
     #[serde(default)]
     pub isolate: Option<bool>,
+    /// With `visible: true` and no target: put back what the Isolates since the last Unisolate
+    /// hid, leaving changes made since alone; with none in effect, show everything. Default:
+    /// false.
+    #[serde(default)]
+    pub unisolate: Option<bool>,
 }
 
 /// What the browser hides and shows, as the design saves it.

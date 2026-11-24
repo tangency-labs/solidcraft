@@ -53,7 +53,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, shown: impl Fn(&Slot) -> bo
                 + NAV_CHEVRON
                 + NAV_MENU_GAP
                 + if values && prefs.menu_display(slot.id) == MenuDisplay::IconAndValue { label_width(slot).max(0.0) + NAV_MENU_GAP } else { 0.0 }
-        } else if labels {
+        } else if labels || navigation_bar::named(slot.id) {
             (metrics.icon + NAV_LABEL_GAP + label_width(slot).max(0.0) + 2.0 * NAV_LABEL_PADDING).max(metrics.button)
         } else {
             metrics.button

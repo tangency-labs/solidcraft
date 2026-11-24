@@ -1,0 +1,46 @@
+{
+  "en": {
+    "navbar.description.unisolate": "Appears while Isolate is in effect and brings back what it hid.",
+    "navbar.unisolate": "Unisolate"
+  },
+  "ar": {
+    "navbar.description.unisolate": "يظهر ما دام العزل ساريًا، ويعيد ما أخفاه.",
+    "navbar.unisolate": "إلغاء العزل"
+  },
+  "de": {
+    "navbar.description.unisolate": "Erscheint, solange Isolieren wirkt, und holt zurück, was es ausgeblendet hat.",
+    "navbar.unisolate": "Isolierung aufheben"
+  },
+  "es": {
+    "navbar.description.unisolate": "Aparece mientras Aislar está activo y devuelve lo que ocultó.",
+    "navbar.unisolate": "Dejar de aislar"
+  },
+  "fr": {
+    "navbar.description.unisolate": "Apparaît tant qu'Isoler est actif et fait revenir ce qu'il a masqué.",
+    "navbar.unisolate": "Annuler l'isolement"
+  },
+  "he": {
+    "navbar.description.unisolate": "מופיע כל עוד הבידוד בתוקף, ומחזיר את מה שהוסתר.",
+    "navbar.unisolate": "ביטול בידוד"
+  },
+  "ja": {
+    "navbar.description.unisolate": "分離表示の間だけ現れ、非表示にしたものを元に戻します。",
+    "navbar.unisolate": "分離表示を解除"
+  },
+  "ko": {
+    "navbar.description.unisolate": "분리 표시 중에만 나타나며, 숨긴 항목을 다시 되돌립니다.",
+    "navbar.unisolate": "분리 표시 해제"
+  },
+  "nl": {
+    "navbar.description.unisolate": "Verschijnt zolang Isoleren actief is en brengt terug wat het verborg.",
+    "navbar.unisolate": "Isolatie opheffen"
+  },
+  "vi": {
+    "navbar.description.unisolate": "Xuất hiện khi Cô lập đối tượng đang có hiệu lực và đưa trở lại những gì đã bị ẩn.",
+    "navbar.unisolate": "Hủy cô lập đối tượng"
+  },
+  "zh": {
+    "navbar.description.unisolate": "隔离期间出现，恢复隔离时隐藏的内容。",
+    "navbar.unisolate": "取消隔离"
+  }
+}
