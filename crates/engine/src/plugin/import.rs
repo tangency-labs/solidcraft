@@ -92,7 +92,7 @@ pub fn importers(session: &Session) -> Vec<Importer> {
 pub struct ImporterStatus {
     /// The installed plugin's version, when its manifest can be read.
     pub installed_version: Option<String>,
-    /// Why it can't read: `not installed`, `turned off`, `unreadable` or `no longer offers that importer`.
+    /// Why it can't read: `not installed`, `turned off`, `unreadable` or `not offering that importer`.
     pub problem: Option<&'static str>,
 }
 
@@ -105,8 +105,8 @@ pub fn importer_status(session: &Session, plugin: &str, format: &str) -> Importe
         Some("turned off")
     } else if installed_version.is_none() {
         Some("unreadable")
-    } else if !importers(session).iter().any(|i| i.id == format) {
-        Some("no longer offers that importer")
+    } else if !importers(session).iter().any(|i| i.id == format && i.plugin_id == plugin) {
+        Some("not offering that importer")
     } else {
         None
     };

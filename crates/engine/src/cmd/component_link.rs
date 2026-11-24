@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve)",
+         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
@@ -118,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LINKS_CONTRACT)
         .output(output_schema_for::<LinksResult>)
         .params(
-        "→ linked components: component, name, path, configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
+        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step` or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
          reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
          unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
@@ -678,6 +678,9 @@ fn source_bodies(file: &Path, bytes: &[u8], link: &DesignLink, validation: solid
 /// read it last. `bytes` are the source file's own, whose digest decides when it was read last.
 fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &DesignLink) -> Result<(Linked, LinkedImages)> {
     let Some(importer) = &link.importer else { return source_bodies(file, bytes, link, s.validation()) };
+    if let Some(why) = importer_file_refusal(s, file) {
+        return Err(EngineError::Other(why));
+    }
     let slot = linked_importer(s, importer)?;
     let options = if importer.options.is_null() { json!({}) } else { importer.options.clone() };
     // Another version of the plugin that can't read the file says so beside its own words.
@@ -701,13 +704,38 @@ fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &D
     Ok((read, images))
 }
 
-/// The installed, enabled importer a link names, to read its file again.
+/// The installed, enabled importer a link names, to read its file again: one of the plugin the
+/// record names. A record that names no plugin is not one this build reads, and runs nothing.
 fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Result<crate::plugin::Importer> {
-    let status = importer.plugin.as_deref().map(|plugin| crate::plugin::importer_status(s, plugin, &importer.format));
-    let needs = status.as_ref().and_then(|status| importer_needs(importer, status));
-    crate::plugin::importers(s).into_iter().find(|i| i.id == importer.format && needs.is_none()).ok_or_else(|| {
-        let what = needs.unwrap_or_else(|| format!("the importer `{}` is not installed or is turned off", importer.format));
+    let Some(plugin) = importer.plugin.as_deref() else {
+        return Err(EngineError::Other(format!(
+            "this link's record names no importer plugin for `{}`, so nothing can read its file again; break the link and insert the file again; the component keeps its last bodies",
+            importer.format
+        )));
+    };
+    let status = crate::plugin::importer_status(s, plugin, &importer.format);
+    let needs = importer_needs(importer, &status);
+    crate::plugin::importers(s).into_iter().find(|i| i.id == importer.format && i.plugin_id == plugin && needs.is_none()).ok_or_else(|| {
+        let what = needs.unwrap_or_else(|| format!("the importer `{}` is not offered by plugin `{plugin}`", importer.format));
         EngineError::Other(format!("{what}; the component keeps its last bodies"))
+    })
+}
+
+/// Why an importer plugin may not read `file` for a link now, judged from its place alone: it is
+/// outside this design's own folder and its folder is not one the user allowed (Preferences,
+/// General), and the caller did not name it to Insert Design in this session. A design received
+/// from someone else names what files it likes, and none of them is read, nor any plugin run on
+/// it, until its folder is allowed. `None`: it may be read.
+fn importer_file_refusal(s: &Session, file: &Path) -> Option<String> {
+    let target = link_target(file);
+    let allowed = s.plugin_state.linked_files.contains(&target)
+        || inside_design_folder(s.path.as_deref(), file)
+        || s.plugin_state.link_folders.iter().any(|folder| target.starts_with(absolute(folder)));
+    (!allowed).then(|| {
+        format!(
+            "{}: this file is outside the design's folder and its folder is not allowed yet; allow it (Preferences, General, linked file folders) and SolidCraft reads it with the importer",
+            file.display()
+        )
     })
 }
 
@@ -1426,7 +1454,14 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let (record, produced) = match &importer {
         Some(importer) => {
             let file = source.file().ok_or_else(|| bad(cmd, "an importer reads a file, not a `document`"))?;
+            // The caller named this file: Update Links may read it again in this session.
+            s.plugin_state.linked_files.insert(link_target(file));
             let made = crate::plugin::import_design_bytes(s, importer, &file.to_string_lossy(), &options)?;
+            // The plugin read the file itself: what it read is what the link's digest says.
+            let again = read_link(file, s.path.as_deref(), true)?;
+            if DesignLink::file_digest(&again) != DesignLink::file_digest(&bytes) {
+                return Err(bad(cmd, format!("{}: the file changed while it was being read; insert it again", file.display())));
+            }
             let record = solidcraft_doc::LinkImporter {
                 format: importer.id.clone(),
                 plugin: Some(importer.plugin_id.clone()),
@@ -1612,10 +1647,16 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The link keeps what it read, so opening this design again knows whether the file
         // changed while it was closed (#9739).
         let read = DesignLink::file_digest(&bytes);
-        if link.file_sha256.as_deref() != Some(read.as_str())
-            && let Some(kept) = s.doc_mut().links.get_mut(&comp)
-        {
+        let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
+        if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
             kept.file_sha256 = Some(read);
+        }
+        // A file an importer read that is the file it read is not read again: no plugin runs, so a
+        // plugin that is gone or turned off has nothing to fail at.
+        if link.importer.is_some() && same_bytes {
+            unchanged.push(cname);
+            read_components.push(comp);
+            continue;
         }
         // A link that has not recorded the properties it inherited (made before they were) is read again.
         let kept_faces = s
@@ -1729,6 +1770,11 @@ fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
+    if link.importer.is_some()
+        && let Some(why) = importer_file_refusal(s, &file)
+    {
+        return Err(why);
+    }
     let bytes = read_link(&file, s.path.as_deref(), link.importer.is_some()).map_err(|e| e.to_string())?;
     Ok(((old.clone(), records.clone()), file, bytes))
 }
@@ -1810,7 +1856,10 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
     if !link.is_design() {
-        return Err(bad(cmd, "STEP sources cannot be relinked to a design; break the link and insert the new STEP file"));
+        return Err(bad(
+            cmd,
+            "this is the link of an imported file (STEP or an importer plugin's), not of a design: break the link and insert the new file",
+        ));
     }
     if !matches!(s.doc.feature(link.feature), Some(f) if f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
         return Err(bad(cmd, "the linked bodies are gone; break the link or insert the design again"));
@@ -2011,7 +2060,13 @@ fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
         |format: &str| LinkSource { format: format.into(), plugin: None, version: None, available: None, installed_version: None, needs: None };
     match (&link.importer, &link.step_names) {
         (Some(i), _) => {
-            let Some(plugin) = &i.plugin else { return Some(plain(&i.format)) };
+            let Some(plugin) = &i.plugin else {
+                return Some(LinkSource {
+                    available: Some(false),
+                    needs: Some("this link's record names no importer plugin, so nothing can read its file again".into()),
+                    ..plain(&i.format)
+                });
+            };
             let status = crate::plugin::importer_status(s, plugin, &i.format);
             let needs = importer_needs(i, &status);
             let differs = status.installed_version.as_ref().is_some_and(|v| Some(v) != i.version.as_ref());
@@ -2072,6 +2127,22 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
+                None if l.importer.is_some() && importer_file_refusal(s, &file).is_some() => {
+                    // Not read, not even hashed: an importer's file outside the design's folder
+                    // waits for its folder to be allowed.
+                    LinkInfo::Looked {
+                        component: *c,
+                        configuration: l.configuration,
+                        importer,
+                        name,
+                        path,
+                        file: shown,
+                        found: None,
+                        changed: None,
+                        state: Some(LinkState::NotAllowed),
+                        reason: importer_file_refusal(s, &file),
+                    }
+                }
                 None => {
                     let found = solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref());
                     // Whether the file is no longer what this design last read (#9739): `null`

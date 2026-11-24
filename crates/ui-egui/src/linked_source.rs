@@ -1351,6 +1351,8 @@ mod tests {
         let linked = app.run("file.insert_step", json!({"path": source})).unwrap()["component"].as_u64().unwrap();
         let named = solidcraft_engine::doc::LinkImporter { format: "smp.convert".into(), ..Default::default() };
         app.session.doc_mut().links.get_mut(&linked).unwrap().importer = Some(named);
+        // Its folder is allowed, so that only the plugin's turn is left to wait for.
+        app.session.plugin_state.link_folders.push(folder.clone());
         crate::documents::open_tab(&mut app, Session::default()).unwrap();
         export(20);
         crate::documents::switch(&mut app, 0);
