@@ -150,7 +150,7 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 use super::boundary_moves::MoveBound;
-use super::clamped_sliver::{is_clamped_sliver, Span};
+use super::clamped_sliver::{is_clamped_sliver, restored_pole, Span};
 use super::knot_lines::{KnotLine, KnotLines};
 use super::p1::{
     remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -1621,7 +1621,7 @@ impl Surface {
                                             s_interval.max(),
                                             (uv_tol_x, uv_tol_y),
                                             approx_tol_3d,
-                                        )
+                                        )?
                                         .is_some()
                                     }
                                     _ => true,
@@ -1845,6 +1845,12 @@ impl Surface {
                         // it is proved within the tolerance of the curve; see
                         // `clamped_sliver`)
                         let at_trace_end = end.t >= s_interval.max();
+                        // the end's pole flag is the saved point's where the end was
+                        // restored from the stack: the restore takes its parameter and UV
+                        // point but leaves the flag of the last point dropped
+                        // (`restored_pole`)
+                        let mut gate_end = end;
+                        gate_end.on_pole = restored_pole(&end, &saved_end);
                         let sliver = !preserve_uv
                             && move_bound.is_none()
                             && (knots.is_empty() != at_trace_end)
@@ -1853,7 +1859,7 @@ impl Surface {
                                 curve,
                                 &s_uv_domain,
                                 &start,
-                                &end,
+                                &gate_end,
                                 uv_tol_x,
                                 uv_tol_y,
                                 approx_tol_3d,
@@ -1879,7 +1885,7 @@ impl Surface {
                                     end.t,
                                     (uv_tol_x, uv_tol_y),
                                     approx_tol_3d,
-                                )
+                                )?
                             }
                             _ => None,
                         };
@@ -1932,7 +1938,7 @@ impl Surface {
                                             end.t,
                                             (uv_tol_x, uv_tol_y),
                                             approx_tol_3d,
-                                        )
+                                        )?
                                     } else {
                                         None
                                     };
