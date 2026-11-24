@@ -1,0 +1,491 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 28.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                -12.9,
+                9.0,
+                -14.0
+              ],
+              "start": [
+                -5.25761655479867,
+                28.105958636951645,
+                -14.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                12.9,
+                9.0,
+                -14.0
+              ],
+              "start": [
+                -12.9,
+                9.0,
+                -14.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.54238344520141,
+                28.105958636951637,
+                -14.0
+              ],
+              "start": [
+                12.9,
+                9.0,
+                -14.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                15.8999999899725,
+                29.962912016715624,
+                -14.0
+              ],
+              "end": -0.19379313632652942,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.3805063766801446
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -4.9935959858909,
+                29.0,
+                -14.0
+              ],
+              "start": [
+                20.806404014109184,
+                29.0,
+                -14.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -9.900000010027586,
+                29.962912016715613,
+                -14.0
+              ],
+              "end": 0.38050637668014076,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.19379313632652723
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                20.806404014109184,
+                29.0,
+                -10.0
+              ],
+              "start": [
+                -4.9935959858909,
+                29.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                15.8999999899725,
+                29.962912016715624,
+                -10.0
+              ],
+              "end": 0.0,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.19379313632652942
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.8999999899725,
+                40.0,
+                -10.0
+              ],
+              "start": [
+                20.8999999899725,
+                29.962912016715624,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -4.900000010027586,
+                40.0,
+                -10.0
+              ],
+              "start": [
+                20.8999999899725,
+                40.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -4.900000010027586,
+                29.962912016715613,
+                -10.0
+              ],
+              "start": [
+                -4.900000010027586,
+                40.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                -9.900000010027586,
+                29.962912016715613,
+                -10.0
+              ],
+              "end": 0.19379313632652723,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b10",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  -4.9935959858909,
+                  29.0
+                ],
+                [
+                  10.0,
+                  20.806404014109184,
+                  29.0
+                ]
+              ],
+              "index": 22
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              7.906404014109142,
+              29.0
+            ]
+          ],
+          "tolerance": 2.6877452425388886
+        },
+        "kind": "round",
+        "sizes": [
+          1.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "report-round-inside-corner-ending-on-coves",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "Profile (cove-ended trapezoid, 25.8 wide at every height, area 516) extruded 28: V = 14448; an upright on its top, the same coves carried up to its front and back faces, 25.8 wide at every height from 29 to 40 and extruded 20 (x = -10 to 10), adds 25.8 x 11 x 20 = 5676, V0 = 20124. The 1 mm round of the inside corner at x = 10, z = 29 fills the square corner less the quarter disc along the ledge's whole 25.8, ending flush with the ledge's ends: +25.8 x (1 - pi/4) = 5.536727384346, V = 20129.536727384346.",
+    "source": "analytic",
+    "sources": [
+      "report"
+    ],
+    "volume_mm3": 20129.536727384348,
+    "what": "a 1 mm round of the inside corner where an upright meets a ledge whose ends fall away into narrow coves runs the ledge's whole length"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 39,
+      "faces": 15,
+      "vertices": 26
+    }
+  },
+  "records": "report-round-inside-corner-ending-on-coves.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b17"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4678.636553971725,
+      "body_count": 1,
+      "edges": 39,
+      "faces": 15,
+      "vertices": 26,
+      "volume_mm3": 20129.536727384377
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "report"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 1 mm round of the inside corner where an upright meets a ledge whose ends fall away into narrow coves runs the ledge's whole length",
+  "why_not": []
+}

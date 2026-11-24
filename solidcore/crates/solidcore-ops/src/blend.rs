@@ -1798,11 +1798,50 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
+    let blended = blend_session(body, order, kind, edges, &each, setbacks, corners, options);
+    match blended {
+        // (not upstream) An equal chamfer or a constant round the kernel refuses as too large
+        // for a face beside an edge or fails to build: where every picked edge is straight
+        // between flat faces and the part falls away past its ends, the blend is carried on
+        // past them until it leaves the part ([`blend_running_out`]).
+        Err(
+            refused @ (Error::NoRoom
+            | Error::TooLarge { .. }
+            | Error::Status(_)
+            | Error::BlendFailed { .. }),
+        ) if matches!(kind, Blend::Chamfer | Blend::Round) && setbacks.is_empty() => {
+            // a run-out that cannot be built (`body` untouched) leaves the kernel's refusal,
+            // which says what to change, the answer
+            match blend_running_out(body, order, kind, edges, &each) {
+                Ok(Some(made)) => Ok(Blended {
+                    dropped: vec![false; edges.len()],
+                    holes: Vec::new(),
+                    made,
+                }),
+                Ok(None) | Err(_) => Err(refused),
+            }
+        }
+        other => other,
+    }
+}
+
+/// [`blend_impl`]'s kernel session on `body`.
+#[allow(clippy::too_many_arguments)]
+fn blend_session(
+    body: &Body,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    each: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+    options: BlendOptions,
+) -> Result<Blended> {
     with_body("blend", body, |k, b| {
         // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
         // this blend, whatever the caller had it at, and put back after
         let outer = k.blend_face_log.replace(BlendFaceLog::default());
-        let ran = blend_on_body(k, b, order, kind, edges, &each, setbacks, corners, options);
+        let ran = blend_on_body(k, b, order, kind, edges, each, setbacks, corners, options);
         let ours = std::mem::replace(&mut k.blend_face_log, outer);
         let made: HashSet<FaceId> = ours
             .iter()
@@ -2748,6 +2787,282 @@ fn carried_face_indices(
         });
     }
     Ok(Ok(out))
+}
+
+/// Not upstream: the equal chamfer or the constant round (`kind`) of `body`'s edges `edges`
+/// (through `order`, or the body's own edge order), `each` its distance back along both faces
+/// or its radius, built by carrying the blend on past the edges' ends until it leaves the part,
+/// for a blend the kernel refuses or fails to build there (an edge ending on a narrow round or
+/// cove the blend is wider than: the blend runs on through it and the face past it). The
+/// kernel plans each edge's run-out ([`solidcore::blend::run_out::plan`]: the edge straight
+/// between flat faces, no other concave edge at its ends, no two edges' blends in reach of
+/// each other) and its section is carried along the edge's line as a prism as long as the body
+/// each way. On a convex edge, of the body's material within the prism, the pieces that hold
+/// the plan's point inside the blend are cut away, any other piece the prism meets further
+/// along its line kept ([`cut_running_out`]); on a concave edge the like pieces of the air
+/// within it are added, as far as one of the edge's faces, moved out, stands behind them
+/// ([`fill_running_out`]). `body` takes the result, and the faces the blends made (those
+/// holding the middle of each blend's face at its edge's middle) are returned by index in its
+/// native face list. `None`, `body` untouched, where there is no plan or a step gives nothing.
+///
+/// # Errors
+/// The kernel's errors from the queries, the prisms, the booleans and the classification.
+fn blend_running_out(
+    body: &Body,
+    order: Option<&crate::Order>,
+    kind: Blend,
+    edges: &[usize],
+    each: &[f64],
+) -> Result<Option<Vec<usize>>> {
+    use solidcore::blend::run_out::{plan, RunOutKind};
+    let kind = match kind {
+        Blend::Chamfer => RunOutKind::Chamfer,
+        Blend::Round => RunOutKind::Round,
+        _ => return Ok(None),
+    };
+    let plans = with_body("blend_running_out", body, |k, b| {
+        let edge_order = order.map_or_else(|| b.edge_list().to_vec(), |o| o.edges.clone());
+        let mut picked = Vec::with_capacity(edges.len());
+        for &i in edges {
+            match edge_order.get(i) {
+                Some(&e) if b.edge_list().contains(&e) => picked.push(e),
+                _ => return Ok(Ok(None)),
+            }
+        }
+        Ok(Ok::<_, Error>(plan(k, b, &picked, kind, each)?))
+    })??;
+    let Some(plans) = plans else {
+        return Ok(None);
+    };
+    let mut out = body.copy()?;
+    for p in &plans {
+        let prism = Prism::of(p);
+        let blended = if p.concave {
+            fill_running_out(&out, &prism, p)?
+        } else {
+            cut_running_out(&out, &prism, p)?
+        };
+        let Some(blended) = blended else {
+            return Ok(None);
+        };
+        out = blended;
+    }
+    // the faces holding the middle of each blend's face
+    let made: Vec<usize> = with_body("blend_running_out", &out, |k, b| {
+        let mut made = Vec::new();
+        for (i, &f) in b.face_list().to_vec().iter().enumerate() {
+            for p in &plans {
+                if solidcore::query::face::p1::point_on_face(k, b, f, p.face_point, p.tolerance)?
+                    .is_some()
+                {
+                    made.push(i);
+                    break;
+                }
+            }
+        }
+        Ok(Ok::<_, Error>(made))
+    })??;
+    body.take_from(&out);
+    Ok(Some(made))
+}
+
+/// A run-out's section carried along its edge's line, as the record's planar region.
+struct Prism {
+    plane: solidcore_record::Plane,
+    section: solidcore_record::Loop2,
+    from: f64,
+    to: f64,
+}
+
+impl Prism {
+    /// The prism of run-out `p`.
+    fn of(p: &solidcore::blend::run_out::RunOut) -> Self {
+        use solidcore::blend::run_out::RunOutSection;
+        use solidcore_record::{Loop2, Seg2, Vec2};
+        let r = |v: Vec3| solidcore_record::Vec3::new(v.x, v.y, v.z);
+        let v2 = |p: [f64; 2]| Vec2::new(p[0], p[1]);
+        let section = match p.section {
+            RunOutSection::Triangle(corners) => Loop2::polygon(&corners.map(v2)),
+            RunOutSection::Round {
+                t0,
+                t1,
+                centre,
+                radius,
+                start,
+                sweep,
+                behind,
+            } => Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: v2(centre),
+                        radius,
+                        start,
+                        sweep,
+                    },
+                    Seg2::Line {
+                        a: v2(t1),
+                        b: v2(behind[0]),
+                    },
+                    Seg2::Line {
+                        a: v2(behind[0]),
+                        b: v2(behind[1]),
+                    },
+                    Seg2::Line {
+                        a: v2(behind[1]),
+                        b: v2(behind[2]),
+                    },
+                    Seg2::Line {
+                        a: v2(behind[2]),
+                        b: v2(t0),
+                    },
+                ],
+            },
+        };
+        Self {
+            plane: solidcore_record::Plane {
+                origin: r(p.origin),
+                x: r(p.x),
+                y: r(p.y),
+            },
+            section,
+            from: p.from,
+            to: p.to,
+        }
+    }
+
+    /// The prism as a body.
+    ///
+    /// # Errors
+    /// The kernel's errors from the extrusion.
+    fn body(&self) -> Result<Body> {
+        crate::prism::extrude_planar_regions(
+            &self.plane,
+            &[solidcore_record::Region2 {
+                outer: self.section.clone(),
+                holes: Vec::new(),
+            }],
+            self.from,
+            self.to,
+        )
+    }
+}
+
+/// The pieces of `within` that hold `p`'s inside point, each as a body.
+///
+/// # Errors
+/// The kernel's errors from the record and the classification.
+fn blend_pieces(within: &Body, p: &solidcore::blend::run_out::RunOut) -> Result<Vec<Body>> {
+    let inside = [p.inside.x, p.inside.y, p.inside.z];
+    let (record, _) = within.to_record()?;
+    let mut pieces = Vec::new();
+    for region in record.material_regions() {
+        let part = record.part(&[region]).map_err(|_| Error::Exception)?;
+        let (piece, _) = Body::from_record(&part.brep, true)?;
+        if piece.classify_point(inside)? == crate::PointClass::Inside {
+            pieces.push(piece);
+        }
+    }
+    Ok(pieces)
+}
+
+/// [`blend_running_out`]'s cut of one convex edge: `out` less the pieces of its material
+/// within `prism` that hold the run-out `p`'s inside point. `None` where there is no such
+/// piece or a boolean gives nothing.
+///
+/// # Errors
+/// The kernel's errors from the prism, the booleans and the classification.
+fn cut_running_out(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    let within = crate::boolean::boolean(out.copy()?, prism.body()?, crate::BooleanOp::Intersect)?;
+    let Some(within) = within else {
+        return Ok(None);
+    };
+    let pieces = blend_pieces(&within, p)?;
+    if pieces.is_empty() {
+        return Ok(None);
+    }
+    let mut result = out.copy()?;
+    for piece in pieces {
+        let Some(cut) = crate::boolean::boolean(result, piece, crate::BooleanOp::Subtract)? else {
+            return Ok(None);
+        };
+        result = cut;
+    }
+    Ok(Some(result))
+}
+
+/// [`blend_running_out`]'s fill of one concave edge: `out` with the pieces of the air within
+/// `prism` that hold the run-out `p`'s inside point added, the air counted only where one of
+/// the edge's two faces stands behind it: within the part as it is with that face (the one
+/// holding the plan's point on it) moved the section's reach out along its normal, the faces
+/// around it extended or trimmed to meet it ([`offset_face_at`]). The fill so ends where the
+/// faces beside the edge's ends, carried on, close it. `None` where there is no such piece,
+/// neither face could be moved, or a boolean gives nothing.
+///
+/// # Errors
+/// The kernel's errors from the prism, the booleans and the classification.
+fn fill_running_out(
+    out: &Body,
+    prism: &Prism,
+    p: &solidcore::blend::run_out::RunOut,
+) -> Result<Option<Body>> {
+    let mut fill: Option<Body> = None;
+    for at in p.backs {
+        let Some(backed) = offset_face_at(out, at, p.reach, p.tolerance)? else {
+            continue;
+        };
+        let within = crate::boolean::boolean(prism.body()?, backed, crate::BooleanOp::Intersect)?;
+        let Some(within) = within else {
+            continue;
+        };
+        fill = match fill {
+            None => Some(within),
+            Some(f) => crate::boolean::boolean(f, within, crate::BooleanOp::Union)?,
+        };
+    }
+    let Some(fill) = fill else {
+        return Ok(None);
+    };
+    let pieces = blend_pieces(&fill, p)?;
+    if pieces.is_empty() {
+        return Ok(None);
+    }
+    let mut result = out.copy()?;
+    for piece in pieces {
+        let Some(joined) = crate::boolean::boolean(result, piece, crate::BooleanOp::Union)? else {
+            return Ok(None);
+        };
+        result = joined;
+    }
+    Ok(Some(result))
+}
+
+/// A copy of `body` with its face through `at` (within `tol`) moved `distance` out along its
+/// normal, the faces around it extended or trimmed to meet it: `None` where no face holds `at`
+/// or the kernel does not make the move.
+///
+/// # Errors
+/// The kernel's errors from the copy and the face lookups.
+fn offset_face_at(body: &Body, at: Vec3, distance: f64, tol: f64) -> Result<Option<Body>> {
+    let moved = body.copy()?;
+    let made = with_body("blend_running_out", &moved, |k, b| {
+        let mut found = None;
+        for &f in &b.face_list().to_vec() {
+            if solidcore::query::face::p1::point_on_face(k, b, f, at, tol)?.is_some() {
+                found = Some(f);
+                break;
+            }
+        }
+        let Some(f) = found else {
+            return Ok(Ok::<_, Error>(false));
+        };
+        let mut exec = solidcore::offset::offset_faces::OffsetFacesExecutive::new();
+        Ok(Ok(exec.offset_faces(k, b, &[f], distance).is_ok()))
+    })??;
+    Ok(made.then_some(moved))
 }
 
 /// The tangent chain of the edges of `body` at record indices `edges` (through `order`, its
