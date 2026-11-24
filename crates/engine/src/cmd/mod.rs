@@ -63,42 +63,100 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
-pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
-pub(crate) use browser::{find_kinds, find_text};
+pub(crate) use bom::SAME_AS_COMPONENT;
+pub(crate) use bom::occurrence_bom_type;
+pub(crate) use bom::record_item_numbers;
+pub(crate) use browser::find_kinds;
+pub(crate) use browser::find_text;
 pub(crate) use component::follow_expressed_moves;
-pub(crate) use component::{path_ids, refuse_filled_virtual};
+pub(crate) use component::path_ids;
+pub(crate) use component::refuse_filled_virtual;
 pub(crate) use config::put_row;
+pub(crate) use construct::GeoForm;
+pub(crate) use construct::GeoFormError;
+pub(crate) use construct::REF as GEO_REF_FORMS;
+pub(crate) use construct::SKETCH_PART;
+pub(crate) use construct::geo_form;
+pub(crate) use construct::is_model_axis;
+pub(crate) use construct::picked_plane;
 pub use construct::picked_plane_refs;
-pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
-pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
-pub use design_link::{LinkProblem, LinkState};
+pub use construct_auto::construct_method;
+pub use construct_auto::construct_methods;
+pub use construct_auto::is_construct_tool;
+pub use design_link::LinkProblem;
+pub use design_link::LinkState;
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
-pub(crate) use face::{FaceRefForm, face_ref_form};
+pub(crate) use edit::pick_mode;
+pub(crate) use face::FaceRefForm;
+pub(crate) use face::face_ref_form;
+pub(crate) use features::EdgeRefForm;
+pub(crate) use features::PLANE_FORMS;
+pub use features::auto_operation;
+pub(crate) use features::axis_dir_form;
+pub(crate) use features::axis_expr_form;
+pub(crate) use features::axis_line_object;
+pub use features::clearance_diameter;
+pub use features::clearance_sizes;
+pub(crate) use features::edge_ref_form;
+pub(crate) use features::explicit_plane;
+pub use features::extrude_reach;
+pub use features::head_counterbore;
+pub use features::head_countersink;
+pub use features::large_thread_size;
 pub(crate) use features::move_matrix_params;
+pub(crate) use features::plane_name_problem;
 pub(crate) use features::profiles as feature_profiles;
-pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
-pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, large_thread_size, shown_scope};
-pub(crate) use features::{rail_fit_form, sweep_orientation};
-pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
+pub(crate) use features::rail_fit_form;
+pub use features::shown_scope;
+pub(crate) use features::sketch_key;
+pub(crate) use features::sweep_orientation;
+pub(crate) use features_more::MAX_SKETCH_ID;
+pub(crate) use features_more::SidePoint;
+pub(crate) use features_more::SketchFrameId;
+pub(crate) use features_more::axes_mask;
+pub(crate) use features_more::side_point;
+pub(crate) use features_more::sketch_frame_id;
+pub(crate) use file::GEOMETRY_MESSAGE;
+pub(crate) use file::NAMES_MESSAGE;
+pub(crate) use file::READER_MESSAGE;
+pub(crate) use file::UP_MESSAGE;
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
+pub(crate) use file::names_form;
 pub use file::open_steps::OpenSteps;
+pub use file::runs_plugin_exporter;
 pub use file::runs_plugin_importer;
+pub(crate) use file::up_form;
+pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
-pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
-pub use join_pieces::{Addition, addition};
+pub use join_pieces::Addition;
+pub use join_pieces::addition;
+pub use joints::MAX_REACH_JOINTS;
+pub use joints::posed_joints;
+pub use joints::reach_from;
+pub use joints::reach_preview;
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
-pub use sketch_construction::{
-    ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
-    construction_segment,
-};
-pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
+pub(crate) use sketch::finish_model_edit;
+pub use sketch_construction::ConstructionLine;
+pub use sketch_construction::construction_line_choice;
+pub use sketch_construction::construction_line_mode;
+pub use sketch_construction::construction_line_solutions;
+pub use sketch_construction::construction_line_takes_length;
+pub use sketch_construction::construction_segment;
+pub use sketch_create::tangent_arc_preview;
+pub use sketch_create::tangent_arc_starts_at;
 pub use sketch_import::drawing_import_command;
-pub use sketch_modify::{TrimHover, break_shared_end, extend_arc_preview, extend_end_at, extend_preview, trim_hover, trim_piece};
+pub use sketch_modify::TrimHover;
+pub use sketch_modify::break_shared_end;
+pub use sketch_modify::extend_arc_preview;
+pub use sketch_modify::extend_end_at;
+pub use sketch_modify::extend_preview;
+pub use sketch_modify::trim_hover;
+pub use sketch_modify::trim_piece;
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
@@ -106,10 +164,11 @@ mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
+mod documents;
 mod file;
 mod file_library;
 pub(crate) use file_library::uses_file as file_library_uses_file;
-mod frame;
+pub mod frame;
 mod frame_end_cap;
 mod frame_rotate_member;
 pub(crate) mod inspect;
@@ -126,9 +185,12 @@ mod mesh;
 mod metadata;
 mod model_selection;
 pub(crate) mod motion;
+mod motion_simulate;
 mod notes;
 mod parts;
 mod plugin;
+#[cfg(test)]
+pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
@@ -136,10 +198,15 @@ mod script;
 mod section;
 mod selection;
 pub mod settings;
-pub(crate) use clipboard::{component_path_form, copy_keys};
-pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance, with_exprs as matrix_with_exprs};
-pub(crate) use component::{base_transform, move_vector};
-pub(crate) use measure_sel::{measure_items, shape_of};
+pub(crate) use clipboard::component_path_form;
+pub(crate) use clipboard::copy_keys;
+pub(crate) use component::base_transform;
+pub(crate) use component::matrix::rigid as rigid_matrix;
+pub(crate) use component::matrix::tolerance as matrix_tolerance;
+pub(crate) use component::matrix::with_exprs as matrix_with_exprs;
+pub(crate) use component::move_vector;
+pub(crate) use measure_sel::measure_items;
+pub(crate) use measure_sel::shape_of;
 pub(crate) use measure_shape::Shape;
 pub(crate) use point_cloud::filters as point_cloud_filters;
 pub(crate) use script::step_params;
@@ -151,26 +218,51 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
-pub(crate) use render::{
-    PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params, render_form_refusal, render_saved_job_refusal,
-    render_started,
-};
+pub(crate) use render::PreparedCapture;
+pub(crate) use render::prepare_capture_with_metadata;
+pub(crate) use render::read_render_request;
+pub(crate) use render::render_cancel_params;
+pub(crate) use render::render_form_refusal;
+pub(crate) use render::render_saved_job_refusal;
+pub(crate) use render::render_started;
 pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
-pub(crate) use sheet::{
-    DxfCurves, DxfText, FlangeType, ThenStep, bend_table_format, dxf_curves, dxf_layers, dxf_note_height, dxf_text, flange_edge, flange_edge_list,
-    flange_position, flange_type, flat_reply, fold_points, fold_position, fold_stays, material_side, perforation_pattern, sheet_points,
-    sheet_rule_name, then_list,
-};
+pub(crate) use sheet::DxfCurves;
+pub(crate) use sheet::DxfText;
+pub(crate) use sheet::FlangeType;
+pub(crate) use sheet::ThenStep;
+pub(crate) use sheet::bend_table_format;
+pub(crate) use sheet::dxf_curves;
+pub(crate) use sheet::dxf_layers;
+pub(crate) use sheet::dxf_note_height;
+pub(crate) use sheet::dxf_text;
+pub(crate) use sheet::flange_edge;
+pub(crate) use sheet::flange_edge_list;
+pub(crate) use sheet::flange_position;
+pub(crate) use sheet::flange_type;
+pub(crate) use sheet::flat_reply;
+pub(crate) use sheet::fold_points;
+pub(crate) use sheet::fold_position;
+pub(crate) use sheet::fold_stays;
+pub(crate) use sheet::material_side;
+pub(crate) use sheet::perforation_pattern;
+pub(crate) use sheet::sheet_points;
+pub(crate) use sheet::sheet_rule_name;
+pub(crate) use sheet::then_list;
 mod silhouette;
 mod sketch;
+pub(crate) use sketch::CORNER_MUST;
+pub(crate) use sketch::PLANE_REF_FORMS;
+pub use sketch::SNAP_PREFIXES;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
-pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form, point_arg_form};
+pub(crate) use sketch::custom_plane_form;
+pub(crate) use sketch::is_snap;
+pub(crate) use sketch::point_arg_form;
 mod canvas_sketch;
 mod canvas_svg;
 mod sketch_3d;
@@ -178,8 +270,10 @@ mod sketch_canvas;
 pub mod sketch_clipboard;
 mod sketch_constraints;
 mod sketch_construction;
+mod sketch_corner_freeform;
 mod sketch_create;
-pub(crate) use sketch_create::{AT_MUST, MAX_TEXT_EDITS};
+pub(crate) use sketch_create::AT_MUST;
+pub(crate) use sketch_create::MAX_TEXT_EDITS;
 mod sketch_divide;
 mod sketch_ends;
 mod sketch_equation;
@@ -188,7 +282,10 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
-pub(crate) use sketch_project::{MAX_PROJECTED_ENTITIES, RefForm, model_ref, ref_form};
+pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
+pub(crate) use sketch_project::RefForm;
+pub(crate) use sketch_project::model_ref;
+pub(crate) use sketch_project::ref_form;
 mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
@@ -196,6 +293,7 @@ mod surface;
 mod surface_analysis;
 mod surface_boundary;
 mod surface_match;
+mod tab_layouts;
 mod tab_views;
 mod view_dxf;
 mod view_navigation;
@@ -247,6 +345,8 @@ pub struct CommandSpec {
     pub enabled: Enabled,
     pub run: Run,
     pub undoable: bool,
+    /// Reviewed edit entry semantics, independent of undoability or authority.
+    pub edit_start: crate::EditStart,
     /// Command authority, independent of undo history. New commands require edit authority.
     pub effect: craft_plugin::Effect,
     /// What runs instead of `run` when the command is given `live: true` (a frame of an
@@ -282,6 +382,7 @@ impl CommandSpec {
             enabled: always,
             run,
             undoable: true,
+            edit_start: crate::EditStart::Preserve,
             effect: craft_plugin::Effect::Edit,
             live: None,
             reads_model: true,
@@ -292,6 +393,25 @@ impl CommandSpec {
             part: Part::Model,
         }
     }
+    /// This registered operation starts a new edit and commits any open sketch first.
+    pub const fn begins_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::Begin;
+        self
+    }
+    /// Mixed setters use an explicit reviewed parameter predicate for edit entry.
+    pub const fn begins_edit_when(mut self, predicate: fn(&Value) -> bool) -> Self {
+        self.edit_start = crate::EditStart::Conditional(predicate);
+        self
+    }
+    /// Whether this request enters an edit; toolbar/effect metadata never decides this.
+    pub fn starts_edit(&self, params: &Value) -> bool {
+        self.edit_start.starts(params)
+    }
+    pub(crate) const fn selection_edit(mut self) -> Self {
+        self.edit_start = crate::EditStart::SelectionDelete;
+        self
+    }
+
     /// Not built yet; `issue` tracks building it.
     pub const fn planned(mut self, issue: &'static str) -> Self {
         self.planned = Some(issue);
@@ -376,7 +496,10 @@ impl CommandSpec {
     /// Whether the command can run in `s` now: on the part open, and enabled. The one check
     /// running a command, running it inside another and listing it make.
     pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
-        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+        if let Some(entry) = &s.active_sheet_sketch
+            && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete")
+            && !(entry.view.is_some() && matches!(self.id, "drawing.open" | "drawing.close"))
+        {
             return Err("finish or cancel the sheet sketch before switching drawings".into());
         }
         // Nothing a drawing does holds the model's commands: an open drawing, or a sheet sketch
@@ -396,13 +519,11 @@ impl CommandSpec {
     /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
-        let r = (self.run)(s, p);
-        // A parameter error that did not name the command names it here (see `Session::execute`).
-        match r {
-            Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
-            other => other,
-        }
+        s.run_nested_edit(self, p, false)
+    }
+    /// Rebuild/continue an existing operation without entering another edit mode.
+    pub(crate) fn run_nested_continuing(&self, s: &mut Session, p: &Value) -> Result<Value> {
+        s.run_nested_edit(self, p, true)
     }
     /// The refusal this command gives when it is not available in this session: none when it
     /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
@@ -463,6 +584,11 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     }
 }
 
+/// Lifecycle actions address the one active edit even when its owning tile is not focused.
+pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
+    if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
+}
+
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
 /// geometry under the cursor while a sketch is open.
 pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
@@ -511,6 +637,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
@@ -540,7 +667,9 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(libraries::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
+    v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(documents::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
@@ -605,12 +734,15 @@ pub fn normalize_command_id(id: &str) -> Option<&str> {
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
 /// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
-/// (`file.open` → `doc.open`). Empty when nothing is close.
+/// (`file.open` → `doc.open`). The command an MCP tool of that name stands for comes first
+/// (`set_parameter` → `parameters.change`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
     let id = id.to_ascii_lowercase();
     if id.len() > 64 {
         return String::new();
     }
+    let tool_name = id.replace(['-', ' '], "_");
+    let tool = crate::agent_tools::tool_command(&tool_name);
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
     let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
@@ -621,7 +753,11 @@ pub(crate) fn did_you_mean(id: &str) -> String {
             (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
+    if let Some(c) = tool {
+        found.push((false, false, 0, c));
+    }
     found.sort();
+    found.dedup_by_key(|(_, _, _, c)| *c);
     let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),

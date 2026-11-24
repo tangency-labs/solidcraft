@@ -46,7 +46,7 @@ pub const TOGGLES: [(&str, &str); 10] = [
 /// Does the sketch hold any geometry of its own: a drawn curve or a 3D curve? Projected curves
 /// and the origin are held in place and do not count.
 pub fn has_geometry(sketch: &solidcraft_engine::sketch::Sketch) -> bool {
-    !sketch.curves.is_empty() || !sketch.wires.is_empty()
+    sketch.curves.iter().any(|c| c.link.is_none()) || sketch.wires.iter().any(|w| w.link.is_none())
 }
 
 /// Nothing the user added: no curve, 3D curve, constraint or dimension, pattern, projection,
@@ -93,7 +93,7 @@ pub fn set_mode(app: &mut SolveApp, m: u8) {
         3 => "Infinite mode: new lines are infinite construction lines",
         _ => "Normal mode",
     };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// X / the toolbar's Construction: convert the selected curves, or with nothing selected
@@ -249,7 +249,8 @@ const LINE_TYPES: [(&str, &str, &str); 4] = [
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
+    crate::workspace::tool_receives_input(app)
+        && app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Is the Canvas or Decal tool running? The palette then shows the tool's frame mode (#18405),
@@ -262,7 +263,7 @@ pub fn image_tool(app: &SolveApp) -> bool {
 fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
     let spec = solidcraft_engine::find_command(app.tool.as_ref()?.cmd)?;
     Some(crate::panel_runtime::PanelPresentation {
-        title: app.tr_label(spec.label).to_owned(),
+        title: app.tr_command(spec.id, spec.label).to_owned(),
         icon: spec.icon.into(),
         status: None,
         attention: false,
@@ -354,8 +355,9 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     if !editing(app) {
         return image_tool_presentation(app);
     }
+    let active = app.session.active_sketch?;
     let world = crate::open_meshing::session_world(&app.session);
-    let sketch = world.sketch(app.session.active_sketch?)?;
+    let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
     let title =
         if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
@@ -378,8 +380,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let (opts, remaining, solved, total, geometry, open_ends, untied_ends) = {
+        let Some(active) = app.session.active_sketch else { return };
         let st = crate::open_meshing::session_world(&app.session);
-        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        let Some(ss) = st.sketch(active) else { return };
         (
             ss.sketch.view.clone(),
             ss.report.shown_dof(),
@@ -469,7 +472,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|spec| crate::ui_kit::ToolChoice {
                         key: spec.id,
                         icon: spec.icon,
-                        label: app.tr_label(spec.label),
+                        label: app.tr_command(spec.id, spec.label),
                         enabled: spec.info(&app.session).enabled,
                     })
                     .collect();
@@ -1039,7 +1042,7 @@ mod tests {
         h.app.start("sketch.rectangle.two_point");
         h.settle();
         let rect = crate::sketch_families::family("sketch.rectangle.two_point").unwrap();
-        assert_eq!(rect.commands.len(), 4);
+        assert_eq!(rect.commands.len(), 5);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
     }
@@ -1130,6 +1133,26 @@ mod tests {
         assert!(h.widget("Fully constrained").is_none());
         assert_eq!(crate::scenario::count_of("sketch_palette:constrained_fraction"), Some(0.0));
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,5]})).unwrap();
+        h.settle();
+        assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
+    }
+
+    /// A new sketch on a face holds only the face's projected outline, which is fixed: it says
+    /// there is no geometry yet rather than "Fully constrained", until a curve is drawn.
+    #[test]
+    fn a_new_sketch_on_a_face_is_not_reported_fully_constrained() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+        h.settle();
+        let line = |h: &crate::scenario::Harness| {
+            let st = h.app.session.world_state().unwrap();
+            let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
+            assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()), "the face outline is projected");
+            dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
+        };
+        assert_eq!(line(&h), "No geometry yet");
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[15,10]})).unwrap();
         h.settle();
         assert_ne!(line(&h), "No geometry yet", "a drawn rectangle is geometry");
     }

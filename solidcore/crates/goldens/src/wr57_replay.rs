@@ -46,9 +46,12 @@
 //! knot line) moved 14 of the 16 `blend.fillet_executive_p3` rows: six past the goldens
 //! comparator (re-blessed, each moved entry classified against a certified enclosure in
 //! `tests/mass_knot_line_moved_rows_are_classified.rs`) and eight in their last mass bits,
-//! under it (their committed lines stay main's). Their entries are deleted; the two left,
-//! `stubs3-union-overhang-corner-edges15-22-r1` and `stubs4-degenerate-brepForFillet2-e7-r0.5`,
-//! still replay.
+//! under it (their committed lines stay main's). Their entries are deleted; of the two left,
+//! `stubs3-union-overhang-corner-edges15-22-r1` replayed until the fillet's new vertices were
+//! placed on their faces' corners after its merge (#13976), which adds one call to its sequence
+//! (16 where main's tape has 15), leaving its row unchanged; its entry is deleted too. #18162's lazy UV trim raise
+//! re-blessed `stubs4-degenerate-brepForFillet2-e7-r0.5` (its edge tolerances, each
+//! certified in `certify::trim_tolerance`), so its entry is deleted too.
 //!
 //! The WR-493 retirement (a found sphere keeps the file NURB it tested) changes the
 //! surfaces the 28 sphere rows of `blend.fillet_standard_solver_p1`, `topology.edgeuse_p1`,
@@ -119,7 +122,8 @@ fn with_hook<R>(hook: impl FnMut(Call<'_>) -> Answer + Send + 'static, f: impl F
 pub(super) enum Ans {
     /// The value's words.
     Ok(u64, u64, u64),
-    /// The error.
+    /// The error. No row left on the tape has one; a tape recorded again may.
+    #[allow(dead_code, reason = "no taped row answers an error now")]
     Err(fn() -> SolidError),
 }
 
@@ -391,7 +395,6 @@ macro_rules! replay_tests {
 }
 
 replay_tests! {
-    fillet_executive_p3_rows_move_only_through_the_wr57_answers: "blend.fillet_executive_p3", 2, cert::EXECUTIVE_P3;
     heal_data_p3_rows_move_only_through_the_wr57_answers: "heal.heal_data_p3", 5, cert::HEAL_DATA_P3;
     surface_drop_lib_p3_rows_move_only_through_the_wr57_answers: "intersect.surface_drop_lib_p3", 1, cert::DROP_LIB_P3;
     api_queries_rows_move_only_through_the_wr57_answers: "query.api_queries", 1, cert::API_QUERIES;
@@ -410,7 +413,7 @@ type Loaded = (Box<dyn UnitDiff>, BTreeMap<String, Case>);
 /// call later also leaves main's row. Both were measured on #17856's r7 tape.
 /// That tape had 52 rows; the 14 `fillet_executive_p3` rows the mass integrator's
 /// knot-line split moved, and the 28 sphere rows the WR-493 retirement moved, are dropped
-/// since, as the module doc says.
+/// since, as the module doc says, and the one #18162 re-blessed.
 #[test]
 fn without_the_tape_no_row_is_mains() {
     let mut by_unit: BTreeMap<&str, Loaded> = BTreeMap::new();
@@ -434,7 +437,7 @@ fn without_the_tape_no_row_is_mains() {
         "(tape of main {MAIN_COMMIT})\n{}",
         failures.join("\n")
     );
-    assert_eq!(DATA.len(), 9);
+    assert_eq!(DATA.len(), 7);
 }
 
 /// Main's error from its `Debug` text: a surface routine's `Failed` phrase (the only kind

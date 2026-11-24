@@ -117,10 +117,12 @@ pipe
   remap_bodies: targets[0]
 frame_member
   sketches: [1]
-  remap_refs: path_sketch
+  remap_refs: pairs[0].a.name, path_sketch
 frame_member_sketch
   sketches: [1, 2]
   remap_refs: path_sketch, profile.sketch
+frame_plate
+  remap_refs: member.feature, plane.base.base.feature
 emboss
   sketches: [1]
   remap_refs: sketch
@@ -161,6 +163,10 @@ sheet_fold
   remap_refs: sketch
   remap_bodies: body
 sheet_path
+  sketches: [1]
+  remap_refs: sketch
+  remap_bodies: body
+sheet_tab
   sketches: [1]
   remap_refs: sketch
   remap_bodies: body
@@ -253,6 +259,8 @@ move
   remap_bodies: bodies[0]
 import
 mesh_convert
+  remap_bodies: body
+mesh_reduce
   remap_bodies: body
 mesh_import
 repair

@@ -751,7 +751,7 @@
 {"case":"primitive_4","deferred":null,"error":null,"ints":{"maps":[0,1,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[208.9528359082768,211.79288663615156,11828.912996741417]],"n":116}}}
 {"case":"primitive_5","deferred":null,"error":null,"ints":{"maps":[0,0,0,1,1,2]},"topology":null,"values":{"geometry":{"blocks":[[62.49701155510355,63.083116915673706,1435.1833907822406]],"n":44}}}
 {"case":"primitive_6","deferred":null,"error":null,"ints":{"maps":[0,0,0,1,2,1]},"topology":null,"values":{"geometry":{"blocks":[[99.97740005870044,109.04691847502339,2798.9151720479454]],"n":58}}}
-{"case":"primitive_7","deferred":null,"error":null,"ints":{"maps":[0,0,1,4,6,4]},"topology":null,"values":{"geometry":{"blocks":[[259.1595435657546,269.85625423175094,24696.15234239678]],"n":196}}}
+{"case":"primitive_7","deferred":null,"error":null,"ints":{"maps":[0,0,1,4,6,4]},"topology":null,"values":{"geometry":{"blocks":[[259.1595096062255,269.85622027222183,24696.150967035854]],"n":196}}}
 {"case":"primitive_8","deferred":null,"error":null,"ints":{"maps":[0,0,1,3,3,2]},"topology":null,"values":{"geometry":{"blocks":[[80.12483500481926,110.07485645308469,4475.654332769323]],"n":116}}}
 {"case":"primitive_9","deferred":null,"error":null,"ints":{"maps":[1001,0,1,0,0,0]},"topology":null,"values":{"geometry":[]}}
 {"case":"rotate_crossing","deferred":null,"error":null,"ints":{"maps":[1001,0,0]},"topology":null,"values":{}}

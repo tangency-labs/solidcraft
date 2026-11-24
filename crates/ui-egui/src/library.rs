@@ -88,6 +88,45 @@ impl ThumbnailSize {
     }
 }
 
+/// How the document browser lays out its entries; Grid is the original layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ViewMode {
+    #[default]
+    Grid,
+    ThumbnailList,
+    List,
+}
+
+impl ViewMode {
+    const ALL: [Self; 3] = [Self::Grid, Self::ThumbnailList, Self::List];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Grid => "library.view_grid",
+            Self::ThumbnailList => "library.view_thumbnail_list",
+            Self::List => "library.view_list",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::ThumbnailList => "thumbnail_list",
+            Self::List => "list",
+        }
+    }
+
+    /// Columns, card width and row height for this view.
+    fn layout(self, size: ThumbnailSize, available: f32, gap: f32) -> (usize, f32, f32) {
+        match self {
+            Self::Grid => size.grid(available, gap),
+            Self::ThumbnailList => (1, available.max(1.0), 52.0),
+            Self::List => (1, available.max(1.0), 26.0),
+        }
+    }
+}
+
 #[derive(Default)]
 struct CardStatus {
     active: bool,
@@ -99,6 +138,8 @@ struct Entry {
     path: PathBuf,
     name: String,
     folder: bool,
+    /// Seconds since 1970 when the file was last modified; folders have none.
+    modified: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +163,7 @@ pub struct LibraryState {
     recent_roots: Vec<PathBuf>,
     pinned_roots: Vec<PathBuf>,
     highlights: BTreeMap<PathBuf, Highlight>,
+    view: ViewMode,
     current: PathBuf,
     search: String,
     focused: Option<bool>,
@@ -140,11 +182,12 @@ pub struct LibraryState {
 
 impl LibraryState {
     pub fn prefs(&self) -> Value {
-        json!({"root": self.root, "recent_roots": self.recent_roots, "pinned_roots": self.pinned_roots, "highlights": self.highlights})
+        json!({"root": self.root, "recent_roots": self.recent_roots, "pinned_roots": self.pinned_roots, "highlights": self.highlights, "view": self.view})
     }
 
     pub fn load(&mut self, value: Option<&Value>) {
         let Some(value) = value else { return };
+        self.view = value.get("view").and_then(|view| serde_json::from_value(view.clone()).ok()).unwrap_or_default();
         self.highlights.clear();
         if let Some(highlights) = value.get("highlights").and_then(Value::as_object) {
             for (path, color) in highlights.iter().take(MAX_HIGHLIGHTS) {
@@ -426,7 +469,13 @@ fn read_folder(root: &Path, current: &Path) -> Result<Listing, String> {
             } else {
                 None
             };
-            entries.push((Entry { path, name: entry.file_name().to_string_lossy().into_owned(), folder: kind.is_dir() }, newest));
+            let modified = result
+                .identities
+                .get(&path)
+                .and_then(|stamp| stamp.modified)
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|time| time.as_secs());
+            entries.push((Entry { path, name: entry.file_name().to_string_lossy().into_owned(), folder: kind.is_dir(), modified }, newest));
         }
     }
     entries.sort_by(|(a, a_time), (b, b_time)| {
@@ -445,7 +494,7 @@ pub(super) fn available(app: &SolveApp) -> bool {
 }
 
 fn choose_folder(app: &mut SolveApp) {
-    app.pick_folder(|app, path| {
+    app.pick_folder("", |app, path| {
         if let Some(path) = path {
             app.library.set_root(PathBuf::from(path));
             app.preferences.show_document_browser = true;
@@ -485,16 +534,22 @@ fn messages(state: &LibraryState, ui: &mut egui::Ui) {
     }
 }
 
-/// Shared card layout for real documents and the built-in examples.
+/// Shared card layout for real documents and the built-in examples, in every view.
+#[allow(clippy::too_many_arguments)]
 fn thumbnail_card(
     ui: &mut egui::Ui,
+    view: ViewMode,
     width: f32,
     height: f32,
     name: &str,
+    detail: Option<&str>,
     texture: Option<egui::TextureHandle>,
     icon: &str,
     status: CardStatus,
 ) -> egui::Response {
+    if view != ViewMode::Grid {
+        return list_card(ui, view, width, height, name, detail, texture, icon, status);
+    }
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
     response.widget_info(|| {
         if status.active {
@@ -534,10 +589,100 @@ fn thumbnail_card(
     response
 }
 
+/// One row of the Thumbnail List (picture, name above date) or the List (name only).
+#[allow(clippy::too_many_arguments)]
+fn list_card(
+    ui: &mut egui::Ui,
+    view: ViewMode,
+    width: f32,
+    height: f32,
+    name: &str,
+    detail: Option<&str>,
+    texture: Option<egui::TextureHandle>,
+    icon: &str,
+    status: CardStatus,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    response.widget_info(|| {
+        if status.active {
+            egui::WidgetInfo::selected(egui::Role::Button, true, true, name)
+        } else {
+            egui::WidgetInfo::labeled(egui::Role::Button, true, name)
+        }
+    });
+    let t = solidcraft_theme::Tokens::get();
+    let lit = response.hovered() || response.has_focus();
+    ui.painter().rect(rect, 4.0, if lit { t.hover } else { t.field }, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    let mut text_left = if view == ViewMode::ThumbnailList {
+        let side = (height - 8.0).max(1.0);
+        let image = egui::Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(side * 4.0 / 3.0, side));
+        ui.painter().rect_filled(image, 3.0, t.panel);
+        if let Some(texture) = texture {
+            crate::home::paint_document_thumbnail(ui.painter(), &texture, image, false);
+        } else {
+            crate::icons::paint_on(ui.painter(), egui::Rect::from_center_size(image.center(), egui::vec2(24.0, 24.0)), icon, None, 1.0);
+        }
+        if status.active {
+            let center = egui::pos2(image.left() + 7.0, image.top() + 7.0);
+            ui.painter().circle_filled(center, 4.0, t.field);
+            ui.painter().circle_filled(center, 3.0, t.accent);
+            crate::scenario::publish_rect("library:active_indicator", egui::Rect::from_center_size(center, egui::vec2(8.0, 8.0)));
+        }
+        image.right() + 8.0
+    } else {
+        let slot = egui::Rect::from_min_size(egui::pos2(rect.left() + 4.0, rect.center().y - 8.0), egui::vec2(16.0, 16.0));
+        // Every row shows its placeholder icon; the open design adds the dot on the icon's corner.
+        crate::icons::paint_on(ui.painter(), slot, icon, None, 1.0);
+        if status.active {
+            let center = slot.left_top() + egui::vec2(1.0, 1.0);
+            ui.painter().circle_filled(center, 4.0, t.field);
+            ui.painter().circle_filled(center, 3.0, t.accent);
+            crate::scenario::publish_rect("library:active_indicator", egui::Rect::from_center_size(center, egui::vec2(8.0, 8.0)));
+        }
+        slot.right() + 6.0
+    };
+    if let Some(highlight) = status.highlight {
+        let marker = egui::Rect::from_min_size(egui::pos2(text_left, rect.center().y - 8.0), egui::vec2(4.0, 16.0));
+        ui.painter().rect_filled(marker, 1.0, highlight.color());
+        crate::scenario::publish_rect("library:highlight_indicator", marker);
+        text_left += 10.0;
+    }
+    let clip = egui::Rect::from_min_max(egui::pos2(text_left, rect.top()), egui::pos2(rect.right() - 6.0, rect.bottom()));
+    let painter = ui.painter().with_clip_rect(clip.intersect(ui.clip_rect()));
+    match detail.filter(|_| view == ViewMode::ThumbnailList) {
+        Some(detail) => {
+            let gap = 3.0;
+            let block = t.font_body + gap + t.font_small;
+            let top = rect.center().y - block / 2.0 - 1.0;
+            painter.text(egui::pos2(text_left, top), egui::Align2::LEFT_TOP, name, egui::FontId::proportional(t.font_body), t.text);
+            painter.text(
+                egui::pos2(text_left, top + t.font_body + gap),
+                egui::Align2::LEFT_TOP,
+                detail,
+                egui::FontId::proportional(t.font_small),
+                t.text_dim,
+            );
+        }
+        None => {
+            painter.text(egui::pos2(text_left, rect.center().y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(t.font_body), t.text);
+        }
+    }
+    response
+}
+
+/// "Modified 5 min ago", "Modified 21 Nov": the Thumbnail List's second line.
+fn modified_label(app: &SolveApp, modified: Option<u64>) -> Option<String> {
+    let modified = modified?;
+    let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(modified);
+    let when = crate::home::recent_time_at(app, modified, now);
+    Some(solidcraft_ui_text::format("library.modified", &[("date", &when)]))
+}
+
 /// Reuse Home's background jobs and cached sample sessions; never create files for examples.
 fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let samples = solidcraft_engine::sample::samples();
-    let (columns, width, height) = app.preferences.library_thumbnail_size.grid(ui.available_width(), ui.spacing().item_spacing.x);
+    let view = app.library.view;
+    let (columns, width, height) = view.layout(app.preferences.library_thumbnail_size, ui.available_width(), ui.spacing().item_spacing.x);
     let mut chosen = None;
     egui::ScrollArea::vertical().id_salt("library_samples").show_rows(ui, height, samples.len().div_ceil(columns), |ui, range| {
         for row in range {
@@ -545,8 +690,10 @@ fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 for column in 0..columns {
                     let index = row * columns + column;
                     let Some(sample) = samples.get(index) else { continue };
-                    let texture = crate::home::document_thumbnail(app, ui.ctx(), &format!("sample:{index}"));
-                    let response = thumbnail_card(ui, width, height, app.tr_label(sample.name), texture, "box", CardStatus::default());
+                    // The List shows names only, so it never asks for a picture.
+                    let texture =
+                        if view == ViewMode::List { None } else { crate::home::document_thumbnail(app, ui.ctx(), &format!("sample:{index}")) };
+                    let response = thumbnail_card(ui, view, width, height, app.tr_label(sample.name), None, texture, "box", CardStatus::default());
                     crate::scenario::publish_handle(&format!("library:sample:{index}"), response.rect.center());
                     if response.on_hover_text(app.tr_label(sample.about)).clicked() {
                         chosen = Some(index);
@@ -562,22 +709,30 @@ fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
     let mut chosen = None;
-    let (columns, width, height) = app.preferences.library_thumbnail_size.grid(ui.available_width(), ui.spacing().item_spacing.x);
+    let view = app.library.view;
+    let (columns, width, height) = view.layout(app.preferences.library_thumbnail_size, ui.available_width(), ui.spacing().item_spacing.x);
     egui::ScrollArea::vertical().id_salt("library_list").show_rows(ui, height, app.library.filtered.len().div_ceil(columns), |ui, range| {
         for row in range {
             ui.horizontal(|ui| {
                 for column in 0..columns {
                     let index = row * columns + column;
                     let Some(entry) = app.library.filtered.get(index).and_then(|i| app.library.listing.entries.get(*i)).cloned() else { continue };
-                    let texture =
-                        if entry.folder { None } else { entry.path.to_str().and_then(|path| crate::home::document_thumbnail(app, ui.ctx(), path)) };
+                    // The List shows names only, so it never asks for a picture.
+                    let texture = if entry.folder || view == ViewMode::List {
+                        None
+                    } else {
+                        entry.path.to_str().and_then(|path| crate::home::document_thumbnail(app, ui.ctx(), path))
+                    };
+                    let detail = if view == ViewMode::ThumbnailList { modified_label(app, entry.modified) } else { None };
                     let active = !entry.folder && app.session.path.as_deref().map(Path::new) == Some(entry.path.as_path());
                     let highlight = if entry.folder { None } else { app.library.highlights.get(&entry.path).copied() };
                     let response = thumbnail_card(
                         ui,
+                        view,
                         width,
                         height,
                         &entry.name,
+                        detail.as_deref(),
                         texture,
                         if entry.folder { "folder" } else { "new" },
                         CardStatus { active, highlight },
@@ -651,6 +806,31 @@ fn insert_footer(app: &mut SolveApp, ui: &mut egui::Ui) {
     );
 }
 
+/// The cog's menu: change the CAD directory, or switch between the views.
+fn settings_menu(app: &mut SolveApp, settings: &egui::Response) {
+    Container::new(&settings.ctx, Surface::Popup).menu(settings).frame(crate::ui_kit::Menu::frame()).show(|ui| {
+        let choose = crate::ui_kit::button(ui, solidcraft_ui_text::tr("library.choose_folder"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_handle("library:choose_folder", choose.rect.center());
+        if choose.clicked() {
+            ui.close();
+            choose_folder(app);
+        }
+        let view = crate::ui_kit::Menu::button(ui, solidcraft_ui_text::tr("library.view"), |ui| {
+            ui.set_min_width(150.0);
+            for view in ViewMode::ALL {
+                let label = solidcraft_ui_text::tr(view.label());
+                let response = crate::ui_kit::list_picker(ui, view.key(), label, app.library.view == view);
+                crate::scenario::publish_handle(&format!("library:view:{}", view.key()), response.rect.center());
+                if response.clicked() {
+                    app.library.view = view;
+                    ui.close();
+                }
+            }
+        });
+        crate::scenario::publish_handle("library:view", view.response.rect.center());
+    });
+}
+
 fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
     ui.horizontal(|ui| {
         let (rect, home) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
@@ -706,12 +886,10 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
             egui::Stroke::new(1.0, solidcraft_theme::Tokens::get().border),
             egui::StrokeKind::Inside,
         );
-        let settings = settings.on_hover_text(solidcraft_ui_text::tr("library.choose_folder"));
-        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.choose_folder")));
+        let settings = settings.on_hover_text(solidcraft_ui_text::tr("library.settings"));
+        settings.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, solidcraft_ui_text::tr("library.settings")));
         crate::scenario::publish_handle("library:settings", settings.rect.center());
-        if settings.clicked() {
-            choose_folder(app);
-        }
+        settings_menu(app, &settings);
     });
     if app.library.folders_expanded {
         ui.separator();
@@ -921,7 +1099,7 @@ mod tests {
     #[test]
     fn document_browser_is_hidden_until_explicitly_enabled() {
         let mut h = Harness::new();
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.app.home.open = false;
         h.frames(3);
         assert!(!h.app.preferences.show_document_browser);
@@ -991,7 +1169,7 @@ mod tests {
 
     fn folder_picker(h: &mut Harness, path: Option<String>) {
         h.app.preferences.show_document_browser = true;
-        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(path.clone()))));
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(path.clone()))));
     }
 
     #[test]
@@ -1034,8 +1212,9 @@ mod tests {
     #[test]
     fn search_cache_reuses_results_until_query_or_listing_changes() {
         let mut state = LibraryState::default();
-        state.listing.entries =
-            (0..10_000).map(|i| Entry { path: PathBuf::from(format!("{i}.sc")), name: format!("Design {i}"), folder: false }).collect();
+        state.listing.entries = (0..10_000)
+            .map(|i| Entry { path: PathBuf::from(format!("{i}.sc")), name: format!("Design {i}"), folder: false, modified: None })
+            .collect();
         state.search = "DESIGN 123".into();
         assert!(state.update_filter());
         assert_eq!(state.filtered.len(), 11);
@@ -1439,6 +1618,7 @@ mod tests {
         h.step(&json!({"click":{"handle":"library:folders"}})).unwrap();
         assert!(h.app.library.folders_expanded);
         h.step(&json!({"click":{"handle":"library:settings"}})).unwrap();
+        h.step(&json!({"click":{"handle":"library:choose_folder"}})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
         h.frames(3);
         assert!(h.app.library.folders_expanded);
@@ -1448,6 +1628,7 @@ mod tests {
         std::fs::create_dir(selected.join("Visible contents")).unwrap();
         folder_picker(&mut h, Some(selected.to_string_lossy().into_owned()));
         h.step(&json!({"click":{"handle":"library:settings"}})).unwrap();
+        h.step(&json!({"click":{"handle":"library:choose_folder"}})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
         wait(&mut h.app);
         h.frames(3);
@@ -1458,12 +1639,40 @@ mod tests {
     }
 
     #[test]
+    fn gear_menu_switches_views_and_the_view_persists() {
+        let mut h = Harness::new();
+        folder_picker(&mut h, None);
+        std::fs::write(h.dir.join("Bracket.solidcraft"), "{}").unwrap();
+        h.app.library.set_root(h.dir.clone());
+        h.app.home.open = false;
+        wait(&mut h.app);
+        h.frames(3);
+        assert_eq!(h.app.library.view, ViewMode::Grid);
+        for view in [ViewMode::ThumbnailList, ViewMode::List, ViewMode::Grid] {
+            h.step(&json!({"click":{"handle":"library:settings"}})).unwrap();
+            h.step(&json!({"click":{"handle":"library:view"}})).unwrap();
+            h.frames(3);
+            h.step(&json!({"click":{"handle":format!("library:view:{}", view.key())}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.library.view, view);
+            assert!(h.widget("Bracket.solidcraft").is_some(), "{view:?} still lists the design");
+            let mut restored = LibraryState::default();
+            restored.load(Some(&h.app.library.prefs()));
+            assert_eq!(restored.view, view);
+        }
+        let mut legacy = LibraryState::default();
+        legacy.load(Some(&json!({"root": null, "view": "bogus"})));
+        assert_eq!(legacy.view, ViewMode::Grid, "an unknown view falls back to the grid");
+    }
+
+    #[test]
     fn choosing_folder_replaces_examples_and_cancel_keeps_them() {
         let mut h = Harness::new();
         folder_picker(&mut h, None);
         h.app.home.open = false;
         h.frames(3);
         h.step(&json!({"click":{"handle":"library:settings"}})).unwrap();
+        h.step(&json!({"click":{"handle":"library:choose_folder"}})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
         h.frames(3);
         assert!(h.app.library.root.is_none());
@@ -1472,6 +1681,7 @@ mod tests {
         let directory = h.dir.to_string_lossy().into_owned();
         folder_picker(&mut h, Some(directory.clone()));
         h.step(&json!({"click":{"handle":"library:settings"}})).unwrap();
+        h.step(&json!({"click":{"handle":"library:choose_folder"}})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
         wait(&mut h.app);
         h.frames(3);
@@ -1550,8 +1760,9 @@ mod tests {
             assert!(card.contains(before) && card.contains(step) && card.contains(iges));
             h.app.library.root = Some(h.dir.clone());
             h.app.library.current = h.dir.clone();
-            h.app.library.listing.entries =
-                (0..1000).map(|i| Entry { path: h.dir.join(format!("Project {i}")), name: format!("Project {i}"), folder: true }).collect();
+            h.app.library.listing.entries = (0..1000)
+                .map(|i| Entry { path: h.dir.join(format!("Project {i}")), name: format!("Project {i}"), folder: true, modified: None })
+                .collect();
             h.frames(3);
             let search = crate::scenario::rect_of("library:search_card").unwrap();
             let refresh = crate::scenario::rect_of("library:refresh").unwrap();
@@ -1660,7 +1871,7 @@ mod tests {
                     let file = crate::scenario::rect_of("appbar:file").unwrap();
                     let home = crate::scenario::rect_of("appbar:home").unwrap();
                     assert!(toggle.right() < home.left());
-                    assert!(home.right() < file.left());
+                    assert!(home.right() <= file.left(), "Home may touch File but never overlap it: {home:?} {file:?}");
                     assert!(toggle.bottom() < panel.top());
                     let viewport = h.app.viewport.rect.unwrap();
                     assert!(viewport.left() >= panel.right(), "{panel:?} {viewport:?}");
@@ -1862,7 +2073,7 @@ mod tests {
         h.app.run("solid.box", json!({"length":12,"width":13,"height":14})).unwrap();
         let unsaved = h.app.session.doc.to_json();
         let before = crate::documents::tabs_info(&h.app).len();
-        open_entry(&mut h.app, Entry { path: file, name: "Saved.solidcraft".into(), folder: false });
+        open_entry(&mut h.app, Entry { path: file, name: "Saved.solidcraft".into(), folder: false, modified: None });
         for _ in 0..1000 {
             crate::file_load::tick(&mut h.app, &h.ctx);
             if h.app.file_load.idle() {
@@ -1879,7 +2090,7 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), unsaved);
         let bad = h.dir.join("Broken.solidcraft");
         std::fs::write(&bad, b"not a design").unwrap();
-        open_entry(&mut h.app, Entry { path: bad, name: "Broken.solidcraft".into(), folder: false });
+        open_entry(&mut h.app, Entry { path: bad, name: "Broken.solidcraft".into(), folder: false, modified: None });
         for _ in 0..1000 {
             crate::file_load::tick(&mut h.app, &h.ctx);
             if h.app.file_load.idle() {
@@ -1900,7 +2111,7 @@ mod tests {
         h.app.library.listing.entries = (0..10_000)
             .map(|i| {
                 let name = format!("Design {i:05}.solidcraft");
-                Entry { path: h.dir.join(&name), name, folder: false }
+                Entry { path: h.dir.join(&name), name, folder: false, modified: None }
             })
             .collect();
         h.frames(3);

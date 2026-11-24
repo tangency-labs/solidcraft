@@ -250,7 +250,13 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
-        self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height])
+        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height]);
+        // Each capture uploads its own scene. Release the picture's buffers after readback or
+        // error so a long-lived capturer keeps its pipelines without holding the last mesh.
+        if let Some(gpu) = &mut state.gpu {
+            gpu.renderer.retain_views(&[]);
+        }
+        result
     }
 
     /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
@@ -506,12 +512,15 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
+        edge_px: crate::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 
@@ -771,6 +780,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_capture_releases_its_scene_uploads_after_readback() {
+        let capturer = match Capturer::headless(crate::test_env::policy()) {
+            Ok(capturer) => capturer,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        let scene = Scene { meshes: vec![SceneMesh::solid(sheet(), Rgb(200, 30, 30))], ..Default::default() };
+        let cam = Camera::default();
+        let first = capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap();
+        assert!(first.1.triangles > 0, "the capture drew the mesh");
+        assert_eq!(capturer.rgba_with_stats(&scene, &cam, 32, 24).unwrap(), first);
+        let state = capturer.state.lock().unwrap();
+        let renderer = &state.gpu.as_ref().unwrap().renderer;
+        assert_eq!(renderer.uploads().geometry, 0, "the renderer released the model scene after readback");
+    }
+
     /// A closed capturer has dropped its device and everything it drew with, and a picture asked
     /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
     /// capturer before it exits ([`close_shared_before_exit`]).
@@ -912,6 +938,200 @@ mod tests {
             let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);
         }
+    }
+
+    /// A model scene of one block: for each of `bodies` (where it is built, its colour, its
+    /// motion slot) a triangle facing the camera with an edge line along its base, every vertex
+    /// put by `put` (its place and its normal turned alike). Its palette entries name the slot.
+    fn slotted(
+        bodies: &[([f32; 3], [u8; 4], u32)],
+        put: &dyn Fn(usize, [f32; 3]) -> [f32; 3],
+        turn: &dyn Fn(usize, [f32; 3]) -> [f32; 3],
+    ) -> crate::view::SceneSlot {
+        use crate::view::{BlockBuilder, SceneBlock, TriClass};
+        let mut sc = GpuScene::default();
+        let mut block = BlockBuilder::default();
+        for (k, (at, rgba, slot)) in bodies.iter().enumerate() {
+            let palette = Arc::make_mut(&mut sc.palette);
+            let (fill, edge) = (palette.intern_moved(*rgba, *slot), palette.intern_moved([20, 20, 20, 255], *slot));
+            let corners =
+                [[-1.0, 0.0, -0.5], [0.2, 0.0, -0.5], [-0.4, 0.0, 0.6]].map(|p: [f32; 3]| put(k, [p[0] + at[0], p[1] + at[1], p[2] + at[2]]));
+            block.begin_body();
+            block.moved_by(*slot);
+            block.triangle(corners, [turn(k, [0.0, -1.0, 0.0]); 3], fill, TriClass::Opaque);
+            block.line(corners[0], corners[1], edge, 3.0);
+            block.end_body();
+        }
+        sc.blocks.push(SceneBlock { key: 77, bytes: block.freeze() });
+        Arc::new(Mutex::new(Some(sc)))
+    }
+
+    /// Bodies whose palette entries name a slot of the motion table are drawn moved by the
+    /// motion a frame brings for that slot ([`crate::view::Motions`]), with nothing built again:
+    /// the picture is the one of the bodies built where each was moved to, lit as they are
+    /// turned, their edge lines with them. A body built outside the view and moved into it is
+    /// drawn (its box is tested where it is drawn), a frame that brings a motion for one slot
+    /// leaves the other bodies where they were built, and a frame that brings none draws every
+    /// body where it was built (on this machine's GPU, skipped without one).
+    #[test]
+    fn bodies_are_drawn_where_their_motions_move_them() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let (red, blue) = ([200, 30, 30, 255], [30, 30, 200, 255]);
+        // The red body is built far outside the view; the blue one below the middle of it.
+        let built = [([-40.0, 0.0, 0.0], red, 3), ([0.3, 0.0, -1.0], blue, 5)];
+        // Red: tilted 30 degrees about X, its face turned up toward the light, then shifted into the upper half of the
+        // view. Blue: shifted a little.
+        let (c, s) = ((-30f32).to_radians().cos(), (-30f32).to_radians().sin());
+        let tilt = |p: [f32; 3]| [p[0], c * p[1] - s * p[2], s * p[1] + c * p[2]];
+        let red_moves = |p: [f32; 3]| {
+            let t = tilt(p);
+            [t[0] + 40.4, t[1], t[2] + 0.9]
+        };
+        let red_rows: crate::view::MotionRows = [[1.0, 0.0, 0.0, 40.4], [0.0, c, -s, 0.0], [0.0, s, c, 0.9]];
+        let blue_rows: crate::view::MotionRows = [[1.0, 0.0, 0.0, -0.5], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.1]];
+        let blue_moves = |p: [f32; 3]| [p[0] - 0.5, p[1], p[2] + 0.1];
+        let still = |_: usize, p: [f32; 3]| p;
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let reds = |rgba: &[u8]| rgba.chunks(4).filter(|p| p[0] > p[2].saturating_add(60)).count();
+        let blues = |rgba: &[u8]| rgba.chunks(4).filter(|p| p[2] > p[0].saturating_add(60)).count();
+        let differ =
+            |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        let mut picture = |key: u64, slot: crate::view::SceneSlot, motions: crate::view::Motions| {
+            let mut f = frame(&Scene::default(), &cam, size, key, None);
+            f.slot = slot;
+            f.motions = motions;
+            capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0
+        };
+        let none = crate::view::Motions::default;
+        // Both built where they are moved to, in no slot.
+        let unslotted = [(built[0].0, red, 0), (built[1].0, blue, 0)];
+        let expected = picture(
+            1,
+            slotted(&unslotted, &|k, p| if k == 0 { red_moves(p) } else { blue_moves(p) }, &|k, n| if k == 0 { tilt(n) } else { n }),
+            none(),
+        );
+        assert!(reds(&expected) > 50 && blues(&expected) > 50, "both bodies show where they are moved to");
+        // Built where they are, and moved by their slots' motions.
+        let both = crate::view::Motions::new([(3, red_rows), (5, blue_rows)]);
+        let moved = picture(2, slotted(&built, &still, &still), both);
+        let off = differ(&expected, &moved);
+        assert!(off <= 8, "{off} pixels differ from the bodies built where their motions move them");
+        // The same scene, a motion for blue alone: red is where it was built, outside the view.
+        let only_blue = picture(2, slotted(&built, &still, &still), crate::view::Motions::new([(5, blue_rows)]));
+        assert!(reds(&only_blue) == 0 && blues(&only_blue) > 50, "a slot without a motion leaves its body where it was built");
+        // No motions: blue where it was built too.
+        let unmoved = picture(2, slotted(&built, &still, &still), none());
+        let as_built = picture(3, slotted(&unslotted, &still, &still), none());
+        assert!(reds(&unmoved) == 0 && blues(&unmoved) > 50);
+        assert_eq!(differ(&as_built, &unmoved), 0, "a frame without motions draws every body where it was built");
+        assert!(differ(&unmoved, &only_blue) > 20, "the motion shows");
+    }
+
+    /// A part drawn as placements of shared triangles moves with the motion its palette entry
+    /// names, flat or smooth: placed outside the view, then tilted and moved into it, it is drawn
+    /// (and lit) as the model scene draws it with the placement itself tilted and moved.
+    #[test]
+    fn a_placement_is_drawn_where_its_bodys_motion_moves_it() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let flat = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let smooth = Mesh { normals: vec![Vec3::new(-0.2, -1.0, 0.0), Vec3::new(0.2, -1.0, 0.0), Vec3::new(0.0, -1.0, 0.2)], ..flat.clone() };
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        for (k, mesh) in [flat, smooth].iter().enumerate() {
+            let tris = Arc::new(crate::view::SharedTris::new(mesh));
+            // Tilted 30 degrees about X, its face turned up toward the light: a normal not turned would light it otherwise.
+            let (c, s) = ((-30f32).to_radians().cos(), (-30f32).to_radians().sin());
+            let placed = |rows: [[f32; 4]; 3], slot: u32| {
+                let mut inst = crate::view::InstancedMesh {
+                    key: 1,
+                    tris: tris.clone(),
+                    instances: Vec::new(),
+                    look: crate::view::InstanceLook::Opaque,
+                    levels: Vec::new(),
+                    closed: true,
+                    edges: None,
+                };
+                let mut sc = GpuScene::default();
+                let red = Arc::make_mut(&mut sc.palette).intern_moved([200, 30, 30, 255], slot);
+                inst.place(rows, red);
+                sc.instanced = vec![inst];
+                Arc::new(Mutex::new(Some(sc)))
+            };
+            let key = 10 * k as u64;
+            let mut there = frame(&Scene::default(), &cam, size, key + 1, None);
+            there.slot = placed([[1.0, 0.0, 0.0, 0.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]], 0);
+            let expected = capturer.picture(&mut state, &there, BACKGROUND, size).unwrap().0;
+            assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
+            // Placed far outside the view, and moved into it by its slot's motion.
+            let mut moved = frame(&Scene::default(), &cam, size, key + 2, None);
+            moved.slot = placed([[1.0, 0.0, 0.0, -40.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], 7);
+            moved.motions = crate::view::Motions::new([(7, [[1.0, 0.0, 0.0, 40.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]])]);
+            let drawn = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+            assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where its motion moves it", k == 0);
+        }
+    }
+
+    /// Copies of a part share their palette entry (#18857) and each placement names its own
+    /// motion: only the copy whose own motion moves it into the view is drawn there, culled where
+    /// that motion puts it, not where the shared entry's motion would. The other two copies, one
+    /// moved by the entry's motion and one by a motion of its own, stay outside it.
+    #[test]
+    fn each_copy_of_a_part_is_drawn_where_its_own_motion_moves_it() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let mesh = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let tris = Arc::new(crate::view::SharedTris::new(&mesh));
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        let (c, s) = ((-30f32).to_radians().cos(), (-30f32).to_radians().sin());
+        let at = |x: f32| [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let scene = |placements: &[([[f32; 4]; 3], u32)]| {
+            let mut inst = crate::view::InstancedMesh {
+                key: 1,
+                tris: tris.clone(),
+                instances: Vec::new(),
+                look: crate::view::InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+                edges: None,
+            };
+            let mut sc = GpuScene::default();
+            // The entry every copy shares, which names motion 9.
+            let red = Arc::make_mut(&mut sc.palette).intern_moved([200, 30, 30, 255], 9);
+            for (rows, slot) in placements {
+                inst.place_moved(*rows, red, crate::view::PaletteIndex(0), crate::view::PaletteIndex(0), *slot);
+            }
+            sc.instanced = vec![inst];
+            Arc::new(Mutex::new(Some(sc)))
+        };
+        let into_view = [[1.0, 0.0, 0.0, 40.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]];
+        // One copy where the moved one ends, the shared entry's motion leaving it as it is.
+        let mut there = frame(&Scene::default(), &cam, size, 1, None);
+        there.slot = scene(&[([[1.0, 0.0, 0.0, 0.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]], crate::view::UNMOVED_SLOT)]);
+        there.motions = crate::view::Motions::new([(9, crate::view::UNMOVED)]);
+        let expected = capturer.picture(&mut state, &there, BACKGROUND, size).unwrap().0;
+        assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
+        // Three copies far outside the view: the first moved into it by its own motion 7, the
+        // second by the entry's motion 9 and the third by its own motion 8, both left outside.
+        let mut moved = frame(&Scene::default(), &cam, size, 2, None);
+        moved.slot = scene(&[(at(-40.0), 7), (at(40.0), crate::view::UNMOVED_SLOT), (at(-40.0), 8)]);
+        moved.motions = crate::view::Motions::new([(7, into_view), (8, crate::view::UNMOVED), (9, crate::view::UNMOVED)]);
+        let drawn = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        assert!(differ <= 4, "{differ} pixels differ from the one copy placed where its own motion moves it");
     }
 
     /// A face with a colour of its own is drawn in that colour, and takes its body's opacity:

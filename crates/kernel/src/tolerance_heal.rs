@@ -11,14 +11,17 @@
 //! ([`crate::validation::failing_check`]), and stands only when SMLib takes it, and its check
 //! fails fewer tests than the check that decided the heal and no kind of test more often, and
 //! the same against SMLib's own check of the body as it was (when the healed body still fails
-//! some test: one that passes is better than any).
+//! some test: one that passes is better than any). An import has already run that check on the
+//! part it heals, and hands it over ([`heal_given_check`]) rather than have it run again.
 //!
 //! Whether imports and Repair heal at all is the app's preference
 //! ([`set_heals_tolerance_defects`]): on by default; off, an import keeps a part its check
 //! fails as read (with the check's warning) and Repair starts from the part as it is, as
 //! before the heal.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::body::Body;
@@ -28,42 +31,61 @@ use crate::{KernelError, Result};
 /// Whether imports and Repair heal tolerance-scale defects ([`heals_tolerance_defects`]).
 static HEALS: AtomicBool = AtomicBool::new(true);
 
+thread_local! {
+    /// The preference a test holds on this thread ([`heal_preference_for_tests`]), in place of
+    /// [`HEALS`]: `None` unless one is held, so always in the app.
+    static HELD: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
 /// Whether a STEP read from now on heals the parts SMLib's check fails, and Repair heals a part
 /// first (as the app sets [`crate::RepairOptions::heal_first`]): the preference
 /// `heal_tolerance_defects`, on unless [`set_heals_tolerance_defects`] turned it off.
 pub fn heals_tolerance_defects() -> bool {
-    HEALS.load(Ordering::Relaxed)
+    HELD.with(Cell::get).unwrap_or_else(|| HEALS.load(Ordering::Relaxed))
 }
 
 /// Heal (`true`, the default) or keep as read the parts of the STEP files read from now on, and
 /// have Repair heal first or not ([`heals_tolerance_defects`]). A read already done keeps what it
-/// was read with: the cache of recent reads keeps the two apart.
+/// was read with: the cache of recent reads keeps the two apart. On a thread where a test holds
+/// the preference ([`heal_preference_for_tests`]) it turns that thread's alone.
 pub fn set_heals_tolerance_defects(on: bool) {
-    HEALS.store(on, Ordering::Relaxed);
+    let held = HELD.with(|h| {
+        let held = h.get().is_some();
+        if held {
+            h.set(Some(on));
+        }
+        held
+    });
+    if !held {
+        HEALS.store(on, Ordering::Relaxed);
+    }
 }
 
-/// Holds the tolerance heal preference for a test that turns it ([`heal_preference_for_tests`]):
-/// tests holding one run one at a time, and the preference is on again when it drops.
+/// Holds the tolerance heal preference for a test that turns it ([`heal_preference_for_tests`]),
+/// on the test's own thread; the thread has the preference it had before when it drops.
 #[doc(hidden)]
 pub struct HealPreferenceForTests {
-    _held: std::sync::MutexGuard<'static, ()>,
+    before: Option<bool>,
+    /// Held by the thread it turns.
+    _thread: PhantomData<*const ()>,
 }
 
 impl Drop for HealPreferenceForTests {
     fn drop(&mut self) {
-        set_heals_tolerance_defects(true);
+        HELD.with(|h| h.set(self.before));
     }
 }
 
-/// For tests that turn the process-wide preference: waits for any other such test, then sets
-/// the preference to `on` (turn it again with [`set_heals_tolerance_defects`] while held). Under
-/// nextest each test is its own process; under `cargo test` this keeps such tests apart.
+/// For tests that turn the preference: sets it to `on` for the calling thread alone (turn it
+/// again with [`set_heals_tolerance_defects`] while held). Under `cargo test` a crate's tests
+/// run on threads of one process, and a test turning the process's switch changed the
+/// evaluations of the tests running beside it (their cost tests saw work no change asked
+/// for). The kernel reads the preference on the thread a read or Repair starts on, and its
+/// workers take it from there, so the whole of the test's work sees what it holds.
 #[doc(hidden)]
 pub fn heal_preference_for_tests(on: bool) -> HealPreferenceForTests {
-    static HELD: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let held = HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    set_heals_tolerance_defects(on);
-    HealPreferenceForTests { _held: held }
+    let before = HELD.with(|h| h.replace(Some(on)));
+    HealPreferenceForTests { before, _thread: PhantomData }
 }
 
 /// What [`heal_tolerance_defects`] did.
@@ -142,9 +164,22 @@ pub enum HealFailure {
 /// record's. A failure met while the token is stopped is [`HealFailure::Stopped`], whatever
 /// failed: as the import's check takes it.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
-    let Some((ops, order)) = body.ops_body() else {
+    heal_given_check(body, None)
+}
+
+/// [`heal_tolerance_defects`], given SMLib's check of `body` when the caller has already run it
+/// on this very body: `own` is what [`crate::validation::failing_check`] of `body` found failing
+/// (`None`: not known, so it is run here when the heal needs it). A STEP import passes the
+/// check it ran on the part, which would otherwise be run again here on the same body: the
+/// heal decides the same either way, with one check fewer.
+///
+/// # Errors
+/// As [`heal_tolerance_defects`].
+pub(crate) fn heal_given_check(body: &Body, own: Option<&CheckFailure>) -> Result<Option<(Body, ToleranceHeal)>> {
+    let Some(form) = body.ops_body() else {
         return Ok(None);
     };
+    let (ops, order) = &*form;
     let heal = || solidcore_ops::heal::heal_tolerance_defects(ops, order);
     let healed = match solidcraft_smlib::stop::token() {
         Some(token) => solidcore_ops::cancel::within(&token, heal),
@@ -185,14 +220,22 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         return Ok(None);
     }
     // The deciding check above is solidcore-ops' of the body it converted. SMLib's own check of
-    // the body as it is must be bettered as well: a heal is kept only when both say so.
+    // the body as it is must be bettered as well: a heal is kept only when both say so. A
+    // caller that already checked the body gave that check (`own`); else it is run now.
     if check.is_some() {
-        let own = crate::validation::failing_check(body).map_err(|e| match e {
-            e @ KernelError::Internal(_) => e,
-            _ if stopped() => KernelError::Heal(HealFailure::Stopped),
-            e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the body: {e}"))),
-        })?;
-        if let Some(why) = own.as_ref().map_or(Some("SMLib's check passes the body".to_string()), |own| worse_than(own, check.as_ref())) {
+        let checked;
+        let own = match own {
+            Some(own) => Some(own),
+            None => {
+                checked = crate::validation::failing_check(body).map_err(|e| match e {
+                    e @ KernelError::Internal(_) => e,
+                    _ if stopped() => KernelError::Heal(HealFailure::Stopped),
+                    e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the body: {e}"))),
+                })?;
+                checked.as_ref()
+            }
+        };
+        if let Some(why) = own.map_or(Some("SMLib's check passes the body".to_string()), |own| worse_than(own, check.as_ref())) {
             log::debug!(target: "repair", "tolerance heal not kept: {why}");
             return Ok(None);
         }
@@ -296,6 +339,23 @@ mod tests {
         assert!(more.is_some_and(|w| w.contains("SmFace::Test #34")), "a kind failed more often");
         let as_many = worse(&before, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length", 2), ("SmFace::Test #34 Face has", 1)])));
         assert!(as_many.is_some_and(|w| w.contains("fails 3 tests, the body's 3")), "as many failed tests");
+    }
+
+    /// A test that turns the preference turns it on its own thread alone. `cargo test` runs a
+    /// crate's tests on threads of one process, and one test turning the process's switch off
+    /// made every evaluation running beside it see another context: their cost tests counted a
+    /// whole timeline evaluated again, or a STEP file read again, that no change asked for.
+    #[test]
+    fn a_test_turning_the_heal_preference_turns_it_for_its_own_thread_alone() {
+        let off = heal_preference_for_tests(false);
+        assert!(!heals_tolerance_defects(), "held off on this thread");
+        set_heals_tolerance_defects(true);
+        assert!(heals_tolerance_defects(), "turned again while held");
+        set_heals_tolerance_defects(false);
+        let beside = std::thread::spawn(heals_tolerance_defects).join().unwrap();
+        assert!(beside, "a test running beside it keeps the preference on");
+        drop(off);
+        assert!(heals_tolerance_defects(), "on again once the hold drops");
     }
 
     /// #17708 review: the healed body is also compared with SMLib's own check of the body as

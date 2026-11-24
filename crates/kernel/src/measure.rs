@@ -119,7 +119,7 @@ mod tests {
         let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         let mut unavailable = exact.clone();
         // A cached refusal is how ops_body represents a B-rep it could not convert.
-        unavailable.ops = std::sync::Arc::new(std::sync::OnceLock::from(None));
+        unavailable.ops = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(()));
         assert!(mesh.is_mesh() && !unavailable.is_mesh());
         for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
             assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
