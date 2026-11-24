@@ -1681,7 +1681,8 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<solidcra
     for region in regions {
         items.push(region_loops(region)?);
     }
-    let (mut points, triangles) = solidcraft_kernel::services::tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
+    let (mut points, triangles) =
+        solidcraft_kernel::services::tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
     // One face of each triangle, without the ones that could not be on a surface: a corner twice
     // has an edge of its own, and the same triangle twice would put two faces on one edge.
     let mut seen: HashSet<[u32; 3]> = HashSet::with_capacity(triangles.len());

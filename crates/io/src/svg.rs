@@ -6,9 +6,9 @@
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use solidcraft_kernel::services::curve::CubicStanding;
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::curve::CubicStanding;
 use std::collections::HashMap;
 use std::ops::Range;
 

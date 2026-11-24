@@ -5,9 +5,9 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_file`].
 
-use solidcraft_kernel::services::import_geometry::{scale_point, scale_value};
 use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::import_geometry::{scale_point, scale_value};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.

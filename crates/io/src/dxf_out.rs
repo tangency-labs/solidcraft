@@ -426,7 +426,11 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcraft_kernel::services::path_export::bulge_arc(solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge }, to).is_none()
+            && solidcraft_kernel::services::path_export::bulge_arc(
+                solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+                to,
+            )
+            .is_none()
         {
             return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
         }
@@ -465,8 +469,11 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcraft_kernel::services::path_export::bulged_edge_points(solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge }, to)
-        .map_err(|error| IoError::Invalid(error.reason))?;
+    let points = solidcraft_kernel::services::path_export::bulged_edge_points(
+        solidcraft_kernel::services::path_export::Vertex { at: from.at, bulge: from.bulge },
+        to,
+    )
+    .map_err(|error| IoError::Invalid(error.reason))?;
     out.try_reserve(points.len()).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
     out.extend(points);
     Ok(())
@@ -940,7 +947,9 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
-        DxfShape::Arc { c, r, a0, a1 } => c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::export_geometry::arc_fields_finite(*a0, *a1),
+        DxfShape::Arc { c, r, a0, a1 } => {
+            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::export_geometry::arc_fields_finite(*a0, *a1)
+        }
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
                 && solidcraft_kernel::services::export_geometry::axis_nonzero(*major)
