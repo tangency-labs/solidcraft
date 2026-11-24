@@ -185,7 +185,12 @@ unbuilt result was non-manifold.
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second
 fundamental forms' homogeneous coefficients. Since A_u × A_v carries a factor w, the bracket
 X′⁴ − d X′ H′ + d² w² K′ of the same sign is what is bounded, four times deg w lower in each
-parameter. Each patch's bound is subdivided into quarters on an explicit stack, at most
+parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′². The forms are built with
+the patch moved to its own frame, which leaves them unchanged, and carry a running error bound
+through their construction and every quartering (`bernstein::Bounded`), so their rounding follows
+the patch's size, not its distance from the origin. A patch is certified when the coefficients'
+ranges, widened by that bound, keep it above 0. Each patch's bound is subdivided into quarters on
+an explicit stack, at most
 `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.

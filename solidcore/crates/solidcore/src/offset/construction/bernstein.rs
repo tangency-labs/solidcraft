@@ -7,15 +7,22 @@
 //! |-------------------|----------|
 //! | [`Bernstein2`]    | none     |
 //! | [`Binomials`]     | none     |
+//! | [`Bounded`]       | none     |
 //!
 //! A polynomial of degrees `(du, dv)` is `sum c[i][j] B_i^du(s) B_j^dv(t)` on
 //! `[0, 1]^2`. Its values lie in the convex hull of its coefficients, so
 //! [`Bernstein2::min_coefficient`] and [`Bernstein2::max_coefficient`] bound it
 //! (Farouki & Rajan 1987); subdividing tightens the bound.
 //!
+//! A [`Bounded`] polynomial carries, beside the coefficients floating point gave it, a bound
+//! of their distance from the exact polynomial's: a running error bound (Higham 2002, §3.3),
+//! each operation's rounding counted as `gamma` of the magnitudes it combines
+//! ([`product_rounding`]) and the errors of its operands carried through.
+//!
 //! Deviations: none (new code). Degrees are bounded by [`MAX_DEGREE`].
 
 use crate::error::{Result, SolidError};
+use crate::nurbs::math::gamma;
 
 const OP: &str = "offset::construction::bernstein";
 
@@ -501,9 +508,217 @@ pub fn eval3(a: &Bernstein3, u: f64, v: f64) -> crate::math::Vec3 {
     crate::math::Vec3::new(x.eval(u, v), y.eval(u, v), z.eval(u, v))
 }
 
+/// The rounded operations behind one coefficient of a Bernstein product of degrees
+/// `(du, dv)` ([`Bernstein2::mul`]), relative to the product of the factors' largest
+/// coefficient magnitudes. Each of the at most `(du + 1)(dv + 1)` terms multiplies each
+/// factor's coefficient by two binomials and the two together, five products; the binomials
+/// come from Pascal's triangle, sums of positive numbers rounded past `2^53`, so one of row
+/// `n` is within `gamma(n)`, and the four of a term are of rows adding to `du + dv`. The sum
+/// takes a rounding per term, and the quotient two binomials of rows `du` and `dv` and two
+/// divisions. By Vandermonde's identity the weights of each sum add to 1, so the terms'
+/// magnitudes add to at most the factors' largest magnitudes multiplied. A degree elevation
+/// is a product with ones and counts the same.
+#[must_use]
+pub fn product_rounding(du: usize, dv: usize) -> usize {
+    let terms = du.saturating_add(1).saturating_mul(dv.saturating_add(1));
+    du.saturating_add(dv)
+        .saturating_mul(2)
+        .saturating_add(terms)
+        .saturating_add(7)
+}
+
+/// `x` raised past the rounding of the few operations that computed it from nonnegative
+/// terms (at most 8, each within the unit roundoff of its value), so a bound computed in
+/// floating point is a bound.
+fn rounded_up(x: f64) -> f64 {
+    x * (1.0 + gamma(16))
+}
+
+/// A polynomial as floating point computed it, and `err`, a bound of every coefficient's
+/// distance from the coefficient the same operations on the exact operands give (a running
+/// error bound, Higham 2002, §3.3; underflow aside, as in the standard model).
+#[derive(Debug, Clone)]
+pub struct Bounded {
+    /// The polynomial as computed.
+    pub f: Bernstein2,
+    /// The bound of its coefficients' distance from the exact ones.
+    pub err: f64,
+}
+
+impl Bounded {
+    /// `f`, exact.
+    #[must_use]
+    pub const fn exact(f: Bernstein2) -> Self {
+        Self { f, err: 0.0 }
+    }
+
+    /// The product: the operands' errors carried (`|a| e_b + e_a |b| + e_a e_b`) and the
+    /// product's own rounding ([`product_rounding`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Bernstein2::mul`].
+    pub fn mul(&self, other: &Self, b: &Binomials) -> Result<Self> {
+        let f = self.f.mul(&other.f, b)?;
+        let (ma, mb) = (self.f.max_abs_coefficient(), other.f.max_abs_coefficient());
+        let (du, dv) = f.degrees();
+        let carried = ma * other.err + self.err * mb + self.err * other.err;
+        let err = rounded_up(carried + gamma(product_rounding(du, dv)) * ma * mb);
+        Ok(Self { f, err })
+    }
+
+    /// `self + x * other` ([`Bernstein2::add_scaled`]): both raised to the larger degrees
+    /// (a product with ones each), then two roundings per coefficient.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Bernstein2::add_scaled`].
+    pub fn add_scaled(&self, other: &Self, x: f64, b: &Binomials) -> Result<Self> {
+        let f = self.f.add_scaled(&other.f, x, b)?;
+        let (du, dv) = f.degrees();
+        let size = self.f.max_abs_coefficient() + x.abs() * other.f.max_abs_coefficient();
+        let ops = product_rounding(du, dv).saturating_add(2);
+        let err = rounded_up(self.err + x.abs() * other.err + gamma(ops) * size);
+        Ok(Self { f, err })
+    }
+
+    /// `self - other`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Bernstein2::add_scaled`].
+    pub fn sub(&self, other: &Self, b: &Binomials) -> Result<Self> {
+        self.add_scaled(other, -1.0, b)
+    }
+
+    /// `self + other`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Bernstein2::add_scaled`].
+    pub fn add(&self, other: &Self, b: &Binomials) -> Result<Self> {
+        self.add_scaled(other, 1.0, b)
+    }
+
+    /// `x * self`: one rounding.
+    #[must_use]
+    pub fn scale(&self, x: f64) -> Self {
+        let f = self.f.scale(x);
+        let err = rounded_up(x.abs() * self.err + gamma(1) * f.max_abs_coefficient());
+        Self { f, err }
+    }
+
+    /// The first-parameter derivative: each coefficient `n (c_(i+1) - c_i)`, two roundings
+    /// of its own value, and twice `n` times the carried error.
+    #[must_use]
+    pub fn deriv_u(&self) -> Self {
+        let f = self.f.deriv_u();
+        #[allow(clippy::cast_precision_loss)]
+        let n = self.f.degrees().0 as f64;
+        let err = rounded_up(2.0 * n * self.err + gamma(2) * f.max_abs_coefficient());
+        Self { f, err }
+    }
+
+    /// The second-parameter derivative, as [`Self::deriv_u`].
+    #[must_use]
+    pub fn deriv_v(&self) -> Self {
+        let f = self.f.deriv_v();
+        #[allow(clippy::cast_precision_loss)]
+        let n = self.f.degrees().1 as f64;
+        let err = rounded_up(2.0 * n * self.err + gamma(2) * f.max_abs_coefficient());
+        Self { f, err }
+    }
+
+    /// One quarter of the square, `[u0, u1] x [v0, v1]` with each end 0, 1/2 or 1
+    /// ([`Bernstein2::restrict`]): at most one de Casteljau split at 1/2 in each parameter,
+    /// `du + dv` levels that each halve exactly and add with one rounding, convex
+    /// combinations that carry the error unchanged.
+    #[must_use]
+    pub fn quarter(&self, u0: f64, u1: f64, v0: f64, v1: f64) -> Self {
+        let f = self.f.restrict(u0, u1, v0, v1);
+        let (du, dv) = f.degrees();
+        let err = rounded_up(self.err + gamma(du + dv) * self.f.max_abs_coefficient());
+        Self { f, err }
+    }
+}
+
+/// A vector of three [`Bounded`].
+pub type Bounded3 = [Bounded; 3];
+
+/// `a . b` with its error bound, as [`dot`].
+///
+/// # Errors
+///
+/// Those of [`Bernstein2::mul`].
+pub fn dot_bounded(a: &Bounded3, b: &Bounded3, bi: &Binomials) -> Result<Bounded> {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    ax.mul(bx, bi)?
+        .add(&ay.mul(by, bi)?, bi)?
+        .add(&az.mul(bz, bi)?, bi)
+}
+
+/// `a x b` with its error bound, as [`cross`].
+///
+/// # Errors
+///
+/// Those of [`Bernstein2::mul`].
+pub fn cross_bounded(a: &Bounded3, b: &Bounded3, bi: &Binomials) -> Result<Bounded3> {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    Ok([
+        ay.mul(bz, bi)?.sub(&az.mul(by, bi)?, bi)?,
+        az.mul(bx, bi)?.sub(&ax.mul(bz, bi)?, bi)?,
+        ax.mul(by, bi)?.sub(&ay.mul(bx, bi)?, bi)?,
+    ])
+}
+
+/// `a - b` with its error bound, as [`sub3`].
+///
+/// # Errors
+///
+/// Those of [`Bernstein2::sub`].
+pub fn sub3_bounded(a: &Bounded3, b: &Bounded3, bi: &Binomials) -> Result<Bounded3> {
+    let [ax, ay, az] = a;
+    let [bx, by, bz] = b;
+    Ok([ax.sub(bx, bi)?, ay.sub(by, bi)?, az.sub(bz, bi)?])
+}
+
+/// `a * s` with its error bound, as [`mul3`].
+///
+/// # Errors
+///
+/// Those of [`Bernstein2::mul`].
+pub fn mul3_bounded(a: &Bounded3, s: &Bounded, bi: &Binomials) -> Result<Bounded3> {
+    let [ax, ay, az] = a;
+    Ok([ax.mul(s, bi)?, ay.mul(s, bi)?, az.mul(s, bi)?])
+}
+
+/// The componentwise first-parameter derivative with its error bound.
+#[must_use]
+pub fn deriv_u3_bounded(a: &Bounded3) -> Bounded3 {
+    let [x, y, z] = a;
+    [x.deriv_u(), y.deriv_u(), z.deriv_u()]
+}
+
+/// The componentwise second-parameter derivative with its error bound.
+#[must_use]
+pub fn deriv_v3_bounded(a: &Bounded3) -> Bounded3 {
+    let [x, y, z] = a;
+    [x.deriv_v(), y.deriv_v(), z.deriv_v()]
+}
+
+/// The polynomials of `a`, without their bounds.
+#[must_use]
+pub fn unbounded3(a: Bounded3) -> Bernstein3 {
+    let [x, y, z] = a;
+    [x.f, y.f, z.f]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geom::expansion;
 
     fn poly(du: usize, dv: usize, f: impl Fn(usize, usize) -> f64) -> Bernstein2 {
         let mut c = Vec::new();
@@ -579,6 +794,99 @@ mod tests {
             }
             assert_eq!(lu.degrees(), p.degrees());
             assert_eq!(rv.degrees(), p.degrees());
+        }
+    }
+
+    /// Whether `|c - e / den| <= err`, exactly: `|c den - e| <= err den` in expansions,
+    /// `e` the exact numerator and `den > 0` exact.
+    fn within(c: f64, e: &[f64], den: f64, err: f64) -> bool {
+        let diff = expansion::sub(&expansion::product(c, den).unwrap(), e);
+        let room = expansion::product(err, den).unwrap();
+        expansion::sign(&expansion::sub(&room, &diff)) >= 0
+            && expansion::sign(&expansion::add(&room, &diff)) >= 0
+    }
+
+    /// Coefficients of both signs over five decades, none a short binary fraction.
+    fn mixed(du: usize, dv: usize, seed: f64) -> Bernstein2 {
+        poly(du, dv, |i, j| {
+            let k = (i * (dv + 1) + j) as f64;
+            ((k + seed) * 0.7).sin() * 10f64.powi((i + 2 * j) as i32 % 5 - 2) + 1.0 / 3.0
+        })
+    }
+
+    /// The weights of the exact half `[0, 1/2]` (`left`) or `[1/2, 1]` of degree `n` on
+    /// coefficient `j` of the new coefficient `i`, dyadic, so exact.
+    fn half_weight(b: &Binomials, n: usize, i: usize, j: usize, left: bool) -> f64 {
+        let (k, m) = if left {
+            (i, j)
+        } else {
+            (n - i, j.wrapping_sub(i))
+        };
+        if m > k {
+            return 0.0;
+        }
+        b.get(k, m) * 0.5f64.powi(k as i32)
+    }
+
+    /// [`Bounded::mul`] and [`Bounded::quarter`] hold each coefficient within their bound of
+    /// the exact one, checked in exact arithmetic (`geom::expansion`): the product's
+    /// coefficient times `C(du, i) C(dv, j)` against the exact sum of its terms, and a
+    /// quarter of the product, taken as exact, against its exact de Casteljau weights. The
+    /// rounding happens (some coefficient is off the exact one) and is counted.
+    #[test]
+    fn the_counted_rounding_holds_the_exact_coefficients() {
+        let b = Binomials::new();
+        let (fa, fb) = (mixed(3, 2, 0.1), mixed(4, 3, 0.9));
+        let p = Bounded::exact(fa.clone())
+            .mul(&Bounded::exact(fb.clone()), &b)
+            .unwrap();
+        let (du, dv) = p.f.degrees();
+        let mut rounded = 0;
+        for i in 0..=du {
+            for j in 0..=dv {
+                let mut sum = vec![0.0];
+                for (ia, ra) in fa.rows().enumerate() {
+                    for (ja, &x) in ra.iter().enumerate() {
+                        for (ib, rb) in fb.rows().enumerate() {
+                            for (jb, &y) in rb.iter().enumerate() {
+                                if ia + ib != i || ja + jb != j {
+                                    continue;
+                                }
+                                let w = b.get(3, ia) * b.get(2, ja) * b.get(4, ib) * b.get(3, jb);
+                                let xy = expansion::product(x, y).unwrap();
+                                sum = expansion::add(&sum, &expansion::scale(&xy, w).unwrap());
+                            }
+                        }
+                    }
+                }
+                let den = b.get(du, i) * b.get(dv, j);
+                let c = p.f.coefficients()[i * (dv + 1) + j];
+                assert!(within(c, &sum, den, p.err), "product {i} {j}");
+                rounded += usize::from(!within(c, &sum, den, 0.0));
+            }
+        }
+        assert!(rounded > 0);
+        for (u0, u1, v0, v1) in [(0.0, 0.5, 0.5, 1.0), (0.5, 1.0, 0.0, 0.5)] {
+            let q = Bounded::exact(p.f.clone()).quarter(u0, u1, v0, v1);
+            let mut rounded = 0;
+            for i in 0..=du {
+                for j in 0..=dv {
+                    let mut sum = vec![0.0];
+                    for (k, row) in p.f.rows().enumerate() {
+                        for (l, &x) in row.iter().enumerate() {
+                            let w = half_weight(&b, du, i, k, u0 == 0.0)
+                                * half_weight(&b, dv, j, l, v0 == 0.0);
+                            if w != 0.0 {
+                                sum = expansion::add(&sum, &expansion::product(x, w).unwrap());
+                            }
+                        }
+                    }
+                    let c = q.f.coefficients()[i * (dv + 1) + j];
+                    assert!(within(c, &sum, 1.0, q.err), "quarter {u0} {v0} {i} {j}");
+                    rounded += usize::from(!within(c, &sum, 1.0, 0.0));
+                }
+            }
+            assert!(rounded > 0);
         }
     }
 }
