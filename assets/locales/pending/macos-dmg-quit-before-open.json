@@ -1,0 +1,66 @@
+{
+  "en": {
+    "update.prepare_dmg": "Download and verify",
+    "update.quit_and_update": "Quit and update",
+    "update.dmg_ready": "The disk image is verified and ready. Finder will open it after SolidCraft quits.",
+    "update.dmg_step_quit": "1. Choose Quit and update, then save any unsaved designs when prompted.",
+    "update.dmg_step_copy": "2. In Finder, drag SolidCraft to Applications, replacing the previous version.",
+    "update.dmg_step_reopen": "3. Open SolidCraft again from Applications."
+  },
+  "ar": {
+    "update.prepare_dmg": "تنزيل والتحقق",
+    "update.quit_and_update": "إنهاء وتحديث",
+    "update.dmg_ready": "تم التحقق من صورة القرص وهي جاهزة. سيفتحها Finder بعد إنهاء SolidCraft.",
+    "update.dmg_step_quit": "1. اختر إنهاء وتحديث، ثم احفظ التصاميم غير المحفوظة عند الطلب.",
+    "update.dmg_step_copy": "2. في Finder، اسحب SolidCraft إلى التطبيقات واستبدل النسخة السابقة.",
+    "update.dmg_step_reopen": "3. افتح SolidCraft مجددًا من التطبيقات."
+  },
+  "de": {
+    "update.prepare_dmg": "Herunterladen und prüfen",
+    "update.quit_and_update": "Beenden und aktualisieren",
+    "update.dmg_ready": "Das geprüfte Disk-Image ist bereit. Finder öffnet es, sobald SolidCraft beendet wurde.",
+    "update.dmg_step_quit": "1. Wählen Sie Beenden und aktualisieren und speichern Sie ungesicherte Entwürfe bei Nachfrage.",
+    "update.dmg_step_copy": "2. Ziehen Sie SolidCraft im Finder in Programme und ersetzen Sie die vorige Version.",
+    "update.dmg_step_reopen": "3. Öffnen Sie SolidCraft erneut aus Programme."
+  },
+  "he": {
+    "update.prepare_dmg": "הורדה ואימות",
+    "update.quit_and_update": "יציאה ועדכון",
+    "update.dmg_ready": "קובץ תמונת הדיסק אומת והוא מוכן. Finder יפתח אותו לאחר יציאה מ-SolidCraft.",
+    "update.dmg_step_quit": "1. בחרו יציאה ועדכון ושמרו תכנונים שלא נשמרו כאשר תתבקשו.",
+    "update.dmg_step_copy": "2. ב-Finder גררו את SolidCraft לתיקיית היישומים והחליפו את הגרסה הקודמת.",
+    "update.dmg_step_reopen": "3. פתחו מחדש את SolidCraft מתוך היישומים."
+  },
+  "ja": {
+    "update.prepare_dmg": "ダウンロードして検証",
+    "update.quit_and_update": "終了して更新",
+    "update.dmg_ready": "検証済みのディスクイメージを準備しました。SolidCraft の終了後に Finder で開きます。",
+    "update.dmg_step_quit": "1. 「終了して更新」を選び、未保存の設計があれば保存してください。",
+    "update.dmg_step_copy": "2. Finder で SolidCraft をアプリケーションにドラッグし、以前のバージョンを置き換えます。",
+    "update.dmg_step_reopen": "3. アプリケーションから SolidCraft を再度開きます。"
+  },
+  "ko": {
+    "update.prepare_dmg": "다운로드 및 검증",
+    "update.quit_and_update": "종료하고 업데이트",
+    "update.dmg_ready": "디스크 이미지 검증이 완료되었습니다. SolidCraft가 종료된 뒤 Finder에서 열립니다.",
+    "update.dmg_step_quit": "1. 종료하고 업데이트를 선택한 다음 저장하지 않은 설계를 저장하세요.",
+    "update.dmg_step_copy": "2. Finder에서 SolidCraft를 응용 프로그램 폴더로 드래그하여 이전 버전을 교체하세요.",
+    "update.dmg_step_reopen": "3. 응용 프로그램에서 SolidCraft를 다시 여세요."
+  },
+  "vi": {
+    "update.prepare_dmg": "Tải về và xác minh",
+    "update.quit_and_update": "Thoát và cập nhật",
+    "update.dmg_ready": "Ảnh đĩa đã được xác minh và sẵn sàng. Finder sẽ mở ảnh đĩa sau khi SolidCraft thoát.",
+    "update.dmg_step_quit": "1. Chọn Thoát và cập nhật, rồi lưu các thiết kế chưa lưu khi được hỏi.",
+    "update.dmg_step_copy": "2. Trong Finder, kéo SolidCraft vào Ứng dụng và thay thế phiên bản cũ.",
+    "update.dmg_step_reopen": "3. Mở lại SolidCraft từ Ứng dụng."
+  },
+  "zh": {
+    "update.prepare_dmg": "下载并验证",
+    "update.quit_and_update": "退出并更新",
+    "update.dmg_ready": "磁盘映像已验证并准备就绪。SolidCraft 退出后 Finder 才会打开它。",
+    "update.dmg_step_quit": "1. 选择退出并更新，并按提示保存尚未保存的设计。",
+    "update.dmg_step_copy": "2. 在 Finder 中将 SolidCraft 拖入应用程序文件夹，替换旧版本。",
+    "update.dmg_step_reopen": "3. 从应用程序文件夹重新打开 SolidCraft。"
+  }
+}

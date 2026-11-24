@@ -230,8 +230,22 @@ fn installers_and_disk_images_are_handed_over() {
         apply(&Method::Msi, &pkg).unwrap(),
         Outcome::Installer("msiexec".into(), vec!["/i".into(), pkg.to_string_lossy().to_string(), "/passive".into()])
     );
-    assert_eq!(apply(&Method::Dmg, &pkg).unwrap(), Outcome::Opened(pkg.clone()));
+    assert_eq!(apply(&Method::Dmg, &pkg).unwrap(), Outcome::DmgReady(pkg.clone()));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A verified DMG does not launch Finder while SolidCraft still owns its executable.
+/// The host starts this helper on exit; it waits for that process to finish first.
+#[test]
+fn macos_disk_image_opens_only_after_the_running_process_exits() {
+    let dmg = Path::new("/var/tmp/SolidCraft 0.45's update.dmg");
+    let (program, arguments) = open_dmg_after_exit(dmg, 12345);
+    assert_eq!(program, Path::new("/bin/sh"));
+    assert_eq!(arguments[0], "-c");
+    assert!(arguments[1].contains("kill -0"));
+    assert!(arguments[1].contains("exec /usr/bin/open"));
+    assert_eq!(&arguments[2..], ["solidcraft-dmg-update", "12345", "/var/tmp/SolidCraft 0.45's update.dmg"]);
+    assert!(!arguments[1].contains(dmg.to_str().unwrap()), "paths are arguments, never shell code");
 }
 
 #[test]
