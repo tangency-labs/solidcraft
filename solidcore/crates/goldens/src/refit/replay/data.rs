@@ -19,6 +19,13 @@
 //! (`stubs4-delete-edge` `e1`, `e2`, `e4`, `e5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in
 //! their `mass_properties` only, so their hashes are of the refit run with that rule;
 //! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
+//!
+//! The retirement of `uv_trim_corner_end_points_only` (#21272: `sm_FixUVTrimCurves` closes a
+//! face's trim corners by moving only the trims' end control points) moves the four
+//! `stubs4-delete-edge-sphere_diff_3cylinders` `e1` and `e4` rows again, in their
+//! `mass_properties` only, so their hashes are of the refit run with it;
+//! `tests/uvtc_moved_rows_are_classified.rs` classifies each moved entry against a certified
+//! enclosure.
 
 use super::Row;
 
@@ -1009,12 +1016,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x05795dd36be8a89b,
+        0xa290c91f3d43027a,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x58eadcd8c1387515,
+        0xbe6de21de2ac161f,
     ),
     (
         "blend.fillet_executive_p3",
@@ -1024,12 +1031,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xd745dc9aadade179,
+        0xb9983f721137df0e,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x7e8f093e2d797485,
+        0xd6c7b58fe14cca8f,
     ),
     (
         "blend.fillet_executive_p3",

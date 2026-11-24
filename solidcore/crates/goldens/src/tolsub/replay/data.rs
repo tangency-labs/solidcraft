@@ -80,17 +80,6 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "source-file-corner_box-edge9",
-        0xf9e3198772fc70f7,
-        1,
-        &[
-            (0, false, 13, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
-            (0, true, 7, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
-            (0, true, 9, 0x3ef24cf88f997039, 0x3ee4f8b588e368f1),
-        ],
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-case_ext-e1-r0.5",
         0xbc8aab1728b9583c,
         1,
@@ -2275,25 +2264,6 @@ pub(super) static DATA: &[Row] = &[
         &[
             (0, false, 14, 0x3f10f3a1ecd6ef28, 0x3f0ca91677750414),
             (0, true, 10, 0x3f10f3a1ecd6ef28, 0x3f0ca91677750414),
-        ],
-    ),
-    (
-        "topology.brep_p10",
-        "gen0115",
-        0xbb0d77b21b63f077,
-        1,
-        &[
-            (0, false, 1, 0x3eea3799c0cc6c9e, 0x3ee4f8b588e368f1),
-            (0, false, 3, 0x3eee016f4bc1b10f, 0x3ee4f8b588e368f1),
-            (0, false, 5, 0x3f0ec492fd5d44d7, 0x3f0986659b246a9b),
-            (0, false, 16, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
-            (0, false, 17, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
-            (0, true, 2, 0x3ef5de99f97fbd8d, 0x3ef3e1a33fe87dc6),
-            (0, true, 4, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
-            (0, true, 5, 0x3f0ec492fd5d44d7, 0x3f0986659b246a9b),
-            (0, true, 6, 0x3f0ec492fd5d44d7, 0x3f0986659b246a9b),
-            (0, true, 12, 0x3f0169496d9400b7, 0x3ef8563816b64cf6),
-            (0, true, 14, 0x3f1169496d69328f, 0x3ef8563816b64cf6),
         ],
     ),
     (

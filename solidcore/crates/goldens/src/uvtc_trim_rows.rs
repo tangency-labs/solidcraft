@@ -23,10 +23,13 @@ use solidcore::kernel::Kernel;
 
 use crate::runner::UnitDiff;
 use crate::trims_on_edges::certify_brep;
-use crate::units::{topology_brep_p3, topology_face_p2, topology_face_p3};
+use crate::units::{topology_brep_p10, topology_brep_p3, topology_face_p2, topology_face_p3};
 
-/// The moved rows, as (unit, case).
-const ROWS: [(&str, &str); 16] = [
+/// The moved rows, as (unit, case). `uv_trim_f4_rebuild` and `topology.brep_p10`'s `gen0115`
+/// (its read's trims, dumped before its op) move within the golden compare's `1e-9` (each
+/// blessed line is main's), so each replay is checked against the line by that compare, as
+/// every row's is.
+const ROWS: [(&str, &str); 18] = [
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46_gaps"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46_gaps_own"),
@@ -35,6 +38,10 @@ const ROWS: [(&str, &str); 16] = [
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_47_gaps"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_47_gaps_own"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_47_own"),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
+    ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild",
@@ -52,6 +59,7 @@ const ROWS: [(&str, &str); 16] = [
     ("topology.brep_p3", "nurbs_off_Mouse_-0.05"),
     ("topology.brep_p3", "nurbs_off_Mouse_0.1"),
     ("topology.face_p2", "fix_file_Mouse.smb_0"),
+    ("topology.brep_p10", "gen0115"),
 ];
 
 /// Every moved row's replay reproduces the row, and every UV trim of the B-rep it records
@@ -64,6 +72,7 @@ fn uvtc_moved_trim_rows_lie_on_their_edges() {
         let runner: &dyn UnitDiff = match unit {
             "topology.face_p3" => &topology_face_p3::Runner,
             "topology.brep_p3" => &topology_brep_p3::Runner,
+            "topology.brep_p10" => &topology_brep_p10::Runner,
             _ => &topology_face_p2::Runner,
         };
         let case = crate::case::regression_case(runner, name);

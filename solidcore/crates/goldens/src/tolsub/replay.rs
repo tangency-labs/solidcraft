@@ -95,6 +95,16 @@
 //! runs are hashed without them ([`run_without_classified_trims`], proved in `wr493_rows`'
 //! `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`).
 //!
+//! The retirement of `uv_trim_corner_end_points_only` (#21272: `sm_FixUVTrimCurves` closes a
+//! face's trim corners by moving only the trims' end control points) moves
+//! `blend.fillet_executive_p3`'s `source-file-corner_box-edge9` and `topology.brep_p10`'s
+//! `gen0115` by less than the goldens' comparator, other than through the read tolerances:
+//! their committed lines stay main's and their entries are deleted. Their moves are proved in
+//! `solidcore`'s `tests/heal_edge_tolerance_covers_edge_face_gap.rs`
+//! (`uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance`: the corner box fillet
+//! moves in its trims and area alone) and in `crate::uvtc_trim_rows` (`gen0115`: its read's
+//! trims lie on their edges).
+//!
 //! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
 //! `zone_tol3d(gain * 2 * gap)`. Its raises on these reads were recorded the same way
 //! against #18230's healer and carried into [`DATA`]: a listed vertex holds #17739's bits,
@@ -566,12 +576,12 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 28;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 27;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
-    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
+    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 37;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 36;
 }
@@ -662,26 +672,31 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// is one point within the drop's tolerances is left out) moves all four in their
 /// `mass_properties` only, so each hash is of the row with that rule;
 /// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
+/// The retirement of `uv_trim_corner_end_points_only` (#21272: `sm_FixUVTrimCurves` closes a
+/// face's trim corners by moving only the trims' end control points) moves all four again,
+/// in their `mass_properties` only, so each hash is of the row with it;
+/// `tests/uvtc_moved_rows_are_classified.rs` classifies each moved entry against a certified
+/// enclosure.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x751d_c931_5b45_292d,
+        0x4a6a_fb24_69a6_68f6,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x5132_edc0_4baf_f026,
+        0x5708_8cfe_33f8_eb4a,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xc413_26f0_108d_e3f1,
+        0x72df_c8a2_f853_85a6,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xd7e9_450b_63e6_d0d1,
+        0x1065_9742_752b_c7df,
     ),
 ];
 
@@ -759,11 +774,18 @@ fn record() {
 /// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
 /// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
 /// (`certify::trim_tolerance` certifies its moved tolerance).
+/// The retirement of `uv_trim_corner_end_points_only` (#21272: `sm_FixUVTrimCurves` closes a
+/// face's trim corners by moving only the trims' end control points) moves five of these rows
+/// again, so each holds this branch's run with the trims put back: the corpus row (its
+/// area and volume; `wr493_rows::sphere_diff_3cylinders_corpus_area_is_within_its_accuracy`
+/// and `tests/uvtc_corpus_row.rs` prove them) and the `uv_trim_f4_rebuild`, `f6_rebuild`, `f7`
+/// and `f7_rebuild` rows (their UV trims; `uvtc_trim_rows` certifies every trim of each on its
+/// edge).
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
         "Fillet__sphere_diff_3cylinders.smb",
-        0x0fe4ffda86f0023a,
+        0x8cbd_285f_a0b2_6876,
     ),
     ("topology.brep_p10", "gen0026", 0xc2f31f04dbd827bb),
     (
@@ -839,7 +861,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
-        0x5bca12f6769919d2,
+        0xbce3_04cd_58de_eebc,
     ),
     (
         "topology.face_p3",
@@ -859,17 +881,17 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild",
-        0x8e918074b11ab263,
+        0x824d_476d_fb63_8b96,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7",
-        0x467d1e66deace095,
+        0x51fc_bc44_7c4d_001f,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0x50fca59ea3c3d0cc,
+        0x2e0f_93eb_6005_c046,
     ),
     (
         "topology.face_p3",

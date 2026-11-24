@@ -3,7 +3,8 @@
 //! moving only their end control points, not by trimming and re-stretching each trim), each
 //! moved entry classified against a certified enclosure of the body's true value.
 //!
-//! The old rows are main's; the new are this branch's. Both are estimates
+//! The old rows are #21353's (main's once it lands: the drop tracer's clamped-sliver rule);
+//! the new are this branch's. Both are estimates
 //! (`brep_mass_properties(k, b, 1e-4, density 1, origin 0)`), and exact floats, so which is
 //! nearer the true value depends only on which side of their midpoint the true value lies
 //! (`harness::side`). For each row the test runs the case with `goldens::dump::capture` on,

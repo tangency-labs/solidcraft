@@ -637,7 +637,11 @@ type Tolerances<'a> = &'a [(u32, u64)];
 /// `corpus.parity`'s area and volume of a corpus file (its `measure`, at accuracy 1e-6),
 /// with the entries of `lower` (edges, vertices: index, bits) set back to those
 /// tolerances first.
-fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (f64, f64) {
+/// The area, the volume and each face's area (in [`bl::faces`] order, the terms the area sums).
+fn corpus_mass(
+    name: &str,
+    lower: Option<(Tolerances<'_>, Tolerances<'_>)>,
+) -> (f64, f64, Vec<f64>) {
     use solidcore::geom::attribute::ObjectKey;
     use solidcore::mass::integrator::properties::{
         brep_volume, face_properties, PropertyAttributes,
@@ -668,6 +672,7 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
     }
     bl::shells(&mut k, &b, None).unwrap();
     let mut area = 0.0;
+    let mut face_areas = Vec::new();
     for f in &faces {
         let bbox = solidcore::query::face::p1::calculate_bounding_box(&k, &b, *f, false).unwrap();
         let s = bbox.size();
@@ -685,6 +690,7 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
         )
         .unwrap();
         area += p.area.abs();
+        face_areas.push(p.area.abs());
     }
     let mut volume = f64::NAN;
     if solid {
@@ -696,7 +702,7 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
         };
         volume = brep_volume(&k, &mut b, 1e-6, &attributes).unwrap();
     }
-    (area, volume)
+    (area, volume, face_areas)
 }
 
 /// The upstream test files the moved goldens rows read (`topology.brep_p10` `read_*`,
@@ -1027,7 +1033,9 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   ones), and every UV trim `GetOrCreateUVTrimCurve` makes after the read, are main's
 ///   bit for bit: trims fit at the edge's fit tolerance (`edgeuse::p3::fit_tolerance`),
 ///   not at the raised one;
-/// - `corpus.parity`'s areas are main's bit for bit; its volumes are main's bit for bit
+/// - `corpus.parity`'s areas are main's bit for bit, but for those WR-441's corner fix moves
+///   ([`UVTC_AREA_MAIN`]: main's with those faces' terms put back, each face enclosed;
+///   each the same with the tolerances lowered); its volumes are main's bit for bit
 ///   with the moved tolerances set back to main's, and as read differ only on
 ///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
 ///   B-rep's box, which is grown by the edge and vertex tolerances
@@ -1046,6 +1054,36 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 /// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
 /// every other file; they are asserted to be those two files only. (`sphere_plane`'s
 /// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
+/// [`corpus_reads_change_only_the_covered_tolerances`]'s moved areas: WR-441's corner fix
+/// (`sm_FixUVTrimCurves` repairs a trim's end points at a corner, not its whole span) moves
+/// `Fillet/vase3.smb`'s integrated area by 1200 ulps (1.4e-13 relative), through the trims
+/// of its two planar faces 0 and 1. Each moved face's area on main (the file, the face's
+/// index in the area's sum, the bits of its term):
+const UVTC_AREA_MAIN: [(&str, usize, u64); 2] = [
+    ("Fillet/vase3.smb", 0, 0x40c5_aaf3_fcdc_b456),
+    ("Fillet/vase3.smb", 1, 0x40b1_9ea5_a6d7_5907),
+];
+
+/// Each [`UVTC_AREA_MAIN`] face classed against a certified enclosure of its exact area
+/// (`mass::enclosure::enclose_face_area`), asked `1e-9 * |A|` wide: the file, the face, its
+/// class, why the enclosure stopped and whether it reached the asked width.
+const UVTC_AREA_CLASSES: [(&str, usize, &str, EnclosureStop, bool); 2] = [
+    (
+        "Fillet/vase3.smb",
+        0,
+        "both enclosed",
+        EnclosureStop::Reached,
+        true,
+    ),
+    (
+        "Fillet/vase3.smb",
+        1,
+        "both enclosed",
+        EnclosureStop::Reached,
+        true,
+    ),
+];
+
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
@@ -1054,7 +1092,28 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
     let mut volume_classes = Vec::new();
+    let mut area_classes = Vec::new();
     let mut floored = Vec::new();
+    // a moved value `now` against main's, by a certified enclosure `[lo, hi]` of the exact one
+    let classify = |now: f64, main: f64, lo: f64, hi: f64| {
+        if lo <= now.min(main) && now.max(main) <= hi {
+            "both enclosed"
+        } else if now.max(main) < lo {
+            if now > main {
+                "closer"
+            } else {
+                "farther"
+            }
+        } else if now.min(main) > hi {
+            if now < main {
+                "closer"
+            } else {
+                "farther"
+            }
+        } else {
+            "straddles"
+        }
+    };
     for (name, [read_main, lazy_main, rebuild_main, area_main, volume_main]) in MAIN {
         let edges = entries(RAISED_EDGES, name);
         let vertices = entries(MOVED_VERTICES, name);
@@ -1129,16 +1188,59 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             }
         }
         let (mut area, mut volume, mut area0, mut volume0) = (0.0, 0.0, 0.0, 0.0);
+        let mut face_areas = Vec::new();
         fit(&mut || {
-            (area, volume) = corpus_mass(name, None);
-            (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+            (area, volume, face_areas) = corpus_mass(name, None);
+            (area0, volume0, _) = corpus_mass(name, Some((edges, vertices)));
         });
-        if area.to_bits() != area_main || area0.to_bits() != area_main {
+        if area0.to_bits() != area.to_bits() {
             failures.push(format!(
                 "{name}: area {:#x} / lowered {:#x}, main {area_main:#x}",
                 area.to_bits(),
                 area0.to_bits()
             ));
+        } else if area.to_bits() != area_main {
+            // (WR-441's corner fix moves the trims of the faces in [`UVTC_AREA_MAIN`]: the
+            // area with main's terms put back for those faces is main's bit for bit, and each
+            // moved face's area, now and on main, is classed against a certified enclosure
+            // of its exact area, asked 1e-9 * |A| wide)
+            let listed: Vec<_> = UVTC_AREA_MAIN.iter().filter(|m| m.0 == name).collect();
+            let mut put_back = 0.0;
+            for (i, &a) in face_areas.iter().enumerate() {
+                put_back += listed
+                    .iter()
+                    .find(|m| m.1 == i)
+                    .map_or(a, |m| f64::from_bits(m.2));
+            }
+            if listed.is_empty() || put_back.to_bits() != area_main {
+                failures.push(format!(
+                    "{name}: area {:#x}, with {} faces put back {:#x}, main {area_main:#x}",
+                    area.to_bits(),
+                    listed.len(),
+                    put_back.to_bits()
+                ));
+            }
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            fit(&mut || b = read_corpus(&mut k, name, false));
+            let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+            for &&(_, i, main) in &listed {
+                let (now, main) = (face_areas[i], f64::from_bits(main));
+                assert_ne!(now.to_bits(), main.to_bits(), "{name} face {i}: not moved");
+                let asked = 1e-9 * main.abs();
+                let e =
+                    solidcore::mass::enclosure::enclose_face_area(&k, &mut b, &[faces[i]], asked)
+                        .unwrap();
+                area_classes.push((
+                    name,
+                    i,
+                    classify(now, main, e.lo, e.hi),
+                    e.lo,
+                    e.hi,
+                    asked,
+                    e.stop,
+                ));
+            }
         }
         if volume0.to_bits() != volume_main {
             failures.push(format!(
@@ -1155,24 +1257,14 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             fit(&mut || b = read_corpus(&mut k, name, false));
             let asked = 1e-9 * main.abs();
             let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
-            let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
-                "both enclosed"
-            } else if volume.max(main) < e.lo {
-                if volume > main {
-                    "closer"
-                } else {
-                    "farther"
-                }
-            } else if volume.min(main) > e.hi {
-                if volume < main {
-                    "closer"
-                } else {
-                    "farther"
-                }
-            } else {
-                "straddles"
-            };
-            volume_classes.push((name, class, e.lo, e.hi, asked, e.stop));
+            volume_classes.push((
+                name,
+                classify(volume, main, e.lo, e.hi),
+                e.lo,
+                e.hi,
+                asked,
+                e.stop,
+            ));
             moved_volumes.push(name);
         }
     }
@@ -1207,6 +1299,11 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
+    let classes: Vec<_> = area_classes
+        .iter()
+        .map(|&(n, i, c, lo, hi, asked, stop)| (n, i, c, stop, hi - lo <= asked))
+        .collect();
+    assert_eq!(classes, UVTC_AREA_CLASSES, "{area_classes:?}");
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
@@ -2002,6 +2099,11 @@ const FILLETS: [(&str, usize, f64); 29] = [
 /// bits of the result's mass properties at the golden's accuracy (1e-4, origin 0), or
 /// the error's status.
 fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
+    fillet_result_fed(name, edge, radius, true)
+}
+
+/// [`fillet_result`], its UV trims fed (`trims`) or left out of the digest.
+fn fillet_result_fed(name: &str, edge: usize, radius: f64, trims: bool) -> (u64, Vec<u64>) {
     use solidcore::blend::fillet_executive::api::fillet_edges;
     use solidcore::mass::integrator::properties::brep_mass_properties_default;
     use solidcore::math::Vec3;
@@ -2034,7 +2136,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
     for e in edges {
         digest_curve(&mut d, &k, &b, e);
         for eu in b.edge(e).unwrap().edgeuses.clone() {
-            digest_trim(&mut d, &k, &b, eu);
+            if trims {
+                digest_trim(&mut d, &k, &b, eu);
+            }
         }
     }
     let mass = match brep_mass_properties_default(&k, &mut b, 1e-4, 1.0, Vec3::ZERO) {
@@ -2072,16 +2176,19 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
 /// two edges at the fillet's end keep 4e-5 instead of main's raise to 8.05e-5, and one trim
 /// on face 16 is refit at that tolerance; that result is proved in
-/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]. Entries 3
+/// (`corner_box` e9, main's `0x7c0ce81dfdec54b0`) and 7 (`open_shell` e5, main's
+/// `0x9362785e2dee39d1`) are WR-441's: its corner fix moves their UV trims alone, proved in
+/// [`uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
     0xc9494b45a0f312d7,
-    0x7c0ce81dfdec54b0,
+    0x2d2cbafe138b406e,
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x9362785e2dee39d1,
+    0x3d5250395fa9eebd,
     0xb716929faf389955,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -2117,7 +2224,9 @@ const FILLET_MAIN: [u64; 29] = [
 /// integrator fits the trims it integrates over to the edges' tolerances);
 /// [`BOTTLE_E8_BEFORE`] holds main's bits and
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
-/// within the case's accuracy of a certified enclosure of the exact properties.
+/// within the case's accuracy of a certified enclosure of the exact properties. WR-441's
+/// corner fix moves entry 3's area (main's `0x4076c10e1e1ce654`, [`UVTC_MASS_MAIN`]), proved
+/// in [`uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance`].
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -2156,7 +2265,7 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         3,
         [
-            0x4076c10e1e1ce654,
+            0x4076c10e1e1ce4f8,
             0x407c829973ddde71,
             0x407c829973ddde71,
             0xc023e5148bf8d37b,
@@ -2408,6 +2517,181 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         }
     }
 }
+
+/// Main's [`fillet_result_fed`] digests of [`FILLETS`] entries 3 (`corner_box` e9 r0.1) and
+/// 7 (`open_shell` e5 r0.5) with the UV trims left out, made by this file's functions on
+/// main (the digests with the trims are [`FILLET_MAIN`]'s before WR-441).
+const UVTC_BARE_MAIN: [(usize, u64); 2] = [(3, 0xf6234496e9791e51), (7, 0xcc5f0726ad557e8)];
+
+/// WR-441's corner fix (`sm_FixUVTrimCurves` repairs only a trim's end points at a
+/// corner, no longer its whole span) moves [`FILLETS`] entries 3 and 7 in five UV trims
+/// alone ([`UVTC_MOVED_TRIMS`]). Proved here, on each result:
+/// - with the trims left out, the digest (status, counts, face tolerances, vertex points,
+///   edge curves) is main's bit for bit ([`UVTC_BARE_MAIN`]);
+/// - every other trim is main's bit for bit: the digest of their [`digest_trim`]s, in edge
+///   and edgeuse order, is main's ([`UVTC_KEPT_TRIMS_MAIN`]);
+/// - each moved trim is within its edge's tolerance: `trim_image_gap_bound_up_to`, a
+///   certified bound on the distance between the trim's image and the edge curve over the
+///   edge's interval, is at most the tolerance (main's trims there are too, by
+///   `7.73e-7`, `1.96e-6`, `1.30e-5`, `9.95e-6` and `5.34e-5` against `1e-5`, `1e-5`,
+///   `1.43e-5`, `6.77e-5` and `1.07e-4`);
+/// - Level 2 reports nothing;
+/// - entry 3's mass properties (entry 7's mass integration refuses the result, as on main) are each within the
+///   case's accuracy (1e-4 of its scale, as in
+///   [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]) of every
+///   point of a certified enclosure of the exact property
+///   (`mass::enclosure::enclose_mass_properties`), now and on main ([`UVTC_MASS_MAIN`]).
+#[test]
+fn uvtc_corner_fix_moves_only_trims_within_their_edges_tolerance() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::mass::integrator::properties::brep_mass_properties_default;
+    use solidcore::math::Vec3;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::query::curve_surface_gap::trim_image_gap_bound_up_to;
+    use solidcore::topology::brep::p1 as bl;
+    use solidcore::topology::edgeuse::p1 as eu1;
+    const ACCURACY: f64 = 1e-4;
+    for ((i, bare_main), (_, kept_main)) in UVTC_BARE_MAIN.into_iter().zip(UVTC_KEPT_TRIMS_MAIN) {
+        let (name, edge, radius) = FILLETS[i];
+        assert_eq!(
+            fillet_result_fed(name, edge, radius, false).0,
+            bare_main,
+            "{i}: the result without its trims is not main's"
+        );
+        let mut k = Kernel::default();
+        let mut b = read_corpus(&mut k, name, false);
+        let e = bl::edges(&b, None).unwrap()[edge];
+        let status = fillet_edges(&mut k, &mut b, &[e], radius, 1, 1, 1.0);
+        let mut kept = Digest::new();
+        let mut moved = Vec::new();
+        for e in bl::edges(&b, None).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let (tol, ivl, curve) = (rec.tolerance, rec.interval, rec.curve.clone());
+            for eu in rec.edgeuses.clone() {
+                let mut d = Digest::new();
+                digest_trim(&mut d, &k, &b, eu);
+                if !UVTC_MOVED_TRIMS.contains(&(i, e.index(), eu.index())) {
+                    kept.u64(d.0);
+                    continue;
+                }
+                let trim = b.edgeuse(eu).unwrap().uv_trim_curve.clone().unwrap();
+                let face = eu1::face(&b, eu).unwrap().unwrap();
+                let mut surface = b
+                    .face(face)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .clone_for_evaluation()
+                    .unwrap();
+                let _ = surface.set_owner(None);
+                let bound = trim_image_gap_bound_up_to(
+                    &k,
+                    &surface,
+                    curve.as_ref().unwrap(),
+                    &trim,
+                    [ivl.min(), ivl.max()],
+                    1e-3 * tol,
+                    tol,
+                )
+                .unwrap();
+                assert!(
+                    bound.is_some_and(|g| g <= tol),
+                    "{i} {e:?} {eu:?}: {bound:?} against {tol:e}"
+                );
+                moved.push((i, e.index(), eu.index()));
+            }
+        }
+        assert_eq!(
+            kept.0, kept_main,
+            "{i}: the trims WR-441 leaves are not main's"
+        );
+        let listed: Vec<_> = UVTC_MOVED_TRIMS.into_iter().filter(|m| m.0 == i).collect();
+        assert_eq!(moved, listed, "{i}: the moved trims");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{i}: {lines:#?}");
+        // (entry 7: main's mass integration refuses the result, as it still does)
+        let mass = brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO);
+        if i == 7 {
+            assert!(mass.is_err(), "{i}: {status:?} {mass:?}");
+            continue;
+        }
+        let m = mass.unwrap();
+        let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
+        for v in [m.centroid, m.inertia, m.products] {
+            now.extend([v.x, v.y, v.z]);
+        }
+        let r = 0.5
+            * calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+                .unwrap()
+                .size()
+                .length();
+        let x = solidcore::mass::enclosure::enclose_mass_properties(&k, &mut b, 0.1 * ACCURACY)
+            .unwrap();
+        let vr2 = x.volume.hi * r * r;
+        let band = |j: usize| match j {
+            0 => (x.area, x.area.hi),
+            1 | 2 => (x.volume, x.volume.hi),
+            3..=5 => (x.centroid[j - 3], r),
+            6..=8 => (x.inertia[j - 6], vr2),
+            _ => (x.products[j - 9], vr2),
+        };
+        let main = UVTC_MASS_MAIN.map(f64::from_bits);
+        for (j, (&now, &main)) in now.iter().zip(&main).enumerate() {
+            let (band, scale) = band(j);
+            assert!(
+                band.lo.is_finite() && band.hi.is_finite() && scale.is_finite(),
+                "{i} {j}: enclosure [{:e}, {:e}] at scale {scale:e} is not finite",
+                band.lo,
+                band.hi
+            );
+            for (what, value) in [("now", now), ("main", main)] {
+                assert!(value.is_finite(), "{i} {j} {what}: {value:e} is not finite");
+                let accuracy = ACCURACY * scale.max(value.abs());
+                let far = (value - band.lo).max(band.hi - value);
+                assert!(
+                    far <= accuracy,
+                    "{i} {j} {what}: {value:e} is up to {far:e} off [{:e}, {:e}] (accuracy {accuracy:e})",
+                    band.lo,
+                    band.hi
+                );
+            }
+        }
+    }
+}
+
+/// The UV trims WR-441's corner fix moves in [`FILLETS`] entries 3 and 7: the entry, the
+/// edge's index and the edgeuse's.
+const UVTC_MOVED_TRIMS: [(usize, u32, u32); 5] = [
+    (3, 11, 32),
+    (3, 14, 58),
+    (7, 3, 52),
+    (7, 5, 29),
+    (7, 32, 88),
+];
+
+/// Main's digest of every other trim of [`FILLETS`] entries 3 and 7 (each [`digest_trim`]'s
+/// value, in edge and edgeuse order), made by this file's functions on main.
+const UVTC_KEPT_TRIMS_MAIN: [(usize, u64); 2] =
+    [(3, 0x6ac6_bbdc_2974_024f), (7, 0x15c2_86c0_bdf4_5e5d)];
+
+/// [`FILLETS`] entry 3's mass bits on main, before WR-441's corner fix.
+const UVTC_MASS_MAIN: [u64; 12] = [
+    0x4076c10e1e1ce654,
+    0x407c829973ddde71,
+    0x407c829973ddde71,
+    0xc023e5148bf8d37b,
+    0xc0241050602f226e,
+    0x400bb48477d8cc2a,
+    0x40eaa4610aefcd5c,
+    0x40ebd6b63d441862,
+    0x40f7ac2386495ac6,
+    0xc0cf08f0f659bc40,
+    0xc0ced0968b1cdcf1,
+    0x40e6336bc4833118,
+];
 
 /// The fillets behind `blend.fillet_executive_p3`'s moved rows make main's geometry and
 /// mass bit for bit: the rows moved only in the edge and vertex tolerances the result

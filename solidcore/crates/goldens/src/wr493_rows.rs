@@ -1297,7 +1297,11 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
 /// certified enclosure of the read's total face area (`enclose_face_area_relative`, every
 /// rounding included, asked `1e-8` wide) holds main's and this branch's values, both sides,
 /// each within that accuracy of it: the move is a re-integration within the requested
-/// accuracy, not a change of the body.
+/// accuracy, not a change of the body. The retirement of `uv_trim_corner_end_points_only`
+/// (#21272: the read closes its faces' trim corners by moving only the trims' end control
+/// points) moves both again, to 38235.9926957725 and 38235.99659480028 (by 3.3e-11 of
+/// themselves), the values this branch's run gives; the same enclosure holds them, and
+/// `tests/uvtc_corpus_row.rs` classifies that move against a certified enclosure.
 #[test]
 fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
     use crate::units::corpus_parity::{run_in_process, Runner, ACCURACY};
@@ -1306,8 +1310,8 @@ fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
     const CASE: &str = "Fillet__sphere_diff_3cylinders.smb";
     // (key, main's committed value, this branch's)
     const VALUES: [(&str, f64, f64); 2] = [
-        ("area", 38_235.992_646_638_4, 38_235.992_697_050_83),
-        ("rt_area", 38_235.996_545_666_74, 38_235.996_596_079_174),
+        ("area", 38_235.992_646_638_4, 38_235.992_695_772_5),
+        ("rt_area", 38_235.996_545_666_74, 38_235.996_594_800_28),
     ];
     let out = run_in_process(&regression_case(&Runner, CASE)).unwrap();
     for (key, _, now) in VALUES {

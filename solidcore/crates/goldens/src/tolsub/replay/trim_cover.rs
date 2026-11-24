@@ -19,6 +19,12 @@
 //! (`e2-r0.1`, `e5-r0.1`, `e5-r0.5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in their
 //! `mass_properties` only, so their hashes are of the put-back run with that rule;
 //! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
+//!
+//! The retirement of `uv_trim_corner_end_points_only` (#21272: `sm_FixUVTrimCurves` closes a
+//! face's trim corners by moving only the trims' end control points) moves `corpus.parity`'s
+//! `Fillet__sphere_diff_3cylinders.smb` in its area and volume, so its hash is of the put-back
+//! run with it; `wr493_rows::sphere_diff_3cylinders_corpus_area_is_within_its_accuracy` and
+//! `tests/uvtc_corpus_row.rs` prove the moved values.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -180,7 +186,7 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
         "Fillet__sphere_diff_3cylinders.smb",
-        0x73a05a8cf10a5ed1,
+        0x4e5ce36586a35b37,
     ),
     (
         "corpus.parity",

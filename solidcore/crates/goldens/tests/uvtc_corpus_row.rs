@@ -9,16 +9,10 @@
 //!   (`enclose_face_area_relative` face by face, `enclose_volume`), as
 //!   `mass_knot_line_moved_rows_are_classified` classifies its corpus entries: all EQUAL,
 //!   none FARTHER ([`moved_corpus_entries_are_classified`]).
-//! * `check` and `rt_check` move from 3 to 6: the three new lines (tests 11, 13 and 15:
-//!   a slow first derivative, a cusp, internal coincident control points) are on edge 24's
-//!   trim, whose first knot span `[0.49999995785315, 0.5]` maps to one point. Every run of
-//!   `degree + 1` control points within `3e-8` of each other in UV on every trim the read
-//!   leaves with a pole is, bit for bit, a run of one of the file's own UV curves
-//!   ([`the_new_check_lines_are_the_files_pole_span`]): the read keeps the file's pole span,
-//!   it does not make one. Upstream's trim at the far end's drop point cut it off as a side
-//!   effect (a trim interval within tolerance of a knot snaps to it), while its stretch back
-//!   over the interval moved every interior parameter off the edge's, the defect the
-//!   retirement removes.
+//! * Nothing else in the row moves: with #21353 (the drop tracer's clamped-sliver rule) its
+//!   `check` and `rt_check` stay main's 3 (without it, the retirement's trims add three
+//!   lines, tests 11, 13 and 15, on edge 24's one-point first knot span, which #21353 leaves
+//!   out).
 //!
 //! Run: `cargo test --profile goldens -p goldens --test uvtc_corpus_row -- --include-ignored --nocapture`.
 #![allow(
@@ -37,9 +31,7 @@ use harness::{side, within_accuracy, Side};
 
 use goldens::case::repo_root;
 use goldens::compare::values_agree;
-use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::tol::ZONE_TOL_3D;
 use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume, Bounds};
 use solidcore::mass::integrator::properties::{brep_volume, face_properties, PropertyAttributes};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -62,7 +54,7 @@ const ACCURACY: f64 = 1e-6;
 const WIDTH: f64 = 1e-10;
 
 /// The moved entries: (name, main's value, this branch's value), from the two trees'
-/// `corpus.parity.jsonl`.
+/// `corpus.parity.jsonl` (#21353 does not move this row).
 const MOVED: [(&str, f64, f64); 4] = [
     ("area", 38_235.992_697_050_83, 38_235.992_695_772_5),
     ("volume", 169_499.150_354_326_24, 169_499.150_354_326_27),
@@ -219,105 +211,4 @@ fn moved_corpus_entries_are_classified() {
     assert!(classes.iter().all(|c| c.1 != Side::Farther), "{classes:#?}");
     assert_eq!(classes, EXPECTED.to_vec(), "{classes:#?}");
     assert_eq!(wide, WIDE.to_vec(), "{wide:#?}");
-}
-
-/// A B-spline's NURB (a line or other curve: `None`).
-fn nurb(c: &Curve) -> Option<solidcore::nurbs::crv_basic::Curve> {
-    let mut c = c.clone();
-    match c.kind_mut() {
-        CurveKind::BSpline(s) => Some(s.get_or_create_gw_nurb().unwrap().clone()),
-        _ => None,
-    }
-}
-
-/// Whether `c` has a knot span all of whose `degree + 1` control points lie within
-/// `ZONE_TOL_3D / 10` (test 15's tolerance) of each other in UV.
-fn has_pole(k: &Kernel, c: &Curve) -> bool {
-    let mut c = c.clone();
-    match c.kind_mut() {
-        CurveKind::BSpline(s) => s.has_internal_pole(k, ZONE_TOL_3D / 10.0).unwrap(),
-        _ => false,
-    }
-}
-
-/// The control points, as bits, of each run of `degree + 1` consecutive control points of
-/// `c` that lie within `3e-8` of the run's first in UV.
-fn pole_spans(c: &solidcore::nurbs::crv_basic::Curve) -> Vec<Vec<[u64; 3]>> {
-    let p = c.cpts();
-    let n = c.degree() + 1;
-    let uv = |q: &solidcore::nurbs::math::CPoint| (q.x / q.w, q.y / q.w);
-    (0..p.len().saturating_sub(n - 1))
-        .filter(|&i| {
-            let (u0, v0) = uv(&p[i]);
-            p[i + 1..i + n].iter().all(|q| {
-                let (u, v) = uv(q);
-                ((u - u0).powi(2) + (v - v0).powi(2)).sqrt() < 3e-8
-            })
-        })
-        .map(|i| {
-            p[i..i + n]
-                .iter()
-                .map(|q| [q.x.to_bits(), q.y.to_bits(), q.w.to_bits()])
-                .collect()
-        })
-        .collect()
-}
-
-/// The three check lines the retirement adds are on a pole span the file itself holds:
-/// every UV trim of the read with a pole (a knot span whose control points all lie within
-/// test 15's tolerance) has a run of `degree + 1` control points within `3e-8` of each
-/// other in UV that is, bit for bit, a run of one of the file's own UV curves.
-#[test]
-fn the_new_check_lines_are_the_files_pole_span() {
-    let mut k = Kernel::default();
-    let data = BrepData::read_from_file(&k, file_bytes(), FileType::Ascii).unwrap();
-    let file_spans: Vec<Vec<[u64; 3]>> = data
-        .uv_curves
-        .iter()
-        .filter_map(|c| nurb(&c.object))
-        .flat_map(|c| pole_spans(&c))
-        .collect();
-    let file_poles = data
-        .uv_curves
-        .iter()
-        .filter(|c| has_pole(&k, &c.object))
-        .count();
-    drop(data);
-
-    let b = read(&mut k, file_bytes());
-    let mut poles = Vec::new();
-    for (eu, r) in b.edgeuses().iter() {
-        let Some(c) = r.uv_trim_curve.as_ref() else {
-            continue;
-        };
-        if !has_pole(&k, c) {
-            continue;
-        }
-        let n = nurb(c).unwrap();
-        let spans = pole_spans(&n);
-        let edge = r.edge.map(EdgeId::index);
-        eprintln!(
-            "UVTC pole trim {eu:?} edge {edge:?}: degree {}, knots {:?}, {} spans, from the file: {}",
-            n.degree(),
-            &n.knots()[..n.knots().len().min(8)],
-            spans.len(),
-            spans.iter().filter(|s| file_spans.contains(s)).count()
-        );
-        poles.push((eu, edge, spans));
-    }
-    eprintln!(
-        "UVTC {} pole trims read, {file_poles} pole curves and {} pole spans in the file",
-        poles.len(),
-        file_spans.len()
-    );
-    assert!(
-        poles.iter().any(|p| p.1 == Some(24)),
-        "edge 24's trim has no pole"
-    );
-    for (eu, edge, spans) in &poles {
-        assert!(
-            !spans.is_empty() && spans.iter().all(|s| file_spans.contains(s)),
-            "{eu:?} (edge {edge:?}): a pole span that is not the file's"
-        );
-    }
 }
