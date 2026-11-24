@@ -271,7 +271,8 @@ fn marker_stands_a_new_cylinder_on_the_face_through_its_face_input() {
     let (name, kind) = last(&h);
     let FeatureKind::Cylinder { base, axis, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "stands where it was dropped: {:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "along the face normal: {:?}", axis.0);
+    let axis = solidcraft_engine::doc::literal_dir(axis);
+    assert!(axis.is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "along the face normal: {axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 
@@ -695,4 +696,85 @@ fn a_cylinder_with_a_reference_edge_reopens_with_its_marker_and_outline_on_its_f
     reopened_at(&mut h, &name, [30.0, 25.0, 10.0]);
     let o = outline(&h);
     assert!(!o.is_empty() && o.iter().all(|p| (p.z - 10.0).abs() < 1e-6 && (p.dist(Vec3::new(30.0, 25.0, 10.0)) - 4.0).abs() < 1e-6), "{o:?}");
+}
+
+/// Editing a cylinder whose axis holds expressions (#18822) and pressing OK keeps the axis as
+/// expressions and keeps its reference edges, whether the axis stands square to the face it is
+/// on now or not; a tilted cylinder away from any face keeps its axis too.
+#[test]
+fn editing_a_cylinder_with_an_expression_axis_keeps_its_axis_and_reference_edges() {
+    for tilt in ["0 deg", "20 deg"] {
+        let mut h = plate();
+        h.app.run("parameters.add", json!({"name": "t", "expression": tilt})).unwrap();
+        let made = h
+            .app
+            .run(
+                "solid.cylinder",
+                json!({"radius": 4, "height": 8, "base": [30, 25, 10], "axis": ["0", "sin(t)", "cos(t)"],
+                       "references": [{"edge": [0, 20, 10], "distance": "30 mm"}], "operation": "join"}),
+            )
+            .unwrap();
+        let name = made["name"].as_str().unwrap().to_string();
+        h.settle();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+        h.settle();
+        ok(&mut h);
+        let (_, kind) = last(&h);
+        let FeatureKind::Cylinder { axis, references, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
+        assert_eq!(axis.clone().map(|e| e.to_string()), ["0", "sin(t)", "cos(t)"], "{tilt}: the axis stays expressions");
+        assert_eq!(references.len(), 1, "{tilt}: the reference edge stays: {references:?}");
+        assert_eq!(references[0].distance.to_string(), "30 mm", "{tilt}");
+    }
+    // Away from any face, tilted by its expressions.
+    let mut h = plate();
+    h.app.run("parameters.add", json!({"name": "t", "expression": "30 deg"})).unwrap();
+    let made = h
+        .app
+        .run("solid.cylinder", json!({"radius": 2, "height": 5, "base": [100, 100, 50], "axis": ["sin(t)", 0, "cos(t)"], "operation": "new"}))
+        .unwrap();
+    let name = made["name"].as_str().unwrap().to_string();
+    h.settle();
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+    h.settle();
+    ok(&mut h);
+    let (_, kind) = last(&h);
+    let FeatureKind::Cylinder { axis, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
+    assert_eq!(axis.clone().map(|e| e.to_string()), ["sin(t)", "0", "cos(t)"], "the floating cylinder keeps its axis");
+}
+
+/// A cylinder tilted off its face by its axis expressions (#18822), whose reference edge has
+/// moved since it was made, still edits: OK finds the edge by its name where it is now, rather
+/// than refusing because nothing is left at the point it was picked at. It sends nothing the
+/// command doesn't take, so it also passes a strict parameter check.
+#[test]
+fn editing_a_tilted_cylinder_follows_its_moved_reference_edge() {
+    for strict in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("parameters.add", json!({"name": "t", "expression": "20 deg"})).unwrap();
+        h.app.run("parameters.add", json!({"name": "dx", "expression": "0 mm"})).unwrap();
+        h.app.run("solid.box", json!({"length": "80 mm + dx", "width": 50, "height": 10, "corner": ["-dx", 0, 0]})).unwrap();
+        let made = h
+            .app
+            .run(
+                "solid.cylinder",
+                json!({"radius": 4, "height": 8, "base": [30, 25, 10], "axis": ["0", "sin(t)", "cos(t)"],
+                       "references": [{"edge": [0, 20, 10], "distance": "30 mm"}], "operation": "join"}),
+            )
+            .unwrap();
+        let name = made["name"].as_str().unwrap().to_string();
+        h.app.run("parameters.change", json!({"name": "dx", "expression": "25 mm"})).unwrap();
+        h.settle();
+        if strict {
+            h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        }
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
+        h.settle();
+        ok(&mut h);
+        let f = h.app.session.doc.find_feature(&name).expect("the cylinder");
+        let FeatureKind::Cylinder { axis, references, .. } = &f.kind else { panic!("a Cylinder: {:?}", f.kind) };
+        assert_eq!(axis.clone().map(|e| e.to_string()), ["0", "sin(t)", "cos(t)"], "strict {strict}");
+        assert_eq!(references.len(), 1, "strict {strict}: {references:?}");
+        assert!((references[0].edge.0.x + 25.0).abs() < 1e-6, "strict {strict}: the edge where it is now: {:?}", references[0].edge);
+        assert_eq!(references[0].distance.to_string(), "30 mm", "strict {strict}");
+    }
 }
