@@ -110,6 +110,7 @@ crates/doc/src/eval.rs:mirror_matrix dot
 crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:new_surface_faces cross,dot
+crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
 crates/doc/src/eval.rs:parallel_tapped_wall dot
