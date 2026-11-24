@@ -1223,6 +1223,20 @@ fn bisect_with_ends(
     Ok(worst.is_finite().then_some(worst))
 }
 
+/// Not upstream (#19889): `end` for the look at the end values of [`bisect_with_ends`],
+/// polling the kernel's cancel token before each value, cached or not, as the pieces it
+/// stands in for poll before each piece: a cancellation that arrives during the look
+/// cancels the bound instead of letting it finish as "not within".
+fn polled_end<'a>(
+    k: &'a Kernel,
+    mut end: impl FnMut(f64) -> Result<Option<f64>> + 'a,
+) -> impl FnMut(f64) -> Result<Option<f64>> + 'a {
+    move |t| {
+        k.check_cancelled(OP)?;
+        end(t)
+    }
+}
+
 /// Not upstream (#19889): whether no end value `end` gives at the ends of the pieces `stack`
 /// is above `enough` ([`bisect_with_ends`]).
 ///
@@ -3693,21 +3707,23 @@ pub fn trim_image_gap_bound_within(
             let mut cache = cache.borrow_mut();
             cached_trim_endpoint(&mut cache, t, || reparametrised_endpoint(&sides, net, t))
         };
-        let mut look = end;
-        let gap = bisect_with_ends(
-            range,
-            FIRST_PIECES,
-            cuts,
-            CLOSE_RELATIVE,
-            floor,
-            [enough_gap, over],
-            budget,
-            |a, b| {
-                k.check_cancelled(OP)?;
-                piece_reparametrised(&sides, net, a, b, end)
-            },
-            Some(&mut look),
-        );
+        let gap = {
+            let mut look = polled_end(k, end);
+            bisect_with_ends(
+                range,
+                FIRST_PIECES,
+                cuts,
+                CLOSE_RELATIVE,
+                floor,
+                [enough_gap, over],
+                budget,
+                |a, b| {
+                    k.check_cancelled(OP)?;
+                    piece_reparametrised(&sides, net, a, b, end)
+                },
+                Some(&mut look),
+            )
+        };
         *endpoints = cache.into_inner();
         let Some(gap) = gap? else {
             return Ok(None);
@@ -4547,6 +4563,47 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// A cancellation that arrives once the budget has parked the first piece cancels the
+    /// look at the end values ([`polled_end`]), as it cancelled the pieces the look stands in
+    /// for, instead of the bound finishing as "not within" (Ok(None)).
+    #[test]
+    fn a_cancellation_during_the_look_at_the_end_values_cancels_it() {
+        use crate::kernel::CancelToken;
+        let cuts: Vec<f64> = (1..1000).map(|i| f64::from(i) / 1000.0 + 1.0e-7).collect();
+        for cancel in [false, true] {
+            let mut k = Kernel::default();
+            let token = CancelToken::new();
+            k.set_cancel_token(token.clone());
+            let k = k;
+            let piece = |a: f64, b: f64| {
+                k.check_cancelled(OP)?;
+                // (the cancellation arrives right after the first piece's poll)
+                if cancel {
+                    token.cancel();
+                }
+                let h = b - a;
+                Ok(PieceBound::with(0.75, Ivl::from(0.1 * h * h), 0.0))
+            };
+            let mut look = polled_end(&k, |_| Ok(Some(0.75)));
+            let gap = bisect_with_ends(
+                [0.0, 1.0],
+                32,
+                &cuts,
+                0.0,
+                1.0e-13,
+                [0.75 + 1.0e-13, f64::INFINITY],
+                Some(64),
+                piece,
+                Some(&mut look),
+            );
+            if cancel {
+                assert!(matches!(gap, Err(SolidError::Cancelled { .. })), "{gap:?}");
+            } else {
+                assert_eq!(gap.unwrap(), None);
             }
         }
     }
