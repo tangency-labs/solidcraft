@@ -153,7 +153,7 @@ fn contains(boundary: &Boundary, p: Vec2, tol: f64) -> Option<bool> {
                     let angle = y.asin();
                     for theta in [angle, std::f64::consts::PI - angle] {
                         let off = (theta - start).rem_euclid(TAU);
-                        if off < sweep {
+                        if seam_only || off < sweep {
                             let x = c.x + r * theta.cos();
                             if (x - p.x).abs() <= tol {
                                 return None;
