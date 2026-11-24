@@ -94,6 +94,9 @@ pub struct Order {
     pub edges: Vec<EdgeId>,
     /// Record vertex `i`'s kernel vertex.
     pub vertices: Vec<VertexId>,
+    /// Kernel edges [`to_record`] split because only sheet faces use them more than twice, each
+    /// counted once however many copies its further uses were given (0 for [`to_kernel`]).
+    pub split_edges: usize,
 }
 
 /// A kernel edge solids touch along, as [`to_record`] writes it: one record edge per pair of
@@ -289,6 +292,7 @@ fn build(
         faces: b.face_list().to_vec(),
         edges: b.edge_list().to_vec(),
         vertices: b.vertex_list().to_vec(),
+        split_edges: 0,
     };
     adopt(k, &mut b, record, &order.faces)?;
     if (order.faces.len(), order.edges.len(), order.vertices.len())
@@ -311,6 +315,9 @@ fn build(
             && b.vertex_list() == order.vertices.as_slice()
     };
     put_enclosing_shells_first(k, &mut b)?;
+    // the body is assembled field by field, so its cached topology (each face's shell, each
+    // loop's edges) was never derived; rebuilt last, as `Body::from_smb` does before handing out
+    b.refresh_cached_topology();
     Ok((b, kept.then_some(order)))
 }
 

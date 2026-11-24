@@ -31,12 +31,6 @@ pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
     check(schema, value, "params", 0, &mut steps, true, CheckContext::new(Conditions::Evaluate))
 }
 
-/// Check an individual input property while retaining its field name's selection context.
-pub fn check_input_field(name: &str, schema: &Value, value: &Value) -> Result<()> {
-    crate::conditions::validate_conditions(schema)?;
-    check(schema, value, &format!("params.{name}"), 0, &mut 0, true, CheckContext::new(Conditions::Evaluate))
-}
-
 /// Validate and omit hidden fields before passing input to plugin code.
 pub fn prepare_input(schema: &Value, value: &Value) -> Result<Value> {
     check_input(schema, value)?;
@@ -406,7 +400,6 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             let child = CheckContext::new(child_conditions);
             match (properties.and_then(|p| p.get(name)), additional) {
                 (Some(property), _) => {
-                    let child = CheckContext { selection: property.get("x-solidcraft-selection").is_some(), ..child };
                     if let (Some(rules), Some(options)) = (rules.fields.get(name), property.get("oneOf").and_then(Value::as_array))
                         && rules.has_choice_filter()
                         && options.iter().take(256).enumerate().all(|(i, option)| {

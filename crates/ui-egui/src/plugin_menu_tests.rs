@@ -151,37 +151,6 @@ fn preflight_omits_absent_optional_selections_but_keeps_explicit_empty_values() 
 }
 
 #[test]
-fn optional_stored_selections_can_be_explicitly_unset() {
-    for empty in [false, true] {
-        let mut h = box_and_pick_plugin();
-        let name = h.app.session.model.state().bodies.first().unwrap().name.clone();
-        let saved = if empty { json!([]) } else { json!([{"type":"body","name":name}]) };
-        let schema = &mut h.app.plugin_menu.listed[0].entries[0].input_schema;
-        schema["required"] = json!([]);
-        schema["properties"]["body"]["minItems"] = json!(1);
-        open_form(&mut h.app, "inserts", "seats", &json!({"depth":2,"body":saved})).unwrap();
-        checked_prefill(&h.app);
-        if !empty {
-            assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["body"], saved);
-            h.app.dialog.as_mut().unwrap().inputs[1].items.clear();
-            h.frames(2);
-            checked_prefill(&h.app);
-        }
-        assert!(h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("body"), "stored values stay present until explicitly unset");
-        h.frames(3);
-        h.step(&json!({"click":{"handle":"plugin_dialog:unset:body"}})).unwrap();
-        checked_prefill(&h.app);
-        let dialog = h.app.plugin_menu.dialog().unwrap();
-        assert!(dialog.ready(&h.app).unwrap().get("body").is_none(), "Unset omits the optional field despite minItems");
-        assert!(!dialog.fields.as_ref().unwrap().iter().find(|(field, _)| field.key == "body").unwrap().0.prefilled);
-        assert!(
-            h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.is_empty()),
-            "the viewport picker cannot restore an unset value"
-        );
-    }
-}
-
-#[test]
 fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
     let mut h = box_and_pick_plugin();
     open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
@@ -207,10 +176,7 @@ fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
 fn deliver_form_reply(app: &mut SolveApp, value: Value) {
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({}));
     request.reply.send(value).unwrap();
-    let source_guard =
-        solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
-    app.plugin_menu.dialogs.last_mut().unwrap().running =
-        Some(Running { reply, ticket: request.ticket, received: None, source_guard: Some(source_guard) });
+    app.plugin_menu.dialogs.last_mut().unwrap().running = Some(Running { reply, ticket: request.ticket, received: None });
 }
 
 #[test]
@@ -255,57 +221,6 @@ fn completed_form_replies_wait_for_the_originating_session() {
         assert_eq!(dialog.session, session);
         if kind != "validation" {
             assert_eq!(dialog.fields.as_ref().unwrap().iter().find(|(field, _)| field.key == "depth").unwrap().1, Input::Number(7.0));
-        }
-    }
-}
-
-#[test]
-fn requested_forms_keep_the_dispatch_revision_across_edits_and_deferred_replies() {
-    for read in [false, true] {
-        for deferred in [false, true] {
-            let mut h = box_and_pick_plugin();
-            h.app.plugin_menu.listed[0].entries[0].input_schema["properties"]["edges"]["minItems"] = json!(0);
-            open_entry(&mut h.app, 0, 0);
-            h.app.plugin_menu.dialogs.last_mut().unwrap().read = read;
-            let queued_revision = h.app.session.design_revision();
-            run(&mut h.app).unwrap();
-            let request = h.app.control_held.pop_front().unwrap();
-            h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
-            check_dispatch(&mut h.app, &request).unwrap();
-            let first_dispatch = h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().source_guard.as_ref().unwrap().revision;
-            assert_ne!(first_dispatch, queued_revision, "the queue-time design is not the run's design");
-            // Held requests can pass dispatch checking again before their worker copies the session.
-            h.app.run("solid.box", json!({"length":2,"width":1,"height":1})).unwrap();
-            check_dispatch(&mut h.app, &request).unwrap();
-            let source_revision = h.app.session.design_revision();
-            assert_ne!(source_revision, first_dispatch);
-            assert_eq!(h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().source_guard.as_ref().unwrap().revision, source_revision);
-            assert!(take_interactive_run(&mut h.app, request.serial));
-            h.app.run("solid.box", json!({"length":3,"width":1,"height":1})).unwrap();
-            assert_ne!(source_revision, h.app.session.design_revision());
-            let reply = json!({"ok":true,"result":{"result":{},"forms":[{"plugin":"inserts","entry":"seats","params":{"depth":7}}]}});
-            request.reply.send(reply).unwrap();
-            if deferred {
-                crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
-                poll(&mut h.app);
-                let running = h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap();
-                assert!(running.received.is_some(), "the completed reply waits for its original session");
-                assert_eq!(running.source_guard.as_ref().unwrap().revision, source_revision);
-                crate::documents::switch(&mut h.app, 0);
-            }
-            poll(&mut h.app);
-            checked_prefill(&h.app);
-            let dialog = h.app.plugin_menu.dialog().unwrap();
-            let guard = dialog.form_guard.as_ref().unwrap();
-            assert_eq!(guard.document_id, h.app.session.document_id);
-            assert_eq!(guard.revision, source_revision, "the requested values belong to the worker's design");
-            assert!(dialog.changed, "a requested form from an earlier revision immediately requires review");
-            assert!(!dialog.revalidated);
-            assert_eq!(dialog.ready(&h.app).unwrap()["depth"], 7.0, "values still valid on the current design remain usable");
-            // Apply forwards the old guard, so the engine revalidates before executing the entry.
-            run(&mut h.app).unwrap();
-            let apply = h.app.control_held.pop_front().unwrap();
-            assert_eq!(apply.params.pointer("/params/form_guard/revision"), Some(&json!(source_revision)));
         }
     }
 }
@@ -534,6 +449,20 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     let no_default = form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a","b"]}}})).unwrap();
     assert_eq!(no_default[0].1, Input::Choice(None), "no default: nothing chosen yet");
     assert_eq!(form(&json!({"type":"object"})), Some(Vec::new()), "no properties: nothing to fill");
+}
+
+#[test]
+fn shared_field_definitions_are_drawn_like_inline_fields() {
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
+        "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{"type":"object",
+            "properties":{"pressure_angle":{"$ref":"#/$defs/angle","default":"25"}}}}]}});
+    let manifest = solidcraft_engine::plugin::parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
+    let schema = &manifest.runtime.unwrap().entries[0].input_schema;
+    let fields = form(schema).expect("a $ref field does not turn the dialog off");
+    let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
+    assert_eq!((fields[0].0.label.as_str(), &fields[0].0.kind), ("Angle", &Kind::Choice { values: angles.clone(), titles: angles }));
+    assert_eq!(fields[0].1, Input::Choice(Some(2)), "the default beside the $ref wins");
 }
 
 #[test]
@@ -785,6 +714,36 @@ fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
         assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
         frame(&mut h.app, vec![], None);
         assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:0").is_none(), "selection closes the picker");
+
+        // A stored, now unavailable schema choice must survive drawing either swatch layout.
+        h.app.plugin_menu.dialogs.clear();
+        open_form(&mut h.app, if complete { "grid" } else { "dropdown" }, "finish", &json!({"finish":"unavailable"})).unwrap();
+        for _ in 0..6 {
+            frame(&mut h.app, vec![], None);
+        }
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let (finish, selected) = fields.iter().find(|(field, _)| field.key == "finish").unwrap();
+        assert!(finish.prefilled);
+        assert_eq!(finish.available, [1, 2, 3]);
+        assert_eq!(*selected, Input::Choice(Some(0)), "drawing preserves the unavailable stored choice");
+        assert_eq!(params(fields), Err(Problem::Invalid("Finish".into())), "the stored choice needs correction");
+
+        let trigger = crate::scenario::handle_at("plugin_dialog:field:finish").unwrap();
+        frame(&mut h.app, pointer(trigger, true), None);
+        frame(&mut h.app, pointer(trigger, false), None);
+        for _ in 0..3 {
+            frame(&mut h.app, vec![], None);
+        }
+        let select = crate::scenario::handle_at("swatch:plugin_field_finish:option:2").unwrap();
+        frame(&mut h.app, pointer(select, true), None);
+        frame(&mut h.app, pointer(select, false), None);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        assert_eq!(
+            fields.iter().find(|(field, _)| field.key == "finish").unwrap().1,
+            Input::Choice(Some(3)),
+            "an explicit swatch selection corrects the stored choice using its schema index"
+        );
+        assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
     }
 }
 
@@ -937,6 +896,434 @@ fn invalid_conditional_dialog_schemas_leave_run_off() {
     }
 }
 
+fn hook_dialog_harness() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("lookup", "read", json!([]));
+    command.dialog_hook = true;
+    command.input_schema = json!({"type":"object","required":["width"],"properties":{
+        "width":{"type":"number","title":"Width","default":1,"minimum":1},
+        "size":{"type":"string","title":"Size","default":"large","oneOf":[{"const":"small"},{"const":"large"}]}
+    }});
+    h.app.plugin_menu.listed = vec![listed("lookup", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h
+}
+
+fn computed_hook_reply(dialog: &EntryDialog) -> solidcraft_engine::plugin::dialog::Update {
+    let hook = dialog.hook.as_ref().unwrap();
+    solidcraft_engine::plugin::dialog::apply(
+        &hook.schema,
+        &json!({"width":1,"size":"large"}),
+        &Default::default(),
+        Some(r#"{"width":{"default":24},"size":{"choices":["large"]}}"#),
+        false,
+    )
+    .unwrap()
+}
+
+#[test]
+fn exporter_dialog_keeps_hook_values_and_waits_for_its_session_before_showing_completion() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.writes = Some(vec!["smp".into()]);
+    let update = computed_hook_reply(dialog);
+    assert!(apply_hook_reply(dialog, 0, update));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["width"], 24.0);
+    deliver_form_reply(&mut h.app, json!({"ok":true,"result":{"path":"bracket.smp","warnings":["export note"]}}));
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().received.is_some());
+    crate::documents::switch(&mut h.app, 0);
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+    let (message, _, error) = h.app.status.as_ref().unwrap();
+    assert!(!*error);
+    assert!(message.contains("bracket.smp") && message.contains("export note"));
+}
+
+#[test]
+fn export_save_callback_queues_for_the_dialogs_original_session() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (id, session) = (dialog.id, dialog.session);
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    queue(&mut h.app, id, json!({"command":"file.export","params":{"path":"bracket.smp"}}));
+    let request = h.app.control_held.pop_back().unwrap();
+    assert_eq!(h.app.plugin_menu.pending.last(), Some(&(request.serial, session)));
+    assert!(check_dispatch(&mut h.app, &request).is_err(), "a file picker cannot redirect an export to another design");
+    h.app.plugin_menu.dialogs.clear();
+    queue(&mut h.app, id, json!({"command":"file.export","params":{}}));
+    assert!(h.app.control_held.is_empty(), "a dismissed dialog cannot queue an export");
+}
+
+#[test]
+fn dialog_hook_drops_stale_generations_and_never_overwrites_user_edits() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().generation = 2;
+    assert!(!apply_hook_reply(dialog, 1, reply.clone()));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 1.0);
+    set_input(dialog.fields.as_mut().unwrap(), "width", Input::Number(42.0));
+    assert!(apply_hook_reply(dialog, 2, reply));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 42.0);
+}
+
+#[test]
+fn dialog_hook_prefilled_values_stay_protected_and_hidden_values_are_validated() {
+    let mut h = hook_dialog_harness();
+    h.app.plugin_menu.dialogs.clear();
+    open_form(&mut h.app, "lookup", "lookup", &json!({"width":42,"size":"small"})).unwrap();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let fields = dialog.fields.as_ref().unwrap();
+    let protected = fields.iter().filter(|(field, _)| field.edited).map(|(field, _)| field.key.clone()).collect();
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &dialog.hook.as_ref().unwrap().schema,
+        &hook_values(fields),
+        &protected,
+        Some(r#"{"width":{"visible":false,"default":24,"hint":"Computed width"},"size":{"enabled":false,"choices":["large"]}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let fields = dialog.fields.as_ref().unwrap();
+    let (width, value) = fields.iter().find(|(field, _)| field.key == "width").unwrap();
+    assert!(!width.visible && width.prefilled && width.edited);
+    assert_eq!(*value, Input::Number(42.0), "a hook default must not replace a stored value");
+    assert_eq!(width.tip.as_deref(), Some("Computed width"));
+    let (size, value) = fields.iter().find(|(field, _)| field.key == "size").unwrap();
+    assert!(!size.enabled);
+    assert_eq!(size.available, [1]);
+    assert_eq!(*value, Input::Choice(Some(0)), "an unavailable stored choice remains visible for correction");
+    checked_prefill(&h.app);
+    let errors = h.app.plugin_menu.dialog().unwrap().field_errors(&h.app);
+    assert!(errors.contains_key("size"), "a narrowed stored choice is invalid");
+    assert!(!errors.contains_key("width"), "a hook-hidden required value is still sent and validated");
+
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    set_input(dialog.fields.as_mut().unwrap(), "size", Input::Choice(Some(1)));
+    checked_prefill(&h.app);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"width":42.0,"size":"large"}));
+}
+
+#[test]
+fn dialog_hook_defaults_take_precedence_after_computed_controllers_change() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","default":3,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":6}]}
+    }});
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &schema,
+        &json!({}),
+        &Default::default(),
+        Some(r#"{"mode":{"value":true},"width":{"default":24}}"#),
+        false,
+    )
+    .unwrap();
+    apply_hook_reply(dialog, 0, update);
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap(), json!({"mode":true,"width":24.0}));
+    refresh_conditions(dialog.fields.as_mut().unwrap());
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 24.0);
+}
+
+#[test]
+fn dialog_hook_narrowing_preserves_an_edited_choice_until_the_user_selects_an_available_one() {
+    for artwork in ["none", "partial", "complete"] {
+        let mut h = hook_dialog_harness();
+        let plugin = &mut h.app.plugin_menu.listed[0];
+        let options = &mut plugin.entries[0].input_schema["properties"]["size"]["oneOf"];
+        *options = json!([{"const":"small"},{"const":"medium"},{"const":"large"}]);
+        if artwork != "none" {
+            image::RgbaImage::from_pixel(2, 2, image::Rgba([100, 150, 200, 255])).save(h.dir.join("size.png")).unwrap();
+            options[2]["x-solidcraft-swatch"] = json!("size.png");
+            if artwork == "complete" {
+                options[1]["x-solidcraft-swatch"] = json!("size.png");
+            }
+            plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&h.dir, &plugin.entries)));
+            assert_eq!(plugin.swatches.get().unwrap().len(), 1, "the swatch path must be exercised");
+        }
+        h.app.plugin_menu.dialogs.clear();
+        open_entry(&mut h.app, 0, 0);
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        set_input(dialog.fields.as_mut().unwrap(), "size", Input::Choice(Some(0)));
+        let update = solidcraft_engine::plugin::dialog::apply(
+            &dialog.hook.as_ref().unwrap().schema,
+            &json!({"width":1,"size":"small"}),
+            &std::collections::BTreeSet::from(["size".into()]),
+            Some(r#"{"size":{"choices":["medium","large"]}}"#),
+            false,
+        )
+        .unwrap();
+        apply_hook_reply(dialog, 0, update);
+        h.frames(3);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let (field, input) = fields.iter().find(|(f, _)| f.key == "size").unwrap();
+        assert_eq!(field.available, [1, 2]);
+        assert_eq!(scalar_value(field, input), Some(json!("small")), "painting must not replace an edited choice: {artwork}");
+        assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err());
+        h.step(&json!({"click":{"handle":"plugin_dialog:field:size"}})).unwrap();
+        let option = if artwork == "none" { "dialog:Size:large" } else { "swatch:plugin_field_size:option:1" };
+        h.step(&json!({"click":{"handle":option}})).unwrap();
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        assert_eq!(fields.iter().find(|(f, _)| f.key == "size").unwrap().1, Input::Choice(Some(2)), "picker indices map to schema indices");
+        assert_eq!(params(fields).unwrap()["size"], "large");
+    }
+}
+
+#[test]
+fn dialog_hook_selection_defaults_preserve_viewport_edits() {
+    let schema = json!({"type":"object","properties":{"bodies":{"type":"array","items":{"type":"string"},"maxItems":1}}});
+    let mut h = hook_dialog_harness();
+    let doc = h.app.session.doc.clone();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let field = &dialog.fields.as_ref().unwrap()[0].0;
+    assert_eq!(default_input(field, &json!(["computed"])), Some(Input::Selection(vec![Sel::Body { name: "computed".into() }])));
+    let mut picker = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: dialog.id }, dialog.selection_inputs());
+    picker.inputs[0].items = vec![Sel::Body { name: "chosen".into() }];
+    take_picks(dialog, &picker, &doc);
+    assert!(dialog.fields.as_ref().unwrap()[0].0.edited, "viewport picks are user edits");
+    let update =
+        solidcraft_engine::plugin::dialog::apply(&schema, &json!({}), &Default::default(), Some(r#"{"bodies":{"default":["computed"]}}"#), false)
+            .unwrap();
+    apply_hook_reply(dialog, 0, update);
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["bodies"], json!(["chosen"]));
+}
+
+#[test]
+fn dialog_hook_discards_selection_baselines_when_the_document_changes() {
+    let schema = json!({"type":"object","properties":{
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1},
+        "width":{"type":"number","default":1}
+    }});
+    for changed_document in [false, true] {
+        let mut h = hook_dialog_harness();
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.fields = form(&schema);
+        dialog.hook.as_mut().unwrap().schema = schema.clone();
+        let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+        *input = Input::Selection(vec![Sel::Body { name: "prefilled-a".into() }]);
+        let update = solidcraft_engine::plugin::dialog::apply(
+            &schema,
+            &json!({"bodies":["prefilled-a"],"width":1}),
+            &Default::default(),
+            Some(r#"{"bodies":{"value":["computed-b"]},"width":{"value":24}}"#),
+            false,
+        )
+        .unwrap();
+        assert!(apply_hook_reply(dialog, 0, update));
+        dialog.picked_on = Some(h.app.session.doc.clone());
+        let (send, receive) = std::sync::mpsc::channel();
+        dialog.hook.as_mut().unwrap().pending = Some((0, receive));
+        if changed_document {
+            Arc::make_mut(&mut h.app.session.doc).name = "Changed design".into();
+            sync_picks(&mut h.app);
+        } else {
+            set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(12.0));
+        }
+        poll_hooks(&mut h.app, &h.ctx);
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        let values = hook_values(dialog.fields.as_ref().unwrap());
+        let expected = (!changed_document).then(|| json!(["prefilled-a"]));
+        assert_eq!(values.get("bodies"), expected.as_ref(), "no old selection may be sent to the next hook");
+        assert_eq!(values["width"], if changed_document { 1.0 } else { 12.0 }, "ordinary field baselines still restore");
+        let baselines = dialog.fields.as_ref().unwrap().iter().filter(|(f, _)| f.key == "bodies").all(|(f, _)| f.hook_baseline.is_none());
+        assert_eq!(baselines, changed_document, "only a document change drops the hook's selection");
+        assert!(dialog.hook.as_ref().unwrap().generation > 0);
+        drop(send);
+    }
+}
+
+#[test]
+fn dialog_hook_keeps_its_last_reply_on_screen_while_the_next_one_is_pending() {
+    let schema = json!({"type":"object","properties":{
+        "reveal":{"type":"number","default":2},
+        "plinth":{"type":"boolean","default":false},
+        "plinth_type":{"type":"string","default":"legs","oneOf":[{"const":"legs"},{"const":"box"}],
+            "x-solidcraft-visible-when":{"field":"plinth","eq":true}}
+    }});
+    let reply = || {
+        solidcraft_engine::plugin::dialog::apply(
+            &schema,
+            &json!({"reveal":2,"plinth":false,"plinth_type":"legs"}),
+            &Default::default(),
+            Some(r#"{"plinth":{"default":true}}"#),
+            false,
+        )
+        .unwrap()
+    };
+    let shown = |dialog: &EntryDialog| {
+        let fields = dialog.fields.as_ref().unwrap();
+        (fields.iter().map(|(_, i)| i.clone()).collect::<Vec<_>>(), fields.iter().map(|(f, _)| f.visible).collect::<Vec<_>>())
+    };
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    assert!(apply_hook_reply(dialog, 0, reply()));
+    set_input(dialog.fields.as_mut().unwrap(), "reveal", Input::Number(3.0));
+    let before = shown(dialog);
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    assert!(generation > 0, "the change starts a new generation");
+    assert_eq!(shown(dialog), before, "nothing moves while the next reply is pending");
+    let fields = dialog.fields.as_ref().unwrap();
+    assert_eq!(params(fields).unwrap(), json!({"reveal":3.0,"plinth":true,"plinth_type":"legs"}));
+    assert_eq!(hook_values(fields)["plinth"], false, "the hook still gets the value from before its default");
+    assert!(apply_hook_reply(dialog, generation, reply()));
+    assert_eq!(shown(dialog), before, "an equal reply changes nothing");
+}
+
+#[test]
+fn dialog_hook_request_keeps_a_selection_its_pre_hook_controller_shows() {
+    let schema = json!({"type":"object","properties":{
+        "plinth":{"type":"boolean","default":true},
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1,"x-solidcraft-visible-when":{"field":"plinth","eq":true}}
+    }});
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+    *input = Input::Selection(vec![Sel::Body { name: "a".into() }]);
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &schema,
+        &json!({"plinth":true,"bodies":["a"]}),
+        &Default::default(),
+        Some(r#"{"plinth":{"value":false}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let fields = dialog.fields.as_ref().unwrap();
+    assert!(!fields.iter().find(|(f, _)| f.key == "bodies").unwrap().0.visible, "the hook's value hides the selection on screen");
+    let values = hook_values(fields);
+    assert_eq!(values["plinth"], true);
+    assert_eq!(values.get("bodies"), Some(&json!(["a"])), "the next hook still gets the selection its sent controller shows");
+}
+
+#[test]
+fn dialog_hook_restored_field_takes_the_conditional_default_its_controller_now_gives() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "depth":{"type":"number","default":1,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":5}]}
+    }});
+    let reply =
+        |values: Value, patch: &str| solidcraft_engine::plugin::dialog::apply(&schema, &values, &Default::default(), Some(patch), false).unwrap();
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":false,"depth":1}), r#"{"depth":{"default":24}}"#)));
+    set_input(dialog.fields.as_mut().unwrap(), "mode", Input::Boolean(true));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 24.0, "the hook value stays while its reply is pending");
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":true,"depth":1}), "{}")));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 5.0, "the reply dropped depth, so mode's default applies");
+}
+
+#[test]
+fn dialog_hook_pending_rejects_invalid_current_inputs_instead_of_cached_parameters() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    set_input(dialog.fields.as_mut().unwrap(), "width", Input::Number(12.0));
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    let id = dialog.id;
+    let queued = h.app.control_held.len();
+    for input in [Input::Typed(String::new()), Input::Typed("invalid".into()), Input::Number(0.0)] {
+        set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", input);
+        assert!(run_dialog(&mut h.app, id).is_err(), "invalid current fields must not submit the cached width");
+        assert_eq!(h.app.control_held.len(), queued);
+        assert!(h.app.plugin_menu.dialog().unwrap().running.is_none());
+    }
+    set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(18.0));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["width"], 18.0);
+    run_dialog(&mut h.app, id).unwrap();
+    assert_eq!(h.app.control_held.len(), queued + 1);
+    assert_eq!(h.app.control_held.back().unwrap().params["params"]["params"]["width"], 18.0);
+    assert!(h.app.plugin_menu.dialog().unwrap().running.is_some());
+    drop(send);
+}
+
+#[test]
+fn dialog_hook_pending_accepts_widget_edits_and_drops_the_old_worker_reply() {
+    let mut h = hook_dialog_harness();
+    let (send, receive) = std::sync::mpsc::channel();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().pending = Some((0, receive));
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:size"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Size:small"}})).unwrap();
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["size"], "small");
+    assert!(dialog.ready(&h.app).is_ok());
+    assert!(dialog.hook.as_ref().unwrap().generation > 0);
+    send.send(Ok(reply)).unwrap();
+    h.frames(1);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 1.0, "the stale default was dropped");
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["size"], "small");
+}
+
+#[test]
+fn dialog_hook_wait_keeps_fields_and_run_interactive_and_renders_computed_default() {
+    let mut h = hook_dialog_harness();
+    let (send, receive) = std::sync::mpsc::channel();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    h.ctx = crate::fonts::test_context();
+    solidcraft_theme::apply(&h.ctx);
+    let mut textures = std::collections::HashMap::new();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-dialog-hook");
+    std::fs::create_dir_all(&dir).unwrap();
+    for stage in ["before", "after"] {
+        let mut output = None;
+        for _ in 0..5 {
+            let mut frame = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                },
+            );
+            ui_kit::test_textures_update(&mut textures, &frame.textures_delta);
+            frame.textures_delta.clear();
+            output = Some(frame);
+        }
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert!(dialog.running.is_none());
+        assert!(dialog.ready(&h.app).is_ok(), "Run stays enabled while the hook waits");
+        assert!(crate::scenario::handle_at("plugin_dialog:field:width").is_some(), "fields stay interactive");
+        let expected = if stage == "before" { 1.0 } else { 24.0 };
+        assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], expected);
+        let output = output.unwrap();
+        let image = ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, h.ctx.viewport_rect(), &textures);
+        assert_eq!(image.dimensions(), (1280, 720));
+        image.save(dir.join(format!("{stage}.png"))).unwrap();
+        if stage == "before" {
+            send.send(Ok(reply.clone())).unwrap();
+        }
+    }
+}
+
 #[test]
 fn conditional_dialog_dropdown_renders_before_and_after_switching() {
     fn paint(
@@ -1032,6 +1419,19 @@ fn conditional_dialog_dropdown_renders_before_and_after_switching() {
     for key in ["plugin_dialog:field:storage", "plugin_dialog:field:length", "plugin_dialog:run", "plugin_dialog:cancel"] {
         assert!(h.ctx.viewport_rect().contains(crate::scenario::handle_at(key).unwrap()), "{key} must fit a smaller window");
     }
+
+    h.app.plugin_menu.dialogs.clear();
+    open_form(&mut h.app, "cabinet", "cabinet", &json!({"storage":"drawers","size":"small"})).unwrap();
+    for _ in 0..4 {
+        paint(&mut h, &mut textures, vec![]);
+    }
+    let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+    assert_eq!(fields.iter().find(|(field, _)| field.key == "size").unwrap().1, Input::Choice(Some(0)));
+    assert_eq!(params(fields), Err(Problem::Invalid("Size".into())));
+    click(&mut h, &mut textures, "plugin_dialog:field:size");
+    click(&mut h, &mut textures, "dialog:Size:large");
+    let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+    assert_eq!(params(fields).unwrap()["size"], "large", "an explicit dropdown selection corrects the unavailable stored choice");
 }
 
 /// A schema with two selection fields: the edges to work on, and one body.
@@ -1758,10 +2158,159 @@ mod native {
         root
     }
 
+    #[test]
+    fn panel_row_click_runs_on_the_command_worker_and_refreshes_its_data() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let folder = h.dir.join("sample");
+        std::fs::create_dir_all(&folder).unwrap();
+        let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+            "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+                "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},"row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+            }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+            "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+                "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+            }}}]}}],"workspaces":[]}
+        }});
+        let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+        let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "inspect.measure")
+            .replace("__COMMAND_LEN__", "15")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2");
+        std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+        std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
+        let inspected = h.app.run("plugin.inspect", json!({"path":folder.to_string_lossy()})).unwrap();
+        let (initial, _) = h.call_queued("engine.execute", json!({"command":"sample.make","params":{"approval":inspected["approval"],"params":{}}}));
+        assert_eq!(initial["ok"], true, "{initial}");
+        h.frames(3);
+        assert_eq!(h.app.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+        let at = crate::scenario::rect_of("plugin-panel:sample:jobs:row:op1").expect("a real shared-host table row").center();
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+        settle(&mut h);
+        h.frames(2);
+        assert_eq!(
+            h.app.session.plugin_panels()[0].data.get("/jobs/0/state"),
+            Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())),
+            "clicks must reach the worker and adopt a later set-data"
+        );
+        assert!(h.app.session.doc.features.is_empty(), "read actions never edit the design");
+        // Keep the synthetic replacement below until the queued action has been inspected.
+        h.app.plugin_menu.loaded = true;
+        let pinned = h.app.session.plugin_panels()[0].clone();
+        crate::panel_runtime::queue_selection(
+            &h.app,
+            "sample".into(),
+            pinned.approval.clone(),
+            "make".into(),
+            solidcraft_engine::plugin::ui::UiEvent {
+                panel: "jobs".into(),
+                event: solidcraft_engine::plugin::ui::EventKind::Select,
+                path: "/jobs".into(),
+                row: Some("op1".into()),
+                value: None,
+            },
+        );
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().approval = "0".repeat(64);
+        h.frames(1);
+        assert!(h.app.plugin_menu.panel_runs.is_empty(), "a stale click never starts a worker under a replacement package's hash");
+        assert_eq!(h.app.session.plugin_panels()[0].data, pinned.data, "a discarded action leaves panel data alone");
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().approval = pinned.approval;
+
+        let id = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .find(|section| section.instance.0.starts_with("plugin."))
+            .unwrap()
+            .instance
+            .clone();
+        h.app
+            .dispatch_panel_layout(solidcraft_engine::panels::LayoutAction::Apply {
+                expected_revision: None,
+                mutations: vec![solidcraft_engine::panels::Mutation::Close { instance: id.clone() }],
+            })
+            .unwrap();
+        h.frames(1);
+        assert!(h.app.session.plugin_panels()[0].visible, "a manual close is workspace placement, not guest state");
+        h.app.session.plugin_state.panels.get_mut("sample").unwrap().visibility_revision.insert("jobs".into(), 1);
+        h.frames(2);
+        assert!(
+            h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id),
+            "a later show-panel(true) reopens the panel"
+        );
+        use solidcraft_engine::panels::{Destination, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
+        let location = SectionLocation::Floating { origin: Point { x: 420.0, y: 180.0 } };
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply {
+                expected_revision: None,
+                mutations: vec![Mutation::Move {
+                    instance: id.clone(),
+                    destination: Destination::NewSection {
+                        section: SectionId::new("plugin-floating").unwrap(),
+                        index: 0,
+                        location: location.clone(),
+                        size: Size { width: 400.0, height: 240.0 },
+                    },
+                }],
+            })
+            .unwrap();
+        h.frames(2);
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.review"})).unwrap();
+        h.frames(2);
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.classic"})).unwrap();
+        h.frames(2);
+        assert_eq!(
+            h.app.panel_runtime().unwrap().layout().layout().containing(&id).unwrap().location,
+            location,
+            "placement is remembered per workspace"
+        );
+        {
+            let package = h.app.session.plugin_state.panels.get_mut("sample").unwrap();
+            package.visible.insert("jobs".into(), false);
+            package.visibility_revision.insert("jobs".into(), 2);
+        }
+        h.frames(2);
+        assert!(!h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id));
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.review"})).unwrap();
+        h.frames(2);
+        assert!(
+            h.app.universal_panel_frame().unwrap().layout.sections.iter().any(|section| section.instance == id),
+            "a consumed hide request does not replay in another workspace"
+        );
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"solidcraft.classic"})).unwrap();
+        h.frames(2);
+        let saved = crate::panel_runtime::preferences_value(&h.app).unwrap();
+        let mut restarted = crate::scenario::Harness::new();
+        restarted.app.home.open = false;
+        restarted.app.disable_panel_runtime().unwrap();
+        restarted.app.session.plugin_state.plugins_dir = Some(h.dir.clone());
+        crate::panel_runtime::load_preferences(&mut restarted.app, &json!({"panel_layout":saved}));
+        restarted.frames(3);
+        let restored = restarted.app.panel_runtime().unwrap().layout().layout().instance(&id).unwrap();
+        assert!(!restored.requested_open, "an inert default declaration honours a restored closed instance");
+        assert_eq!(restored.memory.location, location, "inert plugin registration precedes saved layout restoration");
+        restarted.app.session.plugin_state.panels.get_mut("sample").unwrap().visibility_revision.insert("jobs".into(), 1);
+        restarted.frames(2);
+        assert_eq!(
+            restarted.app.panel_runtime().unwrap().layout().layout().containing(&id).unwrap().location,
+            location,
+            "a new explicit show request reopens a restored closed instance"
+        );
+    }
+
     fn settle(h: &mut crate::scenario::Harness) {
         for _ in 0..500 {
             h.frames(1);
-            if h.app.plugin_menu.dialog().is_none_or(|d| d.running.is_none()) {
+            if h.app.plugin_menu.dialog().is_none_or(|d| d.running.is_none()) && h.app.plugin_menu.panel_runs.is_empty() {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
