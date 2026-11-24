@@ -16,29 +16,28 @@
 //! | [`Tolerances::tol_gap_gain`]           | `SM_TOL_GAP_GAIN`                         |
 //! | [`Tolerances::model_size_estimate`]    | `SmContext::m_dThisModelSizeEstimate`, `SM_MODEL_SIZE_ESTIMATE` |
 //! | [`Tolerances::large_small_size_ratio`] | `SM_LARGE_SMALL_SIZE_RATIO`               |
-//! | [`Rng`]                                | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
+//! | [`Rng`], [`Kernel::seed`], [`Kernel::seeded_rng`] | C `rand()` / `srand(time(NULL))` (e.g. `SmShell.cpp`) |
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
-//! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
 //! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
 //!
-//! Upstream seeds `rand()` from the clock in a few places; the port replaces that with
-//! [`Rng`], seeded from [`KernelOptions::seed`], so runs are reproducible. Results that
-//! depend on random draws therefore cannot match the C++ bit for bit; difftests of such
+//! Upstream seeds `rand()` from the clock in a few places; the port replaces that with an
+//! [`Rng`] each such call makes for itself from [`KernelOptions::seed`]
+//! ([`Kernel::seeded_rng`]), so a call's draws are the same whatever ran before it. Results
+//! that depend on random draws therefore cannot match the C++ bit for bit; difftests of such
 //! code must compare outcomes that are invariant to the draw (and say so in
 //! `plan/findings.md`).
 //!
 //! Upstream also keeps a few process-global function statics whose first use fixes
-//! their value for the rest of the process; those that change results live on the
-//! [`Kernel`] as latches (e.g. [`Kernel::fillet_point_step`]), so each kernel starts
-//! unlatched and a difftest runner can seed the latch with the value the C++ process
-//! already holds. Kernels that stand in for one process together share its value
-//! ([`Kernel::process_fillet_point_step`]).
+//! their value for the rest of the process. The kernel keeps no such state: a value
+//! upstream fixes on first use is chosen here from the call's own input (the
+//! finite-difference step of `SmFilletSolver::ComputePointValues`, `sdStaticStep`, is
+//! chosen for each point), so a result never depends on the calls before it.
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -132,7 +131,7 @@ impl Rng {
 /// Memoisation caches owned by a [`Kernel`] (upstream `SmCacheMgr*`).
 ///
 /// Clearing must never change results, only speed.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Caches {
     /// Not upstream (#2568): the results of `SmBSplineCurve::AssertValid`'s global
@@ -140,12 +139,32 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
+    /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
+    /// as it does by default, or by upstream's sampled distance, as a file's translation asks
+    /// through [`Kernel::with_sampled_trim_raise`]. Crate-private: this is not a kernel
+    /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
+    /// raise fast enough for import and removes the sampled path.)
+    pub(crate) prove_lazy_trim_raise: bool,
+}
+
+impl Default for Caches {
+    fn default() -> Self {
+        Self {
+            curve_analysis: RefCell::default(),
+            prove_lazy_trim_raise: true,
+        }
+    }
 }
 
 impl Caches {
-    /// Drops all cached data.
+    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// change no result.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            ..Self::default()
+        };
     }
 }
 
@@ -167,9 +186,11 @@ pub struct WorkCounters {
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
     merge_record_visits: Cell<u64>,
+    infinite_region_searches: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
+    mass_closure_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
@@ -177,8 +198,13 @@ pub struct WorkCounters {
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
+    curved_edge_runs: Cell<u64>,
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
+    seam_tests: Cell<u64>,
+    contact_stretch_certifications: Cell<u64>,
+    uv_trim_builds: Cell<u64>,
+    trim_deviation_bounds: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -244,6 +270,13 @@ impl WorkCounters {
         self.merge_record_visits.get()
     }
 
+    /// Searches for a B-rep's infinite region (`FindInfiniteRegion`): each time a B-rep
+    /// of more than one region goes on to choose a ray and classify it. Not the fork's.
+    #[must_use]
+    pub fn infinite_region_searches(&self) -> u64 {
+        self.infinite_region_searches.get()
+    }
+
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
     /// ran on (`face_directed_max`, WR-588), summed over its solves: a solve's control-net
     /// guesses read every control point of the surface it is given. Each cell of a
@@ -271,6 +304,14 @@ impl WorkCounters {
     #[must_use]
     pub fn mass_iso_evaluations(&self) -> u64 {
         self.mass_iso_evaluations.get()
+    }
+
+    /// Integrand evaluations of the ruled strips the precise mass properties close a face
+    /// onto its edges' curves with (`gap_closure`): each point of a strip's trim the
+    /// strip's integration samples. Not the fork's.
+    #[must_use]
+    pub fn mass_closure_evaluations(&self) -> u64 {
+        self.mass_closure_evaluations.get()
     }
 
     /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
@@ -332,6 +373,16 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Curved intersection pieces classified as running along a face edge
+    /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
+    /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
+    /// #18065). Not the fork's (a test's witness that a body reaches the
+    /// certificate).
+    #[must_use]
+    pub fn curved_edge_runs(&self) -> u64 {
+        self.curved_edge_runs.get()
+    }
+
     /// Procedural blends recertified as a record's faces got their definitions back
     /// (`surface::procedural_blend::convert::definition_surface`): each certificate that
     /// ran, not each blend [`Kernel::recertify_memo`] answered. Not the fork's (a test's
@@ -349,6 +400,45 @@ impl WorkCounters {
         self.vertex_drops.get()
     }
 
+    /// Edges and vertices of a face asked whether they are a seam or a pole of it while a
+    /// face intersection classifies its curves on the face (docs/booleans.md, "Seams and
+    /// poles"): each edge [`crate::topology::edge::face_on_both_sides`] is asked about and
+    /// each vertex [`crate::topology::vertex::inside_face`] is asked about, for a curve's
+    /// boundary edges and vertices, its reach and the face's own seam. A face without a
+    /// seam has no pole either, so once its edges are found to hold none, its curves skip
+    /// both questions until the B-rep changes. Not the fork's (#18705).
+    #[must_use]
+    pub fn seam_tests(&self) -> u64 {
+        self.seam_tests.get()
+    }
+
+    /// Stretches a curve intersection certified to keep its two curves within the
+    /// tolerance, from a point solution to an end of either curve, to learn whether the
+    /// solution moves to that end (`move_contacts_to_curve_ends`): each certificate
+    /// subdivides the stretch. The count grows with the point solutions near an end, so
+    /// two curves that coincide within the tolerance along many turns, crossing at
+    /// thousands of points, show here. Not the fork's.
+    #[must_use]
+    pub fn contact_stretch_certifications(&self) -> u64 {
+        self.contact_stretch_certifications.get()
+    }
+
+    /// UV trim curves built for an edge use
+    /// (`topology::edgeuse::p3::create_uv_trim_curve`): each build, whether it
+    /// attaches its curve or fails. Not the fork's (#21105).
+    #[must_use]
+    pub fn uv_trim_builds(&self) -> u64 {
+        self.uv_trim_builds.get()
+    }
+
+    /// Certified bounds on a new UV trim's distance from its edge
+    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
+    /// costly part of building a trim. Not the fork's (#21105).
+    #[must_use]
+    pub fn trim_deviation_bounds(&self) -> u64 {
+        self.trim_deviation_bounds.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -358,9 +448,11 @@ impl WorkCounters {
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
         self.merge_record_visits.set(0);
+        self.infinite_region_searches.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
+        self.mass_closure_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
@@ -368,8 +460,36 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
+        self.seam_tests.set(0);
+        self.contact_stretch_certifications.set(0);
+        self.uv_trim_builds.set(0);
+        self.trim_deviation_bounds.set(0);
+    }
+
+    /// Counts one UV trim curve built.
+    pub(crate) fn add_uv_trim_build(&self) {
+        self.uv_trim_builds
+            .set(self.uv_trim_builds.get().saturating_add(1));
+    }
+
+    /// Counts one certified bound on a trim's distance from its edge.
+    pub(crate) fn add_trim_deviation_bound(&self) {
+        self.trim_deviation_bounds
+            .set(self.trim_deviation_bounds.get().saturating_add(1));
+    }
+
+    /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
+    pub(crate) fn add_seam_test(&self) {
+        self.seam_tests.set(self.seam_tests.get().saturating_add(1));
+    }
+
+    /// Counts one stretch certified for a contact's move to a curve end.
+    pub(crate) fn add_contact_stretch_certification(&self) {
+        self.contact_stretch_certifications
+            .set(self.contact_stretch_certifications.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -419,6 +539,12 @@ impl WorkCounters {
             .set(self.merge_record_visits.get().saturating_add(visits));
     }
 
+    /// Counts one search for a B-rep's infinite region.
+    pub(crate) fn add_infinite_region_search(&self) {
+        self.infinite_region_searches
+            .set(self.infinite_region_searches.get().saturating_add(1));
+    }
+
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
     pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
         self.face_extreme_control_points
@@ -429,6 +555,12 @@ impl WorkCounters {
     pub(crate) fn add_mass_iso_evaluation(&self) {
         self.mass_iso_evaluations
             .set(self.mass_iso_evaluations.get().saturating_add(1));
+    }
+
+    /// Counts one evaluation of a mass-property closure strip's integrand.
+    pub(crate) fn add_mass_closure_evaluation(&self) {
+        self.mass_closure_evaluations
+            .set(self.mass_closure_evaluations.get().saturating_add(1));
     }
 
     /// Counts `n` series coefficients a feet Taylor model computed.
@@ -476,6 +608,12 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one curved piece certified to run along a face edge.
+    pub(crate) fn add_curved_edge_run(&self) {
+        self.curved_edge_runs
+            .set(self.curved_edge_runs.get().saturating_add(1));
     }
 
     /// Counts one procedural blend recertified as its record's face got it back.
@@ -577,7 +715,7 @@ pub struct UpstreamFixes
 pub struct KernelOptions {
     /// Tolerances to use.
     pub tolerances: Tolerances,
-    /// Seed for the kernel's [`Rng`].
+    /// Seed of the generators the kernel's sampling calls make ([`Kernel::seeded_rng`]).
     pub seed: u64,
 }
 
@@ -737,32 +875,15 @@ impl CancelToken {
 pub struct Kernel {
     /// Geometric tolerances.
     pub tolerances: Tolerances,
-    /// Deterministic random-number generator.
-    pub rng: Rng,
+    /// The seed of every generator a call makes for its random draws
+    /// ([`Kernel::seeded_rng`]; from [`KernelOptions::seed`]). Configuration only: no call
+    /// changes it, so the kernel holds no position in a random sequence.
+    pub seed: u64,
     /// Memoisation caches.
     pub caches: Caches,
     /// The session's modeling context (marks, Boolean flag, callbacks, its own
     /// model size estimate); created with the defaults, as `SmApiGetOrCreateContext`.
     pub context: Context,
-    /// The function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues`
-    /// (`SmFilletSolver.cpp`, unit `blend.fillet_solver_p4`): `None` until the first
-    /// finite-difference step of a fillet point evaluation latches it (to `1e-3` when
-    /// that first point is a tangent point, else `1e-5`); every later evaluation on
-    /// this kernel reuses the latched value, as upstream does for the whole process.
-    /// A [`Cell`] so the latch can be set through the `&Kernel` the solvers take
-    /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
-    /// process has latched; see [`Kernel::latch_fillet_point_step`].
-    pub fillet_point_step: Cell<Option<f64>>,
-    /// The step of the process this kernel stands in for, when it is one of several that do
-    /// (a pool of kernels, each running calls side by side): `None` for a kernel of its own,
-    /// whose latch is its alone. Every kernel of the pool is handed the one cell, so the
-    /// first latch on any of them settles the step under the cell's lock, and every latch
-    /// after it, on any of them and whenever that kernel was made or taken, gets that step
-    /// ([`Kernel::latch_fillet_point_step`]), as upstream's one function static does. The
-    /// cell is `'static` because the step lives as long as the process, as upstream's does;
-    /// the kernel only borrows it, so it never learns who owns it, and a kernel copy (one
-    /// made for caches) shares it by copying the reference.
-    pub process_fillet_point_step: Option<&'static OnceLock<f64>>,
     /// The upstream undefined-behaviour conditions (their `plan/upstream-issues.md`
     /// ids, e.g. `"UB-175"`) that operations on this kernel met and went past with the
     /// port's defined semantics, each listed once in the order first met. Upstream's
@@ -867,12 +988,52 @@ pub struct Kernel {
     /// tree.
     #[cfg(feature = "profile")]
     pub profiler: crate::profile::Profiler,
+    /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
+    /// the kernel copies an operation makes.
+    #[cfg(test)]
+    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
     /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
     /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
     /// then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
+    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
+    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
+    /// and then it changes nothing. Shared with the kernel copies an operation makes.
+    #[cfg(feature = "wr469-replay")]
+    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
+}
+
+/// Test-only seam of `boolean::topology_intersector::curved_strip`
+/// (tangency-labs/solidcraft#18166): where an operation's topology intersector drops the
+/// curves over curved coincident strips, each run in `runs` is made first on a copy of the
+/// operation's real intersection list, and the number of intervals it drops appended to
+/// `dropped`. `active` is the run being made; its perturbations are read by the drop's
+/// checks.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct StripProbe {
+    /// The runs still to make (taken by the first drop reached).
+    pub(crate) runs: Vec<StripProbeRun>,
+    /// The intervals each run dropped, in order.
+    pub(crate) dropped: Vec<usize>,
+    /// The run being made.
+    pub(crate) active: Option<StripProbeRun>,
+}
+
+/// One run of [`StripProbe`]: the drop at tolerance `tol`, with `extra` added to the
+/// strip's enclosure, the dropped curve's gap and N's piece's gap (in that order), and,
+/// with `event_on_n`, a synthetic interval end on N at the middle of its piece.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StripProbeRun {
+    /// The tolerance the drop is called with.
+    pub(crate) tol: f64,
+    /// Added to the strip's bound, the curve's gap and N's piece's gap.
+    pub(crate) extra: [f64; 3],
+    /// A synthetic interval end on N inside its piece.
+    pub(crate) event_on_n: bool,
 }
 
 impl Default for Kernel {
@@ -887,11 +1048,9 @@ impl Kernel {
     pub fn new(options: &KernelOptions) -> Self {
         Self {
             tolerances: options.tolerances,
-            rng: Rng::new(options.seed),
+            seed: options.seed,
             caches: Caches::default(),
             context: Context::default(),
-            fillet_point_step: Cell::new(None),
-            process_fillet_point_step: None,
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
@@ -915,9 +1074,35 @@ impl Kernel {
             coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
+            #[cfg(test)]
+            strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
+            #[cfg(feature = "wr469-replay")]
+            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
+    }
+
+    /// Internal to file import, not a kernel option: runs `f` with lazily built UV trims
+    /// raised by upstream's sampled distance instead of #18166's proved one, then restores
+    /// the proved raise, whether `f` returns a value or an error.
+    ///
+    /// A file's translation builds every trim of every face it reads, and proving each one
+    /// cost many times the translation (a 561-part assembly opened in 126 s instead of
+    /// 20 s). Its trims are then raised as before #18166. A panic instead drops the kernel
+    /// (solidcraft-smlib's `call_on` never reuses a kernel a panic interrupted), so no
+    /// kernel keeps sampled trims past the import.
+    ///
+    /// Do not call this outside file import: https://github.com/tangency-labs/solidcore/issues/3368
+    /// makes the proved raise fast enough for import and then removes this path, so one
+    /// implementation remains.
+    #[doc(hidden)]
+    pub fn with_sampled_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let proved = self.caches.prove_lazy_trim_raise;
+        self.caches.prove_lazy_trim_raise = false;
+        let out = f(self);
+        self.caches.prove_lazy_trim_raise = proved;
+        out
     }
 
     /// What the profiler recorded since the last call (feature `profile`;
@@ -972,38 +1157,22 @@ impl Kernel {
         Ok(())
     }
 
+    /// A generator at the start of the sequence of the kernel's [seed](Self::seed).
+    ///
+    /// A call that draws random numbers makes one for itself and draws from it, so what it
+    /// draws is a function of the seed and of its own inputs, never of what ran on the
+    /// kernel before: the same call on the same input draws the same numbers.
+    #[must_use]
+    pub const fn seeded_rng(&self) -> Rng {
+        Rng::new(self.seed)
+    }
+
     /// Records that an operation went past upstream undefined behaviour `id` (see
     /// [`Kernel::upstream_ub_passed`]).
     pub fn note_upstream_ub(&mut self, id: &'static str) {
         if !self.upstream_ub_passed.contains(&id) {
             self.upstream_ub_passed.push(id);
         }
-    }
-
-    /// `static double sdStaticStep = first;`: the latched value of
-    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet: the
-    /// process's step when the kernel shares one ([`Kernel::process_fillet_point_step`]),
-    /// settled to `first` if this is the first latch of the process.
-    #[must_use]
-    pub fn latch_fillet_point_step(&self, first: f64) -> f64 {
-        if let Some(step) = self.fillet_point_step.get() {
-            return step;
-        }
-        let step = self
-            .process_fillet_point_step
-            .map_or(first, |process| *process.get_or_init(|| first));
-        self.fillet_point_step.set(Some(step));
-        step
-    }
-
-    /// The step a fillet point evaluation on this kernel takes, once one is latched: the
-    /// kernel's own latch, else the process's ([`Kernel::process_fillet_point_step`]).
-    #[must_use]
-    pub fn latched_fillet_point_step(&self) -> Option<f64> {
-        self.fillet_point_step.get().or_else(|| {
-            self.process_fillet_point_step
-                .and_then(|process| process.get().copied())
-        })
     }
 }
 
@@ -1142,32 +1311,6 @@ mod tests {
     }
 
     #[test]
-    fn fillet_point_step_latches_once() {
-        let k = Kernel::default();
-        assert_eq!(k.fillet_point_step.get(), None);
-        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-5);
-        assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
-        k.fillet_point_step.set(Some(1.0e-3));
-        assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
-    }
-
-    /// Kernels sharing a process step settle one: the first latch on either is the step of
-    /// both, read before the other latches and kept when it does. A kernel of its own
-    /// latches its own.
-    #[test]
-    fn kernels_sharing_a_process_step_settle_one() {
-        static PROCESS: OnceLock<f64> = OnceLock::new();
-        let (mut a, mut b) = (Kernel::default(), Kernel::default());
-        a.process_fillet_point_step = Some(&PROCESS);
-        b.process_fillet_point_step = Some(&PROCESS);
-        assert_eq!(b.latched_fillet_point_step(), None);
-        assert_eq!(a.latch_fillet_point_step(1.0e-5), 1.0e-5);
-        assert_eq!(b.latched_fillet_point_step(), Some(1.0e-5));
-        assert_eq!(b.latch_fillet_point_step(1.0e-3), 1.0e-5);
-        assert_eq!(Kernel::default().latch_fillet_point_step(1.0e-3), 1.0e-3);
-    }
-
-    #[test]
     fn work_counters_count_until_reset() {
         let k = Kernel::default();
         let w = &k.work_counters;
@@ -1182,9 +1325,11 @@ mod tests {
                 w.shell_traversal_faces(),
                 w.proto_vertex_point_solves(),
                 w.merge_record_visits(),
+                w.infinite_region_searches(),
+                w.curved_edge_runs(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1197,11 +1342,14 @@ mod tests {
         w.add_shell_traversal_face();
         w.add_proto_vertex_point_solve();
         w.add_merge_record_visits(3);
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3));
+        w.add_infinite_region_search();
+        w.add_infinite_region_search();
+        w.add_curved_edge_run();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3, 2, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]
@@ -1225,15 +1373,34 @@ mod tests {
     #[test]
     fn rng_is_deterministic_and_in_range() {
         let mut k1 = Kernel::default();
-        let mut k2 = Kernel::new(&KernelOptions::default());
+        let k2 = Kernel::new(&KernelOptions::default());
+        let (mut r1, mut r2) = (k1.seeded_rng(), k2.seeded_rng());
         for _ in 0..1000 {
-            let a = k1.rng.next_f64();
-            assert_eq!(a, k2.rng.next_f64());
+            let a = r1.next_f64();
+            assert_eq!(a, r2.next_f64());
             assert!((0.0..1.0).contains(&a));
-            let s = k1.rng.next_signed_unit();
-            assert_eq!(s, k2.rng.next_signed_unit());
+            let s = r1.next_signed_unit();
+            assert_eq!(s, r2.next_signed_unit());
             assert!((-1.0..1.0).contains(&s));
         }
         k1.caches.clear();
+    }
+
+    /// Every generator a kernel hands out starts at its seed, however many were handed out
+    /// and drawn from before; another seed gives another sequence.
+    #[test]
+    fn every_seeded_rng_starts_at_the_kernels_seed() {
+        let k = Kernel::new(&KernelOptions {
+            seed: 12_345,
+            ..KernelOptions::default()
+        });
+        assert_eq!(k.seed, 12_345);
+        let mut first = k.seeded_rng();
+        let drawn: Vec<u64> = (0..5).map(|_| first.next_u64()).collect();
+        let mut second = k.seeded_rng();
+        assert_eq!(second, Rng::new(12_345));
+        assert_eq!((0..5).map(|_| second.next_u64()).collect::<Vec<_>>(), drawn);
+        assert_eq!(Kernel::default().seed, Rng::DEFAULT_SEED);
+        assert_ne!(Kernel::default().seeded_rng().next_u64(), drawn[0]);
     }
 }

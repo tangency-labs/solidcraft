@@ -10,15 +10,19 @@
 //! Deviations: typed arena ids and caller-owned notification routing. Edge
 //! construction delegates to the ported fillet geometry builder; surface
 //! intersection calls the ported `blend::fillet_geom::p2::srf_srf_intersection`.
+//! [`split_rail_along`] is not upstream (WR-19502): it splits a rail into given pieces.
 //! No recursion.
 use crate::blend::fillet_geom::p1::{
     CliffHandle, FilStatus, FilletBrep, FilletEdgeType, FilletGeomId, FilletVertex,
 };
 use crate::curve::curve::{p2::OwnerChange, Curve};
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::{ignored, EntityRef, Failure, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::{global_solver::SolverOperation, object::ObjectRef};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::surface::surface::Surface;
 use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, Vertex, VertexId};
 fn invalid(reason: &'static str) -> SolidError {
@@ -255,6 +259,102 @@ pub(crate) fn split_rail_with_ops(
     }
     .split_rail(geom, rail, ops)
 }
+/// (Not upstream; #19502) Splits rail `rail` of geometry `geom` into one rail per piece
+/// of its curve, `pieces` being consecutive intervals of the curve in its parameter
+/// order (as `FilletBrep::fillet_brep_pieces_along` finds them). Each piece keeps the
+/// rail's type and original face (`split_rail`), and its 3D and UV curves trimmed to the
+/// piece; the vertices between pieces lie on the curve and are processed. Returns the new
+/// rails in the order they follow `rail` from its start vertex (`rail` keeps the first
+/// piece): an `other_rails` list's order.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for fewer than two pieces or a closed rail; those of
+/// `split_rail`, the evaluations and the trims.
+pub fn split_rail_along(
+    k: &Kernel,
+    fillets: &mut FilletBrep,
+    ownership: &mut dyn RailOwnership,
+    geom: FilletGeomId,
+    rail: EdgeId,
+    pieces: &[Extent1d],
+) -> Result<Vec<EdgeId>> {
+    if pieces.len() < 2 {
+        return Err(invalid("a rail split along fewer than two pieces"));
+    }
+    let start = required(edge::vertex(fillets.brep(), rail)?, RAIL_START)?;
+    let end = required(
+        edge::other_vertex(fillets.brep(), rail, Some(start))?,
+        RAIL_END,
+    )?;
+    if start == end {
+        return Err(invalid("a closed rail split along pieces"));
+    }
+    let curve = required(edge::curve(fillets.brep(), rail)?, RAIL_CURVE)?.copy(k)?;
+    let ivl = curve.natural_interval();
+    let start_point = fillets.brep().vertex(start)?.point;
+    let forward = curve.evaluate_point(k, ivl.min())?.distance(start_point)
+        <= curve.evaluate_point(k, ivl.max())?.distance(start_point);
+    let mut ordered = pieces.to_vec();
+    if !forward {
+        ordered.reverse();
+    }
+    let tolerance = edge::tolerance(fillets.brep(), rail)?;
+
+    // the UV curves of the rail's uses: the one on this geometry's fillet surface, and
+    // the other (on the original face), which split_rail drops from the split end's use
+    let mut on_geom = None;
+    let mut other = None;
+    for e_use in edge::edgeuses(fillets.brep(), rail, None, None)? {
+        let uv = fillets.brep().edgeuse(e_use)?.uv_trim_curve.clone();
+        if fillets.fillet_edgeuse(e_use)?.fillet_geom() == Some(geom) {
+            on_geom = uv;
+        } else {
+            other = uv;
+        }
+    }
+
+    let mut new_rails = Vec::new();
+    let mut current = rail;
+    for piece in ordered.iter().take(ordered.len().saturating_sub(1)) {
+        let (vertex, next) = split_rail(k, fillets, ownership, geom, current)?;
+        let at = if forward { piece.max() } else { piece.min() };
+        let point = curve.evaluate_point(k, at)?;
+        let v = fillets.brep_mut().vertex_mut(vertex)?;
+        v.point = point;
+        v.tolerance = tolerance;
+        fillets
+            .fillet_vertex_mut(vertex)?
+            .set_status(FilStatus::Processed);
+        new_rails.push(next);
+        current = next;
+    }
+
+    for (&e, piece) in std::iter::once(&rail).chain(&new_rails).zip(&ordered) {
+        let mut piece = *piece;
+        if let Some(c) = fillets.brep_mut().edge_mut(e)?.curve.as_mut() {
+            c.trim(k, &mut piece, TrimMode::Notify)?;
+        }
+        edge::set_interval(fillets.brep_mut(), e, &piece)?;
+        for e_use in edge::edgeuses(fillets.brep(), e, None, None)? {
+            let source = if fillets.fillet_edgeuse(e_use)?.fillet_geom() == Some(geom) {
+                &on_geom
+            } else {
+                &other
+            };
+            let uv = match source {
+                Some(c) => {
+                    let mut c = c.copy(k)?;
+                    c.trim(k, &mut piece, TrimMode::Notify)?;
+                    Some(c)
+                }
+                None => None,
+            };
+            fillets.set_edgeuse_uv_curve(e_use, uv, true, true)?;
+        }
+    }
+    Ok(new_rails)
+}
 /// Compute, trim and install a support curve between its adjacent fillet surfaces.
 ///
 /// # Errors
@@ -296,9 +396,34 @@ pub(crate) fn compute_support_edge_with_ops(
     }
     .support_edge(support, geom, approx, angle, ops)
 }
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::blend_missing(OP, "a fillet entity the support edge needs"))
+/// `value`, or a defect with `why` and status `SM_ERR_NULL_POINTER` (upstream `NER` on a
+/// pseudo B-rep link the kernel itself built).
+#[track_caller]
+fn required<T>(value: Option<T>, why: &'static str) -> Result<T> {
+    match value {
+        Some(value) => Ok(value),
+        None => Err(SolidError::blend_null_defect(OP, why)),
+    }
 }
+
+/// A rail or support edge without a start vertex ([`required`]).
+const RAIL_START: &str = "a rail or support edge of the pseudo B-rep has no start vertex: \
+                          the kernel builds each of them between two vertices";
+/// A rail or support edge without an end vertex ([`required`]).
+const RAIL_END: &str = "a rail or support edge of the pseudo B-rep has no end vertex: the \
+                        kernel builds each of them between two vertices";
+/// A rail without a curve ([`required`]).
+const RAIL_CURVE: &str = "a rail of the pseudo B-rep has no curve: the kernel installs each \
+                          rail's curve when it builds the rail";
+/// An edge without a primary edge use ([`required`]).
+const PRIMARY_USE: &str = "an edge of the pseudo B-rep has no edge use: the kernel builds each \
+                           edge with its pair of uses";
+/// An edge use without a mate ([`required`]).
+const MATE: &str = "an edge use of the pseudo B-rep has no mate: the kernel builds each edge \
+                    with its pair of uses";
+/// An edge use without a vertex use ([`required`]).
+const VERTEX_USE: &str = "an edge use of the pseudo B-rep has no vertex use: the kernel builds \
+                          each edge use from its start vertex use";
 struct Rails<'a> {
     k: &'a Kernel,
     fillets: &'a mut FilletBrep,
@@ -306,16 +431,23 @@ struct Rails<'a> {
 }
 impl Rails<'_> {
     fn start(&self, rail: EdgeId) -> Result<VertexId> {
-        required(edge::vertex(self.fillets.brep(), rail)?)
+        required(edge::vertex(self.fillets.brep(), rail)?, RAIL_START)
     }
     fn end(&self, rail: EdgeId) -> Result<VertexId> {
         let start = self.start(rail)?;
-        required(edge::other_vertex(self.fillets.brep(), rail, Some(start))?)
+        required(
+            edge::other_vertex(self.fillets.brep(), rail, Some(start))?,
+            RAIL_END,
+        )
     }
     fn install_curve(&mut self, edge: EdgeId, curve: Curve) -> Result<()> {
         crate::blend::fillet_geom::p1::set_rail_curve(self.fillets.brep_mut(), edge, curve)?;
         let (owner, brep) = self.ownership.edge_owner(edge)?;
-        let curve = required(self.fillets.brep_mut().edge_mut(edge)?.curve.as_mut())?;
+        let curve = required(
+            self.fillets.brep_mut().edge_mut(edge)?.curve.as_mut(),
+            "the curve just installed on the rail is gone: nothing between the install \
+             and the owner change removes it",
+        )?;
         self.ownership.set_curve_owner(edge, curve, owner, brep)
     }
 
@@ -327,18 +459,18 @@ impl Rails<'_> {
     ) -> Result<(VertexId, EdgeId)> {
         let start = self.start(rail)?;
         let end = self.end(rail)?;
-        let mut edgeuse = required(eu::primary_edgeuse(self.fillets.brep(), rail)?)?;
-        let mut vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse)?;
+        let mut edgeuse = required(eu::primary_edgeuse(self.fillets.brep(), rail)?, PRIMARY_USE)?;
+        let mut vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse, VERTEX_USE)?;
         if self.fillets.brep().vertexuse(vu)?.vertex != Some(end) {
-            edgeuse = required(eu::mate(self.fillets.brep(), edgeuse)?)?;
-            vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse)?;
+            edgeuse = required(eu::mate(self.fillets.brep(), edgeuse)?, MATE)?;
+            vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse, VERTEX_USE)?;
         }
         if start == end
             && self.fillets.brep().edgeuse(edgeuse)?.orientation
                 != crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Opposite
         {
-            edgeuse = required(eu::mate(self.fillets.brep(), edgeuse)?)?;
-            vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse)?;
+            edgeuse = required(eu::mate(self.fillets.brep(), edgeuse)?, MATE)?;
+            vu = required(self.fillets.brep().edgeuse(edgeuse)?.vertexuse, VERTEX_USE)?;
         }
         self.fillets
             .set_edgeuse_uv_curve(edgeuse, None, true, true)?;
@@ -362,20 +494,25 @@ impl Rails<'_> {
             .push(vu);
         self.fillets.brep_mut().vertexuse_mut(vu)?.vertex = Some(vertex);
         let (new_start, new_end) = edge::start_end_vertices(self.fillets.brep(), rail)?;
-        self.fillets.brep_mut().edge_mut(rail)?.vertices =
-            [required(new_start)?, required(new_end)?];
+        self.fillets.brep_mut().edge_mut(rail)?.vertices = [
+            required(new_start, RAIL_START)?,
+            required(new_end, RAIL_END)?,
+        ];
         let new_rail = ops.make_edge(self.k, self.fillets, vertex, end)?;
         let original_face = self.fillets.fillet_edge(rail)?.original_face();
         let record = self.fillets.fillet_edge_mut(new_rail)?;
         record.set_fillet_edge_type(FilletEdgeType::Rail);
         record.set_original_face(original_face);
-        let mut new_eu = required(eu::primary_edgeuse(self.fillets.brep(), new_rail)?)?;
-        let new_vu = required(self.fillets.brep().edgeuse(new_eu)?.vertexuse)?;
+        let mut new_eu = required(
+            eu::primary_edgeuse(self.fillets.brep(), new_rail)?,
+            PRIMARY_USE,
+        )?;
+        let new_vu = required(self.fillets.brep().edgeuse(new_eu)?.vertexuse, VERTEX_USE)?;
         if self.fillets.brep().vertexuse(new_vu)?.vertex != Some(end) {
-            new_eu = required(eu::mate(self.fillets.brep(), new_eu)?)?;
+            new_eu = required(eu::mate(self.fillets.brep(), new_eu)?, MATE)?;
         }
         self.fillets.set_edgeuse_fillet_geom(new_eu, Some(geom))?;
-        let curve = required(edge::curve(self.fillets.brep(), rail)?)?.copy(self.k)?;
+        let curve = required(edge::curve(self.fillets.brep(), rail)?, RAIL_CURVE)?.copy(self.k)?;
         self.install_curve(new_rail, curve)?;
         let tolerance = edge::tolerance(self.fillets.brep(), rail)?;
         edge::set_tolerance(self.fillets.brep_mut(), new_rail, tolerance, true, true)?;
@@ -392,18 +529,42 @@ impl Rails<'_> {
     ) -> Result<()> {
         let start = self.start(support)?;
         if !self.fillets.fillet_vertex(start)?.is_processed() {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the support edge's start vertex is not processed",
+                BlendFailure::Defect {
+                    why: "the support edge's start vertex is not processed: the extension \
+                          that makes a support edge processes the vertex it starts at first",
+                },
             ));
         }
         let start_point = self.fillets.vertex_point(start)?;
-        let primary = required(eu::primary_edgeuse(self.fillets.brep(), support)?)?;
-        let mate = required(eu::mate(self.fillets.brep(), primary)?)?;
-        let first = required(self.fillets.fillet_edgeuse(primary)?.fillet_geom())?;
-        let second = required(self.fillets.fillet_edgeuse(mate)?.fillet_geom())?;
-        let surf1 = required(self.fillets.geom(first)?.fillet_surface(None)?)?.clone();
-        let surf2 = required(self.fillets.geom(second)?.fillet_surface(None)?)?.clone();
+        let primary = required(
+            eu::primary_edgeuse(self.fillets.brep(), support)?,
+            PRIMARY_USE,
+        )?;
+        let mate = required(eu::mate(self.fillets.brep(), primary)?, MATE)?;
+        let first = required(
+            self.fillets.fillet_edgeuse(primary)?.fillet_geom(),
+            "the support edge's primary use has no fillet geometry: the kernel assigns \
+             each use of a support edge the geometry on its side",
+        )?;
+        let second = required(
+            self.fillets.fillet_edgeuse(mate)?.fillet_geom(),
+            "the support edge's mate use has no fillet geometry: the kernel assigns each \
+             use of a support edge the geometry on its side",
+        )?;
+        let surf1 = required(
+            self.fillets.geom(first)?.fillet_surface(None)?,
+            "the fillet geometry on the support edge's primary side has no surface: its \
+             fillet surface is built before the support edge is computed",
+        )?
+        .clone();
+        let surf2 = required(
+            self.fillets.geom(second)?.fillet_surface(None)?,
+            "the fillet geometry on the support edge's mate side has no surface: its \
+             fillet surface is built before the support edge is computed",
+        )?
+        .clone();
         let outcome = ops.surface_intersection(
             self.k,
             self.fillets,
@@ -422,18 +583,33 @@ impl Rails<'_> {
         let mut curve = match outcome {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Ok(Some(curve)) => curve,
-            _ => {
+            Ok(None) => {
                 self.fillets
                     .fillet_edge_mut(support)?
                     .set_status(FilStatus::SurfIntFailure);
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend_solver(
                     OP,
-                    "the two fillet surfaces do not intersect",
+                    SolverFailure::SupportSurfacesDoNotMeet,
                 ));
+            }
+            Err(e) => {
+                self.fillets
+                    .fillet_edge_mut(support)?
+                    .set_status(FilStatus::SurfIntFailure);
+                return Err(Failure::new(
+                    OP,
+                    BlendFailure::Solver(SolverFailure::SupportIntersectionFailed),
+                )
+                .caused_by(e)
+                .into_error());
             }
         };
         let mut interval = curve.natural_interval();
-        let surface = required(self.fillets.geom(geom)?.fillet_surface(None)?)?;
+        let surface = required(
+            self.fillets.geom(geom)?.fillet_surface(None)?,
+            "the fillet geometry the support edge ends on has no surface: its fillet \
+             surface is built before the support edge is computed",
+        )?;
         let solutions = surface.global_curve_intersect(
             self.k,
             [CliffHandle::Curve(&curve), CliffHandle::Surface(surface)],
@@ -443,10 +619,14 @@ impl Rails<'_> {
             approx,
         )?;
         let sol = solutions.get(0).ok_or_else(|| {
-            SolidError::blend_failed(OP, "the support curve does not meet the surface")
+            SolidError::blend_solver(OP, SolverFailure::SupportCurveMissesSurface)
         })?;
         let t = sol.start.parameters.first().copied().ok_or_else(|| {
-            SolidError::blend_missing(OP, "the curve parameter of the intersection")
+            SolidError::blend_null_defect(
+                OP,
+                "a curve-surface intersection solution has no curve parameter: the \
+                 intersection records the curve's parameter of each solution",
+            )
         })?;
         let end_point = curve.evaluate_point(self.k, t)?;
         let end = self.end(support)?;
@@ -464,9 +644,9 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop1.success {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_solver(
                 OP,
-                "the start point does not drop onto the curve",
+                SolverFailure::SupportEndOffCurve { at_end: false },
             ));
         }
         let drop2 = curve.drop_point(
@@ -479,9 +659,9 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop2.success {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_solver(
                 OP,
-                "the end point does not drop onto the curve",
+                SolverFailure::SupportEndOffCurve { at_end: true },
             ));
         }
         let reverse = drop1.parameter > drop2.parameter;
@@ -490,11 +670,7 @@ impl Rails<'_> {
         } else {
             ignored(interval.set_min_max(drop1.parameter, drop2.parameter))?;
         }
-        curve.trim(
-            self.k,
-            &mut interval,
-            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-        )?;
+        curve.trim(self.k, &mut interval, TrimMode::Notify)?;
         if reverse {
             curve.reverse_parameterization(self.k, &interval)?;
         }

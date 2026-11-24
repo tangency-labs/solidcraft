@@ -13,7 +13,9 @@
 //!
 //! [`corpus_reads_change_only_the_covered_tolerances`] and
 //! [`moved_fillet_rows_keep_main_geometry_and_mass`] replay the goldens rows the fix moved
-//! against main 3a0f49b09's values (tables made by this file's functions on main).
+//! against main 3a0f49b09's values (tables made by this file's functions on main). With
+//! #17739 a read vertex whose gap is over half its tolerance rises to cover twice the gap;
+//! the replay checks those vertices against that rule.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -24,8 +26,9 @@
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::topology::brep::p10::TopologyEnv;
-use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::p7::{read_from_data, read_from_file};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::brep_data::BrepData;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::edgeuse::p1::max_edge_face_gap;
 use solidcore::topology::topology::NotifyRecords;
@@ -121,7 +124,7 @@ fn revolution_mold_edges_cover_their_gaps() {
 }
 
 /// The UV trim of the sphere's use of `Fillet/sphere_plane.smb`'s circle edge (edge 3),
-/// built after the read: the file's trim fails `sm_CheckUVTrimCurve` and is dropped, so
+/// built after the read once the caller has dropped the file's trim, so
 /// `GetOrCreateUVTrimCurve` makes it. Returns the curve's interval ends and 65 points
 /// along it, and the edge's tolerance.
 fn sphere_plane_circle_trim(k: &Kernel, b: &mut Brep) -> (Vec<[u64; 2]>, f64) {
@@ -164,6 +167,13 @@ fn sphere_plane_trim_fit_does_not_grow_with_the_gap_cover() {
     let e = EdgeId::from_index(3);
     let raised = b.edge(e).unwrap().tolerance;
     assert!(raised > 1.0e-5, "the circle edge is raised: {raised:e}");
+    // the sphere's trim made again after the read (the read keeps the file's own trim,
+    // WR-493)
+    for eu in b.edge(e).unwrap().edgeuses.clone() {
+        if eu1::face(&b, eu).unwrap() == Some(FaceId::from_index(0)) {
+            eu1::set_uv_trim_curve(&mut b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None).unwrap();
+        }
+    }
     let (healed, tol) = sphere_plane_circle_trim(&k, &mut b);
 
     // the same read with the circle edge at the tolerance before the gap cover, and the
@@ -262,7 +272,11 @@ fn corpus_key(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
 }
 
 /// Reads a corpus file as `corpus.parity` does (`rebuild` false), or with the UV trims
-/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows).
+/// rebuilt (`bRebuildUVTrimCurves`, `topology.face_p3`'s `_rebuild` rows), with the
+/// tolerances the read's kept-trim cover raised after the healer put back as the healer
+/// left them ([`undo_trim_cover`]): the replay is of the healer's gap cover, against
+/// main's reads before the kept-trim cover (tangency-labs/solidcraft#19295), whose own
+/// raises are replayed by goldens' `tolsub::replay`.
 fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles")
@@ -278,8 +292,82 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         records: &mut records,
         next_key: 1 << 62,
     };
-    read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    if REFIT.with(std::cell::Cell::get) {
+        // `read_from_file`'s two halves, with each found sphere's file NURB replaced
+        // between them ([`with_fitted_spheres`])
+        let mut data = BrepData::read_from_file(k, bytes, FileType::Ascii).unwrap();
+        assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        read_from_data(k, &mut b, data, rebuild, &mut env).unwrap();
+    } else {
+        read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
+    }
+    undo_trim_cover(&mut b);
     b
+}
+
+thread_local! {
+    /// Whether [`read_corpus`] puts back upstream's fitted sphere NURBs.
+    static REFIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with every [`read_corpus`] read building each sphere found in a NURBS on the
+/// sphere as upstream's `IsNurbSurfaceSphere` returns it, with its NURB made from the
+/// fitted circles: main's build before the WR-493 retirement, which keeps the file's
+/// NURB (goldens' `refit` seam, whose replays show it is main's build bit for bit).
+fn with_fitted_spheres<T>(f: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            REFIT.with(|r| r.set(false));
+        }
+    }
+    REFIT.with(|r| r.set(true));
+    let _clear = Clear;
+    f()
+}
+
+/// Replaces each B-spline surface of `data` that `CopyAndAddAnalytics` finds to be a
+/// sphere (its recognisers in their order: the plane, the cone, then the sphere, each at
+/// tolerance scale 1) by that sphere with upstream's fitted NURB; returns how many.
+fn fit_spheres(k: &Kernel, data: &mut BrepData) -> usize {
+    use solidcore::surface::cone::Cone;
+    use solidcore::surface::plane::Plane;
+    use solidcore::surface::sphere::Sphere;
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    assert!(!k.fixes.analytic_copy_keeps_parameterization);
+    let mut replaced = 0;
+    for s in &mut data.surfaces {
+        let SurfaceKind::BSpline(srf) = s.object.kind() else {
+            continue;
+        };
+        if Plane::is_nurb_surface_plane(k, srf, 1.0).unwrap().is_some()
+            || Cone::is_nurb_surface_cone(k, srf, 1.0).unwrap().is_some()
+        {
+            continue;
+        }
+        if let Some(sphere) = Sphere::fitted_nurb_surface_sphere(k, srf, 1.0).unwrap() {
+            s.object = Surface::from(sphere);
+            replaced += 1;
+        }
+    }
+    replaced
+}
+
+/// Puts back every edge and vertex tolerance the read's kept-trim cover raised
+/// ([`Brep::trim_cover_raises`]) to the value the read had made before it, checking each
+/// still holds the raised value.
+fn undo_trim_cover(b: &mut Brep) {
+    let raises = b.trim_cover_raises().clone();
+    for (e, (before, after)) in raises.edges {
+        let r = b.edge_mut(e).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{e:?}");
+        r.tolerance = before;
+    }
+    for (v, (before, after)) in raises.vertices {
+        let r = b.vertex_mut(v).unwrap();
+        assert_eq!(r.tolerance.to_bits(), after.to_bits(), "{v:?}");
+        r.tolerance = before;
+    }
 }
 
 /// FNV-1a over the bits of the values fed to it.
@@ -350,11 +438,12 @@ fn digest_curve(d: &mut Digest, k: &Kernel, b: &Brep, e: solidcore::topology::Ed
     }
 }
 
-/// The largest edge/face gap of an edge's uses (0 with none).
+/// The largest edge/face gap of an edge's uses (0 with none), measured afresh
+/// (`force_calc`), never read from a use's cache.
 fn edge_gap(k: &Kernel, b: &mut Brep, e: solidcore::topology::EdgeId) -> f64 {
     let mut gap = 0.0f64;
     for eu in b.edge(e).unwrap().edgeuses.clone() {
-        if let Some(g) = max_edge_face_gap(k, b, eu, false).unwrap() {
+        if let Some(g) = max_edge_face_gap(k, b, eu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
     }
@@ -369,18 +458,53 @@ fn entries(table: &[(&str, &'static [(u32, u64)])], name: &str) -> &'static [(u3
         .map_or(&[], |(_, t)| *t)
 }
 
+/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one), measured
+/// afresh (`force_calc`), never read from a use's cache.
+fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64 {
+    use solidcore::topology::{vertex, vertexuse};
+    let mut gap = 0.0f64;
+    for vu in vertex::vertexuses(b, v).unwrap() {
+        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, true).unwrap() {
+            gap = gap.max(g.gap_3d);
+        }
+        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, true).unwrap() {
+            gap = gap.max(g.gap_3d);
+        }
+    }
+    gap
+}
+
 /// Replays one read of `name` against main 3a0f49b09, recording every disagreement in
 /// `failures`:
 /// - each edge in `raised` (index, main's tolerance bits) had main's tolerance under its
 ///   edge/face gap `g`, and now has `zone_tol3d(gain * g)`, which covers `g`;
 /// - each vertex in `moved` (index, main's bits) rose above main's tolerance to its
 ///   largest edge tolerance (the healer's vertex step, `CalcVertexZoneTol3d`, with the
-///   raised edges as input);
+///   raised edges as input), or, when `zone_tol3d(gain * 2 * g)` for its largest gap `g`
+///   is over that, to it (#17739), recorded in `floored`;
 /// - every edge covers its gap.
+///
+/// The heal's tolerances are judged against the gaps the heal measured. Both reads build
+/// and heal the same body; the rebuilding read then rebuilds its UV trims, and a rebuilt
+/// trim can move its edge's interval (`create_uv_trim_curve`'s interval recovery; on
+/// `Fillet/open_shell.smb` edge 17 goes from `[0, 1]` to `[3.9e-6, 1]`), which moves the
+/// edge's gap (there from 3.02e-5 to 1.25e-5) and its start vertex's gap after the heal.
+/// So on the rebuilding read `g` and the vertices' gaps are measured on the plain read of
+/// the file, the healed body after the plain read's own trim check:
+/// - its edge/face gaps are the heal's by construction: they depend only on the edge's
+///   curve and interval and the face's surface, which nothing changes between the heal
+///   and the end of the plain read;
+/// - its vertex gaps are the heal's only as measured: the vertex/face gap starts its
+///   projection from the UV trim ends, which the plain read's trim check can change.
+///
+/// The rebuilt body's current gaps must still be covered by its tolerances. Every gap is
+/// measured afresh, never read from a cache (#20939).
 ///
 /// Returns the digest of the read with main's tolerances put back on those entries:
 /// face, edge and vertex tolerances, edge/face gaps, edge curves and the file's UV trims
-/// with the surface points along them. With `lazy`, also the digest of the UV trims
+/// with the surface points along them. On the rebuilding read the hashed edge/face gaps
+/// are the heal's, taken from the plain read, so the digest does not pin the rebuilt
+/// body's gaps; the coverage checks do. With `lazy`, also the digest of the UV trims
 /// `GetOrCreateUVTrimCurve` makes afterwards on the read as it is (raised).
 fn replay(
     name: &str,
@@ -388,6 +512,7 @@ fn replay(
     raised: &[(u32, u64)],
     moved: &[(u32, u64)],
     lazy: bool,
+    floored: &mut Vec<String>,
     failures: &mut Vec<String>,
 ) -> (u64, u64) {
     use solidcore::geom::tol::{gap_gain, zone_tol3d};
@@ -395,21 +520,35 @@ fn replay(
     use solidcore::topology::{vertex, EdgeId, VertexId};
     let mut k = Kernel::default();
     let mut b = read_corpus(&mut k, name, rebuild);
+    // the body the heal measured its gaps on: on the rebuilding read, the plain read
+    let mut healed_k = Kernel::default();
+    let mut healed = rebuild.then(|| read_corpus(&mut healed_k, name, false));
     let gain = gap_gain(&k);
     let mut d = Digest::new();
     for (_, f) in b.faces().iter() {
         d.f64(f.tolerance);
     }
     let edges: Vec<EdgeId> = b.edges().iter().map(|(id, _)| id).collect();
+    if let Some(h) = healed.as_ref() {
+        // (the gaps of the plain read are taken by id)
+        let vertex_ids = |b: &Brep| b.vertices().iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let healed_edges: Vec<EdgeId> = h.edges().iter().map(|(id, _)| id).collect();
+        assert_eq!(edges, healed_edges, "{name}: the reads' edges");
+        assert_eq!(vertex_ids(&b), vertex_ids(h), "{name}: the reads' vertices");
+    }
     let mut seen = 0;
     for &e in &edges {
         let tol = b.edge(e).unwrap().tolerance;
-        let g = edge_gap(&k, &mut b, e);
-        if tol < g {
+        let now = edge_gap(&k, &mut b, e);
+        if tol < now {
             failures.push(format!(
-                "{name}: {e:?} tolerance {tol:e} under its gap {g:e}"
+                "{name}: {e:?} tolerance {tol:e} under its gap {now:e}"
             ));
         }
+        let g = match healed.as_mut() {
+            Some(h) => edge_gap(&healed_k, h, e),
+            None => now,
+        };
         match raised.iter().find(|&&(i, _)| i == e.index()) {
             Some(&(_, main)) => {
                 seen += 1;
@@ -443,9 +582,26 @@ fn replay(
                     .into_iter()
                     .map(|e| b.edge(e).unwrap().tolerance)
                     .fold(0.0f64, f64::max);
-                if !(main < tol && tol.to_bits() == largest.to_bits()) {
+                // (#17739: a vertex whose gap needs more than its largest edge tolerance
+                // rises to `zone_tol3d(gain * 2 * gap)`, so the check's half rule holds)
+                let now = vertex_gap(&k, &mut b, v);
+                let gap = match healed.as_mut() {
+                    Some(h) => vertex_gap(&healed_k, h, v),
+                    None => now,
+                };
+                let cover = zone_tol3d(&k, gain * 2.0 * gap);
+                let step = if cover > largest {
+                    let read = if rebuild { "rebuilding read" } else { "read" };
+                    floored.push(format!("{name} {read} v{}", v.index()));
+                    cover
+                } else {
+                    largest
+                };
+                // (the check's half rule on the rebuilt body's current gap)
+                if !(main < tol && tol.to_bits() == step.to_bits() && 2.0 * now <= tol) {
                     failures.push(format!(
-                        "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}"
+                        "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}, \
+                         gap {gap:e}, current gap {now:e}, cover {cover:e}"
                     ));
                 }
                 d.f64(main);
@@ -550,7 +706,33 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 ///
 /// Main 3a0f49b09's values per file, made by this file's functions on main: the read's
 /// digest, the lazily made UV trims' digest, the rebuilding read's digest, and the
-/// bits of `corpus.parity`'s area and volume.
+/// bits of `corpus.parity`'s area and volume. The mass integrator's knot-line split (trim
+/// pieces and closure strips end where a trim crosses a surface knot line) since moved
+/// 17 of those area and volume entries, on 14 files; they are main's with that split,
+/// each classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
+///
+/// `Fillet/bottle.smb`'s three digests are #17896's (retiring `keep_operand_uv_trims`).
+/// Its area and volume bits are main's. The digests moved only in the surface points they
+/// sample along face 15's trims (a surface of revolution); every UV trim, edge curve,
+/// tolerance and vertex of the read is bit for bit main's, pinned by
+/// [`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]. The rebuilding
+/// read refits the trims on that surface, and one UV coordinate moves by 8e-31. `CPoint::affine2` keeps a coordinate that both of its
+/// inputs share exactly (PROVEN: a convex combination of equal values). The surface's
+/// generator is made through it (`create_generator_from_angle`,
+/// `gen_adjust_step_interval`), so its shared coordinates are now exact rather than an
+/// ulp off. The surface's net is the rotation of that generator, so 105 of its control
+/// points move, each by at most 1.86e-17 times its point's magnitude: below one unit
+/// roundoff of that magnitude, at rounding (MEASURED; the same test pins the net on a grid
+/// of `2^-44` of each point's magnitude).
+///
+/// `Fillet/sphere_plane.smb`'s rebuilding-read digest and `Solids/revolution_mold.smb`'s
+/// lazy-trims and rebuilding-read digests and area bits are #18490's: with upstream's
+/// fitted sphere NURB put back ([`with_fitted_spheres`]) the read drops the file's trims
+/// onto that sphere and rebuilds them, and #18490 subdivides the drop's spans that its
+/// enclosure proves off the curve, so those rebuilt sphere trims carry more control
+/// points (`revolution_mold`'s area, integrated over them, moves by 1 ulp). The as-read
+/// digests, which keep the file's NURB and trims, are unchanged.
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -559,7 +741,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -569,7 +751,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -579,17 +761,17 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x3a137639560123dc,
             0x19b6267d7bab4376,
             0x40c94ce71acf47de,
-            0x40c96aa73761feba,
+            0x40c96aa73746aab0,
         ],
     ),
     (
         "Fillet/bottle.smb",
         [
-            0x569b0994d89a8785,
-            0x20f9e5358be089e4,
-            0x56d4f90e1a00266f,
+            0xf25190ec5d448d82,
+            0xc4a72239b7834c83,
+            0x93ae057464ce886f,
             0x40408f20e135de78,
-            0x40262233c6fff91f,
+            0x40262233c6c42c0b,
         ],
     ),
     (
@@ -598,8 +780,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb5359aa30f9be919,
             0xa92d78f82fd63550,
             0x73843118350f3240,
-            0x409f327abf0704e1,
-            0x40adb03a50d6ac5b,
+            0x409f327abf06f6f4,
+            0x40adb03a50d6aa6d,
         ],
     ),
     (
@@ -629,7 +811,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -639,7 +821,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -698,7 +880,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xc883abda5a4672f7,
             0xbef2111c0d616bcc,
             0xe9468e03f3395efe,
-            0x405664215d2967d8,
+            0x405664215d2a2cc7,
             0x7ff8000000000000,
         ],
     ),
@@ -708,7 +890,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8f07277297df6078,
             0xcd50069fef891ecf,
             0x67b61d59d84afc0d,
-            0x4085e633bce84e1d,
+            0x4085e633bce85549,
             0x7ff8000000000000,
         ],
     ),
@@ -717,8 +899,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
-            0xfea47f8f2838bbe2,
-            0x40735d27cb8cc7eb,
+            0xf6a7f474bf962518,
+            0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
     ),
@@ -729,7 +911,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x1f46996340f01656,
             0x2732c82601be613b,
             0x40821911bbfe80e6,
-            0x40895b346dbc001b,
+            0x40895b3470b2c59b,
         ],
     ),
     (
@@ -768,8 +950,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x6c2688581ef72501,
             0x934916761febf75d,
             0x629b7badfc0138a6,
-            0x40ff8cfbe4b56c96,
-            0x4130d86087906c9b,
+            0x40ff8cfbe4b56c95,
+            0x4130d860879069ed,
         ],
     ),
     (
@@ -789,7 +971,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x68482310d17f07be,
             0xbfc5158946937f01,
             0x40ff28e1cf641cd3,
-            0x4130d6e013e89aee,
+            0x4130d6e013e89a3e,
         ],
     ),
     (
@@ -826,10 +1008,10 @@ const MAIN: [(&str, [u64; 5]); 28] = [
         "Solids/revolution_mold.smb",
         [
             0x462faca60ad813f0,
-            0x88a9396a602fe93c,
-            0x692f780f5f318bf3,
-            0x40d2a6a844e34477,
-            0x40f8a3124b2291b7,
+            0xaf0de1993588154f,
+            0xc0352fed2c49b9a0,
+            0x40d2a6a844e34873,
+            0x40f8a3124b22bf69,
         ],
     ),
 ];
@@ -847,38 +1029,96 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   not at the raised one;
 /// - `corpus.parity`'s areas are main's bit for bit; its volumes are main's bit for bit
 ///   with the moved tolerances set back to main's, and as read differ only on
-///   `Fillet/corner_box.smb` and `Fillet/test1.smb`, by 1 ulp: the volume integrates
-///   about the middle of the B-rep's box, which is grown by the edge and vertex
-///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
-///   against a certified enclosure `[lo, hi]` of the exact volume
-///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
-///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches that width
-///   and both values lie below `lo`, so the larger, this branch's, is closer to the exact
-///   volume. On `corner_box` it stops at its cell budget, wider than asked, holding both
-///   values: neither can be told farther.
+///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
+///   B-rep's box, which is grown by the edge and vertex tolerances
+///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
+///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
+///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
+///   tolerance. It stops at its cell budget, wider than asked, holding both values:
+///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
+///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
+///
+/// With the WR-493 retirement, the two files here with a sphere found in a NURBS
+/// (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's NURB and
+/// trims on those faces (`wr493_class_proofs`'
+/// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads differ from
+/// main's by that too (asserted). With upstream's fitted sphere NURB put back
+/// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
+/// every other file; they are asserted to be those two files only. (`sphere_plane`'s
+/// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
+    let mut wr493 = Vec::new();
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
     let mut volume_classes = Vec::new();
+    let mut floored = Vec::new();
     for (name, [read_main, lazy_main, rebuild_main, area_main, volume_main]) in MAIN {
         let edges = entries(RAISED_EDGES, name);
         let vertices = entries(MOVED_VERTICES, name);
         raised += edges.len();
         moved += vertices.len();
-        let (read_digest, lazy_digest) = replay(name, false, edges, vertices, true, &mut failures);
         let rebuild_edges = entries(REBUILD_RAISED_EDGES, name);
         let rebuild_vertices = entries(REBUILD_MOVED_VERTICES, name);
-        let (rebuild_digest, _) = replay(
-            name,
-            true,
-            rebuild_edges,
-            rebuild_vertices,
-            false,
-            &mut failures,
-        );
+        let wr = WR493_READS.contains(&name);
+        if wr {
+            // the found spheres keep the file's NURB and trims, so these reads are not
+            // main's (asserted; the replays' own checks hold on them as on every file),
+            // and with upstream's fitted NURB put back they are, as every other file is
+            let mut unfitted = Vec::new();
+            let (read_digest, _) = replay(
+                name,
+                false,
+                edges,
+                vertices,
+                true,
+                &mut unfitted,
+                &mut failures,
+            );
+            let (rebuild_digest, _) = replay(
+                name,
+                true,
+                rebuild_edges,
+                rebuild_vertices,
+                false,
+                &mut unfitted,
+                &mut failures,
+            );
+            if read_digest == read_main || rebuild_digest == rebuild_main {
+                failures.push(format!("{name}: read as main's"));
+            }
+            wr493.push(name);
+        }
+        let fit = |f: &mut dyn FnMut()| {
+            if wr {
+                with_fitted_spheres(f);
+            } else {
+                f();
+            }
+        };
+        let (mut read_digest, mut lazy_digest, mut rebuild_digest) = (0, 0, 0);
+        fit(&mut || {
+            (read_digest, lazy_digest) = replay(
+                name,
+                false,
+                edges,
+                vertices,
+                true,
+                &mut floored,
+                &mut failures,
+            );
+            (rebuild_digest, _) = replay(
+                name,
+                true,
+                rebuild_edges,
+                rebuild_vertices,
+                false,
+                &mut floored,
+                &mut failures,
+            );
+        });
         for (what, now, main) in [
             ("read", read_digest, read_main),
             ("lazy trims", lazy_digest, lazy_main),
@@ -888,8 +1128,11 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                 failures.push(format!("{name}: {what} digest {now:#x}, main {main:#x}"));
             }
         }
-        let (area, volume) = corpus_mass(name, None);
-        let (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+        let (mut area, mut volume, mut area0, mut volume0) = (0.0, 0.0, 0.0, 0.0);
+        fit(&mut || {
+            (area, volume) = corpus_mass(name, None);
+            (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+        });
         if area.to_bits() != area_main || area0.to_bits() != area_main {
             failures.push(format!(
                 "{name}: area {:#x} / lowered {:#x}, main {area_main:#x}",
@@ -908,7 +1151,8 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             // 1e-9 * |V| wide, the goldens' relative tolerance)
             let main = f64::from_bits(volume_main);
             let mut k = Kernel::default();
-            let mut b = read_corpus(&mut k, name, false);
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            fit(&mut || b = read_corpus(&mut k, name, false));
             let asked = 1e-9 * main.abs();
             let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
             let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
@@ -934,38 +1178,118 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     }
     assert_eq!((raised, moved), (206, 296));
     assert_eq!(
-        moved_volumes,
-        ["Fillet/corner_box.smb", "Fillet/test1.smb"],
+        floored,
+        [
+            "Fillet/bottle.smb read v22",
+            "Fillet/open_shell.smb read v2",
+            "Fillet/open_shell.smb read v14",
+            "Fillet/open_shell.smb rebuilding read v14",
+        ],
         "{failures:#?}"
     );
+    assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
+    assert_eq!(wr493, WR493_READS);
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
-        [
-            ("Fillet/corner_box.smb", "both enclosed"),
-            ("Fillet/test1.smb", "closer")
-        ],
+        [("Fillet/corner_box.smb", "both enclosed")],
         "{volume_classes:?}"
     );
-    // (the doc's claims on the widths, against the asked width rather than as printed
-    // digits, which move with any change to the enclosure's cells: `test1`'s enclosure is
-    // as narrow as asked, so its "closer" is decided within the goldens' relative
-    // tolerance; `corner_box`'s spent its cell budget wider than asked, so "both
-    // enclosed" is all it can say)
+    // (the doc's claim on the width, against the asked width rather than as printed
+    // digits, which move with any change to the enclosure's cells: `corner_box`'s spent
+    // its cell budget wider than asked, so "both enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
         .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
-        [
-            ("Fillet/corner_box.smb", EnclosureStop::Budget, false),
-            ("Fillet/test1.smb", EnclosureStop::Reached, true)
-        ],
+        [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// #20939 on a corpus file: the rebuilding read of `Fillet/open_shell.smb` rebuilds edge
+/// 17's UV trims after the heal, and the rebuilt trim moves the edge's interval from
+/// `[0, 1]` to `[3.9e-6, 1]` (`create_uv_trim_curve`'s interval recovery, through
+/// `edge::set_interval`). The edge/face gap and the start vertex's vertex/edge gap
+/// cached over the old interval no longer hold: each use's gap as read equals the gap
+/// measured afresh. (Before #20939 the cache kept the edge's 3.02e-5, measured over
+/// `[0, 1]`, against a gap of 1.25e-5 over the edge's interval, and vertex 14's 3.02e-5
+/// against 3.18e-5.)
+#[test]
+fn open_shell_rebuilt_trim_leaves_no_stale_gap() {
+    use solidcore::topology::{edge, vertexuse, EdgeId, VertexId};
+    let name = "Fillet/open_shell.smb";
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, true);
+    let e = EdgeId::from_index(17);
+    let ivl = b.edge(e).unwrap().interval;
+    assert!(
+        ivl.min() > 0.0 && ivl.min() < 1e-5,
+        "{name}: e17 interval {ivl:?}"
+    );
+    let plain = {
+        let mut k = Kernel::default();
+        let b = read_corpus(&mut k, name, false);
+        b.edge(e).unwrap().interval
+    };
+    assert_eq!(
+        (plain.min(), plain.max()),
+        (0.0, 1.0),
+        "{name}: e17 as healed"
+    );
+    let mut checked = 0;
+    for eu in edge::edgeuses(&b, e, None, None).unwrap() {
+        let read = max_edge_face_gap(&k, &mut b, eu, false)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        let fresh = max_edge_face_gap(&k, &mut b, eu, true)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        assert_eq!(
+            read.to_bits(),
+            fresh.to_bits(),
+            "{name}: {eu:?} gap {read:e}, measured {fresh:e}"
+        );
+        checked += 1;
+    }
+    let v = VertexId::from_index(14);
+    for vu in solidcore::topology::vertex::vertexuses(&b, v).unwrap() {
+        let read = vertexuse::vertex_edge_gap(&k, &mut b, vu, false).unwrap();
+        let fresh = vertexuse::vertex_edge_gap(&k, &mut b, vu, true).unwrap();
+        let read_face = vertexuse::vertex_face_gap(&k, &mut b, vu, false).unwrap();
+        let fresh_face = vertexuse::vertex_face_gap(&k, &mut b, vu, true).unwrap();
+        for (what, read, fresh) in [
+            (
+                "vertex/edge",
+                read.map(|g| g.gap_3d),
+                fresh.map(|g| g.gap_3d),
+            ),
+            (
+                "vertex/face",
+                read_face.map(|g| g.gap_3d),
+                fresh_face.map(|g| g.gap_3d),
+            ),
+        ] {
+            assert_eq!(
+                read.map(f64::to_bits),
+                fresh.map(f64::to_bits),
+                "{name}: {vu:?} {what} gap {read:?}, measured {fresh:?}"
+            );
+            checked += usize::from(read.is_some());
+        }
+    }
+    assert!(checked > 2, "{name}: {checked} gaps checked");
+}
+
+/// The files of [`MAIN`] with a sphere found in a NURBS, whose reads the WR-493
+/// retirement changes too: they are replayed against main's with upstream's fitted
+/// sphere NURB put back ([`with_fitted_spheres`]).
+const WR493_READS: [&str; 2] = ["Fillet/sphere_plane.smb", "Solids/revolution_mold.smb"];
 
 /// Edges whose tolerance the read raises: per file, (edge index, main's tolerance bits).
 const RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
@@ -1630,8 +1954,10 @@ const REBUILD_RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
     ),
 ];
 /// [`MOVED_VERTICES`] of the read that rebuilds the UV trims.
-const REBUILD_MOVED_VERTICES: &[(&str, &[(u32, u64)])] =
-    &[("Fillet/open_shell.smb", &[(12, 0x3efa4fff2e7e0c33)])];
+const REBUILD_MOVED_VERTICES: &[(&str, &[(u32, u64)])] = &[(
+    "Fillet/open_shell.smb",
+    &[(12, 0x3efa4fff2e7e0c33), (14, 0x3f0fb68913522a08)],
+)];
 
 // ---- the fillets of `blend.fillet_executive_p3`'s moved rows ----------------------------
 
@@ -1729,12 +2055,24 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 }
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
-/// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
-/// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
-/// that PR moves this fillet's digest and mass in their last bits, and its tree before
-/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// functions on main; entry 7 (`open_shell` e5) is #17739's: #18402 moved that fillet's
+/// result, and with its vertex tolerances covering twice their gaps the check passes and
+/// the fillet builds (`end_to_end.rs`, `stubs4-open_shell-e5-r0.5`; the other 27 are
+/// unchanged). Entry 14 (`bottle` e8 r0.1) is #18401's: that PR moves this fillet's digest
+/// and mass in their last bits, and its tree before #18230 makes the same digest and mass
+/// bit for bit. The 19 equal digests (`0xb5382d964fe60518`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
-/// same body and status.
+/// same body and status. #17896 moved those 19 digests and entry 14's (main's were
+/// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
+/// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
+/// edge and tolerance of the read is bit for bit main's
+/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]). Since #18918
+/// entry 14 moved with that PR's near-knot rail trim (WR-664: a rail's cut moves onto the
+/// rail's nearby knot, which moves this fillet's geometry within the zone tolerance; main's
+/// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
+/// two edges at the fillet's end keep 4e-5 instead of main's raise to 8.05e-5, and one trim
+/// on face 16 is refit at that tolerance; that result is proved in
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1743,34 +2081,43 @@ const FILLET_MAIN: [u64; 29] = [
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x51f6abb34e90bff2,
+    0x9362785e2dee39d1,
     0xb716929faf389955,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x7442b43a428ea1ca,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
-    0x30d463838d7fca03,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xa20e4479c358841c,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
+    0xb5382d964fe60518,
 ];
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14 is #18401's (see
-/// [`FILLET_MAIN`]).
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
+/// (see [`FILLET_MAIN`]) with the mass integrator's knot-line split, which moved that row
+/// since (its entries are classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`), and #18918's near-knot rail trim, which
+/// moves them within the zone tolerance (the row's certified mass enclosure in goldens'
+/// `round_definition_rows` holds main's values). #18162's lazy UV trim raise refits one
+/// trim at a lower edge tolerance, which moves every value of entry 14 once more (the
+/// integrator fits the trims it integrates over to the edges' tolerances);
+/// [`BOTTLE_E8_BEFORE`] holds main's bits and
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
+/// within the case's accuracy of a certified enclosure of the exact properties.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1826,28 +2173,250 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce093b407,
-            0x402621896e50fcb0,
-            0x402621896e50fcb0,
-            0x3f10d1c99a55926e,
-            0x3f13efa09958129b,
-            0x4000a10fe9da9881,
-            0x4050316571691566,
-            0x4050a9c3826e8ec1,
-            0x40151aaab5c59a6f,
-            0x3f6aed515da75eee,
-            0x3f66b6a18cf50c20,
-            0xbf3c98659ef8970b,
+            0x40408bcce08a27a7,
+            0x402621896ddff26a,
+            0x402621896ddff26a,
+            0x3f10d1d4e45e31cd,
+            0x3f13efa0c2faa837,
+            0x4000a10fe9b1ffdc,
+            0x4050316570dd0323,
+            0x4050a9c381d7a010,
+            0x40151aaab4b86a07,
+            0x3f6aed5192670b82,
+            0x3f66b6ad970f3f0b,
+            0xbf3c98793964744e,
         ],
     ),
 ];
+
+/// [`FILLETS`] entry 14's mass bits on main, before #18162's lazy UV trim raise (see
+/// [`FILLET_MAIN_MASS`]).
+const BOTTLE_E8_BEFORE: [u64; 12] = [
+    0x40408bccdfac28b0,
+    0x402621896ddff26a,
+    0x402621896ddff26a,
+    0x3f10d1d4e45e263c,
+    0x3f13efa0c2faa159,
+    0x4000a10fe9b1ffdc,
+    0x4050316570dd0323,
+    0x4050a9c381d7a010,
+    0x40151aaab4b86a08,
+    0x3f6aed5192670272,
+    0x3f66b6ad970f2ece,
+    0xbf3c9879396462ce,
+];
+
+/// The end points of the two edges of [`FILLETS`] entry 14's result whose tolerance
+/// #18162's lazy UV trim raise lowers: its vertices 26, 38 and 27 (each edge curve ends
+/// within 1e-4 of two of them; they are at least 0.03 apart).
+const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
+    [
+        -7.61836356003545e-7,
+        -6.412140332612071e-1,
+        3.937830788008653,
+    ],
+    [
+        -9.695404181326284e-1,
+        -5.125539440709455e-1,
+        3.9377557534353658,
+    ],
+    [
+        -9.995634517364296e-1,
+        -5.038566395810731e-1,
+        3.937831742378171,
+    ],
+];
+
+/// [`FILLETS`] entry 14 (`bottle` e8 r0.1) under #18162's lazy UV trim raise: the result's
+/// edges 42 and 47 keep 4e-5 where main raises them to 8.05e-5 (twice the drop's reported
+/// fit error), their end vertices 26, 27 and 38 follow (4.07e-5, 4e-5, 4e-5 against main's
+/// 8.05e-5), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance;
+/// nothing else of the result moves (same counts, status, vertex points and edge curves;
+/// Level 2 reported the same two lines as main before #17739 covered them). Proved here, on
+/// the result:
+/// - the two edges (found by their end points, [`BOTTLE_E8_MOVED_ENDS`], not by arena id)
+///   are at 4e-5 and their trim on face 16 (a B-spline) is within it: `trim_image_gap_bound`,
+///   a proved bound on the distance between the trim's image and the edge curve, is at most
+///   the tolerance (edge use 190's, the refit one, is 1.45e-5; edge use 170's 3.75e-6); their
+///   other trim, on the procedural blend, has no exact net to enclose (goldens'
+///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`): that trim at 4e-5
+///   is the move's one unproved remainder;
+/// - the three end vertices (26, 38 and 27, at 4e-5, 4e-5 and 4.07e-5) each cover the end
+///   of every edge curve that ends there, the distance's rounding (`gamma(8)` of the
+///   coordinates' size, times sqrt 3) counted against the tolerance;
+/// - Level 2 reports nothing: main's two vertex/face gaps (4.71e-5 against 3.65e-5, half of
+///   vertex 22's tolerance, unchanged by the raise) are covered by #17739's vertex step,
+///   which raises the read's vertex 22 to cover twice its gap;
+/// - the mass properties, now and before ([`BOTTLE_E8_BEFORE`]), are each within the case's
+///   accuracy (1e-4 of its scale: the area, the volume, `R` the box's half diagonal for a
+///   centroid coordinate, `V R^2` for a moment, or the value's own where larger) of the exact
+///   property: of every point of a certified enclosure of it
+///   (`mass::enclosure::enclose_mass_properties`), so of the exact value wherever it lies in
+///   it. Both are valid estimates at the asked accuracy; the move is the integration's, not
+///   the body's.
+#[test]
+fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::mass::integrator::properties::brep_mass_properties_default;
+    use solidcore::math::Vec3;
+    use solidcore::nurbs::math::gamma;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::query::curve_surface_gap::trim_image_gap_bound_up_to;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1 as bl;
+    use solidcore::topology::edgeuse::p1 as eu1;
+    const ACCURACY: f64 = 1e-4;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, "Fillet/bottle.smb", false);
+    let e = bl::edges(&b, None).unwrap()[8];
+    fillet_edges(&mut k, &mut b, &[e], 0.1, 1, 1, 1.0).unwrap();
+    let counts = [
+        bl::faces(&b, None).unwrap().len(),
+        bl::edges(&b, None).unwrap().len(),
+        bl::vertices(&b, None).unwrap().len(),
+    ];
+    assert_eq!(counts, [18, 47, 31]);
+
+    let mut failures = Vec::new();
+    let (mut moved, mut bounded, mut blend) = (0, 0, 0);
+    for e in bl::edges(&b, None).unwrap() {
+        let rec = b.edge(e).unwrap();
+        let (tol, ivl) = (rec.tolerance, rec.interval);
+        let curve = rec.curve.clone().unwrap();
+        let at_moved_end = |t: f64| {
+            let p = curve.evaluate_point(&k, t).unwrap();
+            BOTTLE_E8_MOVED_ENDS
+                .iter()
+                .any(|&[x, y, z]| p.distance(Vec3::new(x, y, z)) <= 1e-4)
+        };
+        if !(at_moved_end(ivl.min()) && at_moved_end(ivl.max())) {
+            continue;
+        }
+        moved += 1;
+        assert_eq!(tol, 4e-5, "{e:?}");
+        for eu in rec.edgeuses.clone() {
+            let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.clone() else {
+                continue;
+            };
+            let face = eu1::face(&b, eu).unwrap().unwrap();
+            let surface = b.face(face).unwrap().surface.as_ref().unwrap();
+            let is_blend = matches!(surface.kind(), SurfaceKind::ProceduralBlend(_));
+            // (as the raise bounds it: an owner-less copy, the edge's interval)
+            let mut surface = surface.clone_for_evaluation().unwrap();
+            let _ = surface.set_owner(None);
+            let range = [ivl.min(), ivl.max()];
+            match trim_image_gap_bound_up_to(&k, &surface, &curve, &trim, range, 1e-3 * tol, tol)
+                .unwrap()
+            {
+                Some(bound) if bound <= tol => bounded += 1,
+                None if is_blend => blend += 1,
+                other => failures.push(format!("{e:?} {eu:?}: {other:?} against {tol:e}")),
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(
+        [moved, bounded, blend],
+        [2, 2, 2],
+        "moved edges, bounded and blend trims"
+    );
+
+    // the end vertices the raise lowers (26, 38 and 27): each still covers the end of every
+    // edge curve that ends there, each distance's rounding counted against it
+    let mut lowered = Vec::new();
+    for v in bl::vertices(&b, None).unwrap() {
+        let rec = b.vertex(v).unwrap();
+        let (at, tol) = (rec.point, rec.tolerance);
+        if !BOTTLE_E8_MOVED_ENDS
+            .iter()
+            .any(|&[x, y, z]| at.distance(Vec3::new(x, y, z)) <= 1e-4)
+        {
+            continue;
+        }
+        lowered.push(tol);
+        for e in solidcore::topology::vertex::edges(&b, v, None).unwrap() {
+            let rec = b.edge(e).unwrap();
+            let curve = rec.curve.as_ref().unwrap();
+            let (v0, v1) = solidcore::topology::edge::start_end_vertices(&b, e).unwrap();
+            for (end, t) in [(v0, rec.interval.min()), (v1, rec.interval.max())] {
+                if end != Some(v) {
+                    continue;
+                }
+                let p = curve.evaluate_point(&k, t).unwrap();
+                let size = at.max_dimension().max(p.max_dimension());
+                let far = at.distance(p) + gamma(8) * size * 3.0_f64.sqrt();
+                assert!(far <= tol, "{v:?} {e:?}: {far:e} against {tol:e}");
+            }
+        }
+    }
+    lowered.sort_by(f64::total_cmp);
+    assert_eq!(
+        lowered,
+        [4e-5, 4e-5, 4.0730163673638e-5],
+        "the lowered vertices"
+    );
+
+    // (main reports vertex 22's two vertex/face gaps, offset 4.7135459e-5 against half its
+    // 7.30e-5; #17739's healer covers twice that gap, so the check is clean)
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:#?}");
+
+    let m = brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO).unwrap();
+    let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
+    for v in [m.centroid, m.inertia, m.products] {
+        now.extend([v.x, v.y, v.z]);
+    }
+    let r = 0.5
+        * calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+            .unwrap()
+            .size()
+            .length();
+    let x =
+        solidcore::mass::enclosure::enclose_mass_properties(&k, &mut b, 0.1 * ACCURACY).unwrap();
+    let vr2 = x.volume.hi * r * r;
+    let band = |i: usize| match i {
+        0 => (x.area, x.area.hi),
+        1 | 2 => (x.volume, x.volume.hi),
+        3..=5 => (x.centroid[i - 3], r),
+        6..=8 => (x.inertia[i - 6], vr2),
+        _ => (x.products[i - 9], vr2),
+    };
+    let before = BOTTLE_E8_BEFORE.map(f64::from_bits);
+    for (i, (&now, &before)) in now.iter().zip(&before).enumerate() {
+        let (band, scale) = band(i);
+        // (`f64::max` skips a NaN, and an infinite value makes `accuracy` infinite: every
+        // input of the comparison must be finite first)
+        assert!(
+            band.lo.is_finite() && band.hi.is_finite() && scale.is_finite(),
+            "{i}: enclosure [{:e}, {:e}] at scale {scale:e} is not finite",
+            band.lo,
+            band.hi
+        );
+        for (what, value) in [("now", now), ("before", before)] {
+            assert!(value.is_finite(), "{i} {what}: {value:e} is not finite");
+            let accuracy = ACCURACY * scale.max(value.abs());
+            // (the farthest the exact value can be)
+            let far = (value - band.lo).max(band.hi - value);
+            assert!(
+                far <= accuracy,
+                "{i} {what}: {value:e} is up to {far:e} off [{:e}, {:e}] (accuracy {accuracy:e})",
+                band.lo,
+                band.hi
+            );
+        }
+    }
+}
 
 /// The fillets behind `blend.fillet_executive_p3`'s moved rows make main's geometry and
 /// mass bit for bit: the rows moved only in the edge and vertex tolerances the result
 /// carries from the read. The four rows whose mass moved in the expectations
 /// (`source-file-corner_box-edge4`, `-edge8`, `-edge9`,
 /// `stubs4-delete-edge-bottle-e8-r0.1`) have main's mass bit for bit: main's committed rows were older than main's own output, and the bless
-/// rewrote the whole row when the result's tolerances moved.
+/// rewrote the whole row when the result's tolerances moved. Entry 14's digest and mass are
+/// #18162's since its lazy UV trim raise
+/// ([`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]).
 #[test]
 fn moved_fillet_rows_keep_main_geometry_and_mass() {
     let mut failures = Vec::new();
@@ -1866,4 +2435,160 @@ fn moved_fillet_rows_keep_main_geometry_and_mass() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Feeds `c` rounded to a grid of `2^-44 * scale` (a negative zero fed as zero), or `c`
+/// itself for no `scale`.
+fn feed_on_grid(d: &mut Digest, c: f64, scale: Option<f64>) {
+    match scale {
+        Some(s) => d.f64((c / (s * 2f64.powi(-44))).round() + 0.0),
+        None => d.f64(c),
+    }
+}
+
+/// Feeds an edge use's UV trim without the surface: its interval and 17 uv points along it
+/// (`u64::MAX` for no trim or an error); with `grid`, each coordinate on the grid of
+/// [`feed_on_grid`] scaled by `max(1, |c|)`.
+fn digest_uv(d: &mut Digest, k: &Kernel, b: &Brep, eu: solidcore::topology::EdgeuseId, grid: bool) {
+    let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.clone() else {
+        d.u64(u64::MAX);
+        return;
+    };
+    let ivl = trim.natural_interval();
+    d.f64(ivl.min());
+    d.f64(ivl.max());
+    for i in 0..=16 {
+        match trim.evaluate_point(k, ivl.evaluate(f64::from(i) / 16.0)) {
+            Ok(p) => [p.x, p.y]
+                .into_iter()
+                .for_each(|c| feed_on_grid(d, c, grid.then(|| c.abs().max(1.0)))),
+            Err(_) => d.u64(u64::MAX),
+        }
+    }
+}
+
+/// Feeds every face's surface net, its control points' `x, y, z` on the grid of
+/// [`feed_on_grid`] scaled by the point's magnitude `|P|`, and `w` on the grid scaled by
+/// `1`. A face whose surface has no net feeds `u64::MAX`.
+fn digest_nets(d: &mut Digest, b: &Brep) {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    for (_, f) in b.faces().iter() {
+        let net = f.surface.as_ref().and_then(|s| match s.kind() {
+            SurfaceKind::BSpline(x) => x.gw_nurb(),
+            SurfaceKind::Plane(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfRevolution(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfExtrusion(x) => x.base().gw_nurb(),
+            SurfaceKind::Cone(x) => x.rev().base().gw_nurb(),
+            SurfaceKind::Sphere(x) => x.base().base().gw_nurb(),
+            SurfaceKind::Torus(x) => x.base().base().gw_nurb(),
+            _ => None,
+        });
+        let Some(n) = net else {
+            d.u64(u64::MAX);
+            continue;
+        };
+        for row in n.cpts() {
+            for c in row {
+                let size = (c.x * c.x + c.y * c.y + c.z * c.z).sqrt();
+                for v in [c.x, c.y, c.z] {
+                    feed_on_grid(d, v, Some(size));
+                }
+                feed_on_grid(d, c.w, Some(1.0));
+            }
+        }
+    }
+}
+
+/// A corpus read's digest without the points its surfaces evaluate: the face
+/// tolerances; each edge's tolerance, interval and 17 curve points; each vertex's tolerance
+/// and point; each edge use's UV trim ([`digest_uv`], on its grid for `rebuild`), as read
+/// and again after the lazy trims are made; and the surface nets on their grid
+/// ([`digest_nets`]). Each vertex in `main_tolerances` (index, tolerance) is digested with
+/// that tolerance instead of its own.
+fn read_without_surface_points(name: &str, rebuild: bool, main_tolerances: &[(u32, f64)]) -> u64 {
+    use solidcore::topology::edgeuse::p3 as eu3;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, rebuild);
+    let mut d = Digest::new();
+    for (_, f) in b.faces().iter() {
+        d.f64(f.tolerance);
+    }
+    let edges: Vec<_> = b.edges().iter().map(|(id, _)| id).collect();
+    for &e in &edges {
+        d.f64(b.edge(e).unwrap().tolerance);
+        digest_curve(&mut d, &k, &b, e);
+    }
+    for (id, v) in b.vertices().iter() {
+        let tolerance = main_tolerances
+            .iter()
+            .find(|&&(i, _)| i == id.index())
+            .map_or(v.tolerance, |&(_, t)| t);
+        d.f64(tolerance);
+        for c in [v.point.x, v.point.y, v.point.z] {
+            d.f64(c);
+        }
+    }
+    let eus: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
+    for &eu in &eus {
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    for &eu in &eus {
+        if b.edgeuse(eu).unwrap().edge.is_none() {
+            continue;
+        }
+        let made = eu3::get_or_create_uv_trim_curve(&k, &mut b, eu, false, false, true)
+            .map(|r| r.status.is_ok());
+        d.u64(u64::from(matches!(made, Ok(true))));
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    digest_nets(&mut d, &b);
+    d.0
+}
+
+/// Vertex `index` of `name`'s read, which #17739 raises: asserts that its tolerance is
+/// `zone_tol3d(gain * 2 * gap)` for its largest gap and over its largest edge tolerance,
+/// and returns that edge tolerance, the value #18230's vertex step gives it on main.
+fn floored_vertex_main_tolerance(name: &str, rebuild: bool, index: u32) -> f64 {
+    use solidcore::geom::tol::{gap_gain, zone_tol3d};
+    use solidcore::topology::vertex;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, rebuild);
+    let v = b
+        .vertices()
+        .iter()
+        .map(|(id, _)| id)
+        .find(|v| v.index() == index)
+        .unwrap();
+    let tol = b.vertex(v).unwrap().tolerance;
+    let largest = vertex::edges(&b, v, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| b.edge(e).unwrap().tolerance)
+        .fold(0.0f64, f64::max);
+    let cover = zone_tol3d(&k, gap_gain(&k) * 2.0 * vertex_gap(&k, &mut b, v));
+    assert!(
+        largest < cover && tol.to_bits() == cover.to_bits(),
+        "{name} v{index}: tolerance {tol:e}, largest edge {largest:e}, cover {cover:e}"
+    );
+    largest
+}
+
+/// #17896 moves `Fillet/bottle.smb`'s digests in [`MAIN`] only through face 15's net:
+/// every face, edge and vertex tolerance, edge curve, vertex and UV trim of the read is main
+/// f760fd440's bit for bit. The net and the rebuilding read's trims agree with main's on
+/// the grid of [`feed_on_grid`]: the rebuilt trims differ in one coordinate by 8e-31, and
+/// 105 control points of face 15 differ by at most 1.86e-17 of their magnitude (MEASURED,
+/// a dump of both nets). #17739 raises the read's vertex 22 to cover twice its gap (the
+/// rebuilding read keeps it, [`corpus_reads_change_only_the_covered_tolerances`]); the
+/// digest checks that raise and takes main's value there.
+#[test]
+fn bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding() {
+    let v22 = floored_vertex_main_tolerance("Fillet/bottle.smb", false, 22);
+    for (rebuild, main, main_tolerances) in [
+        (false, 0xa600_8eab_0d09_6dd5, &[(22, v22)][..]),
+        (true, 0x57fd_ee59_a641_5de8, &[][..]),
+    ] {
+        let got = read_without_surface_points("Fillet/bottle.smb", rebuild, main_tolerances);
+        assert_eq!(got, main, "bottle read (rebuild {rebuild}) is not main's");
+    }
 }

@@ -1,5 +1,4 @@
-//! The solidcore backend: one kernel for the process (SMLib's context is process-global too, and
-//! some of its state, such as the fillet solver's latched step, lives for the whole process),
+//! The solidcore backend: one kernel for the process (SMLib's context is process-global too),
 //! every call under its lock and a panic guard.
 //!
 //! Upstream fixes ([`fixes`]) are solidcore's opt-in corrections of SMLib defects that the C++
@@ -10,7 +9,7 @@ use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -54,7 +53,9 @@ pub(crate) mod trim;
 #[cfg(test)]
 mod trim_tests;
 
-pub(crate) use convert::{from_arrays, to_arrays};
+#[cfg(test)]
+pub(crate) use convert::from_arrays;
+pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
     area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
     mass_properties, solid_count,
@@ -67,48 +68,13 @@ pub(crate) use measure::{
 pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
-/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
-/// unless it appears broken (`HELD_BACK`). A flag new to the solidcore pin is on without an edit
-/// here, and a retired flag drops out of `UpstreamFixes::all` on its own.
+/// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it.
+/// A flag new to the solidcore pin is on without an edit here, and a retired flag drops out of
+/// `UpstreamFixes::all` on its own. A fix that is broken is fixed or removed in solidcore, never
+/// held off here.
 pub(crate) fn fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::all();
-    for name in HELD_BACK {
-        // A test keeps every name here a flag that exists.
-        if let Some(on) = f.flag_mut(name) {
-            *on = false;
-        }
-    }
-    f
+    UpstreamFixes::all()
 }
-
-/// The fixes held off, each with the case and the numbers that show it broken: a volume or topology
-/// wrong against the analytic value, a check failure, a crash, sound geometry refused that builds
-/// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
-/// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
-/// against its closed form is a win.
-///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
-/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
-/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
-/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
-/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
-/// off).
-///
-/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
-/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
-/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
-/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
-/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
-/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
-/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
-/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
-/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
-/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
-/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
-///
-/// solidcore's tests, its kernel rig and its diagnostics read this list from
-/// `kernel_cases/held_back.json`; a test keeps the file equal to it.
-pub(crate) const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
@@ -186,15 +152,14 @@ fn put_kernel(k: Option<Kernel>) {
 }
 
 /// What a call must not find from the calls before it: the same operation on the same bodies
-/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
-/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. The certificates it finished, kept by the exact content of their inputs
+/// answers the same on any kernel, however much that kernel did first. (The stations it
+/// remembers; marks, identities and what is only kept to reuse memory change no answer, and a
+/// kernel holds no position in a random sequence: each sampling call draws from the start of the
+/// seed's. The certificates it finished, kept by the exact content of their inputs
 /// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
 /// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
-    k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
-    k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
 }
 
@@ -269,10 +234,15 @@ fn call_on<T: dump::Answer>(
     let depth = Depth;
     let caught = catch_unwind(AssertUnwindSafe(|| f(&mut k)));
     drop(depth);
+    let mut code = None;
     let r = match caught {
         Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(Error::Solidcore(format!("{call}: {e}"))),
+        Ok(Err(e)) => {
+            code = Some(crate::failure::FailureCode::of_kernel(call, &e));
+            Err(Error::Solidcore(format!("{call}: {e}")))
+        }
         Err(p) => {
+            code = Some(crate::failure::FailureCode { call, kind: crate::failure::FailureCode::OPS, operation: "Internal" });
             k = fresh();
             let why = p.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
             log::warn!(target: "smlib", "solidcore panicked in {call}: {why}");
@@ -289,6 +259,9 @@ fn call_on<T: dump::Answer>(
             Err(Error::Internal(e)) => Err(Error::Internal(e)),
             _ => Err(Error::Cancelled(call)),
         };
+    }
+    if let (Some(code), Err(e)) = (code, &r) {
+        crate::failure::failed(code, e);
     }
     let why = match &r {
         Ok(v) => v.refusal(),
@@ -429,27 +402,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_upstream_fix_is_on_unless_shown_broken() {
-        let f = fixes();
-        let flags: Vec<(&str, bool)> = f.flags().collect();
-        let off: Vec<&str> = flags.iter().filter(|(name, on)| !on && !HELD_BACK.contains(name)).map(|(name, _)| *name).collect();
+    fn every_upstream_fix_is_on() {
+        let off: Vec<&str> = fixes().flags().filter(|(_, on)| !on).map(|(name, _)| name).collect();
         assert!(off.is_empty(), "UpstreamFixes flags are off: {off:?}");
-        for name in HELD_BACK {
-            assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
-        }
-    }
-
-    /// solidcore's tests, kernel rig and diagnostics build this preset as every flag on but those
-    /// `kernel_cases/held_back.json` names: the file names exactly `HELD_BACK`.
-    #[test]
-    fn the_kernel_corpus_held_back_list_is_this_one() {
-        let listed: Vec<String> =
-            serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/held_back.json")).unwrap();
-        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
-        listed.sort_unstable();
-        let mut held = HELD_BACK.to_vec();
-        held.sort_unstable();
-        assert_eq!(listed, held, "kernel_cases/held_back.json must list exactly HELD_BACK");
     }
 
     #[test]

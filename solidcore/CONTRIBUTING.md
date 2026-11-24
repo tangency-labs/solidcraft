@@ -56,11 +56,13 @@ case, replacing the code they supersede. This page is the short version;
   it; no old path is kept behind a flag, and a saved design rebuilds with today's correct result.
   Say in the PR which results change and show the evidence. Retiring the `UpstreamFixes` flags
   left from the port (turn on, delete the old path and the flag's file
-  `crates/solidcore/src/kernel/fixes/<flag>.md`) is welcome work. A held-back flag is also
-  deleted from `HELD_BACK` in SolidCraft's `crates/smlib/src/core.rs` and from
-  `crates/solidcore/tests/kernel_cases/held_back.json`.
+  `crates/solidcore/src/kernel/fixes/<flag>.md`) is welcome work. SolidCraft runs every flag on,
+  so a broken fix is fixed or removed in solidcore, never held off.
 - **Don't extend the old paths.** Improve the construction that replaces them.
-- **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
+- **Bring your branch up to date** with the latest `main` by merging `main` in or by rebasing;
+  both are fine. Merging costs less: when the PR already passed and the merge leaves your change
+  as it was, CI carries the passing run; a rebase re-runs the full suite and needs
+  `--force-with-lease`. Never force-push `main` or a branch someone else works on.
 
 ## Goldens
 

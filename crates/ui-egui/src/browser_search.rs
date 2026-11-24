@@ -269,8 +269,11 @@ fn kind_label(kind: Kind) -> &'static str {
 }
 
 /// "1 body", "12 bodies": the Browser's header status (#1634), the bodies the design shows in the world.
-pub(crate) fn body_count(session: &Session) -> String {
-    let count = session.world_state().map_or(0, |world| world.bodies.len());
+/// Asked at every frame: from the world a joint drag began on while one is drawn by moving its
+/// bodies (`open_meshing::still_world`), which has them all; asking the session would place the
+/// drag's frame, every moved body again.
+pub(crate) fn body_count(app: &SolveApp) -> String {
+    let count = crate::open_meshing::still_world(app).bodies.len();
     solidcraft_ui_text::format(if count == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" }, &[("count", &count.to_string())])
 }
 

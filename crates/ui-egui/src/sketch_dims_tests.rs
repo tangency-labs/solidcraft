@@ -660,6 +660,63 @@ fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
     }
 }
 
+/// #19669: crossing a window border must not reflect an edge's dimension through the
+/// pointer to a distant part of the view. The field stays beside the edge it measures.
+#[test]
+fn rectangle_boxes_stay_near_their_edges_at_window_borders() {
+    for command in ["sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.rounded"] {
+        for (a, b, dimension) in
+            [(egui::pos2(400.0, 230.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
+        {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            let first = if command == "sketch.rectangle.center" { a + (b - a) * 0.5 } else { a };
+            h.step(&json!({"click":[first.x, first.y]})).unwrap();
+            h.step(&json!({"move":[b.x, b.y]})).unwrap();
+            h.frames(3);
+            let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", dimension)))).expect("dimension is visible");
+            let edge = if dimension == 0 { egui::pos2((a.x + b.x) * 0.5, a.y) } else { egui::pos2(b.x, (a.y + b.y) * 0.5) };
+            // A border may move the box inward by its own size, but not along the edge
+            // by half the rectangle's width or height as a pointer reflection does.
+            assert!(field.distance_to_pos(edge) <= 40.0, "{command}: {field:?} is far from its edge midpoint {edge:?}");
+            assert!(in_open_view(&h, field), "{command}: {field:?} leaves the open view");
+            assert!(!field.expand(2.0).contains(b), "{command}: {field:?} covers the next corner {b:?}");
+        }
+    }
+}
+
+#[test]
+fn small_rounded_rectangle_boxes_at_borders_fit_without_overlap() {
+    for [width, height] in [[1280, 720], [800, 600]] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.rectangle.rounded"})).unwrap();
+        // Keep the corners left of the axes navigator in the narrow window.
+        for point in [egui::pos2(300.0, 230.0), egui::pos2(380.0, 270.0)] {
+            assert!(in_open_view(&h, egui::Rect::from_center_size(point, egui::vec2(1.0, 1.0))), "{width}x{height}: {point:?} is drawable");
+        }
+        h.step(&json!({"click":[300,230]})).unwrap();
+        h.step(&json!({"move":[380,270]})).unwrap();
+        h.frames(3);
+        let fields: Vec<_> =
+            (0..3usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("dimension is visible")).collect();
+        for (i, field) in fields.iter().enumerate() {
+            assert!(in_open_view(&h, *field), "{width}x{height}: {field:?} leaves the open view");
+            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 270.0)), "{width}x{height}: {field:?} covers the next corner");
+            assert!(fields[..i].iter().all(|previous| !previous.intersects(*field)), "{width}x{height}: fields overlap: {fields:?}");
+        }
+        // The preview's final click must still reach the sketch.
+        h.step(&json!({"click":[380,270]})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert_eq!(sketch.profiles.len(), 1, "{width}x{height}: the click finishes the rectangle");
+    }
+}
+
 /// Whether `rect` is in the open view: the layout's free region, clear of the panels and the view's
 /// controls, or the drawing area without one (#17992).
 fn in_open_view(h: &Harness, rect: egui::Rect) -> bool {
@@ -1177,4 +1234,72 @@ fn a_lines_length_and_angle_boxes_do_not_overlap_in_an_isometric_view() {
             assert!(!boxes[0].intersects(boxes[1]), "line of {length} at {deg} deg: the boxes overlap {boxes:?}");
         }
     }
+}
+
+/// The rectangle's corner coordinates (sorted) after the tool finished.
+fn drawn_corners(h: &Harness, anchor: (i64, i64)) -> Vec<(i64, i64)> {
+    let state = h.app.session.world_state().unwrap();
+    let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sketch.profiles.len(), 1);
+    assert_eq!(sketch.sketch.curves.iter().filter(|curve| !curve.construction).count(), 4);
+    let mut corners: Vec<_> = sketch.sketch.points.iter().map(|p| (p.pos.x.round() as i64, p.pos.y.round() as i64)).collect();
+    corners.sort_unstable();
+    corners.dedup();
+    // The anchor stays as the midpoint of the first edge, and the sketch has its origin.
+    corners.retain(|c| *c != anchor && *c != (0, 0));
+    corners
+}
+
+#[test]
+fn edge_center_rectangle_takes_its_direction_from_the_second_click_and_previews_at_every_stage() {
+    // (middle, edge end, corner clicked for the width, expected corners)
+    let cases: [([i32; 2], [i32; 2], [i32; 2], [(i64, i64); 4]); 3] = [
+        // The edge runs along y from -4 to 4; the width goes right.
+        ([0, 0], [0, -4], [6, 1], [(0, -4), (0, 4), (6, -4), (6, 4)]),
+        // Same edge, the width goes left.
+        ([0, 0], [0, 4], [-6, 1], [(-6, -4), (-6, 4), (0, -4), (0, 4)]),
+        // A horizontal edge centred off the origin, the width going down.
+        ([5, 2], [8, 2], [5, -3], [(2, -3), (2, 2), (8, -3), (8, 2)]),
+    ];
+    for (mid, end, corner, expected) in cases {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.cam.distance = 50.0;
+        h.step(&json!({"start": "sketch.rectangle.edge_center"})).unwrap();
+        h.step(&json!({"click": {"world": [mid[0], mid[1], 0]}})).unwrap();
+        // Right after the first click there are boxes and the edge follows the cursor.
+        h.step(&json!({"move": {"world": [end[0], end[1], 0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Length"]);
+        h.step(&json!({"click": {"world": [end[0], end[1], 0]}})).unwrap();
+        // Right after the second click the rectangle follows the cursor and asks for the width.
+        h.step(&json!({"move": {"world": [corner[0], corner[1], 0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2);
+        assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Width"]);
+        h.step(&json!({"click": {"world": [corner[0], corner[1], 0]}})).unwrap();
+        assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+        let mut expected = expected.to_vec();
+        expected.sort_unstable();
+        assert_eq!(drawn_corners(&h, (i64::from(mid[0]), i64::from(mid[1]))), expected);
+    }
+}
+
+#[test]
+fn edge_center_rectangle_typed_length_and_width_become_dimensions() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.step(&json!({"start": "sketch.rectangle.edge_center"})).unwrap();
+    h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+    h.step(&json!({"move": {"world": [0, -3, 0]}})).unwrap();
+    type_value(&mut h, "10");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2);
+    h.step(&json!({"move": {"world": [7, 1, 0]}})).unwrap();
+    type_value(&mut h, "6");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    // A 10 long edge centred on the origin (running down the y axis), 6 wide, to the right.
+    assert_eq!(drawn_corners(&h, (0, 0)), [(0, -5), (0, 5), (6, -5), (6, 5)]);
+    let state = h.app.session.world_state().unwrap();
+    let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sketch.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 2);
 }

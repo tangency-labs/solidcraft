@@ -815,13 +815,11 @@ fn a_reopened_round_measurably_off_its_net_is_the_operand_on_s() {
     assert!((v0 - v1).abs() <= 1e-12 * v0, "volumes {v0} and {v1}");
 }
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut fixes = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *fixes.flag_mut(name).unwrap() = true;
-        }
+        *fixes.flag_mut(name).unwrap() = true;
     }
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;
