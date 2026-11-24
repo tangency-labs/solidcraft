@@ -430,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
     fn a_box_with_rounded_corners_is_drawn_with_its_ball_corners_as_spheres() {
         use crate::blend::{blend, Blend, Corners};
         use solidcore_record::Vec2;
