@@ -2751,11 +2751,12 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
-            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
-            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
-            // rejected, status 1001
-            let refused = !case.name.ends_with("_selected")
-                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            // #15350: a box too small for its tolerance (1e-6 at the origin) is refused by
+            // `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor rejected,
+            // status 1001. #18634: the 1e-3 box at (1e6, 1e6, 1e6) now builds and answers as
+            // at the origin (see `far_review_boxes_answer_as_at_the_origin`), so the
+            // `_translated_` null rows take the null-selection branch below (status 1007).
+            let refused = !case.name.ends_with("_selected") && case.name.contains("_tiny_");
             if refused {
                 assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
                 assert_eq!(rust.ints["status"], [1001], "{}", case.name);
