@@ -233,3 +233,37 @@ fn flip_is_disabled_with_the_reason_only_where_neither_side_faces_a_way() {
         assert_eq!(flip_why(&h), None, "a {snap} To");
     }
 }
+
+/// Whether the dialog's Flip is drawn ticked.
+fn flip_shown_on(h: &Harness) -> bool {
+    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+    let flip = tree.nodes.iter().find(|(_, n)| n.label() == Some("Flip")).expect("a Flip option");
+    flip.1.toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+/// A remembered Flip never blocks two points: there it is shown off and sent off, so the command
+/// applies; the remembered value comes back once a side faces a way again.
+#[test]
+fn a_remembered_flip_is_sent_off_where_neither_side_faces_a_way_and_comes_back() {
+    let mut h = plate_and_peg();
+    h.app.preferences.remember_dialog_values = true;
+    set_flip(&mut h, true);
+    let applied = h.app.dialog.take().unwrap();
+    crate::dialogs::remember(&mut h.app, &applied);
+    h.app.start("solid.align");
+    h.frames(2);
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Align { flip: true, .. }), "Flip is remembered");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![Sel::Vertex { body: "Peg".into(), point: Vec3::new(104.0, 20.0, 0.0) }];
+    d.inputs[2].items = vec![Sel::Vertex { body: "Plate".into(), point: Vec3::new(0.0, 0.0, 10.0) }];
+    h.frames(2);
+    assert!(flip_disabled(&h) && !flip_shown_on(&h), "two points: Flip shown off and disabled");
+    let (p, [min, _]) = apply_and_bound(&mut h, "Peg");
+    assert_eq!(p["flip"], json!(false), "{p}");
+    assert!((min.x + 8.0).abs() < 0.05 && (min.z - 10.0).abs() < 1e-6, "the rim point moved onto the corner: {min:?}");
+    pick_face(&mut h, 2, Vec3::new(5.0, 5.0, 10.0));
+    h.frames(2);
+    assert!(!flip_disabled(&h) && flip_shown_on(&h), "a face To: the remembered Flip is back");
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(p["flip"], json!(true), "{p}");
+}

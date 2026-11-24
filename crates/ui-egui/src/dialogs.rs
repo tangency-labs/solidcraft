@@ -5806,7 +5806,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
 }
 
 /// Keep the options and values of an applied dialog for the next one of the same command.
-fn remember(app: &mut SolveApp, dialog: &Dialog) {
+pub(crate) fn remember(app: &mut SolveApp, dialog: &Dialog) {
     if !app.preferences.remember_dialog_values {
         return;
     }
