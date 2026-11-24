@@ -58,7 +58,10 @@ impl Options {
             None | Some(Value::Null) => {}
             Some(Value::Array(ranges)) if ranges.len() <= MAX_RANGES => {
                 for r in ranges {
-                    let pair = r.as_array().map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
+                    let pair = r
+                        .as_array()
+                        .filter(|a| a.len() == 2)
+                        .map(|a| (a.first().and_then(Value::as_f64), a.get(1).and_then(Value::as_f64)));
                     match pair {
                         Some((Some(lo), Some(hi))) if lo.is_finite() && hi.is_finite() && lo <= hi => diameters.push((lo, hi)),
                         _ => return Err(bad(cmd, "`diameters` must be [[min, max], …] in mm, min ≤ max")),
@@ -113,7 +116,6 @@ fn hole_stacks(s: &mut Session, p: &Value) -> Result<Value> {
     // Millimetres to a nanometre (and no negative zero): readable output, far finer than any fit.
     let round = |x: f64| (x * 1e6).round() / 1e6 + 0.0;
     let round3 = |v: solidcore_record::Vec3| [round(v.x), round(v.y), round(v.z)];
-    let round3_v = |v: [f64; 3]| [round(v[0]), round(v[1]), round(v[2])];
     let slot = |s: solidcore_ops::hole_stacks::Slot| SlotOut { length_mm: round(s.length), along: round3(s.along) };
     let stacks = out
         .stacks
@@ -121,7 +123,7 @@ fn hole_stacks(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|st| StackOut {
             axis: round3(st.axis),
             start: round3(st.start),
-            end: [round(st.start.x + st.axis.x * st.grip), round(st.start.y + st.axis.y * st.grip), round(st.start.z + st.axis.z * st.grip)],
+            end: round3(st.end),
             grip_mm: round(st.grip),
             layers: st
                 .layers
@@ -133,28 +135,13 @@ fn hole_stacks(s: &mut Session, p: &Value) -> Result<Value> {
     let lone = out
         .lone
         .iter()
-        .map(|h| {
-            // The stack's way round: the largest component negative (−z for a vertical hole),
-            // so a hole reports from its top.
-            let big = if h.axis.x.abs() >= h.axis.y.abs() && h.axis.x.abs() >= h.axis.z.abs() {
-                h.axis.x
-            } else if h.axis.y.abs() >= h.axis.z.abs() {
-                h.axis.y
-            } else {
-                h.axis.z
-            };
-            let flip = big > 0.0;
-            let axis = [if flip { -h.axis.x } else { h.axis.x }, if flip { -h.axis.y } else { h.axis.y }, if flip { -h.axis.z } else { h.axis.z }];
-            let end = if flip { h.t[1] } else { h.t[0] };
-            let at = [h.point.x + h.axis.x * end, h.point.y + h.axis.y * end, h.point.z + h.axis.z * end];
-            LoneHole {
-                body: name(h.body).to_owned(),
-                d_mm: round(h.d),
-                at: [round(at[0]), round(at[1]), round(at[2])],
-                axis: round3_v(axis),
-                depth_mm: round(h.t[1] - h.t[0]),
-                slot: h.slot.map(slot),
-            }
+        .map(|h| LoneHole {
+            body: name(h.body).to_owned(),
+            d_mm: round(h.d),
+            at: round3(h.at),
+            axis: round3(h.axis),
+            depth_mm: round(h.depth),
+            slot: h.slot.map(slot),
         })
         .collect();
     serde_json::to_value(HoleStacks { stacks, lone }).map_err(|e| bad(cmd, e.to_string()))

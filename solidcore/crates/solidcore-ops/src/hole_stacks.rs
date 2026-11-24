@@ -61,6 +61,8 @@ pub struct Stack {
     pub start: Vec3,
     /// The clamped thickness, in mm.
     pub grip: f64,
+    /// The point on the axis the last layer ends at.
+    pub end: Vec3,
     /// The stack's layers, from its start along `axis`.
     pub layers: Vec<Layer>,
 }
@@ -70,14 +72,14 @@ pub struct Stack {
 pub struct Lone {
     /// The body, by its index into the records [`hole_stacks`] took.
     pub body: usize,
-    /// A point on the bore's axis (a slot's, halfway between its ends).
-    pub point: Vec3,
-    /// The unit axis, either way round.
+    /// The bore's entry point.
+    pub at: Vec3,
+    /// Unit axis, from the entry point into the bore.
     pub axis: Vec3,
     /// The bore's diameter, in mm.
     pub d: f64,
-    /// The wall's extent along `axis`, in mm.
-    pub t: [f64; 2],
+    /// The wall's extent, in mm.
+    pub depth: f64,
     /// The slot's shape.
     pub slot: Option<Slot>,
 }
@@ -106,7 +108,7 @@ pub fn hole_stacks(records: &[&Brep], o: &Options) -> crate::Result<Stacks> {
     let mut count = 0usize;
     for r in records {
         let mut bores = Vec::new();
-        for b in k::bores(&kernel_record(r)) {
+        for b in k::bores(&kernel_record(r)).map_err(crate::error::status)? {
             if !o.slots && b.slot.is_some() {
                 continue;
             }
@@ -138,16 +140,13 @@ pub fn hole_stacks(records: &[&Brep], o: &Options) -> crate::Result<Stacks> {
     let lone = out
         .lone
         .iter()
-        .filter_map(|&(body, bore)| {
-            let b = bodies.get(body)?.get(bore)?;
-            Some(Lone {
-                body,
-                point: record_vec3(b.point),
-                axis: record_vec3(b.axis),
-                d: b.d,
-                t: b.t,
-                slot: b.slot.map(slot),
-            })
+        .map(|h| Lone {
+            body: h.body,
+            at: record_vec3(h.at),
+            axis: record_vec3(h.axis),
+            d: h.d,
+            depth: h.depth,
+            slot: h.slot.map(slot),
         })
         .collect();
     Ok(Stacks {
@@ -162,6 +161,7 @@ fn one_stack(s: &k::Stack, bodies: &[Vec<k::Bore>]) -> Stack {
         axis: record_vec3(s.axis),
         start: record_vec3(s.start),
         grip: s.grip,
+        end: record_vec3(s.end),
         layers: s
             .layers
             .iter()

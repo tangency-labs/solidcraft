@@ -115,6 +115,8 @@ pub struct Stack {
     pub start: Vec3,
     /// The clamped thickness.
     pub grip: f64,
+    /// The point on the axis the last layer ends at.
+    pub end: Vec3,
     /// The stack's layers, from its start along `axis`.
     pub layers: Vec<Layer>,
 }
@@ -124,8 +126,26 @@ pub struct Stack {
 pub struct Stacks {
     /// The stacks, ordered by their start points.
     pub stacks: Vec<Stack>,
-    /// The bores in no stack, as `(body, bore)` indices.
-    pub lone: Vec<(usize, usize)>,
+    /// The bores in no stack, oriented the stack's way round.
+    pub lone: Vec<Lone>,
+}
+
+/// A bore in no stack, oriented the stack's way round: the largest component of `axis`
+/// negative, `at` its entry point and `depth` its wall's extent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lone {
+    /// The body, by its index into `bodies`.
+    pub body: usize,
+    /// The bore's entry point.
+    pub at: Vec3,
+    /// Unit axis, from the entry point into the bore.
+    pub axis: Vec3,
+    /// The bore's diameter, in mm.
+    pub d: f64,
+    /// The wall's extent, in mm.
+    pub depth: f64,
+    /// The slot's shape.
+    pub slot: Option<Slot>,
 }
 
 /// One cylindrical wall of one face: a full turn (a round hole) or a partial one.
@@ -179,11 +199,18 @@ fn material_outside(forward: Option<bool>) -> bool {
 /// The bores of one record: every round hole, and every obround slot, with its wall's extent.
 /// A countersink or chamfer at a hole's end counts towards its extent. Walls that close only
 /// part of the way round and are not a slot's end are left out: a fastener cannot follow them.
-/// A body with more than [`MAX_FACES`] faces answers none.
-#[must_use]
-pub fn bores(record: &Record) -> Vec<Bore> {
+/// A body with more than [`MAX_FACES`] faces is refused: scanning it would cost more than
+/// the answer is worth, and answering no bores would read as a body without holes.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] with `operation` [`OP`] when the record holds more than
+/// [`MAX_FACES`] faces.
+pub fn bores(record: &Record) -> Result<Vec<Bore>, SolidError> {
     if record.faces.len() > MAX_FACES {
-        return Vec::new();
+        return Err(SolidError::InvalidInput {
+            operation: OP,
+            reason: "a body of more than 20000 faces",
+        });
     }
     let edges: Vec<Option<([Vec3; 2], Vec3)>> = record
         .edges
@@ -297,7 +324,7 @@ pub fn bores(record: &Record) -> Vec<Bore> {
             slot: None,
         });
     }
-    out
+    Ok(out)
 }
 
 /// The wall of one cylinder face: `None` when it does not close round the axis and is not a
@@ -508,12 +535,17 @@ fn through_cones(walls: &mut [Wall], cones: &[Cone]) {
                 c.radius_at_origin + s * c.half_angle.tan()
             };
             let rim = NEAR.max(w.radius * 2e-3);
+            // A countersink or chamfer opens out: the cone's far end is no narrower than its
+            // rim at the wall. A cone that narrows away (a drill point) is the bore's own
+            // closed end, not an opening.
             if (radius_at(w.t[0]) - w.radius).abs() <= rim
+                && radius_at(lo) >= radius_at(w.t[0]) - rim
                 && (hi - w.t[0]).abs() <= COAXIAL
                 && lo < w.t[0]
             {
                 w.t[0] = lo;
             } else if (radius_at(w.t[1]) - w.radius).abs() <= rim
+                && radius_at(hi) >= radius_at(w.t[1]) - rim
                 && (lo - w.t[1]).abs() <= COAXIAL
                 && hi > w.t[1]
             {
@@ -561,11 +593,20 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
         }
     }
     for (here, members) in &cells {
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                for dz in -1..=1 {
-                    let Some(others) = cells.get(&[here[0] + dx, here[1] + dy, here[2] + dz])
-                    else {
+        for dx in -1i64..=1 {
+            for dy in -1i64..=1 {
+                for dz in -1i64..=1 {
+                    // A bore far enough out to saturate its bucket has no representable
+                    // neighbour past the edge: checked adds skip that cell instead of
+                    // overflowing.
+                    let (Some(nx), Some(ny), Some(nz)) = (
+                        here[0].checked_add(dx),
+                        here[1].checked_add(dy),
+                        here[2].checked_add(dz),
+                    ) else {
+                        continue;
+                    };
+                    let Some(others) = cells.get(&[nx, ny, nz]) else {
                         continue;
                     };
                     for &i in members {
@@ -580,9 +621,7 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
                             let (Some(a), Some(b)) = (bore(i), bore(j)) else {
                                 continue;
                             };
-                            if parallel(a.axis, b.axis)
-                                && offset(a.point, a.axis, b) <= o.axis_tolerance
-                            {
+                            if parallel(a.axis, b.axis) && apart(a, b) <= o.axis_tolerance {
                                 join(&mut parent, i, j);
                             }
                         }
@@ -645,20 +684,47 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
             continue;
         };
         let Some(sa) = first.slot else { continue };
-        let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
-        for h in members.iter().filter_map(|&i| bore(i)) {
-            let Some(s) = h.slot else { continue };
-            let c = (h.point - first.point).dot(sa.along);
-            let half = ((s.length - h.d) / 2.0).max(0.0);
+        // A chain of slots can run past the end of where it began (slots centred at 0, 5,
+        // 10 and 15 mm): every pair meets its neighbour, but no one axis runs through all.
+        // Cut the chain into runs that share a centre interval, earliest first, and run
+        // each run's axis through the middle of what it shares.
+        let mut spans: Vec<(f64, f64, usize)> = members
+            .iter()
+            .filter_map(|&i| bore(i).map(|h| (i, h)))
+            .filter_map(|(i, h)| {
+                let s = h.slot?;
+                let c = (h.point - first.point).dot(sa.along);
+                let half = ((s.length - h.d) / 2.0).max(0.0);
+                Some((c, half, i))
+            })
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.2.cmp(&b.2)));
+        let mut run: Vec<usize> = Vec::new();
+        let mut lo = f64::NEG_INFINITY;
+        let mut hi = f64::INFINITY;
+        for (c, half, i) in spans {
+            if lo.max(c - half) > hi.min(c + half) && !run.is_empty() {
+                let mid = lo / 2.0 + hi / 2.0;
+                lines.push(Line {
+                    point: first.point + sa.along * mid,
+                    axis: canonical(first.axis),
+                    members: std::mem::take(&mut run),
+                });
+                lo = f64::NEG_INFINITY;
+                hi = f64::INFINITY;
+            }
+            run.push(i);
             lo = lo.max(c - half);
             hi = hi.min(c + half);
         }
-        let mid = if lo <= hi { lo / 2.0 + hi / 2.0 } else { 0.0 };
-        lines.push(Line {
-            point: first.point + sa.along * mid,
-            axis: canonical(first.axis),
-            members,
-        });
+        if !run.is_empty() {
+            let mid = lo / 2.0 + hi / 2.0;
+            lines.push(Line {
+                point: first.point + sa.along * mid,
+                axis: canonical(first.axis),
+                members: run,
+            });
+        }
     }
     // Along each line, runs of extents that sit within `touching`, one layer per body.
     let mut in_stack = vec![false; refs.len()];
@@ -745,6 +811,7 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
                 axis: line.axis,
                 start: line.point + line.axis * t_start,
                 grip: t_end - t_start,
+                end: line.point + line.axis * t_end,
                 layers,
             });
         }
@@ -758,7 +825,26 @@ pub fn stacks(bodies: &[&[Bore]], o: &Options) -> Result<Stacks> {
     });
     let lone = (0..refs.len())
         .filter(|i| !in_stack.get(*i).copied().unwrap_or(true))
-        .filter_map(|i| refs.get(i).copied())
+        .filter_map(|i| {
+            let (body, bore) = refs.get(i).copied()?;
+            let h = bodies.get(body)?.get(bore)?;
+            // The stack's way round: the largest component negative, so a lone hole
+            // reports from its top, and its entry point and depth come with it.
+            let axis = canonical(h.axis);
+            let t = if axis.dot(h.axis) >= 0.0 {
+                h.t
+            } else {
+                [-h.t[1], -h.t[0]]
+            };
+            Some(Lone {
+                body,
+                at: h.point + axis * t[0],
+                axis,
+                d: h.d,
+                depth: t[1] - t[0],
+                slot: h.slot,
+            })
+        })
         .collect();
     Ok(Stacks { stacks: out, lone })
 }
@@ -840,11 +926,28 @@ fn offset(p: Vec3, axis: Vec3, h: &Bore) -> f64 {
 /// points the other way.
 fn extent(h: &Bore, p: Vec3, axis: Vec3) -> (f64, f64) {
     let base = (h.point - p).dot(axis);
-    if h.axis.dot(axis) >= 0.0 {
-        (base + h.t[0], base + h.t[1])
+    let d = h.axis.dot(axis);
+    // A bore's ends land on the line at its own axial step times how much of its axis
+    // points along the line's, either way round.
+    let (t0, t1) = (h.t[0] * d.abs(), h.t[1] * d.abs());
+    if d >= 0.0 {
+        (base + t0, base + t1)
     } else {
-        (base - h.t[1], base - h.t[0])
+        (base - t1, base - t0)
     }
+}
+
+/// How far apart two round bores' lines sit over the stretch the bores themselves reach:
+/// the perpendicular distance from `a`'s line to `b`'s, at each bore's two ends. Skewed
+/// lines drift apart along the axis, so one measurement at a frame origin can read tight
+/// while the bores sit apart; exactly parallel lines measure the same at every end.
+fn apart(a: &Bore, b: &Bore) -> f64 {
+    let (b0, b1) = extent(b, a.point, a.axis);
+    let at = |s: f64| {
+        let w = a.point + a.axis * s - b.point;
+        (w - b.axis * w.dot(b.axis)).len()
+    };
+    at(a.t[0]).max(at(a.t[1])).max(at(b0)).max(at(b1))
 }
 
 /// Two slots on one axis line: parallel, the same way across, one centre line, and overlapping.

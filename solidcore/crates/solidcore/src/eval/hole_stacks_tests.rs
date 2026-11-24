@@ -258,7 +258,7 @@ fn split_hole() -> Record {
 
 #[test]
 fn two_halves_of_one_cylinder_close_into_one_round_hole() {
-    let b = bores(&split_hole());
+    let b = bores(&split_hole()).unwrap_or_default();
     assert_eq!(b.len(), 1, "{b:?}");
     assert_eq!(b[0].d, 5.0);
     assert_eq!(b[0].t, [0.0, 2.5]);
@@ -267,7 +267,7 @@ fn two_halves_of_one_cylinder_close_into_one_round_hole() {
 
 #[test]
 fn a_round_hole_is_one_bore_with_its_extent() {
-    let b = bores(&round_hole());
+    let b = bores(&round_hole()).unwrap_or_default();
     assert_eq!(b.len(), 1, "{b:?}");
     assert_eq!(b[0].point, Vec3::ZERO);
     assert_eq!(b[0].axis, Vec3::new(0.0, 0.0, 1.0));
@@ -282,12 +282,12 @@ fn a_boss_is_not_a_bore() {
     if let Some(f) = r.faces.first_mut() {
         f.forward = Some(true);
     }
-    assert!(bores(&r).is_empty());
+    assert!(bores(&r).unwrap_or_default().is_empty());
 }
 
 #[test]
 fn two_facing_half_walls_are_one_slot() {
-    let b = bores(&slot());
+    let b = bores(&slot()).unwrap_or_default();
     assert_eq!(b.len(), 1, "{b:?}");
     let s = b[0].slot.expect("one slot");
     assert!(
@@ -304,19 +304,47 @@ fn two_facing_half_walls_are_one_slot() {
 
 #[test]
 fn a_countersink_extends_the_walls_extent() {
-    let b = bores(&countersink());
+    let b = bores(&countersink()).unwrap_or_default();
     assert_eq!(b.len(), 1, "{b:?}");
     assert_eq!(b[0].d, 5.0);
     assert_eq!(b[0].t, [0.0, 2.0], "{b:?}");
 }
 
 #[test]
-fn a_bitten_wall_is_not_a_bore() {
-    assert!(bores(&bitten()).is_empty());
+fn a_drill_point_does_not_extend_the_wall() {
+    // A cone below the wall whose rim matches but which narrows away from it is the bore's
+    // own closed tip, not an opening: the wall keeps its own extent.
+    let mut r = countersink();
+    if let Some(f) = r
+        .faces
+        .iter_mut()
+        .find(|f| matches!(f.surface, Some(Surface::Cone { .. })))
+    {
+        if let Some(Surface::Cone {
+            radius_at_origin, ..
+        }) = f.surface.as_mut()
+        {
+            // Rim 2.5 at the wall's bottom (z=0, 2.0 along the cone's axis from its origin
+            // at z=2), narrowing to 2.0 at z=-0.5 (2.5 along).
+            *radius_at_origin = 4.5;
+        }
+        f.domain[1] = [2.0, 2.5];
+    }
+    let b = bores(&r).unwrap_or_default();
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert!(
+        (b[0].t[0] - 0.0).abs() < 1e-9 && (b[0].t[1] - 0.5).abs() < 1e-9,
+        "{b:?}"
+    );
 }
 
 #[test]
-fn a_body_of_too_many_faces_answers_no_bores() {
+fn a_bitten_wall_is_not_a_bore() {
+    assert!(bores(&bitten()).unwrap_or_default().is_empty());
+}
+
+#[test]
+fn a_body_of_too_many_faces_is_refused() {
     let mut r = round_hole();
     r.faces.resize_with(super::MAX_FACES + 1, || Face {
         parameters: None,
@@ -325,7 +353,9 @@ fn a_body_of_too_many_faces_answers_no_bores() {
         forward: None,
         loops: vec![],
     });
-    assert!(bores(&r).is_empty());
+    // Refused, not an empty answer: an empty answer would read as a body without holes.
+    let e = bores(&r).err();
+    assert!(e.is_some(), "expected a refusal");
 }
 
 #[test]
@@ -369,7 +399,10 @@ fn a_hole_two_tenths_off_is_no_stack() {
     )
     .unwrap();
     assert!(s.stacks.is_empty(), "{s:?}");
-    assert_eq!(s.lone, vec![(0, 0), (1, 0)]);
+    assert_eq!(
+        s.lone.iter().map(|h| (h.body, h.d)).collect::<Vec<_>>(),
+        vec![(0, 5.0), (1, 5.0)]
+    );
     let loose = Options {
         touching: 0.05,
         axis_tolerance: 0.3,
@@ -471,6 +504,36 @@ fn slots_on_one_centre_line_stack_through_their_shared_middle() {
     assert_eq!(s.stacks.len(), 1, "{s:?}");
     assert!((s.stacks[0].grip - 3.0).abs() < 1e-9, "{s:?}");
     assert_eq!(s.stacks[0].layers.len(), 2, "{s:?}");
+    // Through the middle of the length they share ([8, 13] in x): the first slot's own
+    // centre (x=10) would be the wrong answer.
+    let st = &s.stacks[0];
+    assert!(
+        (st.start.x - 10.5).abs() < 1e-9
+            && (st.start.y - 10.0).abs() < 1e-9
+            && (st.start.z - 3.0).abs() < 1e-9,
+        "{st:?}"
+    );
+    assert!(st.axis.z < -0.999, "{st:?}");
+}
+
+#[test]
+fn a_chain_of_slots_past_its_own_start_stacks_in_runs() {
+    // Four slots, each centred 5 mm from the last: every pair meets its neighbour, but the
+    // first and last share nothing, so no one axis runs through all four.
+    let sl = |x: f64| Bore {
+        point: Vec3::new(x, 10.0, 0.0),
+        axis: Vec3::new(0.0, 0.0, 1.0),
+        d: 6.0,
+        t: [0.0, 3.0],
+        slot: Some(Slot {
+            length: 12.0,
+            along: Vec3::new(1.0, 0.0, 0.0),
+        }),
+    };
+    let s = stacks(&[&[sl(0.0), sl(5.0), sl(10.0), sl(15.0)]], &opts()).unwrap();
+    // One body: a stack needs two, so all four answer lone, each on its own run's axis.
+    assert_eq!(s.stacks.len(), 0, "{s:?}");
+    assert_eq!(s.lone.len(), 4, "{s:?}");
 }
 
 #[test]
