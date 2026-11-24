@@ -2964,7 +2964,7 @@ fn short_end_span_is_pole(cpts: &[CPoint], degree: usize, head: bool, tail: bool
 /// segment out ([`Curve::remove_segs`]), so the rest of the curve runs at the parameters
 /// the edge's other curves have, as when every short span went that way; an affine remap
 /// of the rest onto the interval moved every interior parameter, and a shell's loop then
-/// kept a gap (issue_1818_mated_shell_wall). Every other span, however short, stays. Each
+/// kept a gap (`issue_1818_mated_shell_wall`). Every other span, however short, stays. Each
 /// span is judged on the curve that removal leaves without the spans before it: the
 /// removal keeps the end control point, so the next span's first control point changes,
 /// which can make that span a pole too. The curve keeps its end points (the removal keeps
