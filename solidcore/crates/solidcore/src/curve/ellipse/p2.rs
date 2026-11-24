@@ -59,7 +59,7 @@
 //!   [`Ellipse::set_up_polar_conversion`]; its `crIntervalDeg` and `crPlacement`
 //!   arguments are `NotUsed` and dropped. The `SmCircle::IsArc` branch for a curve
 //!   that is not an ellipse is unreachable (the curve is always an [`Ellipse`]).
-//!   An ellipse without NURB (only [`Ellipse::empty`]) is not set up: upstream makes
+//!   An ellipse without NURB ([`Ellipse::empty`], or one whose NURB build failed) is not set up: upstream makes
 //!   the NURB lazily inside `GetKnots`, re-entering the set-up; here that is
 //!   `SM_ERR`.
 //!   Its two `while` loops that shift the NURB's angles by whole turns towards the
@@ -70,6 +70,10 @@
 //!   STEP interval restored, so the temporary full-circle domain does not leak.
 //!   An open arc's (WR-719, the fork's cbeb14b) end angles are its ends' own polar angles rather than
 //!   `STEPInversion`'s, whose seam rule turns an end just short of 360 into 0.
+//!   [`PolarConversion::angle_param_to_nurb_param`] takes the span's end weights and
+//!   maps the standard-form root to the span's own parameter, exact for a span whose
+//!   end weights differ (an arc split off a longer arc away from its middle); upstream
+//!   uses the standard-form root for every span.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
@@ -88,6 +92,12 @@
 //!   circle within the intersection tolerance ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
 //!   them, a solution of the second crossing that repeats one of the first (both
 //!   dropped onto the end of a short arc) is not added again.
+//! - **A line's touch between two flank points (#18828).**
+//!   `Ellipse::touch_between_line_flanks` is not upstream: for an ellipse that is no
+//!   circle `IntersectWithLine` leaves the line to the general intersector, which returns
+//!   a tangent line's touch as two points on its flanks. It certifies the one touch they
+//!   stand for by the circle's contact rule read on the ellipse's support function
+//!   ([`line_coplanar_ellipse_touch`]), for `curve.curve_p8` to replace them with.
 //! - **Co-port.** The geometric constructor belongs to unit `curve.ellipse_p1`; it is
 //!   ported here because every method of this unit needs an ellipse with its NURB
 //!   (made by `MakeNurb`, `p1`).
@@ -120,14 +130,15 @@ use crate::curve::curve::p2::{self as curve_base, CIRCLE_TYPE, ELLIPSE_TYPE};
 use crate::curve::curve::p3::local_curve_solve;
 use crate::curve::curve::p4::is_closed_base;
 use crate::curve::line::{CurveLocationType, Line};
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::curve::{CurveFailure, FastDropBlock};
+use crate::error::{ignore_status, Failure, Result, SolidError};
 use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
     circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
-    line_plane_intersect, point_project_to_plane, transform_point_to_start_plane,
-    vector_project_to_plane, CircleCircle,
+    line_coplanar_ellipse_touch, line_plane_intersect, point_project_to_plane,
+    transform_point_to_start_plane, vector_project_to_plane, CircleCircle,
 };
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -143,6 +154,7 @@ use crate::math::{
 };
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
+use crate::nurbs::math::NOW;
 
 const OP_SET_UP: &str = "curve::ellipse::p2::Ellipse::set_up_polar_conversion";
 
@@ -167,6 +179,22 @@ fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
             "polar conversion table is shorter than its knot list",
         )
     })
+}
+
+/// The weight of control point `i` of `curve`'s NURB, `1` for a non-rational NURB.
+///
+/// # Errors
+///
+/// `InvalidInput` when the NURB has no control point `i` (a polar table that does not
+/// match its curve); those of the NURB.
+fn span_weight(curve: &Ellipse, i: usize) -> Result<f64> {
+    let p = curve.base.control_points()?.get(i).ok_or_else(|| {
+        SolidError::invalid_input(
+            OP_TO_NURBS,
+            "polar conversion table has more spans than its curve",
+        )
+    })?;
+    Ok(if p.w == NOW { 1.0 } else { p.w })
 }
 
 // ---- back-edges -----------------------------------------------------------------------
@@ -504,20 +532,40 @@ impl PolarConversion {
     }
 
     /// The NURB parameter of the angle `angle_deg` in the span from
-    /// `start_nurb`/`start_angle_deg` to `end_nurb`/`end_angle_deg`
-    /// (`AngleParamToNurbParam`): the root in `[0, 1]` of the span's quadratic, scaled
-    /// to the span. Angles within `SM_EFF_ZERO_DEG` of an end give that end.
+    /// `start_nurb`/`start_angle_deg` to `end_nurb`/`end_angle_deg` whose first and last
+    /// weights are `end_weights` (`AngleParamToNurbParam`): the root `s` in `[0, 1]` of
+    /// the span's quadratic, taken to the span's own weights and scaled to the span.
+    /// Angles within `SM_EFF_ZERO_DEG` of an end give that end.
+    ///
+    /// The quadratic is that of a span in standard form, its end weights equal
+    /// (Hoschek/Lasser; see [`PolarConversion`]). Not upstream, which uses `s` for every
+    /// span: an arc split off a longer arc away from its middle has end weights
+    /// `w0 != w2`. The rational quadratic `(B0 w0 P0 + B1 w1 P1 + B2 w2 P2) / (B0 w0 + B1
+    /// w1 + B2 w2)`, `B = ((1 - u)^2, 2 u (1 - u), u^2)`, is unchanged as a point set
+    /// under `u = l s / ((1 - s) + l s)`, `l > 0`: then `1 - u = (1 - s) / ((1 - s) + l
+    /// s)`, so `B(u)` is `((1 - s)^2, 2 l s (1 - s), l^2 s^2)` over the common factor
+    /// `((1 - s) + l s)^2`, which cancels, and in `s` the weights are `(w0, l w1, l^2
+    /// w2)`. With `l = sqrt(w0 / w2)` the end weights are equal: the span in `s` is in
+    /// standard form, the quadratic's root is its parameter, and `u = l s / ((1 - s) + l
+    /// s)` is the span's own. Equal end weights give `l = 1` and `u = s` exactly
+    /// (`(1 - s) + s` rounds to 1 for `s` in `[0, 1]`). On arcs 3e-5 to 1.2e-4 long
+    /// split off a sphere's crossing circles (a box's corner cut off by a ball), `s` put
+    /// the point up to 1.4e-6 off, and the point inversion that refines it stopped
+    /// 3.6e-10 off, beyond the check's conversion test (Ellipse test 1, 1e-10); `u` puts
+    /// it within 3e-18.
     ///
     /// # Errors
     ///
     /// `SM_ERR` when the angle is outside the span, the quadratic has no real root or
-    /// no root in `[0, 1]`.
+    /// no root in `[0, 1]`; `InvalidInput` when an end weight is not positive and finite
+    /// (not an arc).
     pub fn angle_param_to_nurb_param(
         start_nurb: f64,
         end_nurb: f64,
         start_angle_deg: f64,
         end_angle_deg: f64,
         angle_deg: f64,
+        end_weights: (f64, f64),
     ) -> Result<f64> {
         // locals
         let theta = (end_angle_deg - start_angle_deg) / 2.0 * PI / 180.0;
@@ -529,12 +577,27 @@ impl PolarConversion {
             max2(start_angle_deg, end_angle_deg),
         );
         let inside = ivl.contains_value(angle_deg, 0.0); // Note, don't check 'periodic'. [B90]
+        let unclamped = angle_deg;
         let angle_deg = ivl.clamp_value(angle_deg);
 
         if !inside {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_ANGLE,
-                "the angle is outside the arc",
+                CurveFailure::AngleOutsideArc {
+                    angle_deg: unclamped,
+                    start_deg: start_angle_deg,
+                    end_deg: end_angle_deg,
+                },
+            ));
+        }
+
+        // take the standard form's T to the span's own weights (see above)
+        let (w0, w2) = end_weights;
+        let lambda = (w0 / w2).sqrt();
+        if !(w0 > 0.0 && w2 > 0.0 && lambda.is_normal()) {
+            return Err(SolidError::invalid_input(
+                OP_ANGLE,
+                "the span's end weights are not positive and finite",
             ));
         }
 
@@ -560,9 +623,9 @@ impl PolarConversion {
 
         // check determinate for error condition
         if d < 0.0 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_ANGLE,
-                "the quadratic has no real root",
+                CurveFailure::AngleHasNoNurbParameter { angle_deg },
             ));
         }
 
@@ -574,12 +637,14 @@ impl PolarConversion {
             t = (-b - d) / (2.0 * a);
 
             if !(0.0..=1.0).contains(&t) {
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_ANGLE,
-                    "neither root is in [0, 1]",
+                    CurveFailure::AngleHasNoNurbParameter { angle_deg },
                 ));
             }
         }
+
+        let t = lambda * t / ((1.0 - t) + lambda * t);
 
         // scale normalized T to Nurb interval
         Ok((end_nurb - start_nurb) * t + start_nurb)
@@ -716,13 +781,15 @@ impl PolarConversion {
 
                     // check interval interior
                     if (!inside_out && polar_deg <= angle) || (inside_out && polar_deg >= angle) {
-                        // Try cheap exact conversion when possible
+                        // Try cheap exact conversion when possible (the span's control
+                        // points are 2 ii - 2 to 2 ii, the knots inside being double)
                         nurbs_guess = Self::angle_param_to_nurb_param(
                             table(&self.natural_knots, ii - 1, OP_TO_NURBS)?,
                             table(&self.natural_knots, ii, OP_TO_NURBS)?,
                             table(&self.angles, ii - 1, OP_TO_NURBS)?,
                             angle,
                             polar_deg,
+                            (span_weight(curve, ii * 2 - 2)?, span_weight(curve, ii * 2)?),
                         )?;
                         *written = Some(nurbs_guess);
                         break;
@@ -749,10 +816,26 @@ impl PolarConversion {
                 nurbs_guess,
                 step_pnt,
             )?;
-            if !found {
-                return Err(SolidError::curve_failed(
+            if !found && !step_ivl.contains_value(polar_deg, angle_tol) {
+                // the caller's angle off the arc (the tables, which clamp it, are not set
+                // up): its point is on the full ellipse, not on the bounded NURB
+                return Err(SolidError::curve(
                     OP_TO_NURBS,
-                    "no NURBS parameter was found for the step point",
+                    CurveFailure::AngleOutsideArc {
+                        angle_deg: polar_deg,
+                        start_deg: step_ivl.min(),
+                        end_deg: step_ivl.max(),
+                    },
+                ));
+            }
+            if !found {
+                return Err(SolidError::curve(
+                    OP_TO_NURBS,
+                    CurveFailure::Defect {
+                        why: "the point inversion found no NURB parameter for a point the \
+                              ellipse's own analytic form puts on it, started from the \
+                              conversion's guess within the same curve",
+                    },
                 ));
             }
             param
@@ -1212,9 +1295,8 @@ impl Ellipse {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` without a NURB, when the end knots are not triple or the tables come
-    /// out inconsistent; the errors of the evaluations (the STEP domain may already
-    /// be changed, as upstream).
+    /// `SM_ERR` without a NURB or when the end knots are not triple; the errors of the
+    /// evaluations (the STEP domain may already be changed, as upstream).
     pub fn set_up_polar_conversion(&mut self, k: &Kernel) -> Result<()> {
         let mut pc = core::mem::take(&mut self.polar);
         let r = set_up_polar_conversion(&mut pc, self, k);
@@ -1247,9 +1329,12 @@ impl Ellipse {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, step_param: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_EVAL_STEP,
-                "more than 3 derivatives were asked",
+                CurveFailure::TooManyDerivatives {
+                    asked: num_derivs,
+                    most: 3,
+                },
             ));
         }
         Ok(self.eval_step(step_param, num_derivs))
@@ -1485,25 +1570,31 @@ impl Ellipse {
 
         // no work - no polar conversion
         if !self.polar.is_polar_conversion_possible() {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_DROP,
-                "the polar conversion is not possible",
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::NoPolarConversion,
+                },
             ));
         }
 
         // no work - not a circle or circular arc
         if !self.is_circle() {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_DROP,
-                "the ellipse is not a circle",
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::NotACircle,
+                },
             ));
         }
 
         // no work - operation not minimize or intersect
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_DROP,
-                "the operation is neither minimize nor intersect",
+                CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::Operation,
+                },
             ));
         }
 
@@ -1737,11 +1828,20 @@ impl Ellipse {
             let (line_pnt, line_vec) =
                 match intersect_two_planes(this_center, this_normal, other_center, other_normal)? {
                     PlanesIntersection::Line { point, direction } => (point, direction),
+                    // Unreachable: here the sine of the planes' angle is at least that of
+                    // 10 degrees (`nearly_parallel` returned above), and the planes'
+                    // intersection calls them parallel only below `SM_EFF_ZERO`. Planes that do
+                    // not cross take the nearly parallel exit. Kept an error, so no path
+                    // returns an empty answer as if it were checked.
                     PlanesIntersection::Parallel { .. } => {
-                        return Err(SolidError::curve_failed(
+                        return Err(SolidError::curve(
                             "curve::ellipse::p2::Ellipse::intersect_with_ellipse",
-                            "the ellipses' planes are parallel",
-                        ))
+                            CurveFailure::Defect {
+                                why: "the planes' intersection called the ellipses' planes \
+                                      parallel after the nearly parallel exit, which takes \
+                                      every pair whose angle is below 10 degrees",
+                            },
+                        ));
                     }
                 };
 
@@ -2082,6 +2182,106 @@ impl Ellipse {
         Ok(out)
     }
 
+    /// Not upstream (#18828): the touch of `line` with this ellipse (no circle) that two
+    /// point solutions of the general curve/curve intersector, `flanks` (`[ellipse
+    /// parameter, line parameter]` each), stand for, as `[ellipse parameter, line
+    /// parameter, distance]`.
+    ///
+    /// The general intersector meets a line tangent to an ellipse at a double root, where
+    /// its local solves stop on either side of the touch, as far out as the curves stay
+    /// within its zero of each other (2.4e-5 to 2.7e-5 from the touch on an ellipse of
+    /// in-plane radius of curvature 11), so the touch comes back as two points on its
+    /// flanks. Two such points are one touch when the line lies in the ellipse's plane (to
+    /// `SM_EFF_ZERO_SQRT`) and touches the ellipse by the circle's contact rule
+    /// ([`line_coplanar_ellipse_touch`] with `contact_tol`): then the line stays outside
+    /// the ellipse, or enters it by no more than the contact tolerance, which the contact
+    /// rule reads as one touch, as it does for a circle; either way the two points are not
+    /// two crossings to keep. The touch is the support point's drop onto the line, dropped onto
+    /// both curves as [`Ellipse::intersect_with_line`] drops its candidates; it must lie
+    /// between the two flank points on both curves (or at one of them) and within `tol` of
+    /// both (the scaled zero added). `None` when any of that fails, for a circle (which
+    /// the analytic intersector already decides), or for a line out of the plane. `None`
+    /// too when the touch rule or a point solve fails: the two points were a valid answer
+    /// before this was asked, so they stand, as [`Ellipse::intersect_with_line`] keeps
+    /// what it has when a point solve fails.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations; an unported path or a cancellation of a point solve.
+    pub(crate) fn touch_between_line_flanks(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        line: &Line,
+        line_interval: &Extent1d,
+        tol: f64,
+        contact_tol: f64,
+        flanks: [[f64; 2]; 2],
+    ) -> Result<Option<[f64; 3]>> {
+        if self.is_circle() {
+            return Ok(None);
+        }
+        let normal = self.position.z_axis();
+        let start = line.line_point();
+        let line_vec = line.line_vector() * line.line_scale();
+        let length = line_vec.length();
+        if length <= EFF_ZERO * (1.0 + start.max_dimension()) {
+            return Ok(None);
+        }
+        if normal.dot(line_vec).abs() > EFF_ZERO_SQRT * length {
+            return Ok(None);
+        }
+        // (a line too short against the radii to have a direction certifies nothing)
+        let Ok(Some(t)) = line_coplanar_ellipse_touch(
+            start,
+            line_vec,
+            self.position.origin(),
+            self.position.x_axis(),
+            self.position.y_axis(),
+            [self.x_radius(), self.y_radius()],
+            contact_tol,
+        ) else {
+            return Ok(None);
+        };
+        let candidate =
+            point_project_to_plane(start, self.position.origin(), normal) + t * line_vec;
+        let between = |v: f64, a: f64, b: f64| min2(a, b) <= v && v <= max2(a, b);
+        let on_line: Vec<Solution<()>> =
+            match line_global_point_solve(line, line_interval, candidate, tol * 10.0) {
+                Ok(s) => s,
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => return Ok(None),
+            };
+        let on_ellipse: Vec<Solution<()>> =
+            match ellipse_global_point_solve(k, self, interval, candidate, tol * 10.0) {
+                Ok(s) => s,
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
+                Err(_) => return Ok(None),
+            };
+        let mut best: Option<[f64; 3]> = None;
+        for s1 in &on_ellipse {
+            for s2 in &on_line {
+                let (u, w) = (s1.start.parameters[0], s2.start.parameters[0]);
+                if !(between(u, flanks[0][0], flanks[1][0])
+                    && between(w, flanks[0][1], flanks[1][1]))
+                {
+                    continue;
+                }
+                let p1 = self.base.evaluate_point(u)?;
+                let dist = p1.distance(line.evaluate_point(w));
+                let scaled_zero = EFF_ZERO * (1.0 + p1.max_dimension());
+                if dist <= tol + scaled_zero && best.is_none_or(|b| dist < b[2]) {
+                    best = Some([u, w, dist]);
+                }
+            }
+        }
+        Ok(best)
+    }
+
     /// Where a line in this circle's plane that overlaps it by less than the contact
     /// tolerance touches it (not upstream, #14599): the line `(point, vector)` crosses the
     /// circle at the line parameters `crossings` and stays within `near` of it between
@@ -2181,10 +2381,16 @@ impl Ellipse {
         // check input and get scaling value - only allow uniform scaling
         let mut d_scale = 1.0;
         if let Some(s) = scale {
-            if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x.abs() < EFF_ZERO {
-                return Err(SolidError::curve_failed(
+            if !are_same(s.x, s.y) || !are_same(s.x, s.z) {
+                return Err(SolidError::curve(
                     OP_TRANSFORM,
-                    "the scale is not uniform",
+                    CurveFailure::NonUniformScale { scale: s },
+                ));
+            }
+            if s.x.abs() < EFF_ZERO {
+                return Err(SolidError::curve(
+                    OP_TRANSFORM,
+                    CurveFailure::ZeroScale { scale: s.x },
                 ));
             }
             d_scale = s.x;
@@ -2198,8 +2404,10 @@ impl Ellipse {
                 self.position.x_axis(),
                 self.position.y_axis(),
             )
-            .map_err(|_| {
-                SolidError::curve_failed(OP_TRANSFORM, "the placement could not be set")
+            .map_err(|e| {
+                Failure::new(OP_TRANSFORM, CurveFailure::PlacementNotSet)
+                    .caused_by(e)
+                    .into_error()
             })?;
 
         // apply rotation to scaled placement
@@ -2214,8 +2422,10 @@ impl Ellipse {
 
         // apply transformation to underlying Nurb, which notifies the polar converter
         if self.base.nurb.is_some() {
-            self.base.transform(rotate_n_move, scale).map_err(|_| {
-                SolidError::curve_failed(OP_TRANSFORM, "the NURB could not be transformed")
+            self.base.transform(rotate_n_move, scale).map_err(|e| {
+                Failure::new(OP_TRANSFORM, CurveFailure::NurbNotTransformed)
+                    .caused_by(e)
+                    .into_error()
             })?;
             self.notify_post_edit(k)?;
         }
@@ -2242,9 +2452,9 @@ pub(crate) fn set_up_polar_conversion(
 
     // get curve knots (a NURB-less ellipse would make its NURB here, re-entering)
     if e.base.nurb.is_none() {
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_SET_UP,
-            "the ellipse has no NURB",
+            CurveFailure::EllipseWithoutNurb,
         ));
     }
     let (knots, multiplicities) = e.base.knots(None)?;
@@ -2252,9 +2462,9 @@ pub(crate) fn set_up_polar_conversion(
 
     // no work - start/end knots are not full multiplicities
     if multiplicities.first().copied() != Some(3) || multiplicities.last().copied() != Some(3) {
-        return Err(SolidError::curve_failed(
+        return Err(SolidError::curve(
             OP_SET_UP,
-            "the end knots are not of full multiplicity",
+            CurveFailure::EndKnotsNotClamped,
         ));
     }
 
@@ -2461,14 +2671,9 @@ pub(crate) fn set_up_polar_conversion(
             .push(are_same(weight_a, weight_c) && are_same(weight_b / weight_c, cos_half_ang));
     }
 
-    // quit - something went wrong
-    if pc.angles.len() != pc.natural_knots.len() || pc.exact_conversion.len() + 1 != pc.angles.len()
-    {
-        return Err(SolidError::curve_failed(
-            OP_SET_UP,
-            "the angles do not match the knots",
-        ));
-    }
+    // (upstream's "something went wrong" check of the table sizes is gone: the loop above
+    // writes one angle per knot and, from the second knot on, one exactness flag per span,
+    // and the full-multiplicity check gives at least one knot)
 
     // Reset the curve's analytic interval to what we've calculated.
     anal_ivl.init();
@@ -2487,6 +2692,55 @@ fn crossings_merged_upstream(points: &[Point3], tol: f64) -> bool {
     match points {
         [a, b] => a.distance(*b) <= tol * 10.0,
         _ => false,
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Ellipse {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_domain,
+            radius_x,
+            radius_y,
+            polar,
+            inside_out,
+            circle,
+        } = self;
+        d.tag(0xE11);
+        base.content(d)?;
+        position.content(d)?;
+        anal_domain.content(d)?;
+        d.f64(*radius_x);
+        d.f64(*radius_y);
+        polar.content(d)?;
+        d.bool(*inside_out);
+        d.bool(*circle);
+        Some(())
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for PolarConversion {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            possible,
+            natural_knots,
+            angles,
+            exact_conversion,
+            has_curve,
+        } = self;
+        d.tag(0x9C);
+        d.bool(*possible);
+        d.f64s(natural_knots);
+        d.f64s(angles);
+        d.usize(exact_conversion.len());
+        for &x in exact_conversion {
+            d.bool(x);
+        }
+        d.bool(*has_curve);
+        Some(())
     }
 }
 
@@ -2729,7 +2983,7 @@ mod tests {
             &EllipseOptions::default(),
         )
         .expect("ellipse");
-        assert!(e
+        let err = e
             .drop_point_fast::<i64>(
                 &k,
                 &ivl,
@@ -2741,7 +2995,54 @@ mod tests {
                 SolutionRequested::All,
                 None,
             )
-            .is_err());
+            .unwrap_err();
+        assert!(
+            matches!(
+                err.curve_failure(),
+                Some(CurveFailure::FastDropUnavailable {
+                    reason: FastDropBlock::NoPolarConversion | FastDropBlock::NotACircle
+                })
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        // a circle, but a solve that is neither a minimisation nor an intersection
+        let full = circle(&k, 0.0, 360.0, 1.0, false);
+        let err = full
+            .drop_point_fast::<i64>(
+                &k,
+                &ivl,
+                SolverOperation::Maximize,
+                p,
+                None,
+                1e-6,
+                None,
+                SolutionRequested::All,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::FastDropUnavailable {
+                reason: FastDropBlock::Operation
+            })
+        );
+        // more derivatives than the analytic form gives
+        assert_eq!(
+            full.evaluate_step(0.0, 4).unwrap_err().curve_failure(),
+            Some(&CurveFailure::TooManyDerivatives { asked: 4, most: 3 })
+        );
+        // an empty ellipse has no NURB to set its polar conversion up from
+        let mut empty = Ellipse::empty(3);
+        let err = empty.set_up_polar_conversion(&k).unwrap_err();
+        assert_eq!(err.curve_failure(), Some(&CurveFailure::EllipseWithoutNurb));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     #[test]
@@ -2772,13 +3073,98 @@ mod tests {
 
     #[test]
     fn angle_param_conversion() {
-        let t = PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 45.0).expect("t");
+        let t = PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 45.0, (1.0, 1.0))
+            .expect("t");
         assert!((t - 0.5).abs() < 1e-12);
         assert_eq!(
-            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 0.0).expect("t"),
+            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 0.0, (1.0, 1.0))
+                .expect("t"),
             0.0
         );
-        assert!(PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 120.0).is_err());
+        let err =
+            PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 120.0, (1.0, 1.0))
+                .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::AngleOutsideArc {
+                angle_deg: 120.0,
+                start_deg: 0.0,
+                end_deg: 90.0
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// The left part of a quarter of the unit circle split at `f` by de Casteljau, in
+    /// homogeneous coordinates `(w x, w y, w)`: a span whose end weights differ
+    /// (`1` and `(1 - f)^2 + 2 f (1 - f) cos 45 + f^2`), as an arc split off a longer arc
+    /// away from its middle has them. The NURB parameter converted from a polar angle
+    /// must give the circle's point at that angle, `(cos a, sin a)`, to rounding: the
+    /// evaluation below is the span's Bernstein form, a handful of roundings of 1.
+    #[test]
+    fn angle_param_conversion_is_exact_on_a_span_with_unequal_end_weights() {
+        let c = core::f64::consts::FRAC_1_SQRT_2;
+        let quarter = [[1.0, 0.0, 1.0], [c, c, c], [0.0, 1.0, 1.0]];
+        let lerp =
+            |a: [f64; 3], b: [f64; 3], t: f64| [0, 1, 2].map(|i| (1.0 - t) * a[i] + t * b[i]);
+        let f = 0.8;
+        let q1 = lerp(quarter[0], quarter[1], f);
+        let q2 = lerp(q1, lerp(quarter[1], quarter[2], f), f);
+        let span = [quarter[0], q1, q2];
+        let (w0, w2) = (span[0][2], span[2][2]);
+        assert!((w0 - w2).abs() > 0.09, "end weights {w0}, {w2}");
+        let end_deg = q2[1].atan2(q2[0]).to_degrees();
+        let point = |u: f64| {
+            let b = [(1.0 - u) * (1.0 - u), 2.0 * u * (1.0 - u), u * u];
+            let h = [0, 1, 2].map(|i| b[0] * span[0][i] + b[1] * span[1][i] + b[2] * span[2][i]);
+            (h[0] / h[2], h[1] / h[2])
+        };
+        let mut worst = 0.0_f64;
+        for i in 1..20 {
+            let angle_deg = end_deg * f64::from(i) / 20.0;
+            let u = PolarConversion::angle_param_to_nurb_param(
+                0.0,
+                1.0,
+                0.0,
+                end_deg,
+                angle_deg,
+                (w0, w2),
+            )
+            .expect("u");
+            let (x, y) = point(u);
+            let a = angle_deg.to_radians();
+            worst = worst.max((x - a.cos()).hypot(y - a.sin()));
+        }
+        assert!(worst < 1e-14, "worst distance {worst}");
+    }
+
+    /// An end weight must be positive and finite even when the angle is at an end, which
+    /// otherwise answers that end before the weights are looked at. A non-arc span is refused
+    /// for every angle in it.
+    #[test]
+    fn angle_param_conversion_refuses_end_weights_that_are_not_an_arc() {
+        let bad = [
+            (0.0, 1.0),
+            (-1.0, 1.0),
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+            (1.0, f64::NAN),
+            (1.0, 0.0),
+        ];
+        for weights in bad {
+            for angle_deg in [0.0, 45.0, 90.0] {
+                let got = PolarConversion::angle_param_to_nurb_param(
+                    0.0, 1.0, 0.0, 90.0, angle_deg, weights,
+                );
+                assert!(
+                    got.is_err(),
+                    "weights {weights:?} at {angle_deg} gave {got:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2838,9 +3224,28 @@ mod tests {
         let t = c.base().natural_interval().min();
         let q = c.base().evaluate_point(t).expect("q");
         assert!(p.distance(q) < 1e-9);
-        assert!(c
+        let err = c
             .transform(&k, &mv, Some(Vec3::new(1.0, 2.0, 1.0)))
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::NonUniformScale {
+                scale: Vec3::new(1.0, 2.0, 1.0)
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        let err = c.transform(&k, &mv, Some(Vec3::ZERO)).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::ZeroScale { scale: 0.0 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     #[test]

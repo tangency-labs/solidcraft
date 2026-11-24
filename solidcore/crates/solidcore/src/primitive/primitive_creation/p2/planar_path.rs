@@ -892,9 +892,9 @@ mod tests {
         let e = sweep(0.6 * tol).unwrap_err();
         assert_eq!(
             e.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the point is on the curve"
-            )),
+            Some(&crate::error::topology::TopologyFailure::SideUndecided {
+                why: crate::error::topology::SideOpen::OnCurve
+            }),
             "{e}"
         );
 

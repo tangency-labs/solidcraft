@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Gusset</title>
+  <path d="M10.35 41.38L32 53.88L32 57L10.35 44.5Z" fill="#b8c3cf"/>
+  <path d="M53.65 41.38L32 53.88L32 57L53.65 44.5Z" fill="#8e9faf"/>
+  <path d="M32 28.88L53.65 41.38L32 53.88L10.35 41.38Z" fill="#e2e8ef"/>
+  <path d="M32 28.88L53.65 41.38L53.65 44.5L32 57L10.35 44.5L10.35 41.38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.35 41.38L32 53.88L53.65 41.38" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 53.88L32 57" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.35 19.5L13.06 21.06L13.06 42.94L10.35 41.38Z" fill="#b8c3cf"/>
+  <path d="M34.71 8.56L13.06 21.06L13.06 42.94L34.71 30.44Z" fill="#8e9faf"/>
+  <path d="M32 7L34.71 8.56L13.06 21.06L10.35 19.5Z" fill="#e2e8ef"/>
+  <path d="M32 7L34.71 8.56L34.71 30.44L13.06 42.94L10.35 41.38L10.35 19.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.35 19.5L13.06 21.06L34.71 8.56" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13.06 21.06L13.06 42.94" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.88 14.81L42.83 47.62L39.22 49.71L20.27 16.9Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.27 38.77L39.22 49.71L20.27 16.9Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

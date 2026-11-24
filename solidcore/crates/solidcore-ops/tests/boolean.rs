@@ -11,7 +11,7 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
@@ -45,6 +45,32 @@ fn two_overlapping_boxes() {
     assert!(near(volume(&d), 7.0), "{}", volume(&d));
     let i = boolean(a(), b(), BooleanOp::Intersect).unwrap().unwrap();
     assert!(near(volume(&i), 1.0), "{}", volume(&i));
+}
+
+/// The public repro in solidcraft#20408 joins two swept parts along their matching collars.
+#[test]
+fn a_union_of_overlapping_collars_keeps_both_input_bodies() {
+    all_fixes();
+    let a = Body::from_smb(include_bytes!("data/issue_20408_hoop.smb").to_vec(), false).unwrap();
+    let b = Body::from_smb(include_bytes!("data/issue_20408_back.smb").to_vec(), false).unwrap();
+    let before = [volume(&a), volume(&b)];
+    let joined = union_copies(&a, &b).unwrap().unwrap();
+    assert_eq!(joined.solid_count().unwrap(), 1);
+    assert!(joined.check(CheckLevel::Geometry).unwrap().is_valid());
+    // The operands overlap in their coaxial 1.3 mm-radius collars over exactly 2 mm.
+    let overlap = PI * 1.3 * 1.3 * 2.0;
+    assert!(near(volume(&joined), before[0] + before[1] - overlap));
+    assert_eq!(joined.counts().unwrap(), [25, 70, 46]);
+    // The outside of the surviving collar at x=4.75 + 1.3 is 0.1 mm from the probe.
+    let (_, order) = joined.to_record().unwrap();
+    let faces: Vec<usize> = (0..25).collect();
+    let closest = joined
+        .closest_to_point(&order, &faces, &[], [6.15, 15.25, 18.375])
+        .unwrap()
+        .unwrap();
+    assert!(near(closest.distance, 0.1));
+    assert!(near(volume(&a), before[0]));
+    assert!(near(volume(&b), before[1]));
 }
 
 #[test]
@@ -1359,6 +1385,32 @@ fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_fra
 #[test]
 fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut() {
     all_fixes();
+    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
+    let mut failed = Vec::new();
+    for turn in [1e-8, 1e-10, -1e-8] {
+        for frame in [2, 5, 8, 14] {
+            let what = format!("turned {turn:e}, frame {frame}");
+            let b = ball([0.0, 50.0, 20.0], turn);
+            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// The same cuts with the coincidence crossing found as the section curve
+/// (`simple_coincidence_crossing_is_point` off; WR-647, #21306 part C). The section's
+/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
+/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
+/// (Test #70, frame 2); it now keeps the seam side the drop point is on. Same V.
+#[test]
+fn a_seam_meridian_crossing_into_the_balls_pole_cuts_with_the_crossing_as_a_curve() {
+    session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|n| *n != "simple_coincidence_crossing_is_point"),
+    )
+    .unwrap();
     let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
     let mut failed = Vec::new();
     for turn in [1e-8, 1e-10, -1e-8] {
@@ -3334,7 +3386,18 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// inside the walls outside the two rounds, its full section there, of height the top's.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, true);
+}
+
+/// #18064 without `simple_coincidence_crossing_is_point` (WR-647 part A): the curve where the
+/// top crosses the corner round reaches the round's floor edge only at its end vertex
+/// (4, 249.15, 7), so the curve/edge range there is that one contact. The top's other
+/// boundary, the floor's line y = 249.15, meets the round's floor arc only at that point, as
+/// its tangent; the face/face tangency witness proves the range is the point from those two
+/// carriers, and the join is the same as with the flag.
+#[test]
+fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, false);
 }
 
 /// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
@@ -3342,14 +3405,33 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
 /// stays within the scaled zero of the round's floor edge for longer before the touch.
 #[test]
 fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, true);
+}
+
+/// The flatter insert of #18064 without `simple_coincidence_crossing_is_point`: the witness
+/// makes the longer range at the round's end vertex the one contact there (WR-647 part A).
+#[test]
+fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness(
+) {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, false);
 }
 
 /// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
 /// less what they share, the insert's corners inside the walls outside the two rounds, its
-/// full section there, of height the top's.
-fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
-    all_fixes();
+/// full section there, of height the top's. `crossing_is_point` keeps
+/// `simple_coincidence_crossing_is_point` on; without it every other fix is on.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64, crossing_is_point: bool) {
+    if crossing_is_point {
+        all_fixes();
+    } else {
+        session::set_thread_fixes(
+            solidcore::kernel::UpstreamFixes::NAMES
+                .iter()
+                .copied()
+                .filter(|n| *n != "simple_coincidence_crossing_is_point"),
+        )
+        .unwrap();
+    }
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
     // insert's height above the floor

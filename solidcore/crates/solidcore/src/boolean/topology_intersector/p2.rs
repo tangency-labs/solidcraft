@@ -87,6 +87,10 @@
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`]; the ignored call's
 //!   outputs keep their initial values (a failed `DropPoint` is "no drop point", a
 //!   failed coincidence check "not coincident").
+//! - **Face-pair interval edges** (not upstream, #18927): a failed step of
+//!   `FindOrCreateProtoEdge` for an interval of a face pair's intersection refuses with
+//!   [`BooleanFailure::IntervalEdgeNotMade`], its error the cause, where upstream leaves
+//!   the intersection without that edge (`find_or_create_needed_proto_edge`).
 //! - **Curve ownership.** `EdgeFaceCoincidence` resets the curve's owner to the
 //!   original edge after `MakeEdgeInFace`; the port has no curve owners (the curve
 //!   copy is a new handle), so there is nothing to reset.
@@ -164,11 +168,12 @@ use crate::EntityRef;
 
 use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
 use super::curved_strip::drop_strip_crossings;
+use super::duplicate_edge_run::drop_duplicate_edge_runs;
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, solve_with_face_caches, surface_coincidence_check,
+    set_edge_class, solve_with_face_caches, split_soft, surface_coincidence_check,
     surface_solve_with_face_caches, FaceIntersectOutputs, IntersectionCurves, IntersectionResults,
     IntersectorBrep, TopologyIntersector,
 };
@@ -1759,6 +1764,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         super::curved_strip::probe(k, &*brep, &intersections)?;
         drop_strip_crossings(k, &*brep, &mut intersections, approx_tol)?;
 
+        // Not upstream (WR-647): a curve's run along part of an edge that another curve of
+        // the same pair is from end to end is a second copy of that edge, no event
+        // (module docs of `duplicate_edge_run`).
+        drop_duplicate_edge_runs(k, &*brep, &mut intersections)?;
+
         // Not upstream: the contact points the strip rule proves (module docs of
         // `coincident_strip`), declared before any proto vertex of a face pair is made.
         let contacts = strip_contacts(k, brep, &intersections, approx_tol)?;
@@ -1791,16 +1801,34 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 for ll in 0..num_ivls {
                     let mut ci1 = *cc1.at(ll)?;
                     let mut ci2 = *cc2.at(ll)?;
-                    // (status unchecked)
-                    let found = ignore_soft(mgr.find_or_create_proto_edge(
-                        k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                    ))?;
+                    // (status unchecked upstream). Not upstream (#18927): a failed step of
+                    // making the interval's edge (any but the geometric quits, which make
+                    // no edge) refuses the Boolean, which would otherwise build a body
+                    // lacking that edge or its definition; that holds too where another
+                    // face pair made the edge already.
+                    let (found, _was_created) = match split_soft(
+                        mgr.find_or_create_needed_proto_edge(
+                            k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
+                        ),
+                    )? {
+                        Ok(r) => r,
+                        // (a preparation request is retried by its caller, as it is)
+                        Err(cause @ SolidError::PreparationRequired { .. }) => return Err(cause),
+                        Err(cause) => {
+                            return Err(Failure::new(
+                                OP_INTERSECT_TOPOLOGY,
+                                BooleanFailure::IntervalEdgeNotMade,
+                            )
+                            .caused_by(cause)
+                            .into_error())
+                        }
+                    };
                     *cc1.at_mut(ll)? = ci1;
                     *cc2.at_mut(ll)? = ci2;
 
                     // remember pNewPE is part of the trim boundary of this
                     // coincident face pair
-                    if let Some((Some(pe), _was_created)) = found {
+                    if let Some(pe) = found {
                         if are_coincident {
                             add_unique(&mut coinc_pes, pe);
                         }
@@ -1855,10 +1883,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(
-            k,
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?;
+        mgr.combine_proto_vertices_not_proved_apart(k)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)

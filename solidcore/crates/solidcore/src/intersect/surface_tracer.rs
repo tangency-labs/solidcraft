@@ -65,8 +65,9 @@
 //!   ([`SurfaceCache::get_tree`], which builds the tree when needed) is made where the
 //!   tree is used (the global solve of [`find_interior_curves_base`]).
 //!   `SmCacheCheckOutIn` has no counterpart (the cache
-//!   is borrowed for the whole trace), the `SmTemporaryChangeValue`s of
-//!   `DoTrace` are restored on every exit.
+//!   is borrowed for the whole trace), and the cache flags `DoTrace` changes with
+//!   `SmTemporaryChangeValue` are read by none of its steps, so the cache keeps its
+//!   own.
 //! - **Global solver.** The tracer's `SmGlobalSolver` base is made for the solve in
 //!   [`find_interior_curves_base`] with the members the constructor sets (one tree,
 //!   two variables, `SM_SO_INTERSECT`/`SM_SR_NODES` replaced by `SolveIt`'s
@@ -2078,8 +2079,8 @@ where
     Ok(())
 }
 
-/// `SmSurfaceTracer::DoTrace`: stores the optional tolerances, then (with the
-/// cache's point test off and boundary curve processing on) traces from every
+/// `SmSurfaceTracer::DoTrace`: stores the optional tolerances, then (upstream with
+/// the cache's point test off and boundary curve processing on) traces from every
 /// boundary start point ([`SurfaceTrace::find_boundary_start_points`],
 /// [`SurfaceTrace::trace_curve`], reversed when traced backwards, [`flush_curve`])
 /// and then the interior curves ([`SurfaceTrace::find_interior_curves`]).
@@ -2113,18 +2114,12 @@ where
     let domain = t.tracer().uv_domain;
     let _below_g1 = cache.surface_continuity(&domain)? as i32 <= ContinuityType::C0 as i32;
 
-    // Turn off point testing and turn on boundary curve processing.
-    let saved_point_test = cache.point_test_enabled;
-    let saved_boundary = cache.process_boundary_curves;
-    cache.point_test_enabled = false;
-    cache.process_boundary_curves = true;
-    let r = do_trace_body(t, k, cache);
-    cache.point_test_enabled = saved_point_test;
-    cache.process_boundary_curves = saved_boundary;
-    r
+    // (upstream turns off point testing and turns on boundary curve processing for
+    // the trace: none of its steps reads either, so the cache keeps its flags)
+    do_trace_body(t, k, cache)
 }
 
-/// The part of [`do_trace_base`] run with the cache flags changed.
+/// The part of [`do_trace_base`] after its tolerances and continuity check.
 fn do_trace_body<'s, T, O>(
     t: &mut T,
     k: &Kernel,

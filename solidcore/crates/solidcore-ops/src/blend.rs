@@ -44,6 +44,9 @@ use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
 };
+use solidcore::blend::blend_corner::separate_ends::{
+    plan as separate_end_plan, SectionKind, SeparateEndPlan,
+};
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
@@ -215,12 +218,12 @@ pub enum Turn {
 }
 
 /// How chamfers close a corner where every edge at a vertex is chamfered between planes (the
-/// kernel's blend corner, `solidcore::blend::blend_corner::chamfer`, under the kernel's
-/// `fillet_chamfer_corner` fix).
+/// kernel's blend corner, `solidcore::blend::blend_corner::chamfer`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChamferCorner {
-    /// The chamfer planes run on until they meet: what ops builds without asking (a corner the
-    /// session is not told a type for), so a design saved without one keeps its corners.
+    /// The chamfer planes run on until they meet: the default, so a design saved without a
+    /// corner type keeps its corners. Refused where no mitre exists (with the too wide
+    /// chamfer's fit at three chamfers).
     #[default]
     Mitre,
     /// The corner is cut off by the plane through the points where the chamfers' rails cross:
@@ -637,7 +640,7 @@ fn blend_failure(
     call: SessionCall,
 ) -> (Error, Option<EdgeId>) {
     if let SolidError::BlendRefused { refusal, .. } = &e {
-        if let Some(error) = refused(s, refusal) {
+        if let Some(error) = refused(s.target(), refusal) {
             return (crate::session::noted(&e, error), None);
         }
     }
@@ -679,8 +682,7 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
 /// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
 /// its entities by their indices in the session's body; `None` for an entity that body does
 /// not hold, and for a setback too short ([`session_refusal`]'s).
-fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal) -> Option<Error> {
-    let b = s.target();
+fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
     let edge = |e: EdgeId| b.edge_list().iter().position(|&x| x == e);
     let vertex = |v: VertexId| b.vertex_list().iter().position(|&x| x == v);
     Some(match *refusal {
@@ -1002,11 +1004,12 @@ fn pass(
         let mut s = FilletSession::new(k, b)?;
         // read as the corners are made
         s.set_swept_turns(p.turn == Turn::Swept);
-        // the Facet asked of the kernel's chamfer corners; the default leaves the session as it
-        // always was (no type set), so it builds what ops built before
-        if p.chamfer_corner == ChamferCorner::Facet {
-            s.set_chamfer_corner(solidcore::blend::blend_corner::BlendChamferCorner::Facet);
-        }
+        // the corner type the caller chose, always asked: a type refused where it does not
+        // exist, with its fit (the kernel picks a type itself only where none is asked)
+        s.set_chamfer_corner(match p.chamfer_corner {
+            ChamferCorner::Mitre => solidcore::blend::blend_corner::BlendChamferCorner::Mitre,
+            ChamferCorner::Facet => solidcore::blend::blend_corner::BlendChamferCorner::Facet,
+        });
         let prepared = prepare(k, &mut s, p.edges, p.section, p.law);
         let prepared_ok = prepared.is_ok();
         // a set-back vertex is no Ball: its corner is the one the setback is set on
@@ -1214,6 +1217,71 @@ fn untagged(b: &mut Brep) -> solidcore::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Apply the kernel's separate-End plan with the ordinary ops blend passes.
+fn separated_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    kind: Blend,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let section = if kind == Blend::Chamfer {
+        SectionKind::Chamfer
+    } else {
+        SectionKind::Round
+    };
+    let groups = match separate_end_plan(k, b, picked, sizes, section) {
+        Ok(SeparateEndPlan::NotApplicable) => return Ok(None),
+        Ok(SeparateEndPlan::Limited { size, edge }) => {
+            let kind = if section == SectionKind::Chamfer {
+                FitKind::Distance
+            } else {
+                FitKind::Radius
+            };
+            return Ok(Some(Err(Error::TooLarge {
+                size,
+                kind,
+                at: edge_point(k, b, edge)?,
+                face: None,
+                why: Some(RoomReason::RailLeavesFace),
+            })));
+        }
+        Ok(SeparateEndPlan::Ends(groups)) => groups,
+        Err(e) => {
+            let error = match &e {
+                SolidError::BlendRefused { refusal, .. } => refused(b, refusal),
+                _ => failure(&e),
+            };
+            return match error {
+                Some(error) => Ok(Some(Err(crate::session::noted(&e, error)))),
+                None => Err(e),
+            };
+        }
+    };
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = if kind == Blend::Chamfer {
+            sizes
+                .iter()
+                .map(|&d| ChamferSize::Distances([d, d]))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let section = if kind == Blend::Chamfer {
+            Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            }
+        } else {
+            Section::Round(sizes)
+        };
+        pass_or_refuse(k, b, together(edges, section, Turn::Mitre, &[], contract))
+            .map(|result| result.map(|_| ()))
+    };
+    groups.build(k, b, picked, sizes, pass_group).map(Some)
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
@@ -1542,7 +1610,7 @@ pub fn failure(e: &SolidError) -> Option<Error> {
 
 /// [`failure`] for a failure of the session `s`, where a step of the session failed: the
 /// kernel's statement followed by what the session noted of that step ([`noted`]), so two
-/// failures the kernel states alike ("the fillet body is not built") say which step failed
+/// failures the kernel states alike ("a step of the fillet executive failed") say which step failed
 /// and why. A session that noted nothing gives [`failure`]'s; `None` as [`failure`].
 #[must_use]
 pub fn session_failure(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
@@ -1647,8 +1715,7 @@ pub fn blend(
 /// The errors of [`blend`], including [`Error::Argument`] for an absent index or an entity
 /// in the supplied order that does not belong to the body, for [`Turn::Swept`] with a blend
 /// other than [`Blend::Round`], and for [`ChamferCorner::Facet`] with one other than
-/// [`Blend::Chamfer`]; [`Error::Unsupported`] for the Facet without the kernel's
-/// `fillet_chamfer_corner` fix. A swept turn the kernel does not build is
+/// [`Blend::Chamfer`]. A swept turn the kernel does not build is
 /// [`Error::TurnRefused`] with the kernel's reason and the corner's point: `room` at a sharp
 /// concave side edge (no radius of the rounds passes it), else where the blend corner does not
 /// build one yet. A refusal the kernel gives no reason for is as it classifies it
@@ -1682,7 +1749,6 @@ pub fn blend_ordered(
 /// # Errors
 /// The errors of [`blend`]; [`Error::Argument`] for [`Turn::Swept`] with a blend other than
 /// [`Blend::Round`] and for [`ChamferCorner::Facet`] with one other than [`Blend::Chamfer`];
-/// [`Error::Unsupported`] for the Facet without the kernel's `fillet_chamfer_corner` fix;
 /// [`Error::TurnRefused`] for a swept turn the kernel does not build.
 pub fn blend_with(
     body: &Body,
@@ -1774,13 +1840,6 @@ fn blend_on_body(
     options: BlendOptions,
 ) -> solidcore::Result<Result<Blended>> {
     let turn = options.turn;
-    // the Facet is the kernel's blend corner's, under its fix: refused, not built as the
-    // Mitre, without it
-    if options.chamfer_corner == ChamferCorner::Facet && !k.fixes.fillet_chamfer_corner {
-        return Ok(Err(Error::Unsupported(
-            "the chamfered corner needs the kernel's fillet_chamfer_corner fix",
-        )));
-    }
     let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
     let picked = match each_once(edge_order, edges) {
         Ok(p) => p,
@@ -1805,6 +1864,24 @@ fn blend_on_body(
     let contract = options.contract;
     let expect = Expect::under(k, b, Proof::default(), contract)?;
     let mut dropped = vec![false; edges.len()];
+    if picked.len() > 1
+        && back.is_empty()
+        && corners == Corners::Filled
+        && turn == Turn::Mitre
+        && options.chamfer_corner == ChamferCorner::Mitre
+        && matches!(kind, Blend::Chamfer | Blend::Round)
+    {
+        if let Some(made) = separated_end_passes(k, b, &picked, each, kind, contract)? {
+            if let Err(e) = made {
+                return Ok(Err(e));
+            }
+            return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                dropped,
+                holes: Vec::new(),
+                made: Vec::new(),
+            }));
+        }
+    }
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
         Blend::Curvature => |s| Section::Curvature(s),
