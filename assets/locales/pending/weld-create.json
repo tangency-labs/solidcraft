@@ -1,0 +1,10 @@
+{
+  "en": {
+    "cmd.weld.create": "Weld",
+    "cmd.weld.delete": "Delete Weld",
+    "help.weld.create": "Add a weld graphic with its sizes and manufacturing settings. Use it to keep welding instructions with the design.",
+    "ui.weld.create.invalid_type": "Unknown weld type.",
+    "ui.weld.create.local_picks": "Picking geometry is not available in this panel yet. Create a weld graphic without picks.",
+    "ui.weld.create.symbol_unavailable": "The weld symbol editor is not available yet."
+  }
+}

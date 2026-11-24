@@ -298,6 +298,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod weld;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -631,6 +632,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
+    v.extend(weld::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

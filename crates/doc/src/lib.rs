@@ -94,6 +94,7 @@ pub use thread_catalog::parse_tapped_thread;
 pub use thread_catalog::tapped_thread_sizes;
 pub use thread_catalog::untabulated_taper_tap;
 mod walk;
+pub mod weld;
 pub use profile_refs::WHOLE_PROFILE_TOO_MANY_CURVES;
 pub use profile_refs::capture_profile_selection;
 pub use profile_refs::profile_fallback_notes;

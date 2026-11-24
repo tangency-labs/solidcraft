@@ -4,6 +4,65 @@ use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    fn record() -> crate::weld::WeldRecord {
+        crate::weld::WeldRecord {
+            id: 42,
+            number: 1,
+            settings: crate::weld::WeldSettings::default(),
+            symbol: Some(solidcraft_geom::weld::Weld {
+                arrow_side: Some(solidcraft_geom::weld::WeldSide {
+                    kind: solidcraft_geom::weld::Kind::Fillet,
+                    size: Some(solidcraft_geom::weld::Size::Throat(3.)),
+                    length_mm: None,
+                    intermittent: None,
+                    contour: None,
+                }),
+                other_side: None,
+                all_round: false,
+                field: true,
+                tail: None,
+            }),
+        }
+    }
+    #[test]
+    fn weld_graphics_round_trip_and_old_design_default() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        let text = serde_json::to_string(&doc).unwrap();
+        let back = crate::format::read(&text).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.next_item_id().unwrap() > 42);
+        let old = crate::format::read(&serde_json::to_string(&Document::new("Old")).unwrap()).unwrap();
+        assert!(old.welds.is_empty());
+    }
+    #[test]
+    fn weld_graphics_refuse_hostile_saved_records() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        for (path, bad) in [
+            (vec!["id"], serde_json::json!(0)),
+            (vec!["number"], serde_json::json!(0)),
+            (vec!["settings", "weld_type"], serde_json::json!("unknown")),
+            (vec!["settings", "size", "a"], serde_json::json!(-1)),
+            (vec!["settings", "process"], serde_json::json!(7)),
+            (vec!["symbol", "arrow_side", "size", "mm"], serde_json::json!(0)),
+        ] {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            let mut target = &mut value["welds"][0];
+            for key in path {
+                target = &mut target[key];
+            }
+            *target = bad;
+            assert!(crate::format::read(&value.to_string()).is_err());
+        }
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value["welds"] = serde_json::json!([record(), record()]);
+        assert!(crate::format::read(&value.to_string()).is_err());
+    }
+}
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)

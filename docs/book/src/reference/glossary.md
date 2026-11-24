@@ -810,6 +810,12 @@ Some translations show the clash today: Japanese and Chinese show a hole's flat 
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
 
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
+
 ## Mounting plate
 
 A separate, constant-thickness plate attached to a structural member's planar face,

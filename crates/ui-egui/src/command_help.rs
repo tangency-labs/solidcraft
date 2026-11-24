@@ -343,6 +343,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "weld.create",
 ];
 
 /// The help for `command` in the current language, when it has any.

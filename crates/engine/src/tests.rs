@@ -4,6 +4,91 @@ use std::f64::consts::PI;
 use serde_json::{Value, json};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    #[test]
+    fn weld_create_is_a_graphic_and_undoable() {
+        let mut s = Session::default();
+        let reply = s.execute("weld.create", &json!({"weld_type":"fillet","size":{"a":"0.25 in"}})).unwrap();
+        assert_eq!(reply["number"], "W1");
+        assert_eq!(s.doc.welds.len(), 1);
+        assert_eq!(s.doc.welds[0].settings.size["a"], 6.35);
+        assert!(s.doc.features.is_empty());
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(s.execute("weld.create", &json!({"weld_type":"spot"})).unwrap()["number"], "W2");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.welds.is_empty());
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+    }
+    #[test]
+    fn weld_create_hostile_params_leave_document_unchanged() {
+        let mut s = Session::default();
+        let before = s.doc.clone();
+        let cases = [
+            json!(null),
+            json!([]),
+            json!({}),
+            json!({"weld_type":7}),
+            json!({"weld_type":"unknown"}),
+            json!({"weld_type":"fillet","size":{"a":0}}),
+            json!({"weld_type":"fillet","size":{"a":-1}}),
+            json!({"weld_type":"fillet","size":{"a":100001}}),
+            json!({"weld_type":"fillet","size":{"a":"NaN"}}),
+            json!({"weld_type":"fillet","size":{"a":"1 / 0"}}),
+            json!({"weld_type":"fillet","size":{"a":"2 deg"}}),
+            json!({"weld_type":"fillet","size":{"a":[]}}),
+            json!({"weld_type":"fillet","size":{"nope":3}}),
+            json!({"weld_type":"fillet","size":{}}),
+            json!({"weld_type":"fillet","face":"inward"}),
+            json!({"weld_type":"fillet","process":7}),
+            json!({"weld_type":"fillet","root_side":2}),
+            json!({"weld_type":"fillet","ends":3}),
+            json!({"weld_type":"fillet","reference_plane":1}),
+            json!({"weld_type":"fillet","tack":"yes"}),
+            json!({"weld_type":"fillet","pattern_count":1.5}),
+            json!({"weld_type":"fillet","pattern_count":10001}),
+            json!({"weld_type":"fillet","pattern_pitch":0}),
+            json!({"weld_type":"fillet","density":-1}),
+            json!({"weld_type":"fillet","picks":{"line":["Edge 1"]}}),
+            json!({"weld_type":"fillet","picks":{"unknown":[]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0]}]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":"missing","index":0}]}}),
+            json!({"weld_type":"fillet","picks":{"point":[{"point":[1e10,0,0]}]}}),
+            json!({"weld_type":"fillet","symbol":{"arrow_side":null,"other_side":null,"field":false,"all_round":false,"tail":""}}),
+        ];
+        for p in cases {
+            assert!(matches!(s.execute("weld.create", &p), Err(EngineError::BadParams { .. })), "{p}");
+            assert_eq!(s.doc, before, "{p}");
+        }
+    }
+    #[test]
+    fn weld_all_panel_type_ids_and_delete() {
+        let mut s = Session::default();
+        for id in solidcraft_doc::weld::TYPES {
+            s.execute("weld.create", &json!({"weld_type":id})).unwrap();
+        }
+        assert_eq!(s.doc.welds.len(), 26);
+        let id = s.doc.welds[0].id;
+        assert_eq!(s.execute("weld.delete", &json!({"id":id})).unwrap()["deleted"], id);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 26);
+        assert_eq!(s.doc.welds[0].id, id);
+    }
+    #[test]
+    fn weld_topology_picks_validate_exact_indices() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        let body = s.model.state().bodies[0].name.clone();
+        s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":0}]}})).unwrap();
+        let before = s.doc.clone();
+        assert!(s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":999999}]}})).is_err());
+        assert_eq!(s.doc, before);
+    }
+}
 
 /// A folder of the test's own, removed when dropped.
 pub(crate) struct Folder(pub std::path::PathBuf);
