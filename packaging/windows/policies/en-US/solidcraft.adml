@@ -245,6 +245,41 @@ In the Send to Slicer dialog the setting shows as set by the organization. The p
       <string id="Slicer_creatware">CreatWare</string>
       <string id="Slicer_slic3r">Slic3r</string>
       <string id="Slicer_easyprint">EasyPrint (Printables, in the browser)</string>
+      <string id="Theme">Theme</string>
+      <string id="Theme_Explain">The colour theme of the interface (Preferences, Appearance, Theme).
+
+Enabled: SolidCraft uses the theme chosen here, and people cannot choose, import or follow another. It does not switch between a day and a night theme.
+
+Disabled or Not configured: each person chooses.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Theme_dark">Dark</string>
+      <string id="Theme_light">Light</string>
+      <string id="Theme_1-bit-dark">1-bit Dark</string>
+      <string id="Theme_1-bit">1-bit</string>
+      <string id="Theme_akari">Akari</string>
+      <string id="Theme_amber-phosphor">Amber Phosphor</string>
+      <string id="Theme_blueprint">Blueprint</string>
+      <string id="Theme_catppuccin-mocha">Catppuccin Mocha</string>
+      <string id="Theme_cga">CGA</string>
+      <string id="Theme_clay-dark">Clay Dark</string>
+      <string id="Theme_clay">Clay</string>
+      <string id="Theme_cupertino">Cupertino</string>
+      <string id="Theme_graphite">Graphite</string>
+      <string id="Theme_green-phosphor">Green Phosphor</string>
+      <string id="Theme_gruvbox-dark">Gruvbox Dark</string>
+      <string id="Theme_gruvbox-light">Gruvbox Light</string>
+      <string id="Theme_high-contrast">High Contrast</string>
+      <string id="Theme_nord">Nord</string>
+      <string id="Theme_nosferatu">Nosferatu</string>
+      <string id="Theme_okibi">Okibi</string>
+      <string id="Theme_one-dark">One Dark</string>
+      <string id="Theme_onyx">Onyx</string>
+      <string id="Theme_platinum-9">Platinum 9</string>
+      <string id="Theme_solarized-dark">Solarized Dark</string>
+      <string id="Theme_solarized-light">Solarized Light</string>
+      <string id="Theme_solidcraft-95">SolidCraft 95</string>
+      <string id="Theme_tokyo-night">Tokyo Night</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -292,6 +327,9 @@ In the Send to Slicer dialog the setting shows as set by the organization. The p
       </presentation>
       <presentation id="Slicer">
         <dropdownList refId="Slicer" noSort="true" defaultItem="0">Slicer:</dropdownList>
+      </presentation>
+      <presentation id="Theme">
+        <dropdownList refId="Theme" noSort="true" defaultItem="0">Theme:</dropdownList>
       </presentation>
     </presentationTable>
   </resources>

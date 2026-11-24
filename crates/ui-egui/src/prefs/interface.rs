@@ -112,7 +112,8 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
                 // A theme file another tool writes, reloaded when it changes (#7573).
-                follow_row(app, ui);
+                let locked = app.policy.locks("theme");
+                crate::policy::row(ui, locked, |ui| follow_row(app, ui));
             });
         });
         ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {

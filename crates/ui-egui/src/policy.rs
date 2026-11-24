@@ -52,6 +52,8 @@ enum Kind {
     Permission,
     /// A `REG_SZ`: one of these ids, in any case.
     Choice(&'static [&'static str]),
+    /// A `REG_SZ`: `dark`, `light` or the id of a built-in theme, in any case.
+    Theme,
 }
 
 /// `MeshExportFormat`: the formats the Save Mesh dialog offers.
@@ -111,6 +113,7 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
     Lock { policy: "Slicer", pref: "send_slicer", kind: Kind::Choice(SLICERS) },
     Lock { policy: "StatusBar", pref: "status_bar", kind: Kind::Switch },
+    Lock { policy: "Theme", pref: "theme", kind: Kind::Theme },
 ];
 
 /// A preference's value, as a policy sets it.
@@ -252,6 +255,11 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Choice(ids), Value::Text(text)) if text.len() <= MAX_CHOICE => {
             ids.iter().find(|id| id.eq_ignore_ascii_case(text.trim())).map(|id| Setting::Text((*id).into()))
         }
+        (Kind::Theme, Value::Text(text)) if text.len() <= MAX_CHOICE => {
+            let text = text.trim();
+            let builtin = crate::theme_files::builtin().iter().map(|t| t.id.as_str());
+            ["dark", "light"].into_iter().chain(builtin).find(|id| id.eq_ignore_ascii_case(text)).map(|id| Setting::Text(id.into()))
+        }
         _ => None,
     }
 }
@@ -277,6 +285,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
         "status_bar" => Setting::Switch(p.status_bar),
+        "theme" => Setting::Text(p.theme.clone()),
         "view_dxf_dashed" => Setting::Switch(p.view_dxf_dashed),
         "view_dxf_zero" => Setting::Text(p.view_dxf_zero.clone()),
         _ => return None,
@@ -310,6 +319,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
         ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
+        ("theme", Setting::Text(text)) => p.theme.clone_from(text),
         ("view_dxf_dashed", Setting::Switch(on)) => p.view_dxf_dashed = *on,
         ("view_dxf_zero", Setting::Text(text)) => p.view_dxf_zero.clone_from(text),
         _ => {}
@@ -431,7 +441,7 @@ fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
     if app.policy.mandatory.settings.is_empty() {
         return;
     }
-    let mut units = false;
+    let (mut units, mut theme) = (false, keep_own);
     for (pref, setting) in app.policy.mandatory.settings.clone() {
         let Some(current) = get(&app.preferences, pref) else { continue };
         if current == setting {
@@ -442,9 +452,15 @@ fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
         }
         set(&mut app.preferences, pref, &setting);
         units |= pref == "default_units";
+        theme |= pref == "theme";
     }
     if units {
         crate::prefs::default_units_changed(app);
+    }
+    // Dark or light follows the theme in force (a theme file's palette follows it in the frame).
+    if theme && app.policy.locks("theme") {
+        let id = app.preferences.theme.clone();
+        app.ui.dark = crate::theme_files::find(&id, &app.preferences.custom_themes).map_or(id == "dark", |f| f.base.is_dark());
     }
     // The workspace shows the layout in force (an embedded window still docks its panels).
     if app.policy.locks("layout") {
@@ -1091,6 +1107,42 @@ mod tests {
     }
 
     #[test]
+    fn the_theme_is_set_by_the_policy_and_cannot_be_imported_or_followed_over() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.theme = "light".into();
+        h.app.ui.dark = false;
+        h.app.policy = Policy::from_json(r#"{"Theme": " Nord "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.theme, "nord");
+        assert!(h.app.ui.dark, "Nord is a dark theme");
+        assert_eq!(saved(&h.app)["theme"], json!("light"), "the theme is saved as the person chose it");
+        for refused in [
+            h.call("ui.prefs", json!({"theme": "dark"})),
+            h.call("ui.prefs", json!({"theme_import": {"format": crate::theme_files::FORMAT, "name": "ACME", "base": "light"}})),
+            h.call("ui.prefs", json!({"theme_follow": "acme.json"})),
+        ] {
+            assert_eq!(refused["ok"], json!(false), "{refused}");
+        }
+        assert!(crate::prefs::import_theme(&mut h.app, &json!({"format": crate::theme_files::FORMAT, "name": "ACME", "base": "light"})).is_err());
+        assert!(h.app.preferences.custom_themes.is_empty(), "nothing was imported");
+        assert_eq!(h.app.preferences.theme, "nord");
+        // Preferences shows the theme greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(3);
+        assert!(h.widget("Set by your organization").is_some());
+        // Dark and Light are themes too; following the system or a theme that is not built in is no policy.
+        let dark = Policy::from_json(r#"{"Theme": "DARK"}"#);
+        assert_eq!(dark.mandatory.settings.get("theme"), Some(&Setting::Text("dark".into())));
+        for hostile in ["system", "acme", ""] {
+            assert!(Policy::from_json(&format!(r#"{{"Theme": "{hostile}"}}"#)).locked().is_empty(), "{hostile}");
+        }
+    }
+
+    #[test]
     fn without_a_policy_nothing_is_enforced_or_kept() {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.default_units = "ft".into();
@@ -1119,6 +1171,11 @@ mod tests {
         }
         for unit in crate::prefs::UNITS {
             assert!(admx.contains(&format!("<string>{unit}</string>")), "DefaultUnits offers no {unit}");
+        }
+        solidcraft_look::install_tables();
+        assert!(crate::theme_files::builtin().len() > 2, "the built-in themes are installed");
+        for id in ["dark", "light"].into_iter().chain(crate::theme_files::builtin().iter().map(|t| t.id.as_str())) {
+            assert!(admx.contains(&format!("<string>{id}</string>")), "Theme offers no {id}");
         }
     }
 

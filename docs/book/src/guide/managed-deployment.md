@@ -41,6 +41,7 @@ can run it.
 | Mesh export format | `MeshExportFormat` | `REG_SZ` | `stl`, `3mf` or `3mf-tagged` (3MF with face tags): the format File, Save As Mesh and Send to Slicer write; Export STL and Export 3MF open the dialog with it too. SolidCraft 0.48 or later. |
 | Mesh export quality | `MeshExportQuality` | `REG_SZ` | `standard`, `fine` or `finest`: how closely a saved mesh follows curved faces. SolidCraft 0.48 or later. |
 | Slicer | `Slicer` | `REG_SZ` | `prusa`, `bambu`, `orca`, `cura`, `superslicer`, `creality`, `elegoo`, `anycubic`, `ideamaker`, `lychee`, `qidi`, `chitubox`, `creatware`, `slic3r` or `easyprint` (EasyPrint, in the browser): the slicer File, Send to Slicer uses, which people cannot change; when it is not installed, Send to Slicer says no slicer was found. Open in EasyPrint uses it too. SolidCraft 0.48 or later. |
+| Theme | `Theme` | `REG_SZ` | `dark`, `light` or the id of a built-in theme, such as `nord`, `high-contrast` or `solarized-light` (the file names in [`crates/look/themes`](https://github.com/tangency-labs/solidcraft/tree/main/crates/look/themes)): the interface theme, which people cannot change, import over or follow from a file; it does not switch between day and night. SolidCraft 0.48 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 
