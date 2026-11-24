@@ -15,6 +15,7 @@ Add a thin wall along an open sketch line, filled out to the faces of the part: 
 | Thickness | How thick the rib is. It starts at 2 in the design's unit. | 0.25 in for a gusset on a 0.25 in bracket. |
 | Depth | How far the rib fills from the line. Empty means to the next face of the part. | Leave it empty for a gusset. |
 | Flip | Fill toward the other side of the line. | Turn it on if the preview fills away from the corner. |
+| Extend ends (In plane only) | Off: the rib ends where the line ends. On: the line's open ends run on to the next face of the part, so the rib can reach the wall even when the line stops short of it. A thin wall can be skipped, so check the preview. It isn't shown when Direction is Normal. | Turn it on for a rib that meets a curved wall, where it's hard to end the line exactly on the face. |
 
 #### Try it: put a gusset in an L-bracket
 
@@ -27,6 +28,7 @@ Add a thin wall along an open sketch line, filled out to the faces of the part: 
 
 - **Do** sketch an In plane rib on the plane where you want its middle. Half the thickness goes each way from that plane, so a rib sketched on an outside face hangs half off the part. With Normal, the rib grows out of the sketch plane instead, centered on the line: draw the line where the rib's middle goes, on a plane at the rib's edge.
 - **Do** weigh Rib against a plain extrude. For one gusset on a machined part, a triangle sketched and extruded Symmetric works just as well. Rib pays off when the walls may change size (it fills to the new faces), when the faces it meets are curved or sloped, or when you need many ribs ({{#command solid.web}}).
+- **Do** turn on Extend ends when the line can't end exactly on the wall, such as a curved wall. Sketch the line a little short and the rib can run on to the face. A thin wall can be skipped, so check the preview.
 - **Do** keep a machined rib's thickness at least as big as the end mill that has to cut around it, and think about how the pocket beside it will be cut. A thin rib between deep pockets chatters.
 - **Do** type the unit with the number when the print uses another unit. In a millimetre design, typing 0.25 in enters 6.35 mm.
 - **Don't** close the sketch line into a loop. A rib needs an open line; use {{#command solid.extrude}} for a closed shape.

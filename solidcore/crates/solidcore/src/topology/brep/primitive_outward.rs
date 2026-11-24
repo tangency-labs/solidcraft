@@ -1643,9 +1643,11 @@ mod tests {
 
     /// The behaviour change on tiny primitives. The certificate either certifies or refuses
     /// (never an error), a certified body is never Negative under the full proof, and the 1e-3
-    /// box and cylinder are certified. Below the constructors' size resolution they refuse
-    /// with `InvalidInput` (the box at 1e-12), which is a result, not a failure. What the full
-    /// proof says at each size is printed for the change list.
+    /// box and cylinder are certified. Below the constructors' size resolution they refuse:
+    /// `InvalidInput` for the box at 1e-12, and at 1e-6 and 1e-9 the typed failure of the
+    /// face that cannot be made (WR-596; main built no face there and returned the empty
+    /// body). The size that builds is 1e-3: a closed six-face box that passes the level-2
+    /// check. What the full proof says at each size is printed for the change list.
     #[test]
     fn tiny_primitives_and_the_full_proof() {
         fn sign(k: &Kernel, b: &mut Brep) -> &'static str {
@@ -1670,13 +1672,40 @@ mod tests {
                     println!("TINY box {s:e}: certificate {cert} full proof {full}");
                     assert!(!(cert && full == "Negative"), "box {s:e}");
                     assert!(cert || s < 1e-3, "box {s:e} not certified");
+                    // the size the refusals below name builds: six faces, level-2 clean
+                    assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
+                    let lines = crate::topology::brep::validation::check_brep(
+                        &mut k,
+                        &mut b,
+                        crate::topology::brep::validation::CheckLevel::Level2,
+                    )
+                    .unwrap()
+                    .lines();
+                    assert!(lines.is_empty(), "box {s:e}: {lines:?}");
                 }
                 Err(e) => {
                     println!("TINY box {s:e}: constructor refuses: {e:?}");
-                    assert!(
-                        matches!(e, crate::SolidError::InvalidInput { .. }),
-                        "box {s:e}: {e:?}"
-                    );
+                    assert!(s < 1e-3, "box {s:e}: {e:?}");
+                    if s < 1e-9 {
+                        assert!(
+                            matches!(e, crate::SolidError::InvalidInput { .. }),
+                            "box {s:e}: {e:?}"
+                        );
+                    } else {
+                        // the face construction's failure is kept as the cause, and gives
+                        // the class
+                        let cause = e.cause().expect("the face construction's failure");
+                        assert_eq!(
+                            e.topology_failure(),
+                            Some(&crate::error::topology::TopologyFailure::FaceNotMade {
+                                class: cause.kind()
+                            }),
+                            "box {s:e}"
+                        );
+                        assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
+                        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
+                        assert_eq!(e.kind(), cause.kind(), "box {s:e}");
+                    }
                 }
             }
             let mut k = Kernel::default();

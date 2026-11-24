@@ -1,6 +1,8 @@
 ;; Original importer test component, encoded from the importer-world WIT with wasm-tools 1.263.0.
 ;; It copies the start of the file it imports into the design and returns a one-item loss report.
-;; A file starting with S copies part.bin beside it instead, T traps and L loops forever.
+;; A file starting with S copies part.bin beside it instead, T traps and L loops forever. U returns
+;; unsupported("the model has no solids") and I invalid-input("file", the same text), as an
+;; importer built against craft:plugin 0.1 had to.
 (component
   (type $ty-__PACKAGE__/types@__VERSION__ (;0;)
     (instance
@@ -8,7 +10,7 @@
       (export (;1;) "command-failure" (type (eq 0)))
       (type (;2;) (record (field "field" string) (field "reason" string)))
       (export (;3;) "field-failure" (type (eq 2)))
-      (type (;4;) (variant (case "permission-denied" string) (case "command-failed" 1) (case "limit-exceeded" string) (case "invalid-manifest" 3) (case "invalid-input" 3) (case "trap" string) (case "cancelled")))
+      (type (;4;) (variant (case "permission-denied" string) (case "command-failed" 1) (case "limit-exceeded" string) (case "invalid-manifest" 3) (case "invalid-input" 3) (case "trap" string) (case "cancelled") (case "unsupported" string)))
       (export (;5;) "plugin-error" (type (eq 4)))
       (type (;6;) string)
       (export (;7;) "json" (type (eq 6)))
@@ -100,6 +102,54 @@
       i32.const 20
       i32.load
       i32.load8_u
+      i32.const 85
+      i32.eq
+      if ;; label = @1
+        i32.const 64
+        i32.const 1
+        i32.store8
+        i32.const 68
+        i32.const 7
+        i32.store8
+        i32.const 72
+        i32.const 3072
+        i32.store
+        i32.const 76
+        i32.const 23
+        i32.store
+        i32.const 64
+        return
+      end
+      i32.const 20
+      i32.load
+      i32.load8_u
+      i32.const 73
+      i32.eq
+      if ;; label = @1
+        i32.const 64
+        i32.const 1
+        i32.store8
+        i32.const 68
+        i32.const 4
+        i32.store8
+        i32.const 72
+        i32.const 3104
+        i32.store
+        i32.const 76
+        i32.const 4
+        i32.store
+        i32.const 80
+        i32.const 3072
+        i32.store
+        i32.const 84
+        i32.const 23
+        i32.store
+        i32.const 64
+        return
+      end
+      i32.const 20
+      i32.load
+      i32.load8_u
       i32.const 83
       i32.eq
       if ;; label = @1
@@ -141,6 +191,8 @@
     )
     (data (;0;) (i32.const 1024) "{\22summary\22:\22Copied the file\22,\22items\22:[{\22severity\22:\22dropped\22,\22subject\22:\22Sketch1\22,\22message\22:\22Splines are not supported\22}]}")
     (data (;1;) (i32.const 2048) "part.bin")
+    (data (;2;) (i32.const 3072) "the model has no solids")
+    (data (;3;) (i32.const 3104) "file")
     (@producers
       (processed-by "wit-component" "0.263.0")
     )
@@ -228,7 +280,7 @@
     (import "import-type-command-failure" (type (;3;) (eq 2)))
     (type (;4;) (record (field "field" string) (field "reason" string)))
     (import "import-type-field-failure" (type (;5;) (eq 4)))
-    (type (;6;) (variant (case "permission-denied" string) (case "command-failed" 3) (case "limit-exceeded" string) (case "invalid-manifest" 5) (case "invalid-input" 5) (case "trap" string) (case "cancelled")))
+    (type (;6;) (variant (case "permission-denied" string) (case "command-failed" 3) (case "limit-exceeded" string) (case "invalid-manifest" 5) (case "invalid-input" 5) (case "trap" string) (case "cancelled") (case "unsupported" string)))
     (import "import-type-plugin-error" (type (;7;) (eq 6)))
     (type (;8;) (record (field "name" string) (field "size" u64)))
     (import "import-type-file-info" (type (;9;) (eq 8)))

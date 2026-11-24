@@ -149,7 +149,7 @@ fn put_record(o: &mut Vec<f64>, f: &DropCurveFail<NoObject>) -> Result<(), Harne
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let Some(srf) = rust_surface(&k, &i.surface)? else {
         return Ok(Output::new().values("rec", vec![NO_SURFACE]));
     };
@@ -457,7 +457,7 @@ fn gen_case(rng: &mut Rng, k: &Kernel) -> Option<Inputs> {
 }
 
 fn gen_inputs(rng: &mut Rng) -> Inputs {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     loop {
         if let Some(i) = gen_case(rng, &k) {
             return i;
@@ -774,7 +774,7 @@ fn fixtures() -> Vec<(String, Inputs)> {
         ));
     }
     // the natural domain of the fixtures above that used a placeholder
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     for (_, i) in &mut v {
         if i.domain == [0.0; 4] {
             if let Some((_, nat)) = surface_with_domain(&k, &i.surface) {

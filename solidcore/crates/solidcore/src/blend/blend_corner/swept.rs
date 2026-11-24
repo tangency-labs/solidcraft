@@ -42,7 +42,8 @@ use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
+use crate::error::{EntityRef, Result, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::intersect::surface_intersector::p1::SrfIndex;
@@ -57,6 +58,11 @@ use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
+
+use super::{
+    bad_input, bad_setup, edge_use_without_edge, edge_without_curve, face_without_surface, located,
+    missing_defect, solver_input, unbuildable, unbuildable_with,
+};
 
 const OP_CLASSIFY: &str = "blend::blend_corner::swept::classify_swept";
 const OP_BUILD: &str = "blend::blend_corner::swept::swept_corner_edge_geom";
@@ -111,8 +117,8 @@ pub struct TurnRefusal {
     /// `cpWhy`.
     pub comment: String,
     /// The edge whose blend no size builds (the fork's `NoteFitRadius(0.0, edge)` before
-    /// the refusal), for the executive to note: the first round's edge at a sharp concave
-    /// side edge.
+    /// the refusal), for the executive to note: the first round's edge at a sharp side edge
+    /// the ball cannot pass.
     pub fit_edge: Option<EdgeId>,
 }
 
@@ -193,8 +199,7 @@ pub(crate) fn fmt_g(v: f64) -> String {
 
 /// `sm_TangentAtVertex`: the unit tangent of `e`'s curve at its end on `vertex`.
 fn tangent_at_vertex(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId) -> Result<Vec3> {
-    let nul = || SolidError::blend_missing(OP_CLASSIFY, "the edge or its curve");
-    let curve = edge::curve(b, e)?.ok_or_else(nul)?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| edge_without_curve(OP_CLASSIFY, e))?;
     let ivl = edge::interval(b, e)?;
     let t = if edge::start_vertex(b, e)? == Some(vertex) {
         ivl.min()
@@ -202,7 +207,15 @@ fn tangent_at_vertex(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId) -> Resul
         ivl.max()
     };
     let pv = curve.evaluate(k, t, 1, true, true)?;
-    pv.get(1).copied().ok_or_else(nul)?.unitize()
+    pv.get(1)
+        .copied()
+        .ok_or_else(|| {
+            missing_defect(
+                OP_CLASSIFY,
+                "the curve's evaluation to the first derivative returned no derivative",
+            )
+        })?
+        .unitize()
 }
 
 /// `sm_MeridianAngleDeg`: the angle (degrees) of `w` in the frame (`x`, `z`) of a meridian
@@ -216,24 +229,53 @@ fn meridian_angle_deg(w: Vec3, x: Vec3, z: Vec3) -> f64 {
 fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result<f64> {
     let slot = solver
         .surface(rail)?
-        .ok_or_else(|| SolidError::blend_missing(op, "the rail's offset surface"))?;
+        .ok_or_else(|| bad_setup(op, FilletSetUp::SolverOffsetSurface, None))?;
     Ok(slot.surface.offset_distance().abs())
+}
+
+/// The edge of `eu`, an edge use of the caller's body; [`edge_use_without_edge`] without
+/// one.
+fn edge_of(b: &Brep, eu: EdgeuseId, op: &'static str) -> Result<EdgeId> {
+    eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(op, eu))
+}
+
+/// The caller's Turn gives `given` blended edge uses, fewer than two (status
+/// `SM_ERR_NULL_POINTER`, the `NER` of the second).
+fn not_two_blended(op: &'static str, given: usize) -> crate::error::SolidError {
+    bad_input(
+        op,
+        CornerInput::TurnWithoutTwoBlendedEdgeUses { given },
+        None,
+    )
 }
 
 /// `SmBlendCorner::Classify`'s Swept part (the fork's e647dac and 1fcbdb7; reached with
 /// `GetSweptTurns()` on a Turn): whether the blend corner builds a Swept turn at `vertex`,
 /// two blended edge uses `solver_eus` among `all_eus`. `None` where it does; else the
-/// refusal: a sharp concave side edge the ball cannot pass ([`FilletErrorType::NoRoom`],
-/// naming the radius the edge must be rounded at first), and, not built yet
+/// refusal: a sharp side edge the ball cannot pass ([`FilletErrorType::NoRoom`], naming the
+/// radius the edge must be rounded at first), and, not built yet
 /// ([`FilletErrorType::CornerUnsupported`]), a corner of four edges, rounds that share no
-/// face, unequal, variable or non-circular rounds, a tangent side edge, and a side edge
-/// that is not a straight line square (within the fillet's tolerance over the radius) to
-/// both rounded edges with a planar common face.
+/// face, rounds of different convexity, unequal, variable or non-circular rounds, a tangent
+/// side edge, and a side edge that is not a straight line square (within the fillet's
+/// tolerance over the radius) to both rounded edges with a planar common face.
+///
+/// The ball can circle the side edge only where its own side of the faces there is the wide
+/// one. A concave round's ball lies in the air and a convex round's in the material; a concave
+/// side edge has the narrow wedge in the air, a convex one in the material. So the turn passes
+/// where the side edge and the rounds differ in convexity (a boss base's concave rounds round
+/// its convex upright edge, an L's convex top rounds round its concave inner edge) and is
+/// refused where they agree (a pocket rim's concave rounds at its concave corner edge, a
+/// box's convex rounds at its convex corner edge).
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for missing topology, solvers or surfaces the fork
-/// dereferences (`NER`); those of the topology, convexity, tangency and curve queries.
+/// Status `SM_ERR_NULL_POINTER` where the fork dereferences what is not there (`NER`):
+/// the caller's input as [`CornerInput::TurnWithoutTwoBlendedEdgeUses`],
+/// [`CornerInput::TurnRingWithoutSideEdgeUse`], [`BlendFailure::EdgeUseWithoutEdge`],
+/// [`BlendFailure::EdgeWithoutCurve`] and [`BlendFailure::FaceHasNoSurface`], or a solver
+/// without its set-up ([`FilletSetUp::SurfaceGenerator`],
+/// [`FilletSetUp::SolverOffsetSurface`]); those of the topology, convexity, tangency and
+/// curve queries.
 #[allow(clippy::too_many_lines)] // one fork routine
 pub fn classify_swept(
     k: &Kernel,
@@ -244,12 +286,6 @@ pub fn classify_swept(
     tangency_tol_deg: f64,
     solvers: &dyn SweptSolvers,
 ) -> Result<Option<TurnRefusal>> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_CLASSIFY,
-            "topology or a solver the swept turn's classification reads",
-        )
-    };
     let refuse = |error: FilletErrorType, why: &str| {
         Ok(Some(TurnRefusal {
             error,
@@ -257,8 +293,8 @@ pub fn classify_swept(
             fit_edge: None,
         }))
     };
-    let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
-        return Err(nul());
+    let &[eu1_, eu2_, ..] = solver_eus else {
+        return Err(not_two_blended(OP_CLASSIFY, solver_eus.len()));
     };
     // a Swept turn is built at one side edge between the blends' other faces
     if all_eus.len() != 3 {
@@ -273,7 +309,8 @@ pub fn classify_swept(
             ring = Some(eu);
         }
     }
-    let ring = ring.ok_or_else(nul)?;
+    let ring =
+        ring.ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::TurnRingWithoutSideEdgeUse, None))?;
     let side = find_side_edgeuse(b, eu1_, ring)?;
     let common = match side {
         Some(side) => face_by_two_edgeuses(b, Some(eu1_), Some(eu2_), Some(side))?,
@@ -290,15 +327,27 @@ pub fn classify_swept(
         solvers.solver_of_edgeuse(eu1_)?,
         solvers.solver_of_edgeuse(eu2_)?,
     ];
-    let side_edge = eu1::edge(b, side)?.ok_or_else(nul)?;
-    if is_concave_edge(k, b, side_edge)? {
+    let side_edge = edge_of(b, side, OP_CLASSIFY)?;
+    let concave = [
+        is_concave_edge(k, b, edge_of(b, eu1_, OP_CLASSIFY)?)?,
+        is_concave_edge(k, b, edge_of(b, eu2_, OP_CLASSIFY)?)?,
+    ];
+    if concave[0] != concave[1] {
+        return refuse(
+            FilletErrorType::CornerUnsupported,
+            "Fillet Error: a swept turn is built between rounds of one convexity (not yet between a round that adds material and one that takes it off)",
+        );
+    }
+    let side_concave = is_concave_edge(k, b, side_edge)?;
+    if side_concave == concave[0] {
         let radius = offset_radius(fs[0], 0, OP_CLASSIFY)?;
-        // no radius builds a swept turn past a sharp concave side edge: its size is not the
-        // cause (the fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge()))
+        // no radius builds a swept turn past the side edge: its size is not the cause (the
+        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge()))
+        let kind = if side_concave { "concave" } else { "convex" };
         return Ok(Some(TurnRefusal {
             error: FilletErrorType::NoRoom,
             comment: format!(
-                "Fillet Error: a swept turn cannot pass the sharp concave corner edge between the rounds; round that edge at a radius of at least {} first",
+                "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
                 fmt_g(radius)
             ),
             fit_edge: eu1::edge(b, eu1_)?,
@@ -309,7 +358,10 @@ pub fn classify_swept(
     let tol = min(fs[0].approx_tol_3d, fs[1].approx_tol_3d);
     let mut radius = -1.0;
     for (f, eu) in fs.iter().zip([eu1_, eu2_]) {
-        let fsg = f.fsg.as_ref().ok_or_else(nul)?;
+        let fsg = f
+            .fsg
+            .as_ref()
+            .ok_or_else(|| bad_setup(OP_CLASSIFY, FilletSetUp::SurfaceGenerator, None))?;
         let r0 = offset_radius(f, 0, OP_CLASSIFY)?;
         let r1 = offset_radius(f, 1, OP_CLASSIFY)?;
         if fsg.fillet_surface_generator_type() != FilletSurfaceGeneratorType::Circular
@@ -334,9 +386,10 @@ pub fn classify_swept(
     // square to it: off square by an angle whose sine is s, the section's arc of radius r
     // leaves the edge's plane by up to s r, held to the fillet's tolerance
     let sin_tol = tol / radius;
-    let t1 = tangent_at_vertex(k, b, eu1::edge(b, eu1_)?.ok_or_else(nul)?, vertex)?;
-    let t2 = tangent_at_vertex(k, b, eu1::edge(b, eu2_)?.ok_or_else(nul)?, vertex)?;
-    let common_surface = face2::surface(b, common)?.ok_or_else(nul)?;
+    let t1 = tangent_at_vertex(k, b, edge_of(b, eu1_, OP_CLASSIFY)?, vertex)?;
+    let t2 = tangent_at_vertex(k, b, edge_of(b, eu2_, OP_CLASSIFY)?, vertex)?;
+    let common_surface =
+        face2::surface(b, common)?.ok_or_else(|| face_without_surface(OP_CLASSIFY, common))?;
     let square = match edge::curve(b, side_edge)? {
         None => false,
         Some(curve) => match curve.is_line(k, 10, tol)? {
@@ -370,11 +423,14 @@ pub fn classify_swept(
 ///
 /// # Errors
 ///
-/// `SM_ERR` where the corner is not as the Swept topology made it or its geometry
-/// does not hold (the radii, the feet, the turn, the torus's corners at S, A and B, a
-/// loop of other than three curves, no iso-curve from A to B);
-/// [`SolidError::null_pointer`] for missing topology or geometry the fork dereferences;
-/// those of the evaluations, the convexity test and the torus.
+/// `SM_ERR` where the corner is not as the Swept topology made it
+/// ([`CornerInput::TopologyMismatch`], [`CornerInput::VertexNotProcessed`],
+/// [`FilletSetUp::VertexGeoms`]) or its geometry does not hold
+/// ([`BlendFailure::CornerUnbuildable`]: the radii, the feet, the turn, the torus's corners
+/// at S, A and B, a loop of other than three curves); `SM_ERR_NULL_POINTER` without the
+/// event, the solver links, the body's edges and curves or the filleted edge uses (named
+/// causes), or for no iso-curve from A to B ([`CornerStep::SweptArcNotFound`]); those of
+/// the evaluations, the convexity test and the torus.
 #[allow(clippy::too_many_lines)] // one fork routine
 pub fn swept_corner_edge_geom(
     k: &Kernel,
@@ -383,22 +439,22 @@ pub fn swept_corner_edge_geom(
     corner: &mut FilletCorner,
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
-    let nul = || {
-        SolidError::blend_missing(
-            OP_BUILD,
-            "topology or geometry the swept turn's edges are built from",
-        )
-    };
-    let err = || SolidError::blend_failed(OP_BUILD, "the swept turn's edges could not be built");
-    let swept = corner.swept.as_mut().ok_or_else(nul)?;
+    let swept = corner
+        .swept
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::EventNotSet, None))?;
     swept.delete_surface();
     let side_eu = swept.side_eu;
     let &[s, a, b] = corner.vertices.as_slice() else {
-        return Err(err());
+        return Err(bad_input(OP_BUILD, CornerInput::TopologyMismatch, None));
     };
     for v in [s, a, b] {
         if !pseudo.fillet_vertex(v)?.is_processed() {
-            return Err(err());
+            return Err(bad_input(
+                OP_BUILD,
+                CornerInput::VertexNotProcessed,
+                Some(EntityRef::Vertex(v)),
+            ));
         }
     }
     let tol = corner.approx_tol_3d;
@@ -410,13 +466,31 @@ pub fn swept_corner_edge_geom(
     for (slot, plate) in centre.iter_mut().zip([a, b]) {
         let geoms = pseudo.vertex_fillet_geoms(plate)?;
         let &[g] = geoms.as_slice() else {
-            return Err(err());
+            return Err(located(
+                OP_BUILD,
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::VertexGeoms),
+                Some(EntityRef::Vertex(plate)),
+            )
+            .with_status(SM_ERR)
+            .into_error());
         };
         let vu = pseudo
             .vu_at_rail_end(s, Some(g), None, None)?
-            .ok_or_else(nul)?;
+            .ok_or_else(|| {
+                bad_setup(
+                    OP_BUILD,
+                    FilletSetUp::RailEndVertexUse,
+                    Some(EntityRef::Vertex(s)),
+                )
+            })?;
         let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
-        let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(nul)?;
+        let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(|| {
+            solver_input(
+                OP_BUILD,
+                SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+                None,
+            )
+        })?;
         let solver = solvers.solver(solver_id)?;
         let mut on = [Point3::default(); 2];
         for (p, side) in on.iter_mut().zip([SrfIndex::First, SrfIndex::Second]) {
@@ -424,38 +498,49 @@ pub fn swept_corner_edge_geom(
             let offset = pseudo
                 .geom(g)?
                 .offset_surface(rail, Some(solver))?
-                .ok_or_else(nul)?;
+                .ok_or_else(|| bad_setup(OP_BUILD, FilletSetUp::RailOffsetSurface, None))?;
             *p = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
         }
         let [on0, on1] = on;
         if on0.distance(on1) > tol {
-            return Err(err()); // the section's offset points are its ball's centre
+            // the section's offset points are its ball's centre
+            return Err(unbuildable(OP_BUILD, CornerStep::RoundSectionOffsetsApart));
         }
         *slot = on0;
         let r = on0.distance(s_pnt);
         if minor >= 0.0 && (r - minor).abs() > tol {
-            return Err(err()); // Classify took the radii to be equal
+            // Classify took the radii to be equal
+            return Err(unbuildable(OP_BUILD, CornerStep::SweptBallRadiiDiffer));
         }
         minor = r;
     }
 
     // the axis: the side edge's line; the torus's centre the balls' common foot on it
-    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
-    let side_curve = edge::curve(target, side_edge)?.ok_or_else(nul)?;
-    let (line_pt, axis) = side_curve.is_line(k, 10, tol)?.ok_or_else(err)?;
+    let side_edge = edge_of(target, side_eu, OP_BUILD)?;
+    let side_curve =
+        edge::curve(target, side_edge)?.ok_or_else(|| edge_without_curve(OP_BUILD, side_edge))?;
+    let (line_pt, axis) = side_curve
+        .is_line(k, 10, tol)?
+        .ok_or_else(|| unbuildable(OP_BUILD, CornerStep::SweptSideEdgeNotLine))?;
     let axis = axis.unitize()?;
     let [c0, c1] = centre;
     let foot0 = line_pt + axis * (c0 - line_pt).dot(axis);
     let foot1 = line_pt + axis * (c1 - line_pt).dot(axis);
     if foot0.distance(foot1) > tol {
-        return Err(err());
+        return Err(unbuildable(OP_BUILD, CornerStep::SweptFeetApart));
     }
     let origin = foot0;
     let x = c0 - origin;
     let x2 = c1 - origin;
     let mut major = x.length();
-    if major <= tol || (x2.length() - major).abs() > tol {
-        return Err(err());
+    if major <= tol {
+        return Err(unbuildable(OP_BUILD, CornerStep::SweptCentreOnAxis));
+    }
+    if (x2.length() - major).abs() > tol {
+        return Err(unbuildable(
+            OP_BUILD,
+            CornerStep::SweptCentreAxisDistancesDiffer,
+        ));
     }
     // S on the axis: the horn torus, its tube through the axis at S (as a revolved circle
     // that reaches the axis). The two radii, computed apart, differ in their last bits,
@@ -468,7 +553,7 @@ pub fn swept_corner_edge_geom(
     let z = x.cross(x2);
     let sin = z.length();
     if sin <= EFF_ZERO {
-        return Err(err()); // no turn
+        return Err(unbuildable(OP_BUILD, CornerStep::SweptNoTurn));
     }
     let z = z.unitize()?;
     let y = z.cross(x);
@@ -496,8 +581,14 @@ pub fn swept_corner_edge_geom(
         .as_deref()
         .and_then(<[EdgeuseId]>::first)
         .copied()
-        .ok_or_else(nul)?;
-    let first_edge = eu1::edge(target, first)?.ok_or_else(nul)?;
+        .ok_or_else(|| {
+            bad_input(
+                OP_BUILD,
+                CornerInput::FilletedEdgeUsesNotGiven { kind: corner.kind },
+                None,
+            )
+        })?;
+    let first_edge = edge_of(target, first, OP_BUILD)?;
     let adds_material = is_concave_edge(k, target, first_edge)?;
     let torus = Torus::create_canonical(
         k,
@@ -519,7 +610,7 @@ pub fn swept_corner_edge_geom(
         (Point2::new(0.0, vs), s_pnt),
     ] {
         if torus.evaluate_step_point(uv)?.distance(want) > tol {
-            return Err(err());
+            return Err(unbuildable(OP_BUILD, CornerStep::SweptTorusOffVertex));
         }
     }
     let mut surface = Surface::from(torus);
@@ -536,15 +627,23 @@ pub fn swept_corner_edge_geom(
     let natural = surface.natural_uv_domain_with_nurb(k)?;
     let trims = surface.create_natural_uv_trim_curves(k, &natural, SurfParamType::V, true)?;
     if trims.curves_3d.len() != 3 || trims.uv_curves.len() != 3 || trims.orients.len() != 3 {
-        return Err(err()); // the ends and the arc; the side at S a point
+        // the ends and the arc; the side at S a point
+        return Err(unbuildable(OP_BUILD, CornerStep::SweptLoopNotThreeCurves));
     }
 
     // the arc A-B is the torus's (its iso-curve at A's tube angle, from A to B)
     let &[_, arc_edge, _] = corner.edges.as_slice() else {
-        return Err(err());
+        return Err(bad_input(OP_BUILD, CornerInput::TopologyMismatch, None));
     };
-    let arc_a = edge::vertex(pseudo.brep(), arc_edge)?.ok_or_else(nul)?;
-    let arc_b = edge::other_vertex(pseudo.brep(), arc_edge, Some(arc_a))?.ok_or_else(nul)?;
+    let no_ends = || {
+        bad_setup(
+            OP_BUILD,
+            FilletSetUp::EdgeVertices,
+            Some(EntityRef::Edge(arc_edge)),
+        )
+    };
+    let arc_a = edge::vertex(pseudo.brep(), arc_edge)?.ok_or_else(no_ends)?;
+    let arc_b = edge::other_vertex(pseudo.brep(), arc_edge, Some(arc_a))?.ok_or_else(no_ends)?;
     let sa = pseudo.vertex_point(arc_a)?;
     let sb = pseudo.vertex_point(arc_b)?;
     let mut arc = None;
@@ -564,10 +663,17 @@ pub fn swept_corner_edge_geom(
         arc = Some(copy);
         break;
     }
-    let arc = arc.ok_or_else(nul)?;
+    let arc = arc.ok_or_else(|| {
+        unbuildable_with(OP_BUILD, CornerStep::SweptArcNotFound, SM_ERR_NULL_POINTER)
+    })?;
     set_edge_curve(pseudo.brep_mut(), arc_edge, Some(arc))?;
 
-    let swept = corner.swept.as_mut().ok_or_else(nul)?;
+    let swept = corner.swept.as_mut().ok_or_else(|| {
+        missing_defect(
+            OP_BUILD,
+            "the swept turn's event, taken at the start, is gone after the torus is built",
+        )
+    })?;
     swept.surface = Some(surface);
     swept.curves_3d = trims.curves_3d;
     swept.uv_curves = trims.uv_curves.into_iter().map(Curve::from).collect();
@@ -583,8 +689,10 @@ pub fn swept_corner_edge_geom(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without the rounds' edge uses, their common face or its
-/// surface; those of the definition and its re-certification.
+/// Status `SM_ERR_NULL_POINTER` with fewer than two blended edge uses
+/// ([`CornerInput::TurnWithoutTwoBlendedEdgeUses`]), no common face
+/// ([`CornerInput::TurnRoundsShareNoFace`]) or none of its surface; those of the
+/// definition and its re-certification.
 #[allow(clippy::too_many_arguments)]
 fn keep_definition(
     k: &Kernel,
@@ -596,15 +704,21 @@ fn keep_definition(
     radius: f64,
     tol: f64,
 ) -> Result<()> {
-    let nul = || SolidError::blend_missing(OP_BUILD, "the swept turn's event or its patch");
-    let swept = corner.swept.as_ref().ok_or_else(nul)?;
-    let eus = corner.solver_eus.as_deref().ok_or_else(nul)?;
-    let (Some(&eu1_), Some(&eu2_)) = (eus.first(), eus.get(1)) else {
-        return Err(nul());
+    let swept = corner.swept.as_ref().ok_or_else(|| {
+        missing_defect(
+            OP_BUILD,
+            "the swept turn's event, taken by the torus's construction, is gone",
+        )
+    })?;
+    // the construction read the first blended edge use already: given, at least one
+    let eus = corner.solver_eus.as_deref().unwrap_or_default();
+    let &[eu1_, eu2_, ..] = eus else {
+        return Err(not_two_blended(OP_BUILD, eus.len()));
     };
     let common = face_by_two_edgeuses(target, Some(eu1_), Some(eu2_), Some(swept.side_eu))?
-        .ok_or_else(nul)?;
-    let common = face2::surface(target, common)?.ok_or_else(nul)?;
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::TurnRoundsShareNoFace, None))?;
+    let common =
+        face2::surface(target, common)?.ok_or_else(|| face_without_surface(OP_BUILD, common))?;
     let definition = CornerDefinition::swept(k, common, axis_point, axis, centres, radius, tol)?;
     definition.recertify(k, surface)?;
     surface.set_corner_definition(definition);
@@ -618,20 +732,30 @@ fn keep_definition(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without the torus, the fillet B-rep or a new face
-/// (`NER`); those of the face construction.
+/// Status `SM_ERR_NULL_POINTER` (`NER`) without the event
+/// ([`CornerInput::EventNotSet`]), the torus ([`CornerInput::FacesNotBuilt`]) or the fillet
+/// B-rep ([`CornerInput::FilletBrepNotGiven`]), or a `Defect` (same status) for a face
+/// construction that succeeds without a face; those of the face construction.
 pub fn create_swept_patch(
     corner: &mut FilletCorner,
     env: &mut CornerPatchEnv<'_, '_>,
 ) -> Result<()> {
-    let nul = || SolidError::blend_missing(OP_PATCH, "the swept turn's event or topology");
-    let swept = corner.swept.as_mut().ok_or_else(nul)?;
-    let surface = swept.surface.take().ok_or_else(nul)?;
+    let swept = corner
+        .swept
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet, None))?;
+    let surface = swept
+        .surface
+        .take()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FacesNotBuilt, None))?;
     // the face takes the surface and the curves
     let curves_3d = std::mem::take(&mut swept.curves_3d);
     let uv_curves = std::mem::take(&mut swept.uv_curves);
     let orients = swept.orients.clone();
-    let fillet = env.fillet.as_mut().ok_or_else(nul)?;
+    let fillet = env
+        .fillet
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven, None))?;
     let input = FaceCurvesInput {
         loops: vec![curves_3d.len()],
         curves_3d: Some(curves_3d.into_iter().map(Some).collect()),
@@ -655,7 +779,12 @@ pub fn create_swept_patch(
         &face_ref,
         &mut fillet.notify,
     )?;
-    let face = made.face.ok_or_else(nul)?;
+    let face = made.face.ok_or_else(|| {
+        missing_defect(
+            OP_PATCH,
+            "making the swept turn's face returned no face, though the face construction succeeded",
+        )
+    })?;
     // the corner's patch face (SmFilletCorner::GetPatchFaces, the stitch)
     corner.surfaces.push(surface);
     corner.surface_faces.push(face);
@@ -677,21 +806,17 @@ mod tests {
         (b, e, v)
     }
 
-    /// An edge without a curve has no tangent at its vertex: a typed `Missing` failure, with
-    /// the null-pointer status the bare status had.
+    /// An edge without a curve has no tangent at its vertex: the caller's input,
+    /// `EdgeWithoutCurve`, with the null-pointer status the bare status had.
     #[test]
-    fn an_edge_without_a_curve_is_a_typed_missing_failure() {
+    fn an_edge_without_a_curve_is_edge_without_curve() {
         let (b, e, v) = box_with_curveless_edge();
         let err = tangent_at_vertex(&Kernel::default(), &b, e, v).unwrap_err();
-        assert_eq!(
-            err.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the edge or its curve"
-            ))
-        );
+        assert_eq!(err.blend_failure(), Some(&BlendFailure::EdgeWithoutCurve));
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
             crate::error::upstream_status(&err),
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
         );
     }
 

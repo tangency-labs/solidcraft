@@ -305,6 +305,8 @@ fn orient(o: OrientType) -> i64 {
 /// The records of the Rust B-rep, with the layout of the shim's. `pre` are the record
 /// counts before the operation.
 fn rust_records(b: &Brep, pre: [usize; 10]) -> Model {
+    #[cfg(test)]
+    crate::certify::written(b);
     let lb = Labels { pre };
     let (mut regions, mut shells, mut faceuses, mut faces) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());

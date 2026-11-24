@@ -340,6 +340,37 @@ impl JsonSchema for Point2 {
     }
 }
 
+/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
+/// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
+/// isn't zero, is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisDirExpr(pub [Expr; 3]);
+
+impl<'de> Deserialize<'de> for AxisDirExpr {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::axis_expr_form(&Value::deserialize(d)?).map(AxisDirExpr).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for AxisDirExpr {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisDirExpr".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        // A number of any size gives a direction; an expression is a `NumberExpr`.
+        let c = json_schema!({"anyOf": [{"type": "number"}, generator.subschema_for::<NumberExpr>()]});
+        json_schema!({
+            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\" (a parameter added as a plain number is a length: \"n / 1 mm\").",
+            "anyOf": [
+                {"type": "string", "pattern": format!("^[{ws}]*[XYZxyz][{ws}]*$", ws = whitespace_class())},
+                {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+            ]
+        })
+    }
+}
+
 /// A placement point: `[x, y, z]` or `{x, y, z}`, each a number (mm) or a length expression,
 /// as `features::point_param` reads it. Whether the expressions evaluate is checked by the
 /// handler, which has the design.
@@ -430,6 +461,57 @@ impl JsonSchema for StringList {
         json_schema!({
             "description": "A name, or a list of names.",
             "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "maxItems": 10000}]
+        })
+    }
+}
+
+/// A sweep's path (#16168): curve ids of the path's sketch, or `{"sketch", "curve"}` entries for
+/// curves of other sketches. Accepted exactly when the handler reads it; kept as the raw values.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PathList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for PathList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let fail = || D::Error::custom("must be a curve id or a list of path entries");
+        let entries = match Value::deserialize(d)? {
+            Value::String(s) => vec![Value::String(s)],
+            Value::Array(a) if a.len() > 1000 => return Err(D::Error::custom("must have at most 1000 items")),
+            Value::Array(a) => a,
+            _ => return Err(fail()),
+        };
+        for v in &entries {
+            match v {
+                Value::String(_) => {}
+                Value::Object(o) => {
+                    if !o.get("curve").is_some_and(Value::is_string) {
+                        return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}"));
+                    }
+                    if crate::cmd::sketch_key(o.get("sketch")).is_none() {
+                        return Err(D::Error::custom("a path entry's `sketch` must be a sketch id or name"));
+                    }
+                }
+                _ => return Err(D::Error::custom("each path entry must be a curve id or {\"sketch\", \"curve\"}")),
+            }
+        }
+        Ok(PathList(entries))
+    }
+}
+
+impl JsonSchema for PathList {
+    fn schema_name() -> Cow<'static, str> {
+        "PathList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let entry = json!({"anyOf": [
+            {"type": "string"},
+            {"type": "object", "required": ["sketch", "curve"], "properties": {
+                "sketch": {"description": "The sketch the curve is in.", "type": ["number", "string"]},
+                "curve": {"type": "string"}
+            }}
+        ]});
+        json_schema!({
+            "description": "A curve id of the path's sketch, or a list of path entries; an entry is a curve id or {\"sketch\": <sketch>, \"curve\": <id>} for a curve of another sketch.",
+            "anyOf": [{"type": "string"}, {"type": "array", "items": entry, "maxItems": 1000}]
         })
     }
 }
@@ -526,6 +608,14 @@ keyword_param!(
     &["inside", "center", "on", "on_center", "outside"],
     "inside, center or outside",
     "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
+);
+keyword_param!(
+    /// `solid.coil`'s `end_cut`.
+    CoilEndCutParam,
+    "end cut",
+    &["axial", "square"],
+    "axial or square",
+    "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
 );
 keyword_param!(
     /// `solid.emboss`'s `mode`.
@@ -1740,4 +1830,10 @@ pub struct FeatureCommon {
 pub fn feature_common<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
     let v = Value::deserialize(d)?;
     serde_path_to_error::deserialize(&v).map_err(|e| D::Error::custom(super::check::located(&e)))
+}
+
+/// Deserializes any flattened part of a contract as [`feature_common`] does `FeatureCommon`:
+/// its problems name their keys as the parent's own would.
+pub fn flattened<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
+    feature_common(d)
 }

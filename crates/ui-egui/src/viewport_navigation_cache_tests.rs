@@ -8,7 +8,8 @@ fn app() -> SolveApp {
     app.set_origin_shown(false);
     app.ui.show_grid = false;
     app.ui.ground_shadow = true;
-    app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.viewport.gpu =
+        Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     app.cam.pitch = 0.7;
     app
 }
@@ -191,6 +192,43 @@ fn opening_does_not_draw_bodies_before_their_meshes_are_shown() {
     assert!(build_sketch_scene(&app, &proj).shadow.is_empty(), "the shadow uses that same picture");
 }
 
+/// While a design opens, each picture holds the bodies meshed so far in the order they were
+/// meshed, with the rest of the world's state: built from the picture before when nothing else
+/// holds it (the new bodies added), copied when something does (which keeps its own bodies),
+/// never by copying the whole world first.
+#[test]
+fn opening_shows_the_bodies_meshed_so_far_in_order_adding_to_the_picture_before() {
+    let mut s = solidcraft_engine::Session::default();
+    for k in 0..5 {
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[20 * k, 0, 0],"operation":"new"})).unwrap();
+    }
+    let mut app = SolveApp::new(s, crate::Services::default());
+    app.viewport.gpu =
+        Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
+    let world = crate::open_meshing::session_world(&app.session);
+    assert_eq!(world.bodies.len(), 5);
+    crate::open_meshing::without_threads(|| crate::open_meshing::start(&mut app, None));
+    let names = |st: &solidcraft_engine::doc::ModelState| st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let of = |order: &[usize]| order.iter().map(|&i| world.bodies[i].name.clone()).collect::<Vec<_>>();
+    let mut now = 1e6;
+    let mut show = |app: &mut SolveApp, order: &[usize]| {
+        crate::open_meshing::set_ready(app, order);
+        now += 1e6;
+        crate::open_meshing::refresh(app, now);
+        crate::open_meshing::shown_world(app)
+    };
+    let first = show(&mut app, &[3, 1]);
+    assert_eq!(names(&first), of(&[3, 1]));
+    assert_eq!(first.body_counter, world.body_counter, "the rest of the world's state with them");
+    drop(first);
+    let second = show(&mut app, &[3, 1, 0]);
+    assert_eq!(names(&second), of(&[3, 1, 0]), "the new body added after the others");
+    // Held elsewhere, the picture keeps its own bodies; the next is copied.
+    let third = show(&mut app, &[3, 1, 0, 4, 2]);
+    assert_eq!(names(&third), of(&[3, 1, 0, 4, 2]));
+    assert_eq!(names(&second), of(&[3, 1, 0]), "the picture held before is as it was");
+}
+
 /// Opening a part placed many times makes, off the window's thread, the plan mesh its copies
 /// are drawn from at a finer display quality (their part's, made once): the first frames would
 /// otherwise plan every part there, which held a hundred-times assembly's window for most of a
@@ -235,6 +273,31 @@ fn a_copy_shown_before_its_parts_other_copies_is_still_drawn_as_an_instance() {
     let shown = crate::open_meshing::shown_world(&app);
     assert_eq!(shown.bodies.len(), 1, "one copy shown so far");
     assert!(repeated_copy(&app, &shown.bodies[0]), "drawn as an instance of its part, as opening counted it");
+}
+
+/// The mesher working ahead of the first frames also works out each body's box, which framing
+/// the view reads for every body once they are all shown: on the window thread, a placed copy's box
+/// moved every point of its part's mesh (a second for a hundred copies of a large assembly).
+#[test]
+fn opening_works_out_each_placed_copys_box_off_the_window_thread() {
+    let mut s = solidcraft_engine::Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap()["component"].clone();
+    s.execute("solid.cylinder", &json!({"base":[0,0,0],"radius":5,"height":20})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for k in 1..=3 {
+        s.execute("occurrence.copy", &json!({"component":part,"translate":[0,40 * k,0]})).unwrap();
+    }
+    let world = s.world_state().unwrap();
+    assert!(world.bodies.iter().all(|b| !b.mesh_bounds_made()));
+    let repeated = crate::open_meshing::repeated_parts(&world);
+    let q = solidcraft_engine::doc::display_quality::DisplayQuality::Normal;
+    for b in &world.bodies {
+        crate::open_meshing::warm(b, false, false, &repeated, q);
+    }
+    assert!(world.bodies.iter().all(|b| b.mesh_bounds_made()), "every body's box, ahead of framing");
+    // A world state built again from the same placements keeps them.
+    let again = s.world_state().unwrap();
+    assert!(again.bodies.iter().all(|b| b.mesh_bounds_made()));
 }
 
 fn wireframe_cylinder() -> SolveApp {

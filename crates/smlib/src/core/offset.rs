@@ -29,7 +29,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
-use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple, shell_brep_simple};
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
@@ -49,19 +49,34 @@ type Out<T> = std::result::Result<T, Error>;
 /// `SM_ERR_INVALID_INPUT`.
 const INVALID_INPUT: i32 = 1007;
 
-/// `status` (smlib_shim.h): an offset's refusal as solidcore-ops routes it
-/// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
-/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
-/// wall it names, solidcore#2367), a vertex moved past an edge's other end
-/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
-/// blends pass it on, which carries ops' other offset refusals as they are.
+/// The offset's typed refusal and complete diagnostic come through solidcore-ops.
+/// Other failures pass through the blend mapper, retaining that diagnostic wherever
+/// it would otherwise give only a numeric status.
 fn status(e: SolidError) -> Error {
+    let diagnostic = solidcore_ops::offset::diagnostic(&e);
+    match diagnostic.refusal {
+        Some(error) => refused(error, diagnostic.detail),
+        None => match blend_status(e) {
+            Error::Status(_) => Error::Solidcore(diagnostic.detail),
+            other => other,
+        },
+    }
+}
+
+/// Application errors for ops' offset refusals: specialised wall answers keep
+/// their fields; other typed refusals keep the kernel diagnostic alongside them.
+pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
     use solidcore_ops::Error as Ops;
-    match solidcore_ops::offset::refusal(&e) {
-        Some(Ops::WallsTouch) => Error::WallsTouch,
-        Some(Ops::WallFolds { largest }) => Error::WallFolds { largest },
-        Some(Ops::Unsupported(_)) => Error::Unsupported,
-        _ => blend_status(e),
+    // this crate words a named solid test as the bare NotSolid it always was
+    if error.not_solid_test().is_some() {
+        return Error::RefusedWithDiagnostic { refusal: Ops::NotSolid, diagnostic };
+    }
+    match error {
+        Ops::WallsTouch => Error::WallsTouch,
+        Ops::WallFolds { largest } => Error::WallFolds { largest },
+        Ops::Unsupported(_) => Error::Unsupported,
+        error @ Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { .. }, .. } => Error::Refused(error),
+        refusal => Error::RefusedWithDiagnostic { refusal, diagnostic },
     }
 }
 
@@ -276,7 +291,8 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    shell_brep_simple(k, b, options, open)
+    // solidcore's shell, a feature narrower than twice an inward wall left solid
+    solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
 /// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
@@ -319,11 +335,27 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
             return Ok(Err(Error::NoRoom));
         }
-        match called(shell_brep_full(k, &w, thickness, &picked))? {
-            Ok(r) => finish(r, solid_in),
-            Err(e) => Ok(Err(e)),
+        let shelled = match called(shell_brep_full(k, &w, thickness, &picked))? {
+            Ok(r) => finish(r, solid_in)?,
+            Err(e) => Err(e),
+        };
+        match shelled {
+            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
+                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
+                None => Ok(Err(e)),
+            },
+            r => Ok(r),
         }
     })
+}
+
+/// (#18568) A failure that does not say why: a bare status, solidcore's text, a result that is
+/// not a solid, or an offset refused as unsound.
+fn is_bare_failure(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Status(_) | Error::Solidcore(_) | Error::NotSolid | Error::Exception | Error::Refused(solidcore_ops::Error::OffsetRefused { .. })
+    )
 }
 
 /// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity
@@ -360,18 +392,26 @@ pub(crate) fn offset_faces(body: &Body, points: &[[f64; 3]], tolerance: f64, dis
 /// to meet it; the tangent blends on them follow (`SmOffsetFacesExecutive`: taken off, the faces
 /// moved, put back at their own sizes). A blend that no longer fits is [`Error::NoRoom`], one that
 /// cannot be put back as it was [`Error::Unsupported`], one that would need a continuation that
-/// cannot be made exactly [`Error::NotExact`], a move that moved nothing [`Error::NoEffect`].
+/// cannot be made exactly [`Error::NotExact`], a move that moved nothing [`Error::NoEffect`]. Where
+/// solidcore says why a blend cannot follow, the last three are [`Error::BlendsNotFollowed`] with
+/// its reason (#18575).
 fn move_faces(k: &mut Kernel, b: &mut Brep, picked: &[FaceId], distance: f64) -> Out<()> {
     let mut exec = OffsetFacesExecutive::new();
-    exec.offset_faces(k, b, picked, distance).map_err(|e| match exec.refusal() {
-        OffsetFacesRefusal::NoRoom => Error::NoRoom,
-        OffsetFacesRefusal::Unsupported => Error::Unsupported,
-        OffsetFacesRefusal::NotExact => Error::NotExact,
-        OffsetFacesRefusal::NoEffect => Error::NoEffect,
-        // Not in the fork (solidcore#2020, #2027): the blends cannot be put back, the fillet's
-        // status kept. SolidCraft has no such error: a move solidcore does not make.
-        OffsetFacesRefusal::NotPutBack => Error::Unsupported,
-        OffsetFacesRefusal::None => status(e),
+    exec.offset_faces(k, b, picked, distance).map_err(|e| {
+        let why = exec.reason().trim();
+        let not_followed = |exact: bool, bare: Error| {
+            if why.is_empty() { bare } else { Error::BlendsNotFollowed { exact, why: why.to_string() } }
+        };
+        match exec.refusal() {
+            OffsetFacesRefusal::NoRoom => Error::NoRoom,
+            OffsetFacesRefusal::Unsupported => not_followed(false, Error::Unsupported),
+            OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
+            OffsetFacesRefusal::NoEffect => Error::NoEffect,
+            // Not in the fork (solidcore#2020, #2027): the blends cannot be put back, the fillet's
+            // status kept. SolidCraft has no such error: a move solidcore does not make.
+            OffsetFacesRefusal::NotPutBack => not_followed(false, Error::Unsupported),
+            OffsetFacesRefusal::None => status(e),
+        }
     })
 }
 
@@ -441,6 +481,15 @@ fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) ->
     Ok(Some(n))
 }
 
+/// A face the draft cannot tilt, refused for what about it the draft cannot handle (#18541), in
+/// the words `solidcore_ops::offset::draft` gives the same refusal where they fit this check.
+fn cannot_draft(why: &'static str) -> Error {
+    Error::Refused(solidcore_ops::Error::Unsupported(why))
+}
+
+/// A drafted cone's radius would reach zero within the face's span.
+const CONE_CLOSES: &str = "a drafted cone would close within the face";
+
 /// `drafted_cone` (tangency-labs/smlib#27, #53): the cone a face on the cone or cylinder `cyl` about
 /// the pull (its outward normal `n` at `inside`) becomes drafted by `angle` about its circle on the
 /// neutral plane (through `origin`, normal `normal`), so that it leans in going along `pull`: its
@@ -451,8 +500,10 @@ fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) ->
 /// the surface's own NURB with each control point moved radially by the new radius over the old at
 /// its height, so it keeps the surface's parameters and the face's UV trims stay valid: for a
 /// cylinder solidcore's `Cone::lean_cylinder` (solidcore#1545), for a cone the same edit on
-/// [`Cone::base_mut`]. [`Error::Unsupported`] when the pull does not run along the axis, the axis
-/// lies in the neutral plane, or the cone would close within the face's span.
+/// [`Cone::base_mut`]. Refused ([`cannot_draft`]) when the pull does not run along the axis, the
+/// axis is parallel to the neutral plane, the neutral plane is at or past the cone's apex, or the
+/// cone would close within the face's span;
+/// [`Error::Unsupported`] when the cone's frame or net cannot be read or edited.
 #[allow(clippy::too_many_arguments)] // the capi's drafted_cone
 fn drafted_cone(
     k: &Kernel,
@@ -473,12 +524,12 @@ fn drafted_cone(
     let z = z * (1.0 / len);
     let sense = z.dot(pull);
     if (sense.abs() - 1.0).abs() > 1e-9 {
-        return Ok(Err(Error::Unsupported));
+        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is not along the pull")));
     }
     let axis = frame.origin();
     let toward = z.dot(normal);
     if toward.abs() < 1e-12 {
-        return Ok(Err(Error::Unsupported));
+        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane")));
     }
     // The hinge circle's centre: the axis on the neutral plane, at the cone's height v0.
     let v0 = (origin - axis).dot(normal) / toward;
@@ -490,8 +541,11 @@ fn drafted_cone(
     let r0 = cyl.radius(v0);
     let slope = (cyl.radius(1.0) - cyl.radius(0.0)) * sense;
     let turned = (slope.atan() - s * angle).tan();
-    if !(r0 > 0.0) || !turned.is_finite() {
-        return Ok(Err(Error::Unsupported));
+    if !(r0 > 0.0) {
+        return Ok(Err(cannot_draft("the neutral plane is at or past a drafted cone's apex")));
+    }
+    if !turned.is_finite() {
+        return Ok(Err(cannot_draft(CONE_CLOSES)));
     }
     if cyl.is_cylinder() {
         return Ok(answer(cyl.lean_cylinder(k, turned * sense, v0))?.ok_or(Error::Unsupported));
@@ -507,7 +561,7 @@ fn drafted_cone(
             let h = (p - centre).dot(pull);
             let (was, now) = (cyl.radius(v0 + h * sense), r0 + h * turned);
             if !(was > 0.0 && now > 0.0) {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft(CONE_CLOSES)));
             }
             let foot = centre + pull * h;
             if answer(net.set_control_point(ControlPointForm::EuclideanRational, i, j, foot + (p - foot) * (now / was), w))?.is_none() {
@@ -609,7 +663,7 @@ pub(crate) fn draft(
                 continue;
             }
             let SurfaceKind::Plane(plane) = surf.kind_with_nurb(k)? else {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft("a drafted face is neither a plane nor a cone or cylinder")));
             };
             // The face's outward normal: the plane's, turned with the outer faceuse.
             let mut n = plane.position().z_axis();
@@ -617,7 +671,7 @@ pub(crate) fn draft(
                 n = -n;
             }
             if n.dot(along).abs() > 1e-6 {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft("a drafted plane is not parallel to the pull")));
             }
             let Some(inside) = answer(face_internal_point(k, &mut w, f))? else {
                 return Ok(Err(Error::Status(INVALID_INPUT)));
@@ -647,11 +701,25 @@ pub(crate) fn draft(
             }
             surfaces.push(tilted);
         }
+        // A drafted cone that would reach a cavity's wall closes the wall: refused with the largest
+        // angle that keeps it (#20767), before anything changes.
+        let (n, p) = ([normal.x, normal.y, normal.z], [along.x, along.y, along.z]);
+        if let Err(e) = called(solidcore_ops::offset::refuse_draft_closing_wall(k, &w, &picked, neutral_origin, n, p, angle))? {
+            return Ok(Err(e));
+        }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
+        // A face the drafted faces would cut through (a hole's wall within the draft of the side,
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses. Best
+        // effort: a check that fails itself only leaves the kernel's own refusal, and never
+        // refuses a draft the kernel builds.
+        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces).ok().flatten();
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
-            return Ok(Err(e));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough { at: [t.at.x, t.at.y, t.at.z], depth: t.depth },
+                None => e,
+            }));
         }
         if !moved_faces(&mut w)? {
             return Ok(Err(Error::NoEffect));

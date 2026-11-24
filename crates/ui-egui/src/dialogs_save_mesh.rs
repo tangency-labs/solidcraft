@@ -635,6 +635,14 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 /// The status line after a save or a send.
 fn report(app: &mut SolveApp, result: &Value) {
     let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
+    let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+    // Bodies left out of the file: said plainly, naming each one, in a warning that stays until it is dismissed.
+    let skipped_suffix = if skipped.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", solidcraft_ui_text::format("ui.export_skipped", &[("bodies", &skipped.join(", "))]))
+    };
+    let say = |app: &mut SolveApp, line: String| if skipped.is_empty() { app.set_status(line, false) } else { app.set_status_sticky(line) };
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
@@ -645,6 +653,9 @@ fn report(app: &mut SolveApp, result: &Value) {
                     }
                     _ => solidcraft_ui_text::format("ui.sent_to_slicer", &[("slicer", s)]),
                 };
+                if !skipped_suffix.is_empty() {
+                    line.push_str(&skipped_suffix);
+                }
                 // Said once: sending the same bodies again overwrites the file the slicer has open.
                 if result.get("numbered").is_some() && !std::mem::replace(&mut app.preferences.slicer_resend_hint_seen, true) {
                     line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_resend_hint"));
@@ -652,9 +663,13 @@ fn report(app: &mut SolveApp, result: &Value) {
                 if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
                     line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
                 }
-                app.set_status(line, false);
+                say(app, line);
             }
-            None => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", path)]), false),
+            None => {
+                let saved = solidcraft_ui_text::format("ui.saved_to", &[("path", path)]);
+                let line = if skipped_suffix.is_empty() { saved } else { format!("{saved}{skipped_suffix}") };
+                say(app, line);
+            }
         },
     }
 }
@@ -1104,5 +1119,50 @@ mod tests {
         h.app.preferences.export_selects_only_body = true;
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Two"})).unwrap();
         assert!(bodies(&mut h, "file.save_mesh").is_empty(), "with two bodies nothing says which one is meant");
+    }
+
+    /// #18780: report toast lists skipped bodies when an export skips untessellatable bodies.
+    #[test]
+    fn report_shows_skipped_bodies_in_toast() {
+        let mut h = crate::scenario::Harness::new();
+        let result = json!({
+            "path": "/tmp/out.3mf",
+            "skipped": ["BrokenSliver"]
+        });
+        report(&mut h.app, &result);
+        let status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
+        assert!(status.contains("BrokenSliver"), "{status}");
+        assert!(status.contains("could not be meshed"), "{status}");
+        // A warning that stays until it is dismissed, not a status that goes after a few seconds.
+        let at = h.app.status.as_ref().map(|s| s.1);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2) && h.app.status_sticky_at == at, "{:?}", h.app.status);
+
+        let slicer_result = json!({
+            "path": "/tmp/out.3mf",
+            "slicer": "PrusaSlicer",
+            "skipped": ["BrokenSliver"]
+        });
+        report(&mut h.app, &slicer_result);
+        let slicer_status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
+        assert!(slicer_status.contains("BrokenSliver"), "{slicer_status}");
+        assert!(slicer_status.contains("could not be meshed"), "{slicer_status}");
+
+        // Nothing skipped: the plain, passing message.
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| !s.2) && h.app.status_sticky_at != h.app.status.as_ref().map(|s| s.1));
+    }
+
+    /// The toast of a skipped body is still up after the usual time, and goes when it is dismissed.
+    #[test]
+    fn the_skipped_body_toast_stays_until_dismissed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf", "skipped": ["BrokenSliver"]}));
+        let text = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        let old = crate::now_ms() - 60_000.0;
+        h.app.status = h.app.status.take().map(|(t, _, e)| (t, old, e));
+        h.app.status_sticky_at = Some(old);
+        h.frames(3);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0 == text), "a minute later the warning is still shown");
     }
 }
