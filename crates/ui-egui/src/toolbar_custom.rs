@@ -89,7 +89,8 @@ impl ToolbarCustom {
             .into_iter()
             .flatten()
             .filter(|(key, value)| {
-                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar" | "plugin_unpinned") && (current || !value.is_array())
+                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar" | "plugin_unpinned")
+                    && (current || !value.is_array())
             })
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
