@@ -3307,14 +3307,23 @@ fn copy_frames_digest(doc: &Document, f: &Feature, features: &[FeatureId], st: &
 /// part together with what it mirrors leaves it, bit for bit, as it was (#14271). A plane read from
 /// model geometry, or a component origin datum, can lie in another part, so its own component's
 /// world frame counts then too.
-fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+fn mirror_placements_digest(
+    doc: &Document,
+    f: &Feature,
+    st: Option<&ModelState>,
+    plane: &PlaneRef,
+    placements: &[Vec<u64>],
+    bodies: &[crate::BodyName],
+) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     if !placement_reuse::local_plane(plane, 0) {
         doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
     }
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
-    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+    for (i, path) in placements.iter().enumerate() {
+        let effective = resolve_migrated_placement(doc, st, bodies.get(i), path);
+        let placed = mirror_copy_frame(doc, f.component, &effective);
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3329,9 +3338,11 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, place
 
 /// What a body pattern's picked placements read: each placement's frame and the component its
 /// copies join, both in the feature's component, and each body's offset.
-fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+fn pattern_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+    for (i, path) in placements.iter().enumerate() {
+        let effective = resolve_migrated_placement(doc, st, bodies.get(i), path);
+        let placed = mirror_copy_frame(doc, f.component, &effective);
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -3342,6 +3353,27 @@ fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>
         serde_json::to_string(&doc.body_offsets.get(&b.0)).unwrap_or_default().hash(&mut h);
     }
     h.finish()
+}
+
+fn resolve_migrated_placement<'a>(
+    doc: &Document,
+    st: Option<&ModelState>,
+    body: Option<&crate::BodyName>,
+    path: &'a [u64],
+) -> std::borrow::Cow<'a, [u64]> {
+    let Some(mb) = body.and_then(|b| st?.body(&b.0)) else {
+        return std::borrow::Cow::Borrowed(path);
+    };
+    let Some((at, _)) = doc.path_placement(path) else {
+        return std::borrow::Cow::Borrowed(path);
+    };
+    if placement_shows(doc, mb, at) {
+        std::borrow::Cow::Borrowed(path)
+    } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
+        std::borrow::Cow::Owned(migrated)
+    } else {
+        std::borrow::Cow::Borrowed(path)
+    }
 }
 
 /// Whether only the bodies `f` makes follow where parts are placed: a mirror of placed bodies
@@ -3629,7 +3661,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             // too, or moving the component serves a stale mirror from the cache (#7313 review).
             // The shared read loop below never runs for picked placements, so the datum frames
             // fold in here, each relative to the reading component, as `reads.paths` does.
-            return mirror_placements_digest(doc, f, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
+            return mirror_placements_digest(doc, f, st, plane, placements, bodies) ^ datum_paths_digest(doc, f, &datums);
         }
         FeatureKind::MeshReduce { body, .. } => {
             reads.placed_body(st, body);
@@ -3670,7 +3702,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Pattern { bodies, placements, .. } if !bodies.is_empty() => {
             // Bodies picked where a placement shows them follow those placements, as a mirror's.
             if !placements.is_empty() {
-                pattern_placements_digest(doc, f, placements, bodies).hash(&mut h);
+                pattern_placements_digest(doc, f, st, placements, bodies).hash(&mut h);
             }
             for b in bodies {
                 reads.placed_body(st, &b.0);
@@ -10461,13 +10493,66 @@ fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u
     let lost = || DocError::Invalid(format!("the placement `{}` was mirrored at no longer exists", mb.name));
     // A stale or edited path that leads to another component no longer shows the body.
     let (at, _) = doc.path_placement(path).ok_or_else(lost)?;
-    if !placement_shows(doc, mb, at) {
+    let effective: std::borrow::Cow<'_, [u64]> = if placement_shows(doc, mb, at) {
+        std::borrow::Cow::Borrowed(path)
+    } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
+        std::borrow::Cow::Owned(migrated)
+    } else {
         return Err(lost());
-    }
+    };
     let singular = || DocError::Invalid(format!("the placement `{}` was mirrored at is singular", mb.name));
-    let (component, frame, picked) = mirror_copy_frame(doc, own, path).ok_or_else(singular)?;
+    let (component, frame, picked) = mirror_copy_frame(doc, own, &effective).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
+}
+
+/// Follow a pattern or mirror copy whose owning component shifted between an ancestor and a
+/// single-placed descendant when sibling occurrences were removed or added (#21548).
+///
+/// [`mirror_copy_frame`] places a copy in its component when that component has one occurrence,
+/// and in the innermost single-placed ancestor (often the root) while it has several. Deleting
+/// sibling occurrences migrates the copy down into that now-unique component; adding another
+/// occurrence migrates it back up to the ancestor. In both cases the copy stays at the same world
+/// position and its placement path is uniquely determined.
+fn migrated_copy_placement(doc: &Document, mb: &ModelBody, path: &[u64], at: u64) -> Option<Vec<u64>> {
+    if !doc.feature(mb.feature).is_some_and(|f| matches!(f.kind, FeatureKind::Pattern { .. } | FeatureKind::Mirror { .. })) {
+        return None;
+    }
+    let owner = doc.model_body_component(mb);
+    // Downward migration (e.g. 3 -> 1 occurrences): `owner` is strictly inside `at` and every
+    // occurrence along the chain from `at` to `owner` is active and placed once.
+    if mb.transferred && owner != at {
+        let inactive = doc.inactive_pattern_occurrences();
+        let mut tail = Vec::new();
+        let mut c = owner;
+        for _ in 0..=doc.components.len() {
+            if c == at {
+                tail.reverse();
+                let mut resolved = path.to_vec();
+                resolved.extend(tail);
+                if doc.path_placement(&resolved).is_some_and(|(comp, _)| comp == owner) {
+                    return Some(resolved);
+                }
+                break;
+            }
+            let mut matches = doc.occurrences.iter().filter(|o| o.component == c && !inactive.contains(&o.id));
+            let Some(occ) = matches.next() else { break };
+            if matches.next().is_some() {
+                break;
+            }
+            tail.push(occ.id);
+            c = occ.parent;
+        }
+    }
+    // Upward migration (e.g. 1 -> 2 occurrences): `owner` is now an ancestor along `path` (a strict
+    // prefix of `path`) because a sibling occurrence was added to `at`.
+    for k in (0..path.len()).rev() {
+        let prefix = &path[..k];
+        if doc.path_placement(prefix).is_some_and(|(comp, _)| comp == owner) && placement_shows(doc, mb, owner) {
+            return Some(prefix.to_vec());
+        }
+    }
+    None
 }
 
 /// Whether a placement of component `at` shows body `mb`: `at` is the body's component. That is
