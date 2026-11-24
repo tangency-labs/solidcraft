@@ -2830,11 +2830,7 @@ impl BSplineCurve {
                 && ((head < zone_tol_1d_min && knots.len() > 2)
                     || (tail < zone_tol_1d_max && knots.len() > 2))
             {
-                if self.dim != 3 {
-                    // a UV curve loses its pole end spans only: upstream's removal would
-                    // also cut every other span shorter than the 3D zone tolerance
-                    cur1 = without_pole_end_spans(&cur1, zone_tol_3d)?;
-                } else {
+                if self.dim == 3 {
                     let removal = cur1
                         .remove_degen_segs(zone_tol_3d)
                         .map_err(SolidError::nurbs_routine(OP))?;
@@ -2843,6 +2839,10 @@ impl BSplineCurve {
                     if let Some(r) = removal {
                         cur1 = copy_nurb_curve(&r.curve);
                     }
+                } else {
+                    // a UV curve loses its pole end spans only: upstream's removal would
+                    // also cut every other span shorter than the 3D zone tolerance
+                    cur1 = without_pole_end_spans(&cur1, zone_tol_3d)?;
                 }
             }
 
