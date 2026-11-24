@@ -455,7 +455,7 @@ fn face_without_surface<O>(geometry: &impl ClassGeometry<O>, h: O) -> SolidError
 // Why each step that fails here is the kernel's fault (`OffsetFailure::Defect`).
 
 /// Why a curve evaluated with its first derivative has none
-/// ([`make_edges_on_analytics_exact`]).
+/// ([`make_edges_on_analytics_exact`] and the exact pieces of `mate_edges`, [`run_as`]).
 const NO_TANGENT: &str = "the evaluation of the exact piece and of the edge's curve with one \
      derivative succeeded but returned no tangent, which an evaluation that succeeds returns";
 /// Why the jets of `passes_through` are short.
@@ -2447,6 +2447,32 @@ fn exact_piece(
     Ok(None)
 }
 
+/// `piece` ([`exact_piece`]) reversed where it runs against `curve`, the curve it was
+/// found through: their tangents at their middles point apart. `exact_piece` gives a
+/// line or conic in its own direction (a conic's angle increasing), from whichever of
+/// `curve`'s ends that direction leaves; a closed `curve`'s piece starts at its start, so
+/// both middles are the point half way round. `op` names the caller.
+///
+/// # Errors
+///
+/// Those of the evaluations and the reversal; a defect where an evaluation gives no
+/// tangent.
+fn run_as(k: &Kernel, piece: &mut ExactPiece, curve: &Curve, op: &'static str) -> Result<()> {
+    let old = curve.evaluate(k, curve.natural_interval().evaluate(0.5), 1, true, true)?;
+    let (new, piece_ivl) = {
+        let probe = Curve::from(piece.clone());
+        let ivl = probe.natural_interval();
+        (probe.evaluate(k, ivl.evaluate(0.5), 1, true, true)?, ivl)
+    };
+    let (Some(old_tangent), Some(new_tangent)) = (old.get(1), new.get(1)) else {
+        return Err(defect(op, NO_TANGENT, SM_ERR));
+    };
+    if old_tangent.dot(*new_tangent) < 0.0 {
+        piece.reverse_parameterization(k, &piece_ivl)?;
+    }
+    Ok(())
+}
+
 /// The kind of a candidate of [`exact_piece`].
 enum ExactKind<'a> {
     Line(&'a Line),
@@ -2611,6 +2637,14 @@ fn smallest_tolerance(tolerances: &[f64]) -> Option<f64> {
         smallest = Some(smallest.map_or(t, |s| s.min(t)));
     }
     smallest
+}
+
+/// Whether the parameter range `[a, b]` (either order) of a coincident solution covers the
+/// curve's natural interval `ivl`, each end within a scaled zero of the interval's.
+fn covers_curve(a: f64, b: f64, ivl: &Extent1d) -> bool {
+    let near = |x: f64, y: f64| (x - y).abs() <= EFF_ZERO * (1.0 + y.abs());
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    (lo < ivl.min() || near(lo, ivl.min())) && (hi > ivl.max() || near(hi, ivl.max()))
 }
 
 /// Whether a move of `distance` stays within `allowed`: written so that a NaN on either
@@ -2813,18 +2847,7 @@ fn exact_edge(
         return Ok(None);
     };
     // The piece runs as the edge does (exact_piece may give it end to start).
-    let old = trimmed.evaluate(k, trimmed.natural_interval().evaluate(0.5), 1, true, true)?;
-    let (new, found_ivl) = {
-        let probe = Curve::from(found.clone());
-        let ivl = probe.natural_interval();
-        (probe.evaluate(k, ivl.evaluate(0.5), 1, true, true)?, ivl)
-    };
-    let (Some(old_tangent), Some(new_tangent)) = (old.get(1), new.get(1)) else {
-        return Err(defect(OP_ANALYTICS_EXACT, NO_TANGENT, SM_ERR));
-    };
-    if old_tangent.dot(*new_tangent) < 0.0 {
-        found.reverse_parameterization(k, &found_ivl)?;
-    }
+    run_as(k, &mut found, &trimmed, OP_ANALYTICS_EXACT)?;
     // A conic whose own parameters SMLib cannot hold consistently (its polar
     // conversion off by more than its own zero, far from the origin) fails its
     // validity check: the edge keeps its marched curve rather than take it.
@@ -5056,6 +5079,17 @@ impl OffsetGeometryCreation {
                 // Test the solutions to see if they are not nearly tangent.
                 face_solutions.push((solutions.len(), solutions.len()));
                 for sol in sols2.as_slice() {
+                    // Not upstream (WR-495): a curve that lies on the surface all the way
+                    // (the exact circle on a neighbour's offset plane, its one coincident
+                    // range the whole curve) is not cut by it anywhere: the range's ends are
+                    // the curve's own ends, wherever its seam is, not trim points. The end is
+                    // then found as where no neighbour cuts the curve
+                    // (shell_file_problemShell4_face2_extend).
+                    if sol.solution_type == SolutionType::RangeOfValues
+                        && covers_curve(sol.start.param(0)?, sol.end.param(0)?, &crv_ivl)
+                    {
+                        continue;
+                    }
                     // (neither status is checked upstream: a failed evaluation leaves its
                     // output at SmPoint3d's SM_UNDEF_DOUBLE default; passed on here, WR-658)
                     let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
@@ -6494,9 +6528,14 @@ impl OffsetGeometryCreation {
                     if is_exact_kind(marched) || marched.is_degenerate(k, EFF_ZERO, None)? {
                         continue;
                     }
-                    let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                    let Some(mut piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
                         continue;
                     };
+                    // The piece runs as the marched one does: the trims below find the
+                    // edge's ends on it in its direction, and a closed piece run the other
+                    // way round from the marched start gives the arcs between them the
+                    // other way round too (shell_file_problemShell4_face2_extend).
+                    run_as(k, &mut piece, marched, OP_MATE)?;
                     let piece = Curve::from(piece);
                     let mut uv: [Option<Curve>; 2] = [None, None];
                     for (i_surf, slot) in uv.iter_mut().enumerate() {
@@ -9058,6 +9097,54 @@ mod tests {
         assert!(drop_is_loose(f64::NAN, 1e-4));
         assert!(drop_is_loose(0.0, f64::NAN));
         assert!(drop_is_loose(f64::INFINITY, 1e-4));
+    }
+
+    /// WR-495 (shell_file_problemShell4_face2_extend): a range of values that covers the
+    /// whole curve, ends to within `EFF_ZERO` relative, either way round, is a curve lying
+    /// on the neighbour surface; a range that stops short of either end is not.
+    #[test]
+    fn a_range_covering_the_whole_curve_is_not_a_cut() {
+        let ivl = Extent1d::from_min_max(0.0, 360.0);
+        assert!(covers_curve(0.0, 360.0, &ivl));
+        assert!(covers_curve(360.0, 0.0, &ivl));
+        assert!(covers_curve(-1.0, 361.0, &ivl));
+        assert!(covers_curve(0.0, 360.0 * (1.0 - 0.5 * EFF_ZERO), &ivl));
+        assert!(!covers_curve(0.0, 359.0, &ivl));
+        assert!(!covers_curve(1e-3, 360.0, &ivl));
+        assert!(!covers_curve(f64::NAN, 360.0, &ivl));
+    }
+
+    /// WR-495 (shell_file_problemShell4_face2_extend): a closed exact circle running the
+    /// other way round from the marched curve it replaces is reversed, so its arcs run as
+    /// the edge's did; one running the same way is kept.
+    #[test]
+    fn an_exact_circle_running_backwards_is_reversed() {
+        let k = Kernel::default();
+        let circle = |y: f64| {
+            Ellipse::new_circle(
+                &k,
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, y, 0.0),
+                Extent1d::from_min_max(0.0, 360.0),
+                50.8,
+                &crate::curve::ellipse::EllipseOptions::default(),
+            )
+            .unwrap()
+        };
+        let tangent = |c: &Curve| {
+            let ivl = c.natural_interval();
+            c.evaluate(&k, ivl.evaluate(0.5), 1, true, true).unwrap()[1]
+        };
+        let marched = Curve::from(circle(-1.0));
+        let mut backwards = ExactPiece::Conic(circle(1.0));
+        assert!(tangent(&Curve::from(backwards.clone())).dot(tangent(&marched)) < 0.0);
+        run_as(&k, &mut backwards, &marched, OP_MATE).unwrap();
+        assert!(tangent(&Curve::from(backwards)).dot(tangent(&marched)) > 0.0);
+        let mut forwards = ExactPiece::Conic(circle(-1.0));
+        run_as(&k, &mut forwards, &marched, OP_MATE).unwrap();
+        let (a, b) = (tangent(&Curve::from(forwards)), tangent(&marched));
+        assert!(a.dot(b) > 0.0);
     }
 
     /// The pieces of one cubic split apart and joined back again: the joint knot (full
