@@ -2319,6 +2319,19 @@ fn internal_components_are_picked_from_another_design_with_their_timelines() {
     assert!(held.values().all(|part| solidcraft_io::internal_of(part).is_some_and(|tag| tag.design == "target.sc")));
     assert_eq!(std::fs::read(&source).unwrap(), before, "the design picked from is untouched");
 
+    // Picked again, the plate is the part the design already holds: nothing more is stored and
+    // its component is placed a second time. Edited since, it would be another part.
+    let again = run(&mut s, "component.insert_from_design", json!({"path": source, "members": ["plate.scprt"]}));
+    assert_eq!(again["inserted"][0]["reused"], true, "{again}");
+    assert_eq!(again["inserted"][0]["member"], "plate.scprt", "{again}");
+    assert_eq!(again["inserted"][0]["component"].as_u64(), Some(plate), "{again}");
+    assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == plate).count(), 2);
+    assert_eq!(s.doc.links.len(), 3, "no fourth component");
+    assert!(!job.join(".~target.sc.parts").join("plate (2).scprt").exists(), "no second copy");
+    assert!((volume(&mut s) - 12000.0).abs() < 1e-6, "{}", volume(&mut s));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.occurrences.iter().filter(|o| o.component == plate).count(), 1);
+
     // One undo takes the whole insert back.
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.links.is_empty(), "one undo step");
@@ -2864,6 +2877,37 @@ fn a_save_without_linked_bodies_keeps_the_bodies_of_a_linked_step_file() {
     let listed = run(&mut opened, "component.links", json!({}));
     assert!(listed["links"].as_array().unwrap().iter().all(|l| l["changed"] != true), "{listed}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A lock a crashed Edit in Place left on a work file, which nobody holds, goes when the design
+/// is opened again (#6892); a lock this app holds stays.
+#[test]
+fn opening_a_design_removes_a_lock_a_crashed_edit_left_on_its_part() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("dead-part-lock");
+    part(&root.join("bracket.scprt"), 10);
+    part(&root.join("bolt.scprt"), 10);
+    let design = root.join("counter.sc");
+    let work = root.join(".~counter.sc.parts");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": design}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bracket.scprt")}));
+    run(&mut s, "component.insert_design", json!({"path": root.join("bolt.scprt")}));
+    run(&mut s, "component.make_internal", json!({"component": "bracket"}));
+    run(&mut s, "component.make_internal", json!({"component": "bolt"}));
+    run(&mut s, "file.save", json!({}));
+    // One no app can read, as a crash part way through writing it leaves; one this app holds.
+    let dead = solidcraft_io::design_lock::lock_path(&work.join("bracket.scprt"));
+    std::fs::write(&dead, b"{").unwrap();
+    let mine = solidcraft_io::design_lock::Lock::mine(solidcraft_io::design_lock::now_secs());
+    solidcraft_io::design_lock::write(&work.join("bolt.scprt"), &mine).unwrap();
+    let held = solidcraft_io::design_lock::lock_path(&work.join("bolt.scprt"));
+
+    let mut opened = Session::default();
+    assert_eq!(run(&mut opened, "doc.open", json!({"path": design}))["errors"], 0);
+    assert!(!dead.exists(), "the lock nobody holds is gone");
+    assert!(held.exists(), "the lock this app holds stays");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// A design opened while no work files are made (read as the Single design environment reads

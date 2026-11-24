@@ -131,6 +131,9 @@ pub(crate) fn unpack(doc: &Document, design: &str) -> Unpacked {
         }
     }
     stamps.save();
+    // A lock a crashed Edit in Place left on a work file goes when the design is opened again,
+    // so the part can be edited without waiting for the design to close.
+    clear_dead_locks(&folder);
     // A folder made by something that hides nothing (the command-line tool, an earlier build) is
     // hidden once the app has the design open.
     if let Some(hide) = HIDE.get().filter(|_| folder.is_dir()) {
@@ -299,9 +302,8 @@ fn tidy(design: &str, depth: usize) -> usize {
         // A lock a work file's editing left when the app was stopped (a crash during Edit in
         // Place): nobody holds it any more, and it would keep the folder from going. One this
         // process or a running app still holds stays.
-        if let Some(of) = entry.file_name().to_str().and_then(|name| name.strip_prefix(".~")).and_then(|name| name.strip_suffix(".lock")) {
-            let now = solidcraft_io::design_lock::now_secs();
-            if solidcraft_io::design_lock::read(&folder.join(of)).is_none_or(|lock| !lock.is_mine() && (lock.is_stale(now) || lock.owner_is_gone())) {
+        if let Some(dead) = dead_lock(&folder, &entry) {
+            if dead {
                 let _ = std::fs::remove_file(entry.path());
             }
             continue;
@@ -327,6 +329,49 @@ fn tidy(design: &str, depth: usize) -> usize {
     // Only an empty folder goes.
     let _ = std::fs::remove_dir(&folder);
     removed
+}
+
+/// Whether `entry`, in the work folder `folder`, is a work file's lock that nobody holds any
+/// more: one that can't be read, one whose app is no longer running on this computer, or one not
+/// refreshed for so long that its owner (another computer, on a shared folder) is taken for
+/// gone. `None` for anything that is not a lock file. A lock this process or a running app
+/// holds is `Some(false)`.
+fn dead_lock(folder: &Path, entry: &std::fs::DirEntry) -> Option<bool> {
+    let name = entry.file_name();
+    let of = name.to_str()?.strip_prefix(".~")?.strip_suffix(".lock")?;
+    let now = solidcraft_io::design_lock::now_secs();
+    Some(solidcraft_io::design_lock::read(&folder.join(of)).is_none_or(|lock| !lock.is_mine() && (lock.is_stale(now) || lock.owner_is_gone())))
+}
+
+/// Remove the locks in `folder` that nobody holds any more ([`dead_lock`]).
+fn clear_dead_locks(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else { return };
+    for entry in entries.flatten() {
+        if dead_lock(folder, &entry) == Some(true) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The internal component of `doc`, the design saved at `own`, that is the part in `bytes`
+/// under the name `given` or that name numbered (`bracket (2).scprt`): the same file but for
+/// the tag that names its design. This is how a part brought a second time is found to be one
+/// the design already holds. A part edited since it was brought is another part.
+pub(crate) fn same_part(doc: &Document, held: &BTreeMap<String, Blob>, own: &str, given: &str, bytes: &[u8]) -> Option<String> {
+    let (stem, extension) = given.rsplit_once('.')?;
+    let (stem, extension) = (stem.to_lowercase(), extension.to_lowercase());
+    let plain = solidcraft_io::with_internal_of(bytes, None).ok()?;
+    linked(doc).into_iter().find(|name| {
+        let lower = name.to_lowercase();
+        let Some((other, ext)) = lower.rsplit_once('.') else { return false };
+        let numbered = other.strip_prefix(stem.as_str()).is_some_and(|rest| {
+            rest.is_empty() || rest.strip_prefix(" (").and_then(|n| n.strip_suffix(')')).is_some_and(|n| n.parse::<u32>().is_ok())
+        });
+        numbered
+            && ext == extension
+            && self::bytes(doc, held, Some(own), name)
+                .is_some_and(|stored| solidcraft_io::with_internal_of(stored.as_bytes(), None).is_ok_and(|stored| stored == plain))
+    })
 }
 
 /// The design that owns the file at `file`, which carries a tag ([`solidcraft_io::InternalOf`]):

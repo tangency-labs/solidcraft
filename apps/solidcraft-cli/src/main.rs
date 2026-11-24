@@ -176,11 +176,29 @@ const COMMANDS: &[Command] = &[
     Command { name: "save-stress", usage: USAGE_SAVE_STRESS, listed: false },
 ];
 
+/// Give the folder at `path` the Hidden attribute, as the desktop app does for a design's work
+/// folder. This tool has no unsafe code, so it asks Windows' own `attrib`, and only when the
+/// folder is not hidden yet. A folder that can't be changed stays as it is.
+#[cfg(target_os = "windows")]
+fn hide_folder(path: &std::path::Path) {
+    use std::os::windows::fs::MetadataExt as _;
+    const HIDDEN: u32 = 0x2;
+    if std::fs::metadata(path).is_ok_and(|found| found.file_attributes() & HIDDEN == 0) {
+        let attrib = std::env::var_os("SystemRoot").map(|root| std::path::Path::new(&root).join("System32").join("attrib.exe"));
+        if let Some(attrib) = attrib.filter(|program| program.is_file()) {
+            let _ = std::process::Command::new(attrib).arg("+h").arg(path).stdin(std::process::Stdio::null()).output();
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
     // The kernel's fix set, named to solidcore-ops before any call runs on it.
     solidcraft_engine::kernel::start();
+    // A design's work folder is hidden by its name elsewhere; Windows needs the attribute (#6892).
+    #[cfg(target_os = "windows")]
+    solidcraft_engine::set_work_folder_hider(hide_folder);
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
     // record from here, and print the table when the command ends.
     let profiling = match args.first().map(String::as_str) {

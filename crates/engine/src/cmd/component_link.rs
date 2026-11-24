@@ -2145,6 +2145,22 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let mut inserted = Vec::new();
     for pick in picks {
         let (given, bytes, placement) = picked(&source, &pick).map_err(|why| bad(cmd, format!("{path}: {why}")))?;
+        // Row-major 3x4, as `component.insert_design` takes it.
+        let rows = placement.map(|at| (0..3).flat_map(|row| (0..4).map(move |column| at[column][row])).collect::<Vec<f64>>());
+        // A part this design already holds is not stored a second time: it is placed once more.
+        if let Some(member) = super::design_internal::same_part(&s.doc, &s.internal_held, &own, &given, &bytes)
+            && let Some(file) = super::design_internal::work_file(Some(&own), &member)
+        {
+            let mut params = json!({"path": file.to_string_lossy(), "reuse": true});
+            if let Some(rows) = &rows {
+                params["to_matrix"] = json!(rows);
+            }
+            let made = insert_design(s, &params)?;
+            let component = made["component"].as_u64().ok_or_else(|| bad(cmd, "the picked design made no component"))?;
+            let name = s.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+            inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: true });
+            continue;
+        }
         let member = super::design_internal::free_name(&s.doc, &own, Path::new(&given));
         // The copy belongs to this design now, and says so.
         let tag = solidcraft_io::InternalOf {
@@ -2161,9 +2177,7 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
         s.internal_held.insert(member.clone(), bytes.clone().into());
         let name = given.rsplit_once('.').map_or(given.as_str(), |(stem, _)| stem).to_string();
         let mut params = json!({"path": file.to_string_lossy(), "name": name});
-        if let Some(at) = placement {
-            // Row-major 3x4, as `component.insert_design` takes it.
-            let rows: Vec<f64> = (0..3).flat_map(|row| (0..4).map(move |column| at[column][row])).collect();
+        if let Some(rows) = &rows {
             params["to_matrix"] = json!(rows);
         }
         let made = insert_design(s, &params)?;
@@ -2173,7 +2187,7 @@ fn insert_from_design(s: &mut Session, p: &Value) -> Result<Value> {
             kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
         }
         let name = s.doc.components.iter().find(|c| c.id == component).map_or(name, |c| c.name.clone());
-        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned() });
+        inserted.push(PickedMember { pick, component, name, member, file: file.to_string_lossy().into_owned(), reused: false });
     }
     reply(cmd, InsertFromDesignResult { inserted, param_warnings: Vec::new() })
 }

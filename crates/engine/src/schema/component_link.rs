@@ -630,7 +630,7 @@ pub struct InsertFromDesignResult {
 pub struct PickedMember {
     /// The pick it came from.
     pub pick: String,
-    /// The new component, by id.
+    /// The component, by id: a new one, or with `reused` the one the design had.
     pub component: u64,
     /// Its name.
     pub name: String,
@@ -638,6 +638,10 @@ pub struct PickedMember {
     pub member: String,
     /// The unpacked file, whole: the one to open to edit it.
     pub file: String,
+    /// The design already held this part under this name, unchanged: nothing was stored, and
+    /// its component got one more placement.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reused: bool,
 }
 
 /// What `component.make_internal` returns.
