@@ -411,7 +411,7 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
     assert!(after.iter().any(|i| i.label == "Unisolate" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Unisolate");
-    assert!(!after.iter().any(|i| i.label == "Isolate"));
+    assert!(after.iter().any(|i| i.label == "Isolate"), "Isolate stays, to narrow the isolation");
     act(&mut app, &t, "Unisolate");
     assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");
 

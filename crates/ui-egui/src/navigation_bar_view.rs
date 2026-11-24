@@ -239,7 +239,8 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         selected: editing.is_none() && selected(app, slot.id),
         enabled: editing.is_some() || !(slot.id == "projection" && projection_locked(app)),
         hidden: hidden.is_some(),
-        show_text: if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels },
+        // A strong slot is its icon alone, labels or not (`Catalogue::strong`).
+        show_text: if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels && !navigation_bar::strong(slot.id) },
         rect,
         // The View menu's slot, by the name older scenarios use.
         alias: (slot.id == "display").then_some("nav:view"),
@@ -812,6 +813,12 @@ mod tests {
         let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
         let view = slot_view(&h.app, &bar, slot, usize::MAX, Rect::NOTHING, None);
         assert!(view.selected && view.icon == "unisolate" && !view.show_text, "on, icon only");
+        h.app.preferences.navigation_bar.labels = crate::navigation_bar::Labels::Labels;
+        let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
+        assert!(bar.labels && !slot_view(&h.app, &bar, slot, usize::MAX, Rect::NOTHING, None).show_text, "icon only on a bar of labels too");
+        let (_, rect) = bar.slots.iter().find(|(s, _)| s.id == UNISOLATE).expect("on the bar");
+        assert_eq!(rect.width(), crate::ui_kit::NavigationMetrics::for_size(h.app.preferences.navigation_bar.size).button, "a plain button's width");
+        h.app.preferences.navigation_bar.labels = crate::navigation_bar::Labels::Icons;
         assert!(navigation_bar::strong(UNISOLATE) && !navigation_bar::strong("grid"), "only Unisolate takes the primary fill");
         h.step(&json!({"click":{"handle":"nav:slot:unisolate"}})).unwrap();
         h.settle();

@@ -126,7 +126,8 @@ fn a_narrow_bar_folds_other_slots_before_unisolate() {
     assert_eq!(bar.slots.last().map(|(slot, _)| slot.id), Some("unisolate"), "Unisolate stays, last on the row");
     assert!(!bar.overflow.iter().any(|slot| slot.id == "unisolate"));
     assert!(narrow.contains_rect(bar.rect));
-    let order: Vec<_> = bar.slots.iter().map(|(slot, _)| slot.id).filter(|id| *id != "unisolate").chain(bar.overflow.iter().map(|slot| slot.id)).collect();
+    let order: Vec<_> =
+        bar.slots.iter().map(|(slot, _)| slot.id).filter(|id| *id != "unisolate").chain(bar.overflow.iter().map(|slot| slot.id)).collect();
     assert_eq!(order, NavigationBar::default().slots, "the others keep their order across the row and More");
     let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(90.0, 720.0));
     let bar = measure(tiny, &prefs, |_| true, |_| 50.0);

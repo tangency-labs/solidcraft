@@ -425,7 +425,7 @@ fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
 
 /// #8120: Isolate on an occurrence menu becomes Unisolate and restores sibling placements.
 #[test]
-fn occurrence_isolate_toggles_unisolate_on_the_same_menu() {
+fn occurrence_isolate_offers_unisolate_beside_it() {
     let (mut h, _, first, second) = fixture();
     let first_body = h.app.session.occurrence_bodies(&[first], true).unwrap()[0].clone();
     let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
@@ -435,9 +435,19 @@ fn occurrence_isolate_toggles_unisolate_on_the_same_menu() {
     assert!(!h.app.session.body_visible(&first_body));
     assert!(h.app.session.body_visible(&second_body));
 
+    // Isolate stays, for this placement and its own key; Unisolate follows it with its key.
+    for path in [second, first] {
+        let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![path] });
+        let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on every placement");
+        assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([path]), "this placement's own Isolate");
+        assert_eq!(
+            (items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()),
+            ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I")
+        );
+    }
     let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Unisolate").expect("Unisolate");
-    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Isolate"));
     context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Unisolate"), "gone once everything is back");
     assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
     assert!(h.app.session.visibility.hidden_occurrences.is_empty());
 }

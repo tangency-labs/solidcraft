@@ -386,7 +386,9 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() {
+        // The bodies Unisolate will hide again follow renames too (#8120).
+        let before_isolate = self.visibility.before_isolate.as_ref().map_or(&[][..], |before| before.hidden_bodies.as_slice());
+        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && selected.is_empty() {
             return;
         }
         if rename.is_none() {
@@ -404,7 +406,7 @@ impl Session {
                 body.name = new.to_string();
             }
         }
-        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().chain(before_isolate).map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
@@ -421,7 +423,7 @@ impl Session {
                 }
             }
         }
-        self.visibility.hidden_bodies.retain_mut(|hidden| {
+        let remap = |hidden: &mut String| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
                 true
@@ -430,7 +432,11 @@ impl Session {
                 // body's hide follows into that name; a stale entry must not hide it.
                 !destinations.contains(hidden)
             }
-        });
+        };
+        self.visibility.hidden_bodies.retain_mut(remap);
+        if let Some(before) = self.visibility.before_isolate.as_mut() {
+            before.hidden_bodies.retain_mut(remap);
+        }
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,

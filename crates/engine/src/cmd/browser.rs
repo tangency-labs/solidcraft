@@ -733,7 +733,12 @@ fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     };
     s.visibility.hidden_bodies = before.hidden_bodies;
     s.visibility.hidden_occurrences = before.hidden_occurrences;
-    s.visibility.hidden_folders = before.hidden_folders;
+    // Isolate only ever shows folders: hide those again, and keep a folder hidden while isolating.
+    for key in before.hidden_folders {
+        if !s.visibility.hidden_folders.contains(&key) {
+            s.visibility.hidden_folders.push(key);
+        }
+    }
     s.refresh_display();
     let visibility = VisibilityState::from(&s.visibility);
     reply(cmd, BrowserVisibilityResult { visible: true, changed: None, isolated: None, visibility, param_warnings: Vec::new() })
@@ -2271,6 +2276,22 @@ mod tests {
         assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
         run(&mut s, "browser.unisolate", json!({}));
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+    }
+
+    /// #8120: a body hidden before the Isolate and renamed during it stays hidden after Unisolate,
+    /// and a folder hidden during it stays hidden.
+    #[test]
+    fn unisolate_follows_renames_and_keeps_later_folder_hides() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "body.rename", json!({"body": "C", "name": "D"}));
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
+        run(&mut s, "browser.unisolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["D"], "the renamed body stays hidden");
+        assert!(s.visibility.hidden_folders.iter().any(|k| k == "c0/sketches"), "the folder hidden while isolating stays hidden");
     }
 
     /// #8120: Unisolate puts back what the Isolates hid, as it was before the first one, is one

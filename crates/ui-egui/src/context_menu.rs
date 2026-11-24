@@ -393,20 +393,26 @@ fn isolate_key(app: &SolveApp) -> String {
     crate::keymap::display_for(app, "browser.isolate").unwrap_or_default()
 }
 
-/// Isolate, or Unisolate on what an Isolate left on screen (#8120).
+/// Isolate, as before: while isolating it narrows what stays on screen. [`items`] adds Unisolate
+/// beside it (#8120).
 pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
-    if !bodies.is_empty() && isolating(app) && bodies.iter().all(|b| app.session.body_visible(b)) {
-        return unisolate_item(app);
-    }
     act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).key(&isolate_key(app)).on(!bodies.is_empty())
 }
 
-/// Isolate this placement, or Unisolate when an Isolate left it on screen (#8120).
+/// Isolate this placement. [`items`] adds Unisolate beside it (#8120).
 pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
-    if !path.is_empty() && isolating(app) && !app.session.occurrence_hidden(path) {
-        return unisolate_item(app);
-    }
     act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path })).key(&isolate_key(app))
+}
+
+/// While an Isolate is in effect, Unisolate follows the menu's Isolate entry (#8120), unless the
+/// menu offers it already, as the empty-space menu does.
+fn add_unisolate(app: &SolveApp, v: &mut Vec<Item>) {
+    if !isolating(app) || v.iter().any(|item| item.id == "ui.unisolate") {
+        return;
+    }
+    if let Some(at) = v.iter().position(|item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence") {
+        v.insert(at + 1, unisolate_item(app));
+    }
 }
 
 /// Returns an isolation menu item for a component. When its bodies are the only ones left on
@@ -650,6 +656,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     {
         v.push(crate::render_workspace::assign::menu(app, name));
     }
+    add_unisolate(app, &mut v);
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
         v.push(Item::sep());
@@ -1327,12 +1334,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
-        "ui.isolate" => {
-            let new_item = isolate_occurrence_item(app, path);
-            item.id = new_item.id;
-            item.label = new_item.label;
-            item.params = new_item.params;
-        }
+        // This placement's own Isolate, whatever the component's first placement shows.
+        "ui.isolate" => *item = isolate_occurrence_item(app, path),
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
