@@ -16,7 +16,7 @@ pub(super) struct BackingSlot {
 
 impl BackingSlot {
     pub(super) fn reserve(ctx: &Context, layer: egui::LayerId) -> Option<Self> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return None;
         }
         let painter = ctx.layer_painter(layer);
@@ -41,7 +41,7 @@ pub(super) fn show_combo<R>(
     combo: egui::ComboBox,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+    if !crate::blur::enabled() {
         return combo.show_ui(ui, body);
     }
     let popup = widget.with("popup");
@@ -153,7 +153,7 @@ impl BackingModal {
         self
     }
     pub fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::ModalResponse<R> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !crate::blur::enabled() {
             return self.modal.show(ctx, body);
         }
         // Blur the preceding UI before native dimming, then blur the dialog's immediate
@@ -765,6 +765,16 @@ impl Container {
         }
     }
 
+    /// Compact completion notifications keep Toast's independent layout, with popup elevation
+    /// and the large (8-point) corner token. Ordinary status/progress toasts keep their shell frame.
+    pub fn completion_notice_frame(ctx: &Context) -> Frame {
+        let t = Tokens::get();
+        Self::new(ctx, Surface::Toast)
+            .frame(ctx, t.panel, Side::Left)
+            .corner_radius(t.radius_lg)
+            .shadow(Self::popup_frame(&ctx.global_style()).shadow)
+    }
+
     /// Movable tool sheets round all exposed corners, joining only their right dock edge (or the
     /// edges they were declared `joined` at).
     pub fn tool_frame(self, mut frame: Frame, right_docked: bool) -> Frame {
@@ -819,10 +829,7 @@ impl Container {
 
     /// Stock Frame path for backing cards; no additional inset chrome is introduced.
     pub fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible())
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return frame.show(ui, body);
         }
         let slot = ui.painter().add(egui::Shape::Noop);
@@ -844,10 +851,7 @@ impl Container {
         frame: Frame,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible())
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !crate::blur::enabled() || !crate::blur::wants_backdrop(frame.fill, ui.painter().opacity(), ui.painter().is_visible()) {
             return panel.frame(frame).show(ui, body);
         }
         let slot = BackingSlot::reserve(ui.ctx(), ui.layer_id());
@@ -857,13 +861,9 @@ impl Container {
         })
     }
 
-    fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
+    fn background(self, _ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && !self.see_through && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 {
-            Some(crate::blur::decorate)
-        } else {
-            None
-        }
+        if crate::blur::enabled() && !self.see_through && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
     }
 
     pub(super) fn show_frame_background<R>(

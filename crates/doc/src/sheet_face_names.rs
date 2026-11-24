@@ -13,24 +13,18 @@ use solidcraft_develop::{CornerRelief, Development, JointKind, Sheet, Surface};
 use crate::sheet_surface::Piece;
 use crate::sheet_surface_convert::{HoleRecord, PanelMade, RimEdge, SheetFace, SheetPart};
 
-use crate::{ModelBody, ModelState, SurfaceSheet};
-
-/// The readable sheet names of a body's faces (by B-rep face index), as
-/// [`sheet_face_name`](super::sheet_face_name)s: `None` for every face. No sheet in `_st` names
-/// its faces so: a sheet made from surfaces reports what each face was made for, and the model
-/// names its faces (#7990).
-pub fn body_sheet_face_names(_st: &ModelState, b: &ModelBody) -> Vec<Option<String>> {
-    vec![None; b.body.face_count()]
-}
+use crate::SurfaceSheet;
 
 /// What the builder of a folded sheet made from surfaces sews a face for (see
 /// `sheet_surface_fold::solid`): one of a piece's two caps, on the sheet's surface or the other
-/// face, `at` the middle of the piece, or a wall along the run of its outline from `a` through
-/// `mid` to `b` (flat coordinates).
+/// face, `at` the middle of the piece, a wall along the run of its outline from `a` through
+/// `mid` to `b` (flat coordinates), or a face of the sheet's `bead`th bead (see
+/// [`crate::sheet_surface_bead::Form`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum FaceRole {
     Cap { surface: bool, at: Vec2 },
     Wall { a: Vec2, b: Vec2, mid: Vec2 },
+    Bead { bead: usize, face: solidcraft_develop::BeadFace },
 }
 
 /// What each face of a folded sheet made from surfaces (#6748) was made for, as its builder makes
@@ -41,6 +35,8 @@ pub(crate) struct FaceNamer<'a> {
     dev: &'a Development,
     /// What made each panel, by its key (see [`PanelMade`]).
     recipes: &'a [(String, PanelMade)],
+    /// The sheet's beads, which name their own faces.
+    beads: &'a [crate::SurfaceBead],
     /// Each panel's rims in the flat, and what made each (see [`rim_edges`]).
     rims: Vec<Vec<(Vec2, Vec2, Option<RimEdge>)>>,
     /// Each corner relief cut from the flat (see [`Development::cuts`]), with the panels the two
@@ -56,6 +52,7 @@ impl<'a> FaceNamer<'a> {
         pieces: &[(Piece, Region2)],
         curves: &[(String, String, Vec2, Vec2)],
         recipes: &'a [(String, PanelMade)],
+        beads: &'a [crate::SurfaceBead],
     ) -> FaceNamer<'a> {
         let rims = (0..sheet.panels.len())
             .map(|i| {
@@ -91,7 +88,7 @@ impl<'a> FaceNamer<'a> {
                 _ => None,
             })
             .collect();
-        FaceNamer { sheet, dev, recipes, rims, reliefs }
+        FaceNamer { sheet, dev, recipes, beads, rims, reliefs }
     }
 
     /// What the face made for `role` of `piece` was made for, as the sheet reports it to the model
@@ -100,8 +97,9 @@ impl<'a> FaceNamer<'a> {
     /// a bend's curved face or end by the panel the bend makes; a tab's cap, along its bend; a
     /// corner relief's wall by its corner's two bends, along the relief's outline from where it
     /// meets the first bend's zone (see [`relief_start`]); a hole's wall (see [`HoleRecord`],
-    /// `holes`), along its sketch curve. None for a wall nothing says what made (the model names
-    /// it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
+    /// `holes`), along its sketch curve; a bead's face by its feature and centreline (see
+    /// [`crate::sheet_surface_bead::face_role`]). None for a wall nothing says what made (the model
+    /// names it from geometry). A fold's piece's caps and rims are its panel's (see [`root`]): pieces of
     /// the faces the fold parted.
     pub(crate) fn part(&self, piece: Piece, role: FaceRole, holes: &[HoleRecord]) -> Option<(SheetPart, Option<f64>)> {
         let key = |i: usize| self.sheet.panels.get(i).map(|p| p.name.clone());
@@ -126,10 +124,14 @@ impl<'a> FaceNamer<'a> {
                     return Some((SheetPart::Relief { panels: panels.clone() }, Some(along)));
                 }
             }
-            let (feature, curve, along) = hole_at(self.sheet, self.dev, holes, run)?;
-            Some((SheetPart::Hole { feature, curve }, Some(along)))
+            let (part, along) = hole_at(self.sheet, self.dev, holes, run)?;
+            Some((part, Some(along)))
         };
         match (piece, role) {
+            (_, FaceRole::Bead { bead, face }) => {
+                let b = self.beads.get(bead)?;
+                Some((SheetPart::Bead { feature: b.feature, curve: b.curve.clone(), face: crate::sheet_surface_bead::face_role(face) }, None))
+            }
             (Piece::Panel(i), FaceRole::Cap { surface, .. }) => Some((SheetPart::Cap { panel: parted(i)?, surface }, None)),
             (Piece::Panel(i), FaceRole::Wall { a, b, mid }) => {
                 let m = (a + b) * 0.5;
@@ -158,6 +160,7 @@ impl<'a> FaceNamer<'a> {
                             None => cut([a, mid, b]),
                         }
                     }
+                    FaceRole::Bead { .. } => None,
                 }
             }
             (Piece::Tab(z, _), FaceRole::Cap { surface, at }) => {
@@ -282,28 +285,33 @@ pub(crate) fn ranked(made: Vec<Option<(SheetPart, Option<f64>)>>) -> Vec<Option<
 
 /// The hole of `holes` whose wall the run `run` (from its start through its middle to its end,
 /// the flat's coordinates) of a sheet developed as `dev` lies along, wherever the hole now is: the
-/// cut that made it, the sketch curve under the run, and where along that curve's drawn segment
-/// the run starts (see [`starts_at`]). None for a run along no recorded hole, or along records
-/// that disagree.
-fn hole_at(sheet: &Sheet, dev: &Development, holes: &[HoleRecord], run: [Vec2; 3]) -> Option<(u64, String, f64)> {
+/// feature and curve or drill that made it, and where along its recorded segment the run starts
+/// (see [`starts_at`]). None for a run along no recorded hole, or along records that disagree.
+fn hole_at(sheet: &Sheet, dev: &Development, holes: &[HoleRecord], run: [Vec2; 3]) -> Option<(SheetPart, f64)> {
     let small = sheet.thickness * 1e-3;
-    let mut found: Option<(u64, String, f64)> = None;
+    let mut found: Option<(SheetPart, f64)> = None;
     for h in holes {
         // The hole's chart is its panel's (by key), which a fold's pieces keep.
         let Some(Some(at)) = sheet.panels.iter().position(|p| p.name == h.panel).and_then(|k| dev.placements.get(k)) else { continue };
         let back = at.inverse();
         let chart = run.map(|x| back.point(x));
-        let Some((_, curve, drawn)) = h.segs.iter().find(|(seg, curve, _)| !curve.is_empty() && chart.iter().all(|x| on_seg(seg, *x, small))) else {
+        let Some((_, curve, drawn)) =
+            h.segs.iter().find(|(seg, curve, _)| (h.drill_role.is_some() || !curve.is_empty()) && chart.iter().all(|x| on_seg(seg, *x, small)))
+        else {
             continue;
         };
-        if let Some((feature, named, _)) = &found {
-            if (*feature, named) != (h.feature, curve) {
+        let part = match &h.drill_role {
+            Some(role) => SheetPart::Drill { feature: h.feature, role: role.clone() },
+            None => SheetPart::Hole { feature: h.feature, curve: curve.clone() },
+        };
+        if let Some((named, _)) = &found {
+            if *named != part {
                 return None;
             }
             continue;
         }
         let start = drawn.as_ref().map_or(0.0, |g| starts_at(g, chart, small));
-        found = Some((h.feature, curve.clone(), start));
+        found = Some((part, start));
     }
     found
 }
@@ -334,72 +342,21 @@ fn on_seg(s: &Seg2, p: Vec2, tol: f64) -> bool {
 /// (`before`), through the operation's history: a face kept, trimmed or split from a named face
 /// keeps its name; a face the operation made has none. All none without a history.
 pub(crate) fn carried<T: Clone>(before: &[Option<T>], body: &solidcraft_kernel::Body) -> Vec<Option<T>> {
+    carried_from(before, &[], body)
+}
+
+/// Carry parts from both operands when a result face has exactly one source.
+pub(crate) fn carried_from<T: Clone>(before: &[Option<T>], tool: &[Option<T>], body: &solidcraft_kernel::Body) -> Vec<Option<T>> {
     let n = body.face_count();
     let Some(h) = body.history().filter(|h| h.faces.len() == n) else { return vec![None; n] };
     h.faces
         .iter()
         .map(|p| match p.origins.as_slice() {
             [solidcore_record::brep::history::FaceOrigin::Face { operand: 0, face }] => before.get(*face).cloned().flatten(),
+            [solidcore_record::brep::history::FaceOrigin::Face { operand: 1, face }] => tool.get(*face).cloned().flatten(),
             _ => None,
         })
         .collect()
-}
-
-/// Each straight rim of the flat panels of `sheet`, developed as `dev` into `pieces`: the panel,
-/// its edge in the panel's chart and its name there (see [`FaceNamer`]). `curves` are the sketch
-/// lines that made panels' edges (see [`SurfaceSheet::sketch_curves`]).
-pub(crate) fn rims(
-    sheet: &Sheet,
-    dev: &Development,
-    pieces: &[(Piece, Region2)],
-    curves: &[(String, String, Vec2, Vec2)],
-    recipes: &[(String, PanelMade)],
-) -> Vec<(usize, Vec2, Vec2, String)> {
-    let mut out = Vec::new();
-    for (i, panel) in sheet.panels.iter().enumerate() {
-        let (Surface::Plane, Some(Some(at))) = (&panel.surface, dev.placements.get(i)) else { continue };
-        let back = at.inverse();
-        let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
-        let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
-        out.extend(rim_names(sheet, i, &own, &zones, curves, recipes).into_iter().map(|(a, b, name, _)| (i, a, b, name)));
-    }
-    out
-}
-
-/// The straight edges of the outlines `own` of panel `i`'s material (in its chart), with what
-/// made each (see [`rim_edges`]) and the name of its rim (see [`FaceNamer`]); a name two edges
-/// would share takes the edge's place too. `far`, `side0`, `side1`, `ext0` and `ext1` on a panel a
-/// bend makes, the sketch line's id on one a sketch made, `edge3` (its place in the outline) where
-/// nothing says what made the edge.
-fn rim_names(
-    sheet: &Sheet,
-    i: usize,
-    own: &[Region2],
-    zones: &[Region2],
-    curves: &[(String, String, Vec2, Vec2)],
-    recipes: &[(String, PanelMade)],
-) -> Vec<(Vec2, Vec2, String, Option<RimEdge>)> {
-    let edges = rim_edges(sheet, i, own, zones, curves, recipes);
-    let mut out: Vec<(Vec2, Vec2, String, Option<RimEdge>)> = edges
-        .into_iter()
-        .map(|(a, b, edge, k)| {
-            let name = match &edge {
-                Some(RimEdge::Sketch { curve }) => curve.clone(),
-                Some(RimEdge::Far) => "far".into(),
-                Some(RimEdge::End { at_origin }) => if *at_origin { "side1" } else { "side0" }.into(),
-                Some(RimEdge::Past { at_origin }) => if *at_origin { "ext1" } else { "ext0" }.into(),
-                None => format!("edge{k}"),
-            };
-            (a, b, name, edge)
-        })
-        .collect();
-    let names: Vec<String> = out.iter().map(|x| x.2.clone()).collect();
-    for (k, x) in out.iter_mut().enumerate() {
-        if names.iter().filter(|n| **n == x.2).count() > 1 {
-            x.2 = format!("{}{k}", x.2);
-        }
-    }
-    out
 }
 
 /// What made each straight edge of the outlines `own` of panel `i`'s material (in its chart), and
@@ -620,6 +577,6 @@ impl SurfaceSheet {
                 }
             })
             .collect();
-        self.holes.push(HoleRecord { panel: panel.to_string(), feature, segs });
+        self.holes.push(HoleRecord { panel: panel.to_string(), feature, segs, drill_role: None });
     }
 }

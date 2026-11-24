@@ -5,6 +5,94 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn table_cell_borders_are_single_inside_rings_for_hover_focus_and_errors() {
+    for dark in [false, true] {
+        let t = solidcraft_theme::Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        for (focused, invalid) in [(false, false), (true, false), (true, true)] {
+            let ctx = context();
+            let id = egui::Id::unique("single_cell_ring");
+            let mut value = "10 mm".to_owned();
+            let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+            let mut draw = |ui: &mut Ui| {
+                ui.set_width(280.0);
+                scope(ui, |ui| {
+                    rect.set(cell_editor(ui, id, &mut value, "", invalid).rect);
+                });
+            };
+            raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            if focused {
+                ctx.memory_mut(|m| m.request_focus(id));
+            }
+            let output =
+                raw_frame(&ctx, egui::RawInput { events: vec![egui::Event::PointerMoved(rect.get().center())], ..Default::default() }, &mut draw);
+            let mut rings = Vec::new();
+            for s in &output.shapes {
+                each_shape(&s.shape, &mut |shape| {
+                    if let egui::Shape::Rect(r) = shape
+                        && r.stroke.width > 0.0
+                    {
+                        rings.push(r.clone());
+                    }
+                });
+            }
+            assert_eq!(rings.len(), 1, "dark {dark}, focus {focused}, invalid {invalid}: {rings:?}");
+            assert_eq!(rings[0].rect, rect.get());
+            assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+            assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+            assert_eq!(rings[0].stroke.width, if focused && !invalid { 1.5 } else { 1.0 });
+            assert_eq!(
+                rings[0].stroke.color,
+                if invalid {
+                    t.form_error
+                } else if focused {
+                    crate::selection_ink(&t)
+                } else {
+                    t.control_border.lerp_to_gamma(t.form_dim, 0.35)
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_cell_editor_has_one_inside_ring_around_the_editor_and_note() {
+    let t = solidcraft_theme::Tokens::get();
+    for invalid in [false, true] {
+        let ctx = context();
+        let id = egui::Id::unique("wide_ring");
+        let mut value = "a long expression that wraps over the neighbouring cells".to_owned();
+        ctx.memory_mut(|m| m.request_focus(id));
+        let mut last = egui::FullOutput::default();
+        for _ in 0..4 {
+            last = raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    ui.set_width(100.0);
+                    wide_cell_editor(ui, id, &mut value, "", invalid, 460.0, ("Live value", false));
+                });
+            });
+        }
+        let mut rings = Vec::new();
+        for s in &last.shapes {
+            each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && r.stroke.width > 0.0
+                {
+                    assert!(s.clip_rect.contains_rect(r.rect));
+                    rings.push(r.clone());
+                }
+            });
+        }
+        assert_eq!(rings.len(), 1, "invalid {invalid}: {rings:?}");
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+        assert_eq!(rings[0].stroke.width, if invalid { 1.0 } else { 1.5 });
+        assert!(rings[0].rect.width() > 300.0);
+        assert!(text_shapes(&last).any(|text| text.galley.job.text == "Live value" && rings[0].rect.contains(text.pos)));
+    }
+}
+
+#[test]
 fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
     let fixture = |stock: bool| {
         let ctx = crate::test_support::context();
@@ -108,6 +196,170 @@ fn tab_visits_expression_fields_in_row_order() {
     frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
     assert_eq!(first, "1");
     assert_eq!(second, "2");
+}
+
+struct UnitExpressions;
+
+impl Expressions for UnitExpressions {
+    fn is_literal(&self, text: &str) -> bool {
+        self.parse_length_mm(text, 1.0).is_some()
+    }
+
+    fn is_unit(&self, unit: &str) -> bool {
+        ["", "m", "mm", "mil", "in", "inch", "rad", "µm"].contains(&unit.trim())
+    }
+
+    fn unit_is_prefix(&self, unit: &str) -> bool {
+        let unit = if unit == "μ" { "µ" } else { unit };
+        !unit.is_empty() && ["m", "mm", "mil", "in", "inch", "rad", "µm"].iter().any(|name| *name != unit && name.starts_with(unit))
+    }
+
+    fn complete(&self, _: &mut Ui, _: &egui::Response, _: &mut String) -> bool {
+        false
+    }
+
+    fn unit_scale(&self, _: &str) -> (f64, &'static str) {
+        (1.0, "mm")
+    }
+
+    fn length_number(&self, mm: f64, _: &str, _: u8) -> String {
+        mm.to_string()
+    }
+
+    fn parse_length_mm(&self, text: &str, _: f64) -> Option<f64> {
+        if let Some(number) = text.strip_suffix("mm") {
+            parse_number(number)
+        } else if let Some(number) = text.strip_suffix('m') {
+            parse_number(number).map(|n| n * 1000.0)
+        } else {
+            parse_number(text)
+        }
+    }
+}
+
+#[test]
+fn numeric_fields_publish_ambiguous_units_after_pause_or_commit() {
+    for kind in ["expression", "length", "bounded_length"] {
+        for finish in ["completion", "pause", "enter", "blur"] {
+            let ctx = context();
+            install_expressions(&ctx, std::sync::Arc::new(UnitExpressions));
+            let mut text = String::new();
+            let mut number = 1.0;
+            let mut draw = |time, events| {
+                let mut result = None;
+                let output = raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+                    let (enter, response) = match kind {
+                        "expression" => checked_field(ui, &mut text, "", false),
+                        "length" => (false, length_field(ui, &mut number, "mm", 2)),
+                        _ => (false, bounded_length_field(ui, &mut number, "mm", 2, 0.0..=5000.0, 0.5)),
+                    };
+                    result = Some((response.id, enter, numeric_preview_ready(ui.ctx())));
+                });
+                (if kind == "expression" { text.clone() } else { number.to_string() }, result.unwrap(), output)
+            };
+            let (_, (id, _, _), _) = draw(0.0, vec![]);
+            ctx.memory_mut(|m| m.request_focus(id));
+            draw(0.01, vec![]);
+            select(&ctx, id, 0, usize::from(kind != "expression"));
+            assert_eq!(draw(0.02, vec![egui::Event::Text("2".into())]).0, "2", "{kind}: a bare number is immediate");
+            let (draft, (_, _, ready), output) = draw(0.03, vec![egui::Event::Text("m".into())]);
+            assert_eq!(draft, if kind == "expression" { "2m" } else { "2000" }, "{kind}: keep the editing contract");
+            assert!(!ready, "{kind}/{finish}: do not preview a unit prefix");
+            assert!(text_shapes(&output).any(|s| s.galley.text() == "2m"), "{kind}: preserve the visible draft");
+            assert!(!draw(0.1, vec![]).1.2, "{kind}: do not preview before the pause expires");
+            let (time, events) = match finish {
+                "completion" => (0.11, vec![egui::Event::Text("m".into())]),
+                "pause" => (0.5, vec![]),
+                "enter" => (0.11, key(egui::Key::Enter)),
+                _ => {
+                    ctx.memory_mut(|m| m.surrender_focus(id));
+                    (0.11, vec![])
+                }
+            };
+            let (draft, (_, enter, ready), _) = draw(time, events);
+            let expected = if kind == "expression" {
+                if finish == "completion" { "2mm" } else { "2m" }
+            } else if finish == "completion" {
+                "2"
+            } else {
+                "2000"
+            };
+            assert_eq!(draft, expected, "{kind}/{finish}");
+            assert!(ready, "{kind}/{finish}: the preview is ready");
+            assert_eq!(enter, kind == "expression" && finish == "enter");
+        }
+    }
+}
+
+#[test]
+fn numeric_unit_prefix_parsing_preserves_complete_values_and_identifiers() {
+    for text in ["2m", "2 m", "2mi", "2in", "2 i", "2r", "2 r", "2µ", "2 μ", "2e3m", "-2,5m", "pi m", "(2) m"] {
+        assert!(crate::value_focus::pending_unit(&UnitExpressions, text), "{text}");
+    }
+    for text in ["", "2", "2mm", "2 mm", "2m ", "2inch", "2 rad", "width2m", "width_m", "r", "2 m + 1", "2 m)"] {
+        assert!(!crate::value_focus::pending_unit(&UnitExpressions, text), "{text}");
+    }
+}
+
+#[test]
+fn numeric_preview_pause_restarts_after_each_edit() {
+    let ctx = context();
+    install_expressions(&ctx, std::sync::Arc::new(UnitExpressions));
+    let mut value = "2m".to_owned();
+    let mut draw = |time, typed: &str| {
+        let mut result = None;
+        let events = if typed.is_empty() { vec![] } else { vec![egui::Event::Text(typed.into())] };
+        raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+            let ready_before = numeric_preview_ready(ui.ctx());
+            let response = checked_field(ui, &mut value, "", false).1;
+            result = Some((response.id, numeric_preview_ready(ui.ctx()), ready_before));
+        });
+        result.unwrap()
+    };
+    let (id, _, _) = draw(0.0, "");
+    ctx.memory_mut(|m| m.request_focus(id));
+    assert!(draw(0.005, "").1, "focusing an existing value does not delay its preview");
+    select(&ctx, id, 0, 2);
+    assert!(draw(0.01, "2").1, "a complete value is immediate");
+    assert!(!draw(0.1, "m").1);
+    let (_, after, before) = draw(0.45, "i");
+    assert!(!before && !after, "a queued keystroke reaches the field before an expired timer previews its old text");
+    let (_, after, before) = draw(0.6, "");
+    assert!(!before && !after, "the second keystroke restarted the pause, including when preview runs before the fields draw");
+    let (_, after, before) = draw(0.76, "");
+    assert!(before && after);
+}
+
+#[test]
+fn numeric_preview_enter_waits_for_a_queued_edit_in_the_same_frame() {
+    let ctx = context();
+    install_expressions(&ctx, std::sync::Arc::new(UnitExpressions));
+    let mut value = "2m".to_owned();
+    let mut draw = |time, events: Vec<egui::Event>| {
+        let mut result = None;
+        raw_frame(&ctx, egui::RawInput { time: Some(time), events, ..Default::default() }, |ui| {
+            let ready_before = numeric_preview_ready(ui.ctx());
+            let response = checked_field(ui, &mut value, "", false).1;
+            result = Some((response.id, ready_before));
+        });
+        result.unwrap()
+    };
+    let enter = || egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (id, _) = draw(0.0, vec![]);
+    ctx.memory_mut(|m| m.request_focus(id));
+    draw(0.005, vec![]);
+    select(&ctx, id, 0, 2);
+    draw(0.01, vec![egui::Event::Text("2".into())]);
+    draw(0.1, vec![egui::Event::Text("m".into())]);
+    let (_, before) = draw(0.12, vec![egui::Event::Text("m".into()), enter()]);
+    assert!(!before, "Enter in the frame of the completing keystroke must not release the earlier `2m`");
+    assert!(draw(0.13, vec![]).1, "after the Enter the finished value previews immediately");
 }
 
 #[test]
@@ -969,8 +1221,25 @@ fn paste_inserts_at_the_cursor_and_replaces_the_selection() {
     right_click(&ctx, rect.get().center(), &mut draw);
     assert_eq!(selection(&ctx, id), Some((0, 6)), "a right press inside the selection keeps it");
     pick(&ctx, "text_paste", &mut draw);
-    assert_eq!(*value.borrow(), "4 mm  ", "Paste replaces the selection; a single line takes line breaks as spaces");
+    assert_eq!(*value.borrow(), "4 mm ", "Paste replaces the selection; each line ending becomes one space");
     set_clipboard(None);
+}
+
+#[test]
+fn single_line_paste_normalizes_each_line_ending_to_one_space() {
+    for ending in ["\r\n", "\n", "\r"] {
+        let clip = format!("尺寸{ending}🙂");
+        let mut text = String::new();
+        let inserted = egui::TextBuffer::insert_text(&mut super::SingleLineBuffer(&mut text), &clip, egui::text::CharIndex(0));
+        assert_eq!(text, "尺寸 🙂", "keyboard paste with {ending:?}");
+        assert_eq!(inserted, 4);
+
+        let mut text = String::new();
+        let done = text_menu::apply(&mut text, None, Edit::Paste, Some(&clip), Field::LINE);
+        assert_eq!(text, "尺寸 🙂", "menu paste with {ending:?}");
+        assert_eq!(done.range.primary.index.0, 4);
+        assert!(done.changed);
+    }
 }
 
 #[test]

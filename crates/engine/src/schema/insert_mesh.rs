@@ -14,7 +14,9 @@
 //! - `names` and `folder` are read only when `up` is given for a glTF file: the handler checks
 //!   them there, as it does for a STEP file, and they change nothing for a mesh;
 //! - `units` is read whatever the file (a glTF or 3MF file is refused it afterwards, which the
-//!   handler says).
+//!   handler says);
+//! - `geometry` is read only for an OpenUSD file (any other file is refused it with the
+//!   handler's own message).
 //!
 //! A value of the wrong type that the handler reads as if the key were left out (a `name` that is
 //! not text) is refused by the contract, as schemas.md has it: that difference is what warn and
@@ -165,6 +167,41 @@ pub struct InsertMeshKeys {
     #[serde(default, deserialize_with = "crease_angle_key", skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 180.0))]
     pub crease_angle_degrees: Option<f64>,
+    /// For an OpenUSD file only (any other file is refused it): what it brings in. `meshes` (the
+    /// default) reads its meshes as mesh bodies, as before; `exact` reads its exact B-rep where it
+    /// has one (a `BrepArray`'s solids and shells) as B-rep bodies of an Import
+    /// feature, and only its meshes with no B-rep as mesh bodies, the reply saying `geometry:
+    /// "exact"` (`crease_angle_degrees` is refused with it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<GeometryParam>,
+}
+
+/// `geometry` of `file.insert_mesh` and `doc.open` for an OpenUSD file: `meshes` or `exact`, read
+/// as the handler reads it.
+#[derive(Clone, Copy, Debug)]
+pub struct GeometryParam(pub solidcraft_io::UsdGeometry);
+
+impl<'de> Deserialize<'de> for GeometryParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_io::UsdGeometry::parse)
+            .map(GeometryParam)
+            .ok_or_else(|| D::Error::custom(whole(crate::cmd::GEOMETRY_MESSAGE)))
+    }
+}
+
+impl JsonSchema for GeometryParam {
+    fn schema_name() -> Cow<'static, str> {
+        "GeometryParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "For an OpenUSD file: meshes (the default) reads its meshes as mesh bodies; exact reads its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies. Matching ignores case and surrounding spaces.",
+            "type": "string",
+            "pattern": words_pattern(&["meshes", "exact"], true)
+        })
+    }
 }
 
 /// Leaves out the keys the handler does not read for this call, in the order it looks at them.
@@ -175,7 +212,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_mesh_path(&path) && !solidcraft_io::is_ply_path(&path) {
         // Refused for its kind before anything else is read.
-        for key in ["name", "up", "names", "folder", "units", "origin", "crease_angle_degrees"] {
+        for key in ["name", "up", "names", "folder", "units", "origin", "crease_angle_degrees", "geometry"] {
             keys.remove(key);
         }
         return;
@@ -188,6 +225,10 @@ fn leave_unread(value: &mut Value) {
     }
     if !gltf_or_usd {
         keys.remove("up");
+    }
+    // Any other file is refused `geometry` with the handler's own message.
+    if !solidcraft_io::is_usd_path(&path) {
+        keys.remove("geometry");
     }
 }
 
@@ -366,6 +407,10 @@ pub struct MeshInserted {
     /// For a glTF file stood up from Y up to Z up: the occurrence that was turned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stand_up: Option<u64>,
+    /// `exact` when an OpenUSD file was read for its exact geometry (`geometry: "exact"`): the
+    /// feature is then an Import feature, its B-reps B-rep bodies. Absent for meshes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

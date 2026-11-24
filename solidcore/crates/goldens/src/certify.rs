@@ -13,12 +13,14 @@
 
 pub(crate) mod tube;
 
+use solidcore::blend::fillet_section::interval::{round_down, round_up};
 use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::math::{gamma, NOW};
 use solidcore::query::distance_bound::surface_distance_lower_bound;
+use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::surface::surface::Surface;
 
 /// A certified enclosure of the distance from a point to a surface.
@@ -46,7 +48,6 @@ impl Enclosure {
 /// basis (its points are the basis's, at the same parameters, and its drops run on the
 /// basis), else the surface itself.
 pub(crate) fn measured(surface: &Surface) -> &Surface {
-    use solidcore::surface::surface::p2::SurfaceKind;
     match surface.kind() {
         SurfaceKind::CurveBounded(c) => measured(c.basis()),
         _ => surface,
@@ -153,18 +154,35 @@ pub(crate) fn nearest(
     p: Point3,
     foot: Point2,
 ) -> Enclosure {
+    nearest_with_rounding(k, surface, uv_box, p, foot).0
+}
+
+/// [`nearest`], with the rounding its upper end adds to the computed distance from `p` to
+/// the foot's surface point: the evaluation's slack at the foot and `γ_8` of the distance's
+/// coordinates, the two terms counted below (infinite where the evaluation is not bounded).
+///
+/// # Panics
+///
+/// As [`nearest`].
+pub(crate) fn nearest_with_rounding(
+    k: &Kernel,
+    surface: &Surface,
+    uv_box: Option<&Extent2d>,
+    p: Point3,
+    foot: Point2,
+) -> (Enclosure, f64) {
     let surface = measured(surface);
     let q = surface.evaluate_point(k, foot).expect("the foot");
     // the evaluation's rounding, and the distance's own (a difference per coordinate, three
     // squares, two sums and a root, on coordinates at most the larger point's size)
     // (past a rational net's knots the evaluation is not bounded: no upper end)
-    let hi = p.distance(q)
-        + evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY)
-        + gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    let slack = evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY);
+    let distance = gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    let hi = p.distance(q) + slack + distance;
     // ask for the foot's distance: the subdivision stops once the nearest piece is that far
     let lo = surface_distance_lower_bound(k, surface, uv_box, p, p.distance(q))
         .expect("the lower bound");
-    Enclosure { lo, hi }
+    (Enclosure { lo, hi }, round_up(slack + distance))
 }
 
 /// The enclosure of a sampled maximum gap from a curve to `surface`: the largest of the true
@@ -310,6 +328,106 @@ pub(crate) fn split_lower_bound(
     Some(lo)
 }
 
+/// The surface whose points a global solve over `surface` reaches, at parameters of its own:
+/// a STEP wrapper's surface (the same points) and a curve-bounded surface's basis, else
+/// the surface itself; and whether the parameters are the given surface's. A STEP
+/// wrapper evaluates its base's STEP point (`Surface::evaluate_step_point`), which is the
+/// base's own point at the same parameters except for the kinds with a STEP
+/// parametrisation of their own ([`step_is_identity`]): past one of those, `false`.
+fn point_set(surface: &Surface) -> Option<(&Surface, bool)> {
+    match surface.kind() {
+        SurfaceKind::CurveBounded(c) => point_set(c.basis()),
+        SurfaceKind::Step(s) => {
+            let base = s.surface()?;
+            let (set, own) = point_set(base)?;
+            Some((set, own && step_is_identity(base)))
+        }
+        _ => Some((surface, true)),
+    }
+}
+
+/// Whether `surface`'s STEP point at `uv` is its own point at `uv`: every kind
+/// `Surface::evaluate_step_point` sends to `evaluate_point` (a curve-bounded surface
+/// as its basis), not a cone, sphere, torus, revolution or extrusion.
+fn step_is_identity(surface: &Surface) -> bool {
+    match surface.kind() {
+        SurfaceKind::CurveBounded(c) => step_is_identity(c.basis()),
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_) => false,
+        _ => true,
+    }
+}
+
+/// Whether `dom` lies in `surface`'s natural domain (its NURB parameters): no point of the
+/// surface over `dom` is an extrapolation past its knots.
+fn in_natural_domain(k: &Kernel, surface: &Surface, dom: &Extent2d) -> Option<bool> {
+    let nat = surface.natural_uv_domain_with_nurb(k).ok()?;
+    Some(
+        nat.min().x <= dom.min().x
+            && nat.min().y <= dom.min().y
+            && dom.max().x <= nat.max().x
+            && dom.max().y <= nat.max().y,
+    )
+}
+
+/// A certified lower bound on the distance from `p` to `surface` over the solve domain
+/// `dom`. Where the parameters are the point set's own ([`point_set`]):
+/// [`surface_distance_lower_bound`] over `dom` itself, else, for `dom` inside the point
+/// set's natural domain (no extrapolated point), [`split_lower_bound`] over its whole
+/// point set, a lower bound over any part of it. A plane, by any parameters (a STEP
+/// wrapper's too), [`plane_lower_bound`]. `None` otherwise: past a STEP wrapper of a
+/// kind with its own STEP parameters nothing maps `dom` to the NURBS form's.
+pub(crate) fn domain_lower_bound(
+    k: &Kernel,
+    surface: &Surface,
+    dom: &Extent2d,
+    p: Point3,
+    want: f64,
+) -> Option<f64> {
+    let (set, own) = point_set(surface)?;
+    if own {
+        if let Ok(lo) = surface_distance_lower_bound(k, set, Some(dom), p, want) {
+            return Some(lo);
+        }
+    }
+    if let SurfaceKind::Plane(plane) = set.kind() {
+        return plane_lower_bound(plane, p);
+    }
+    if !own || !in_natural_domain(k, set, dom)? {
+        return None;
+    }
+    split_lower_bound(k, set, p, want)
+}
+
+/// A certified lower bound on the distance from `p` to a plane, by any parameters: every
+/// point of the plane is `o + a x + b y` for its origin and axes, so its distance from `p`
+/// is at least `|(p - o) . n| / |n|` for `n = x × y` exactly. The computed cross product,
+/// difference and dot product round by at most `γ_2`, `u` and `γ_3` of their terms'
+/// sizes (`|n_i| <= 2 X Y`, `|p_i - o_i| <= S` for `X`, `Y` and `S` the axes' and points'
+/// largest coordinates times two), together under `γ_10 · 6 S X Y`; `|n|` is bounded
+/// above by its computed length grown by `γ_4` plus the cross product's own rounding.
+/// `None` for axes not proven independent (the computed `|n|` within its rounding of 0).
+fn plane_lower_bound(plane: &solidcore::surface::plane::Plane, p: Point3) -> Option<f64> {
+    let at = plane.position();
+    let (o, x, y) = (at.origin(), at.x_axis(), at.y_axis());
+    let (xs, ys) = (x.max_dimension(), y.max_dimension());
+    let size = 2.0 * p.max_dimension().max(o.max_dimension());
+    let n = x.cross(y);
+    let n_err = gamma(2) * 2.0 * xs * ys * 3.0_f64.sqrt();
+    let n_lo = n.length() * (1.0 - gamma(4)) - n_err;
+    if n_lo.is_nan() || n_lo <= 0.0 {
+        return None;
+    }
+    let n_hi = round_up(n.length() * (1.0 + gamma(4)) + n_err);
+    let dot = (p - o).dot(n).abs();
+    let err = gamma(10) * 6.0 * size * xs * ys;
+    let lo = round_down(round_down(dot - err) / n_hi * (1.0 - gamma(1)));
+    lo.is_finite().then_some(lo.max(0.0))
+}
+
 thread_local! {
     static KEPT: std::cell::RefCell<Option<solidcore::topology::Brep>> =
         const { std::cell::RefCell::new(None) };
@@ -329,6 +447,43 @@ pub(crate) fn keep(b: &solidcore::topology::Brep) {
 pub(crate) fn take_kept() -> Option<solidcore::topology::Brep> {
     KEPT.with(|k| k.borrow_mut().take())
 }
+
+#[cfg(test)]
+thread_local! {
+    static WRITTEN: std::cell::RefCell<Option<Vec<solidcore::topology::Brep>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Starts keeping a copy of every B-rep a runner hands to [`written`] on this thread, for
+/// [`take_written`] ([`trim_tolerance`]).
+#[cfg(test)]
+pub(crate) fn watch_written() {
+    WRITTEN.with(|w| *w.borrow_mut() = Some(Vec::new()));
+}
+
+/// A runner's B-rep whose tolerances it is writing into its output: copied while
+/// [`watch_written`] is on, ignored otherwise.
+///
+/// # Panics
+///
+/// When the B-rep cannot be copied.
+#[cfg(test)]
+pub(crate) fn written(b: &solidcore::topology::Brep) {
+    WRITTEN.with(|w| {
+        if let Some(kept) = w.borrow_mut().as_mut() {
+            kept.push(b.clone_standing_for_self().expect("a copy of the B-rep"));
+        }
+    });
+}
+
+/// Stops [`watch_written`] and returns the copies kept since.
+#[cfg(test)]
+pub(crate) fn take_written() -> Vec<solidcore::topology::Brep> {
+    WRITTEN.with(|w| w.borrow_mut().take().unwrap_or_default())
+}
+
+#[cfg(test)]
+pub(crate) mod trim_tolerance;
 
 /// One edge's tolerance and what it must cover: the largest certified upper end of its
 /// uses' sampled edge-face gaps ([`sampled_max`] over `CalcMaxEdgeFaceGap`'s 20-sample gap

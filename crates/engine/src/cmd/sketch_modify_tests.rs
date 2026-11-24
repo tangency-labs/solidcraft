@@ -92,13 +92,128 @@ fn offset_chain_resolves_transitive_coincidence_and_stops_at_branches() {
     let b = sk.add_line_pts(2, 3, None).unwrap();
     let c = sk.add_line_pts(4, 5, None).unwrap();
     // Equal coordinates do not connect curves without shared points or constraints.
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true)], false));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true)], false, vec![]));
     sk.add_constraint(ConstraintKind::Coincident { p: 1, q: 6 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Coincident { p: 2, q: 6 }, None).unwrap();
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true), (b, true)], false, vec![]));
     sk.add_constraint(ConstraintKind::Coincident { p: 4, q: 6 }, None).unwrap();
-    assert_eq!(super::chain(&sk, a, &[a, b, c]), (vec![(a, true)], false));
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
+    // Three curves meet and none of the others is picked: the chain stops there.
+    assert_eq!(super::chain(&sk, a, &[a, b, c], &[a]), (vec![(a, true)], false, vec![]));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true), (b, true)], false, vec![]));
+}
+
+/// An arch: a 20 × 20 mm rectangle with an arc across its top line, the arc's ends on the
+/// rectangle's top corners, where three curves meet. The ids of the arc and of the top, right,
+/// bottom and left lines.
+fn arch() -> (Session, [String; 5]) {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -20], "p1": [10, 0]}));
+    let arc = ids(&run(&mut s, "sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 6.2]}))["curves"])[0].clone();
+    let sk = sketch(&s);
+    let line = |at: fn(Vec2) -> bool| {
+        sk.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { a, b } if at(sk.points[a].pos) && at(sk.points[b].pos))).unwrap().id.clone()
+    };
+    let lines = [line(|p| close(p.y, 0.0)), line(|p| close(p.x, 10.0)), line(|p| close(p.y, -20.0)), line(|p| close(p.x, -10.0))];
+    let [top, right, bottom, left] = lines;
+    (s, [arc, top, right, bottom, left])
+}
+
+/// The sources of the one chain an offset of `picks` follows, sorted, and whether it is closed.
+fn arch_offset(picks: &[&String]) -> (Vec<String>, bool) {
+    let (mut s, _) = arch();
+    let r = run(&mut s, "sketch.offset", json!({"curves": picks, "distance": 1}));
+    assert_eq!(r["sides"].as_array().unwrap().len(), 1, "{picks:?}: {r}");
+    let made = ids(&r["curves"]);
+    let sk = sketch(&s);
+    let chain = sk.offsets.iter().find(|o| o.owns_output(&made[0])).unwrap_or_else(|| panic!("{picks:?}: no association: {r}"));
+    assert_eq!(made.len(), chain.sources.len(), "{picks:?}: {r}");
+    if chain.closed {
+        assert_closed_offset(&sk, &made);
+    }
+    let mut sources: Vec<String> = chain.sources.iter().map(|(id, _)| id.clone()).collect();
+    sources.sort();
+    (sources, chain.closed)
+}
+
+#[test]
+fn offset_chain_through_a_corner_of_three_curves_follows_the_picked_one_and_closes_the_picked_shape() {
+    let (_, [arc, top, right, bottom, left]) = arch();
+    let sorted = |v: &[&String]| {
+        let mut v: Vec<String> = v.iter().map(|s| s.to_string()).collect();
+        v.sort();
+        v
+    };
+    let rectangle = sorted(&[&top, &right, &bottom, &left]);
+    let outline = sorted(&[&arc, &right, &bottom, &left]);
+    // Nothing else picked where three curves meet: the chain stops there.
+    assert_eq!(arch_offset(&[&arc]), (sorted(&[&arc]), false));
+    assert_eq!(arch_offset(&[&top]), (sorted(&[&top]), false));
+    assert_eq!(arch_offset(&[&left]), (sorted(&[&left, &bottom, &right]), false));
+    // Picks that close a shape offset that shape, every corner joined (#14788).
+    assert_eq!(arch_offset(&[&left, &top]), (rectangle.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &right]), (outline.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left]), (outline.clone(), true));
+    // A curve picked after the shape closed, touching it, is left alone: not offset on its own
+    // and not a second way on at the corner that would break the chain open.
+    assert_eq!(arch_offset(&[&left, &top, &arc]), (rectangle, true));
+    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left, &top]), (outline.clone(), true));
+    // Also where the later pick would close another shape with the first one alone.
+    assert_eq!(arch_offset(&[&arc, &right, &top]), (outline.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &left, &top]), (outline, true));
+}
+
+/// A construction line never chains with drawn curves, so one that ends on a closed shape's corner
+/// cannot break that chain open: it keeps an offset of its own.
+#[test]
+fn offset_keeps_a_picked_construction_line_that_ends_on_a_corner_of_a_closed_shape() {
+    let mut s = new_sketch();
+    let sides = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.line", json!({"points": [[-10, -10], [10, 10]], "construction": true, "ids": ["diagonal"]}));
+    let r = run(&mut s, "sketch.offset", json!({"curves": [sides[0], "diagonal"], "distance": 1}));
+    let sk = sketch(&s);
+    let chains: Vec<(usize, bool)> = sk.offsets.iter().map(|o| (o.sources.len(), o.closed)).collect();
+    assert_eq!(chains, [(4, true), (1, false)], "{r}");
+}
+
+#[test]
+fn offset_leaves_out_only_a_curve_on_a_corner_of_a_shape_the_picks_close() {
+    let (mut s, [arc, top, right, bottom, left]) = arch();
+    // A rectangle and a circle apart from the arch, and a construction line on its corners.
+    let apart = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, -20], "p1": [50, 0]}))["curves"]);
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [40, 20], "radius": 5}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-10, 0], [10, -20]], "construction": true, "ids": ["diagonal"]}));
+    let diagonal = "diagonal".to_string();
+    let sk = sketch(&s);
+    let out = |picks: &[&String], id: &str, chain: bool| {
+        let picks: Vec<String> = picks.iter().map(|s| s.to_string()).collect();
+        super::offset_leaves_out(&sk, &picks, id, chain)
+    };
+    // Picks that close nothing leave nothing out.
+    for id in [&arc, &top, &right, &bottom, &left] {
+        assert!(!out(&[], id, true), "{id}");
+        assert!(!out(&[&left], id, true), "{id}: one side stops at the arc's feet");
+    }
+    // The left and top lines close the rectangle: the arc meets it, its own lines belong to it.
+    assert!(out(&[&left, &top], &arc, true));
+    assert!(out(&[&arc, &right], &top, true));
+    for id in [&left, &top, &right, &bottom] {
+        assert!(!out(&[&left, &top], id, true), "{id}");
+    }
+    // Nothing apart from the closed shape is left out, and several closed shapes each keep their
+    // own strays out, whichever was picked first.
+    for id in apart.iter().chain([&circle, &diagonal]) {
+        assert!(!out(&[&left, &top], id, true), "{id}");
+    }
+    assert!(!out(&[&circle], &arc, true), "a circle has no corner to meet");
+    assert!(out(&[&apart[0], &circle, &left, &top], &arc, true));
+    assert!(out(&[&left, &top, &apart[0], &circle], &arc, true));
+    // Without Chain only the picks make the shape.
+    assert!(!out(&[&arc, &right], &top, false));
+    assert!(out(&[&left, &top, &right, &bottom], &arc, false));
+    assert!(!out(&[&left, &top, &right, &bottom], &apart[0], false));
+    // Hostile picks: unknown ids are ignored.
+    assert!(!out(&[&"nope".to_string()], &arc, true));
+    assert!(!out(&[&left, &top], "nope", true));
 }
 
 #[test]
@@ -281,6 +396,68 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     let shape = sk.shape(ci).unwrap();
     assert!(shape.dist(Vec2::new(-5.0, 0.0)) < 1e-6 && shape.dist(Vec2::new(4.8296, -1.2941)) < 1e-3);
     assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
+}
+
+/// #15619: two crossing lines trimmed back to a corner hold it with one Coincident. The first
+/// trim pins its new end on the other line; the second joins the ends, and that pin goes.
+#[test]
+fn two_crossing_lines_trimmed_to_a_corner_keep_one_constraint_there() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, 0], [10, 0]], "connect": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 10]], "connect": false}))["curves"])[0].clone();
+    let at_corner = |s: &Session| -> Vec<ConstraintKind> {
+        let sk = sketch(s);
+        let near = |p: usize| sk.point(p).is_some_and(|q| q.dist(Vec2::new(0.0, 0.0)) < 1e-6);
+        sk.constraints
+            .iter()
+            .filter(|k| match k.kind {
+                ConstraintKind::Coincident { p, q } => near(p) || near(q),
+                ConstraintKind::PointOnCurve { p, .. } => near(p),
+                _ => false,
+            })
+            .map(|k| k.kind.clone())
+            .collect()
+    };
+    run(&mut s, "sketch.trim", json!({"curve": a, "at": [-3, 0]}));
+    let first = at_corner(&s);
+    assert!(matches!(first.as_slice(), [ConstraintKind::PointOnCurve { .. }]), "the first trim pins the end on the other line: {first:?}");
+    run(&mut s, "sketch.trim", json!({"curve": b, "at": [0, -3]}));
+    let second = at_corner(&s);
+    assert!(matches!(second.as_slice(), [ConstraintKind::Coincident { .. }]), "one Coincident holds the corner: {second:?}");
+    // Two free lines have 8 degrees of freedom; the corner takes 2.
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], 6);
+}
+
+/// #15619: a trim that drops a Point On Curve at a corner still moves an end tangency recorded
+/// after it onto the piece that keeps that end (the drop shifts every constraint after it).
+#[test]
+fn trim_dropping_a_corner_point_on_curve_keeps_a_later_end_tangent() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 10], "start": [10, 10], "end": [0, 10]}));
+    let v = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], "a1.end"], "connect": false}))["curves"])[0].clone();
+    let h = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, 0], [10, 0]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-5, 5], [5, 5]], "connect": false}));
+    // The Point On Curve at the corner comes first, the Tangent after it.
+    run(&mut s, "sketch.trim", json!({"curve": h, "at": [-3, 0]}));
+    let tangent = run(&mut s, "sketch.constraint.tangent", json!({"a": v, "b": "a1"}))["constraint"].as_str().unwrap().to_string();
+    // The middle of the vertical line goes; its top piece keeps the end on the arc.
+    run(&mut s, "sketch.trim", json!({"curve": v, "at": [0, 2.5]}));
+    let sk = sketch(&s);
+    let at = |p: usize, x: f64, y: f64| sk.point(p).is_some_and(|q| q.dist(Vec2::new(x, y)) < 1e-6);
+    let top = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Line { a, b } if at(a, 0.0, 10.0) || at(b, 0.0, 10.0))).unwrap();
+    let arc = sk.curve_index("a1").unwrap();
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|k| k.id == tangent && matches!(k.kind, ConstraintKind::Tangent { a, b } if (a, b) == (top, arc) || (a, b) == (arc, top))),
+        "the tangent follows the top piece: {:?}",
+        sk.constraints
+    );
+    assert!(
+        !sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, .. } if at(p, 0.0, 0.0))),
+        "the corner's Point On Curve goes: {:?}",
+        sk.constraints
+    );
 }
 
 /// An ellipse's own axes do not cut it (they end on it, where a Center Rectangle's diagonals end
@@ -1523,6 +1700,36 @@ fn offset_chain_mirror_patterns_move_scale() {
     assert!(sk.center(sk.curve_index(&cp).unwrap()).unwrap().dist(Vec2::new(-110.0, 0.0)) < 1e-7);
 }
 
+/// #15697: the Transform tool turns a rounded square about its middle. Picked by its sides and
+/// corner arcs, with a corner drawn on the origin, it turns whole: every point of its curves and
+/// its centre point land where the rotation puts them, so the square does not come out as a
+/// trapezoid (the corner's hold on the origin is let go, as Move does).
+#[test]
+fn rotation_turns_a_rounded_square_whole() {
+    for command in ["sketch.transform", "sketch.move"] {
+        for angle in [45.0, 30.0] {
+            let at = format!("{command} {angle}");
+            let mut s = new_sketch();
+            let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": [0, 0], "p1": [20, 20], "radius": 3}));
+            let source = ids(&r["curves"]);
+            assert_eq!(source.len(), 8, "four sides and four corner arcs: {r}");
+            let before = sketch(&s);
+            let mut shape: Vec<usize> = source.iter().flat_map(|id| before.curves[before.curve_index(id).unwrap()].kind.point_ids()).collect();
+            shape.push(before.points.iter().position(|p| Some(p.id.as_str()) == r["centre"].as_str()).unwrap());
+            let out = run(&mut s, command, json!({"entities": source, "angle": angle, "center": [10, 10]}));
+            assert_eq!(out["sketch"]["solved"], true, "{at}: {out}");
+            let after = sketch(&s);
+            let (sin, cos) = f64::to_radians(angle).sin_cos();
+            let c = Vec2::new(10.0, 10.0);
+            for i in shape {
+                let (p, q) = (before.points[i].pos - c, after.points[i].pos);
+                let expected = c + Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+                assert!(q.dist(expected) < 1e-6, "{at}: point {} at {q:?}, expected {expected:?}", before.points[i].id);
+            }
+        }
+    }
+}
+
 /// #4645: rotating a constrained 40 × 10 rectangle turns it at its size. Horizontal and vertical
 /// relations and dimensions swap at odd quarter turns, stay at half turns and go at other angles;
 /// lengths stay. A rotated copy is unconstrained and leaves the original as it was.
@@ -1768,6 +1975,27 @@ fn scale_scales_the_dimensions_it_takes_with_it() {
     assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
     run(&mut s, "edit.undo", json!({}));
     assert!(close(s.doc.eval(&radius, solidcraft_doc::expr::Kind::Length).unwrap(), 5.0), "one undo restores the radius");
+}
+
+/// #16611: a filleted rectangle scaled about a base point other than the origin keeps its
+/// shape: the fillet's virtual corner left on the curves' extensions at the sketch origin is
+/// let go when the scale moves away from it, instead of the solver bending the profile back.
+#[test]
+fn scale_about_another_base_point_keeps_the_profile() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 20], [0, 20]], "closed": true}));
+    run(&mut s, "sketch.fillet", json!({"points": ["l1.end", "l2.end", "l3.end", "l4.end"], "radius": 5}));
+    let curves = ["l1", "l2", "l3", "l4", "a1", "a2", "a3", "a4"];
+    let out = run(&mut s, "sketch.scale", json!({"entities": curves, "base": [20, 10], "factor": 2}));
+    assert_eq!(out["sketch"]["solved"], true, "{out}");
+    let sk = sketch(&s);
+    let ids: Vec<String> = curves.iter().map(|c| c.to_string()).collect();
+    assert!(box_is(&sk, &ids, [-20.0, -10.0], [60.0, 30.0]), "{:?}", bounds(&sk, &ids));
+    let (p, q) = (sk.point(sk.resolve_point("l1.start").unwrap()).unwrap(), sk.point(sk.resolve_point("l1.end").unwrap()).unwrap());
+    assert!((p.x + 10.0).abs() < 1e-6 && (p.y + 10.0).abs() < 1e-6 && (q.x - 50.0).abs() < 1e-6 && (q.y + 10.0).abs() < 1e-6, "l1: {p:?} {q:?}");
+    // 80 × 40 − (4 − π) × 10² = 3114.159265358979, the issue's expected volume at height 1.
+    let area = 3114.159265358979;
+    assert!((profiles(&s)[0] - area).abs() < 1e-6, "{:?}", profiles(&s));
 }
 
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
@@ -2447,6 +2675,51 @@ fn text_takes_a_font_and_edit_text_keeps_or_changes_it() {
     assert!(s.execute("sketch.text", &json!({"text": "I", "at": [0, 0], "font": 12})).is_err());
     assert!(s.execute("sketch.text", &json!({"text": "I", "at": [0, 0], "font": "C:/no/such/dir/font.ttf"})).is_err());
     near(&s, 17.6385);
+}
+
+#[test]
+fn a_relative_font_path_is_read_from_the_design_folder_not_the_working_folder() {
+    // The repository's BIZ UDPGothic "I" is 17.6385 mm² at 10 mm; the built-in "I" is 13.5557 mm² (see the font test above).
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf");
+    let dir = std::env::temp_dir().join(format!("solidcraft-text-font-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("fonts")).unwrap();
+    std::fs::copy(source, dir.join("fonts/Bold.ttf")).unwrap();
+    let design = dir.join("text.json").to_string_lossy().into_owned();
+    let near = |s: &Session, id: u64, want: f64| {
+        let a: Vec<f64> = s.model.state().sketch(id).unwrap().profiles.iter().map(|p| p.area).collect();
+        assert!(a.len() == 1 && (a[0] - want).abs() < 1e-3, "{a:?} against {want}");
+    };
+    // The test's working folder has no `fonts/Bold.ttf`: the path can only be found from the design's folder.
+    let mut s = Session::default();
+    run(&mut s, "file.save_as", json!({"path": design}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = s.active_sketch.unwrap();
+    run(&mut s, "sketch.text", json!({"text": "I", "at": [0, 0], "height": 10, "font": "fonts/Bold.ttf"}));
+    near(&s, id, 17.6385);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "file.save", json!({"path": design, "cache": false}));
+    // A `.json` design is saved as plain JSON (a `.sc` one is a container), so the text can be read. The file keeps the path as it was typed, so the folder with its fonts moves as one.
+    let saved = std::fs::read_to_string(&design).unwrap();
+    assert!(saved.contains("\"fonts/Bold.ttf\""), "{saved}");
+    // Opened again, from wherever the program runs, the text is still set in that font.
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": design}));
+    near(&reopened, id, 17.6385);
+    let source = reopened.doc.sketch(id).unwrap().links.iter().find_map(|l| match &l.source {
+        LinkSource::Text { font, .. } => font.clone(),
+        _ => None,
+    });
+    assert!(source.is_some_and(|f| std::path::Path::new(&f).is_absolute() && f.ends_with("Bold.ttf")));
+    // A font file that is not there keeps the built-in font and its warning. The same design in a folder
+    // without `fonts/Bold.ttf` (a font file read once stays in memory, so the file is not removed in place).
+    let bare = dir.join("bare");
+    let copied = std::fs::create_dir_all(&bare).and_then(|()| std::fs::copy(&design, bare.join("text.json")));
+    assert!(copied.is_ok());
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": bare.join("text.json").to_string_lossy()}));
+    near(&again, id, 13.5557);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -3173,7 +3446,7 @@ fn periodic_fit_creator_keeps_legacy_and_refuses_hostile_intent_atomically() {
     let before = s.doc.to_json();
     let history = s.undo.len();
     for (cmd, p) in [
-        ("sketch.spline.control_point", p),
+        ("sketch.spline.control_point", json!({"points":[[0,0],[4,0],[3,2]],"periodic":true})),
         ("sketch.spline.fit_point", json!({"points":[[0,0],[1,0],[0,0],[1,0]],"periodic":true})),
         ("sketch.spline.fit_point", json!({"points":[[0,0],[1,0],[1,1]],"periodic":"yes"})),
     ] {
@@ -6583,4 +6856,302 @@ fn the_move_of_a_projected_or_fixed_point_says_which_one_it_is() {
     // The origin is fixed by the sketch itself.
     let e = s.execute("sketch.move", &json!({"entities": ["origin"], "translate": [6.0, 0.0]})).unwrap_err().to_string();
     assert!(e.contains("point `origin` is fixed and cannot move"), "{e}");
+}
+
+/// Area of the closed cubic B-spline over `cv`, from the textbook closed form with indices wrapped
+/// (Piegl & Tiller, the uniform basis), sampled on every span.
+fn closed_cubic_area(cv: &[[f64; 2]]) -> f64 {
+    let n = cv.len() as isize;
+    let p = |k: isize| cv[k.rem_euclid(n) as usize];
+    let mut pts = Vec::new();
+    for i in 0..n {
+        for k in 0..200 {
+            let t = k as f64 / 200.0;
+            let b = [
+                (-t * t * t + 3.0 * t * t - 3.0 * t + 1.0) / 6.0,
+                (3.0 * t * t * t - 6.0 * t * t + 4.0) / 6.0,
+                (-3.0 * t * t * t + 3.0 * t * t + 3.0 * t + 1.0) / 6.0,
+                t * t * t / 6.0,
+            ];
+            pts.push([0, 1, 2, 3].map(|j| p(i - 1 + j)).iter().zip(b).fold([0.0, 0.0], |acc, (q, w)| [acc[0] + q[0] * w, acc[1] + q[1] * w]));
+        }
+    }
+    let m = pts.len();
+    ((0..m).map(|j| pts[j][0] * pts[(j + 1) % m][1] - pts[(j + 1) % m][0] * pts[j][1]).sum::<f64>() / 2.0).abs()
+}
+
+/// #19337: a closed control-point spline draws, solves and extrudes to one closed profile whose
+/// area and volume are those of the closed cubic B-spline over its control points, and a closed
+/// control spline with fewer than degree + 1 points is refused.
+#[test]
+fn closed_control_point_spline_draws_and_extrudes_to_one_profile() {
+    let cv = [[0.0, 0.0], [12.0, -2.0], [20.0, 8.0], [10.0, 16.0], [-3.0, 12.0], [-6.0, 3.0]];
+    let area = closed_cubic_area(&cv);
+    let mut s = new_sketch();
+    run(&mut s, "sketch.spline.control_point", json!({"points": cv, "periodic": true}));
+    let areas = profiles(&s);
+    assert_eq!(areas.len(), 1, "{areas:?}");
+    assert!((areas[0] - area).abs() < 1e-4 * area, "profile {} mm² vs B-spline {area} mm²", areas[0]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let volume = measured["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 10.0 * area).abs() < 1e-4 * 10.0 * area, "volume {volume} mm³ vs {} mm³", 10.0 * area);
+    let mut few = new_sketch();
+    let refused = few.execute("sketch.spline.control_point", &json!({"points": [[0, 0], [10, 0], [10, 10]], "periodic": true}));
+    assert!(refused.is_err(), "three control points cannot close a cubic spline: {refused:?}");
+}
+
+/// #18075: a fillet reaches the corner symmetric to the one it rounds. Two corners tied by a
+/// Symmetry constraint round together: the counterpart gets the same radius held by an Equal
+/// constraint, and both sharp corners stay as virtual corners for the constraint to measure to.
+#[test]
+fn a_fillet_reaches_the_corner_symmetric_to_the_one_it_rounds() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-20, 0], [20, 0], [20, 20], [-20, 20]]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let f = run(&mut s, "sketch.fillet", json!({"point": "l1.start", "radius": 5}));
+    assert_eq!(f["sketch"]["solved"], true, "{f}");
+    let corners = ids(&f["virtual_corners"]);
+    assert_eq!(corners.len(), 2, "{f}");
+    assert_eq!(ids(&f["curves"]).len(), 2, "{f}");
+    let sk = sketch(&s);
+    let mut cs: Vec<Vec2> = corners.iter().map(|c| sk.point(sk.resolve_point(c).unwrap()).unwrap()).collect();
+    cs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(cs[0].dist(Vec2::new(-20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert!(cs[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Equal { .. })).count(), 1, "{:?}", sk.constraints);
+    for (point, expected) in
+        [("l1.start", Vec2::new(-15.0, 0.0)), ("l1.end", Vec2::new(15.0, 0.0)), ("l2.start", Vec2::new(20.0, 5.0)), ("l4.end", Vec2::new(-20.0, 5.0))]
+    {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    let area = profiles(&s);
+    assert_eq!(area.len(), 1);
+    assert!(close(area[0], 800.0 - 50.0 * (1.0 - std::f64::consts::PI / 4.0)), "{area:?}");
+}
+
+/// #18075: a fillet reaches the mirrored corner of a mirrored copy. The Mirror tool ties every
+/// copied point to its source with a Symmetry constraint, so rounding one corner of the source
+/// rounds the matching corner of the copy too.
+#[test]
+fn a_fillet_reaches_the_mirrored_corner_of_a_mirrored_copy() {
+    let mut s = new_sketch();
+    run(
+        &mut s,
+        "sketch.line",
+        json!({"closed": true, "points": [[-20, 0], [-20, 20], [-5, 20], [-5, 0]], "ids": ["left", "top", "right", "bottom"]}),
+    );
+    let mirror = run(&mut s, "sketch.mirror", json!({"entities": ["left", "top", "right", "bottom"], "line": "y"}));
+    let copies = ids(&mirror["curves"]);
+    assert_eq!(copies.len(), 4, "{mirror}");
+    let f = run(&mut s, "sketch.fillet", json!({"point": "left.start", "radius": 3}));
+    assert_eq!(f["sketch"]["solved"], true, "{f}");
+    let corners = ids(&f["virtual_corners"]);
+    assert_eq!(corners.len(), 2, "{f}");
+    let arcs = ids(&f["curves"]);
+    assert_eq!(arcs.len(), 2, "{f}");
+    let sk = sketch(&s);
+    let mut cs: Vec<Vec2> = corners.iter().map(|c| sk.point(sk.resolve_point(c).unwrap()).unwrap()).collect();
+    cs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(cs[0].dist(Vec2::new(-20.0, 0.0)) < 1e-6, "{cs:?}");
+    assert!(cs[1].dist(Vec2::new(20.0, 0.0)) < 1e-6, "{cs:?}");
+    // The arc of the source's corner and the arc of the copy's: both corners are rounded, with the
+    // same radius.
+    let mut centres: Vec<Vec2> = arcs
+        .iter()
+        .map(|a| {
+            let CurveKind::Arc { c, .. } = sk.curves[sk.curve_index(a).unwrap()].kind else { panic!("a fillet arc") };
+            sk.point(c).unwrap()
+        })
+        .collect();
+    centres.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!(centres[0].dist(Vec2::new(-17.0, 3.0)) < 1e-6, "{centres:?}");
+    assert!(centres[1].dist(Vec2::new(17.0, 3.0)) < 1e-6, "{centres:?}");
+    assert_eq!(sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Equal { .. })).count(), 1, "{:?}", sk.constraints);
+    for (point, expected) in [
+        ("left.start", Vec2::new(-20.0, 3.0)),
+        ("bottom.end", Vec2::new(-17.0, 0.0)),
+        // A mirror maps each source end to the copy's opposite end.
+        (format!("{}.end", copies[0]).as_str(), Vec2::new(20.0, 3.0)),
+        (format!("{}.start", copies[3]).as_str(), Vec2::new(17.0, 0.0)),
+    ] {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    // Both rectangles lose the same corner: the copy is rounded as the source is.
+    let area = profiles(&s);
+    assert_eq!(area.len(), 2, "{area:?}");
+    let cut = 9.0 * (1.0 - std::f64::consts::PI / 4.0);
+    assert!(close(area[0], 300.0 - cut) && close(area[1], 300.0 - cut), "{area:?}");
+}
+
+/// #18075: a chamfer reaches the corner symmetric to the one it cuts, and keeps the distances it
+/// measures along the mirrored sides.
+#[test]
+fn a_chamfer_reaches_the_corner_symmetric_to_the_one_it_cuts() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-20, 0], [20, 0], [20, 20], [-20, 20]]}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": "l1.start", "b": "l1.end", "line": "y"}));
+    let c = run(&mut s, "sketch.chamfer.equal_distance", json!({"point": "l1.start", "distance": 5}));
+    assert_eq!(c["sketch"]["solved"], true, "{c}");
+    assert_eq!(ids(&c["virtual_corners"]).len(), 2, "{c}");
+    assert_eq!(ids(&c["curves"]).len(), 2, "{c}");
+    let sk = sketch(&s);
+    for (point, expected) in
+        [("l1.start", Vec2::new(-15.0, 0.0)), ("l1.end", Vec2::new(15.0, 0.0)), ("l2.start", Vec2::new(20.0, 5.0)), ("l4.end", Vec2::new(-20.0, 5.0))]
+    {
+        let actual = sk.point(sk.resolve_point(point).unwrap()).unwrap();
+        assert!(actual.dist(expected) < 1e-6, "{point}: {actual:?}, expected {expected:?}");
+    }
+    // Each corner loses the triangle its chamfer cuts off.
+    let area = profiles(&s);
+    assert_eq!(area.len(), 1);
+    assert!(close(area[0], 800.0 - 2.0 * 0.5 * 5.0 * 5.0), "{area:?}");
+}
+
+/// #21336: changing an offset's driving dimension from positive to negative flips the offset to
+/// the opposite side instead of failing the sketch and wiping everything from view, both alone and
+/// after a downstream extrude.
+#[test]
+fn offset_dimension_edited_negative_flips_side_and_keeps_sketch() {
+    // 1. Center rectangle with outward 2 mm offset, no extrude: +2 -> -2 -> -2 -> -5, plus undo/reopen.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    let param = o["param"].as_str().unwrap().to_string();
+    let curve_count = sketch(&s).curves.len();
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "initial outward offset: {:?}", bounds(&sketch(&s), &out));
+
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    assert_eq!(changed["expression"], "2 mm", "{changed}");
+    assert!(box_is(&sketch(&s), &out, [-18.0, -13.0], [18.0, 13.0]), "flipped inward offset: {:?}", bounds(&sketch(&s), &out));
+    assert_eq!(sketch(&s).curves.len(), curve_count);
+
+    // Flipping back to the outside with -2 and resizing to 5 mm inward.
+    let back = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(back["errors"], json!([]), "{back}");
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "flipped back outward: {:?}", bounds(&sketch(&s), &out));
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "-5"}));
+    assert!(box_is(&sketch(&s), &out, [-15.0, -10.0], [15.0, 10.0]), "flipped inward 5 mm: {:?}", bounds(&sketch(&s), &out));
+
+    // Undo and save/reopen preserve the flipped side.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let world_reopened = reopened.world_state().unwrap();
+    let sk_reopened = &world_reopened.sketch(1).unwrap().sketch;
+    assert!(box_is(sk_reopened, &out, [-15.0, -10.0], [15.0, 10.0]), "reopened: {:?}", bounds(sk_reopened, &out));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "undo restores outward: {:?}", bounds(&sketch(&s), &out));
+
+    // 2. Same workflow after extruding the outer rectangle and re-entering sketch edit.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    let param = o["param"].as_str().unwrap().to_string();
+    let curve_count = sketch(&s).curves.len();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    run(&mut s, "sketch.edit", json!({"sketch": 1}));
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert!(s.world_state().unwrap().sketch(1).is_some(), "sketch must stay visible after negative offset edit: {changed}");
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), curve_count);
+    assert!(box_is(&sk, &out, [-18.0, -13.0], [18.0, 13.0]), "flipped inward after extrude: {:?}", bounds(&sk, &out));
+}
+
+/// #21336: negative values also work through a referenced user parameter, symmetric offsets, and
+/// multi-instance ladders; zero or collapsing offset values are refused cleanly without wiping the
+/// sketch.
+#[test]
+fn offset_negative_user_param_symmetric_ladder_and_refusal() {
+    // 1. Driven by a user parameter whose sign flips from +2 to -2 and back.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "off", "expression": "2 mm"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 15]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": "off", "side": [0, -25]}));
+    let out = ids(&o["curves"]);
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]));
+    let r_neg = run(&mut s, "parameters.change", json!({"name": "off", "expression": "-2 mm"}));
+    assert_eq!(r_neg["errors"], json!([]), "{r_neg}");
+    assert!(box_is(&sketch(&s), &out, [-18.0, -13.0], [18.0, 13.0]), "negative user param flips inward: {:?}", bounds(&sketch(&s), &out));
+    let r_pos = run(&mut s, "parameters.change", json!({"name": "off", "expression": "2 mm"}));
+    assert_eq!(r_pos["errors"], json!([]), "{r_pos}");
+    assert!(box_is(&sketch(&s), &out, [-22.0, -17.0], [22.0, 17.0]), "positive user param flips back outward: {:?}", bounds(&sketch(&s), &out));
+
+    // Zero or collapsing distance is refused and leaves the sketch untouched.
+    let before = s.doc.to_json();
+    let e_zero = s.execute("parameters.change", &json!({"name": "off", "expression": "0 mm"})).unwrap_err().to_string();
+    assert!(e_zero.contains("the values were not changed"), "{e_zero}");
+    assert_eq!(s.doc.to_json(), before);
+    let e_collapse = s.execute("parameters.change", &json!({"name": "off", "expression": "-20 mm"})).unwrap_err().to_string();
+    assert!(e_collapse.contains("the values were not changed"), "{e_collapse}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
+
+    // 2. Direct negative edit that would collapse the flipped offset is also refused cleanly.
+    let param = o["param"].as_str().unwrap().to_string();
+    let e_direct = s.execute("parameters.change", &json!({"name": param, "expression": "-20"})).unwrap_err().to_string();
+    assert!(e_direct.contains("the values were not changed"), "{e_direct}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // 3. Symmetric offset: editing the shared parameter to -3 swaps both sides cleanly.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "symmetric": true}));
+    let (a, b) = (side_curves(&o, 0), side_curves(&o, 1));
+    let param = o["param"].as_str().unwrap().to_string();
+    let a_was_inner = box_is(&sketch(&s), &a, [2.0, 2.0], [38.0, 28.0]);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-3"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    let sk = sketch(&s);
+    if a_was_inner {
+        assert!(box_is(&sk, &a, [-3.0, -3.0], [43.0, 33.0]), "{:?}", bounds(&sk, &a));
+        assert!(box_is(&sk, &b, [3.0, 3.0], [37.0, 27.0]), "{:?}", bounds(&sk, &b));
+    } else {
+        assert!(box_is(&sk, &a, [3.0, 3.0], [37.0, 27.0]), "{:?}", bounds(&sk, &a));
+        assert!(box_is(&sk, &b, [-3.0, -3.0], [43.0, 33.0]), "{:?}", bounds(&sk, &b));
+    }
+
+    // 4. Multi-instance offset ladder: editing the shared parameter to -2 flips all 3 rings inward.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 2, "side": [20, -10], "instances": 3}));
+    let param = o["param"].as_str().unwrap().to_string();
+    offset_rings(&sketch(&s), &o, &[2.0, 4.0, 6.0]);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-2"}));
+    assert_eq!(changed["errors"], json!([]), "{changed}");
+    let sk = sketch(&s);
+    for (index, inset) in [2.0, 4.0, 6.0].into_iter().enumerate() {
+        let curves = side_curves(&o, index);
+        assert!(box_is(&sk, &curves, [inset, inset], [40.0 - inset, 30.0 - inset]), "ring {}: {:?}", index + 1, bounds(&sk, &curves));
+    }
+
+    // 5. Combined source + offset edit that collapses the offset against the solved source
+    // geometry (circle r=10 -> 3, inward offset 2 -> 5) is refused cleanly without wiping the
+    // sketch.
+    let mut s = new_sketch();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let dim_r = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": "radius", "value": 10}))["param"].as_str().unwrap().to_string();
+    let o = run(&mut s, "sketch.offset", json!({"curves": [circle], "distance": 2, "side": [0, 0]}));
+    let dim_off = o["param"].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e_combined = s.execute("parameters.change", &json!({"changes": {dim_r.clone(): "3 mm", dim_off: "5 mm"}})).unwrap_err().to_string();
+    assert!(e_combined.contains("the values were not changed"), "{e_combined}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
+    // Shrinking only the source circle below the existing inward offset is also refused cleanly.
+    let e_shrink = s.execute("parameters.change", &json!({"name": dim_r, "expression": "1 mm"})).unwrap_err().to_string();
+    assert!(e_shrink.contains("the values were not changed"), "{e_shrink}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.world_state().unwrap().sketch(1).is_some());
 }

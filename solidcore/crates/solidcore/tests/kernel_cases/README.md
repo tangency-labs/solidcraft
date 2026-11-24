@@ -9,7 +9,7 @@ The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.
 - every operation's operands are given records or earlier outputs;
 - recorded volumes of passing cases without known-failure markers agree with independent
   analytic expectations, as described below;
-- the manifest counts every entry;
+- every case the manifest names has its file, and is one the kernel alone does not account for;
 - no two nonempty traces contain exactly the same calls, operand import options and decoded
   operand records. Descriptions, expected values and gzip filenames do not make a replay
   distinct. Numbers are compared exactly, without a tolerance. Empty traces remain records
@@ -34,8 +34,8 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 - `<area>/<case>.json`: one entry. A ladder case's area is `ladder/<tier>`.
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
 - `<area>/<case>.jpg`: the case's render, where it has one: the site's case gallery shows it.
-- `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
-- `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
+- `manifest.json`: the SolidCraft and solidcore commits the cases were exported at, and every case that isn't expressible, with its reasons.
+- `../kernel_cases_known_failing/<area>/<case>.json`: the kernel cases that fail today, the one list, one file per case (named by the case, so pull requests that list or unlist different cases never touch the same file): `issue`, `reason` and, optionally, `fails`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet. To list a case, add its file; to unlist it, delete the file. A file whose case the corpus does not have fails the rig.
 
 ## An entry
 
@@ -43,7 +43,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 |---|---|
 | `case`, `area`, `sources`, `what` | The case, as SolidCraft's rig names it. |
 | `calls` | The operations in execution order: `op`, `inputs` (bodies `b<n>`), `params`, and `outputs` or `error`. Keep discarded tool construction and handled attempts too, even when their outputs do not reach the final bodies. |
-| `refused_as` | Optional string on a call with `error`: a part of the error's text the replay must give. Without it any error matches the traced refusal; with it a different failure (a blend that fails inside instead of being refused) does not. |
+| `refused_as` | Optional string on a call with `error`: a part of the error's text the replay must give. Without it any error matches the traced refusal; with it a different failure (a blend that fails inside instead of being refused) does not. This holds for a handled refusal (`continued`) too: a different error fails the case before replay goes on to the later calls. |
 | `continued` | Optional boolean on a call with `error`. `true` means the application handled this refusal: replay must observe a refusal, continue to any later calls, and grade the final result. A handled refusal can be the last call when the application keeps an earlier body. Omitted or `false` keeps the terminal-refusal behavior. A marker after a terminal refusal is invalid. |
 | `bodies` | The operand bodies given as records: `trusted` and `keeping_splines` say how SolidCraft read each record into the kernel. |
 | `params` | The operation's arguments as SolidCraft passed them. A pick by points is `{kind, points, tolerance, picked}`: each point's pick is `{index, at}`, the entity's index in the body's list of its kind and where it is (an edge's ends, a vertex's point), or `{miss}`. |
@@ -93,7 +93,7 @@ New kernel cases come here. A case about a command, the UI or a product rule sta
 1. **The entry**, `<area>/<case>.json` in an existing area (a new area is a new folder): `case` (`<source number>-<short-name>`, the issue or pull request it comes from), `area`, `sources`, `what`, `calls`, `bodies`, `records`, `params`, `result`, `expected`, `operation_expressible`, `expressible` and, where they apply, `why_not` and `ungraded`, as [An entry](#an-entry) gives them. `rig`, `golden`, `outcome` and `traced_ops` come with an export and are left out of a hand-written entry.
 2. **The operand records**, `<case>.bodies.json.gz` beside it (gzip, no timestamp): `{"b<n>": record}`, one solidcore B-rep record per body `bodies` names. Keep them small: the bodies the operation takes, not a whole design.
 3. **The expected values** in `expected` (SolidCraft's `expected.json` format) are closed-form or exact: a volume, an area, a distance or a count derived by hand or from analysis, with the derivation in `what`. Never a kernel's output, solidcore's included, and never a value taken from commercial CAD.
-4. **The manifest:** add one to the area's `cases` in `manifest.json` (and to `not_expressible` with the reason, for a case the kernel alone does not account for).
+4. **The manifest:** for a case the kernel alone does not account for, add it to `not_expressible` in `manifest.json` with the reason. Nothing else: the manifest keeps no per-area totals (the corpus test counts the case files).
 
 To export a case from SolidCraft instead of writing it: draft it there as `tests/kernel-cases/<area>/<id>/recipe.json` and `expected.json`, run `cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli --export DIR`, copy `DIR/<area>/<id>.json` and its `.bodies.json.gz` here, and delete the draft there.
 

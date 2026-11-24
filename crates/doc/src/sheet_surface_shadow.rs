@@ -768,7 +768,7 @@ pub(crate) fn shadow(
         Some(Wall { surface, sign })
     };
     let surfaces = rec.faces.iter().enumerate().map(|(f, face)| if mine.contains(&f) { wall(f, face) } else { None }).collect();
-    let r = Reader { q, slab, surfaces, tol, sag, step: (now.size() * 0.01).clamp(sag * 10.0, 1.0), name };
+    let r = Reader { q, slab, surfaces, tol, sag, step: (now.size() * 0.01).min(1.0).max(sag * 10.0), name };
     let unread = || format!("a wall of the cut on {name} can't be read");
     // The walls' edges, each once, and what each is.
     let mut edges: Vec<Edge> = Vec::new();

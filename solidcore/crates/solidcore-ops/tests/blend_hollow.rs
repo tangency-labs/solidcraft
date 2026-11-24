@@ -76,6 +76,7 @@ fn breaks_through(r: Result<f64>, limit: f64, mid: [f64; 3]) {
             kind: FitKind::Radius,
             at: Some(at),
             why: Some(RoomReason::BreaksThrough),
+            ..
         }) => {
             assert!(size < limit && limit - size < 0.011, "{size} vs {limit}");
             assert!(

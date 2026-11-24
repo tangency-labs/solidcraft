@@ -326,7 +326,7 @@ fn arcs_of_different_turns_take_rails() {
 /// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
 /// enough for the normals.
 fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
-    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new() }
+    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new(), segs: Vec::new() }
 }
 
 /// The sections' oriented normals, with the loft's direction `d(v)` at each section.
@@ -495,4 +495,95 @@ fn control_box(b: &crate::Body) -> (Vec3, Vec3) {
         }
     }
     (lo, hi)
+}
+
+/// A rail to the apex of a loft to a point (#20985), from the section at z = 0 to (0, 0, 30), at
+/// `x(z)` in the XZ plane.
+fn rail_to_apex(x: impl Fn(f64) -> f64) -> Vec<Vec3> {
+    (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(if z >= 30.0 { 0.0 } else { x(z) }, 0.0, z)).collect()
+}
+
+/// A circle of radius 20 lofted to a point 30 mm above its centre along a straight rail up the
+/// cone's side changes nothing: the cone, π r² h / 3 = 4000π, the base as drawn.
+#[test]
+fn a_straight_rail_to_the_apex_leaves_the_cone() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - z / 30.0));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 4000.0 * PI;
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    let m = measure(&b).unwrap();
+    assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{:?}", m.bbox);
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-3, "the rail is {worst} mm off the loft");
+}
+
+/// A rail curving in to the apex, r = 20 (1 − (z/30)²), makes the rail's solid of revolution:
+/// π∫₀³⁰ r² dz = 12000π ∫₀¹ (1 − t²)² dt = 6400π.
+#[test]
+fn a_curved_rail_to_the_apex_makes_the_solid_of_revolution_of_the_rail() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 20.0 * (1.0 - (z / 30.0).powi(2)));
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, std::slice::from_ref(&r), RailFit::Scale).unwrap();
+    let want = 6400.0 * PI;
+    assert!(close(volume(&b), want, 1e-3), "volume {} vs {want}", volume(&b));
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
+/// Two straight rails up opposite corners of a square of half side 10 to the point 30 mm up: the
+/// pyramid, 20² · 30 / 3 = 4000. The rails meet at the apex, which is where they have to.
+#[test]
+fn two_rails_to_the_apex_of_a_pyramid() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let edge = |s: f64| -> Vec<Vec3> {
+        (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(s * 10.0 * (1.0 - t), s * 10.0 * (1.0 - t), 30.0 * t)).collect()
+    };
+    let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, &[edge(1.0), edge(-1.0)], RailFit::Scale).unwrap();
+    assert!(close(volume(&b), 4000.0, 1e-4), "volume {}", volume(&b));
+}
+
+/// A rail that ends beside the apex does not reach the point the loft goes to: refused.
+#[test]
+fn a_rail_that_misses_the_apex_is_refused() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) * 0.5).map(|z| Vec3::new(20.0 - z * 0.5, 0.0, z)).collect();
+    let e = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, &[r], RailFit::Scale).unwrap_err();
+    assert!(matches!(e, KernelError::Invalid(_)), "{e:?}");
+}
+
+/// A square of half side 10 lofted to a point 30 up along a rail from the middle of one side
+/// curving in as x = 10 (1 − t²), t = z / 30. Stretching widens each section only across to the
+/// rail: 2 · 10 (1 − t²) by 2 · 10 (1 − t), volume 12000 ∫₀¹ (1 − t²)(1 − t) dt = 5000. Scaling
+/// grows it both ways: (2 · 10 (1 − t²))², volume 12000 ∫₀¹ (1 − t²)² dt = 6400.
+#[test]
+fn a_stretching_rail_to_the_apex_widens_one_way_and_a_scaling_one_both() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let r = rail_to_apex(|z| 10.0 * (1.0 - (z / 30.0).powi(2)));
+    for (fit, want) in [(RailFit::Stretch, 5000.0), (RailFit::Scale, 6400.0)] {
+        let b = crate::loft_to_point_with_rails(&at(0.0), &square(10.0), apex, std::slice::from_ref(&r), fit).unwrap();
+        assert!(close(volume(&b), want, 1e-3), "{fit:?}: volume {} vs {want}", volume(&b));
+        let m = measure(&b).unwrap();
+        assert!((m.bbox.max.y - 10.0).abs() < 1e-6 && (m.bbox.max.z - 30.0).abs() < 1e-6, "{fit:?}: {:?}", m.bbox);
+    }
+}
+
+/// A closed loop of two cubic Béziers lofted to a point along a straight rail from one of its
+/// points to the apex: the rail lies on the cone over the loop, so the loft is that cone, the
+/// loft to the point without rails (exact ruled walls), area × h / 3.
+#[test]
+fn a_spline_profile_follows_a_straight_rail_to_the_apex() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let (a, b) = (Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0));
+    let lp = Loop2 {
+        segs: vec![
+            Seg2::Cubic { p0: a, p1: Vec2::new(-10.0, 12.0), p2: Vec2::new(10.0, 12.0), p3: b },
+            Seg2::Cubic { p0: b, p1: Vec2::new(10.0, -12.0), p2: Vec2::new(-10.0, -12.0), p3: a },
+        ],
+    };
+    let r: Vec<Vec3> = (0..=60).map(|i| f64::from(i) / 60.0).map(|t| Vec3::new(10.0 * (1.0 - t), 0.0, 30.0 * t)).collect();
+    let railed = crate::loft_to_point_with_rails(&at(0.0), &lp, apex, &[r], RailFit::Scale).unwrap();
+    let plain = crate::loft_to_point(&at(0.0), &lp, apex).unwrap();
+    let (v, want) = (volume(&railed), volume(&plain));
+    assert!(close(v, want, 1e-6), "railed {v} vs plain {want}");
 }

@@ -195,8 +195,8 @@
 {"case":"ssi-cone-plane-near-apex-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14054.999999499996,14054.999999499996,28390.999992]],"n":24},"status":[1000.0]}}
 {"case":"ssi-cone-plane-parabola","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14050.014616972514,14056.78410303539,28262.41701569206]],"n":24},"status":[1000.0]}}
 {"case":"ssi-cone-plane-parabola-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14050.014616972514,14056.78410303539,28262.41701569206]],"n":24},"status":[1000.0]}}
-{"case":"ssi-cone-plane-tangent-along-ruling","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14053.0,14053.0,28333.0]],"n":24},"status":[1000.0]}}
-{"case":"ssi-cone-plane-tangent-along-ruling-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14053.0,14053.0,28333.0]],"n":24},"status":[1000.0]}}
+{"case":"ssi-cone-plane-tangent-along-ruling","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14027.0,14027.0,28275.0]],"n":24},"status":[1000.0]}}
+{"case":"ssi-cone-plane-tangent-along-ruling-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14027.0,14027.0,28275.0]],"n":24},"status":[1000.0]}}
 {"case":"ssi-cone-plane-through-apex-along-axis","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28044.0,28054.0,379048.0]],"n":47},"status":[1000.0]}}
 {"case":"ssi-cone-plane-through-apex-along-axis-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28044.0,28054.0,379048.0]],"n":47},"status":[1000.0]}}
 {"case":"ssi-cone-plane-through-apex-oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14055.0,14055.0,28391.0]],"n":24},"status":[1000.0]}}

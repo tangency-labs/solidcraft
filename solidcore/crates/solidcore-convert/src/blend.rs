@@ -89,6 +89,7 @@ fn definition(d: &r::BlendDefinitionRecord) -> kb::BlendDefinitionRecord {
                 kb::RadiusRecord::Constant { offsets: *offsets }
             }
             r::RadiusRecord::Law(law) => kb::RadiusRecord::Law(curve(law)),
+            r::RadiusRecord::EqualSetback => kb::RadiusRecord::EqualSetback,
         },
         order: d.order,
         thumbweight: d.thumbweight,
@@ -113,6 +114,7 @@ fn record_definition(d: kb::BlendDefinitionRecord) -> r::BlendDefinitionRecord {
         radius: match d.radius {
             kb::RadiusRecord::Constant { offsets } => r::RadiusRecord::Constant { offsets },
             kb::RadiusRecord::Law(law) => r::RadiusRecord::Law(record_curve(law)),
+            kb::RadiusRecord::EqualSetback => r::RadiusRecord::EqualSetback,
         },
         order: d.order,
         thumbweight: d.thumbweight,
@@ -130,9 +132,14 @@ fn record_definition(d: kb::BlendDefinitionRecord) -> r::BlendDefinitionRecord {
 
 fn support(s: &r::SupportRecord) -> kb::SupportRecord {
     match s {
-        r::SupportRecord::Nurbs { kind, form } => kb::SupportRecord::Nurbs {
+        r::SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution,
+        } => kb::SupportRecord::Nurbs {
             kind: support_kind(*kind),
             form: surface(form),
+            revolution: revolution.as_ref().map(revolution_to_kernel),
         },
         r::SupportRecord::Blend(b) => {
             kb::SupportRecord::Blend(Box::new(kb::ProceduralBlendRecord {
@@ -145,9 +152,14 @@ fn support(s: &r::SupportRecord) -> kb::SupportRecord {
 
 fn record_support(s: kb::SupportRecord) -> r::SupportRecord {
     match s {
-        kb::SupportRecord::Nurbs { kind, form } => r::SupportRecord::Nurbs {
+        kb::SupportRecord::Nurbs {
+            kind,
+            form,
+            revolution,
+        } => r::SupportRecord::Nurbs {
             kind: record_support_kind(kind),
             form: record_surface(form),
+            revolution: revolution.map(record_revolution),
         },
         kb::SupportRecord::Blend(b) => {
             let b = *b;
@@ -156,6 +168,26 @@ fn record_support(s: kb::SupportRecord) -> r::SupportRecord {
                 net: record_surface(b.net),
             }))
         }
+    }
+}
+
+fn revolution_to_kernel(c: &r::RevolutionRecord) -> kb::RevolutionRecord {
+    kb::RevolutionRecord {
+        origin: c.origin,
+        x_axis: c.x_axis,
+        y_axis: c.y_axis,
+        radius: c.radius,
+        semi_angle_deg: c.semi_angle_deg,
+    }
+}
+
+fn record_revolution(c: kb::RevolutionRecord) -> r::RevolutionRecord {
+    r::RevolutionRecord {
+        origin: c.origin,
+        x_axis: c.x_axis,
+        y_axis: c.y_axis,
+        radius: c.radius,
+        semi_angle_deg: c.semi_angle_deg,
     }
 }
 
@@ -335,10 +367,12 @@ mod tests {
                 r::SupportRecord::Nurbs {
                     kind: r::SupportKindRecord::Cylinder,
                     form: form.clone(),
+                    revolution: None,
                 },
                 r::SupportRecord::Nurbs {
                     kind: r::SupportKindRecord::Free,
                     form: form.clone(),
+                    revolution: None,
                 },
             ],
             sides: [1., -1.],
@@ -370,6 +404,7 @@ mod tests {
                 r::SupportRecord::Nurbs {
                     kind: r::SupportKindRecord::Plane,
                     form: form.clone(),
+                    revolution: None,
                 },
             ],
             radius: r::RadiusRecord::Constant { offsets: [2., 3.] },
@@ -382,10 +417,12 @@ mod tests {
                 r::SupportRecord::Nurbs {
                     kind: r::SupportKindRecord::Plane,
                     form: form.clone(),
+                    revolution: None,
                 },
                 r::SupportRecord::Nurbs {
                     kind: r::SupportKindRecord::Cylinder,
                     form,
+                    revolution: None,
                 },
             ],
             radius: 0.3,

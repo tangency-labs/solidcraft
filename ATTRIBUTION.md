@@ -469,6 +469,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/collision_auto.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -960,6 +961,50 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | tests/step-regressions/hole_round_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (a 30 x 30 x 10 block, a 14 mm hole, a 1 mm round on its top edge), inserted and exported again; import regression fixture | MIT OR Apache-2.0 |
 | tests/step-regressions/torus_patch_and_rest.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (solid.torus R 12, r 2); import regression fixture | MIT OR Apache-2.0 |
 | tests/step-regressions/torus_patch_and_rest_revolved.step | SolidCraft contributors | exported by SolidCraft 0.30.1 from public commands (torus_patch_and_rest.step inserted and exported again); import regression fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore/tests/data/issue_17598_pole_corner_patch.smb | HuggingAI4Engineering | a 5 x 4 x 3 mm block cut by the kernel from the part of CADGenBench task 215 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), around a three-sided corner patch with a pole, written as a native body file; offset regression fixture | ODC-By-1.0 |
+| assets/sheet-metal/standard-library.json | SolidCraft contributors | Original; gauge thicknesses worked out from the Manufacturers' Standard Gauge weights, 15 U.S.C. 206 and the Brown & Sharpe formula, K-factors and radii from the generic tables its `sources` list cite (facts, not copied text); the standard sheet metal library (#18304) | MIT OR Apache-2.0 |
+| .agents/skills/solidcraft-babysit-pr/SKILL.md | Theo Browne (tstack babysit-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-babysit-pr/scripts/pr-wait | Theo Browne (tstack pr-wait), rewritten for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-file-pr/SKILL.md | Theo Browne (tstack file-pr), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-full-stop/SKILL.md | Theo Browne (tstack full-stop), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-modernize/SKILL.md | Theo Browne (tstack modernize), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| .agents/skills/solidcraft-takeover/SKILL.md | Theo Browne (tstack takeover), adapted for SolidCraft | https://github.com/t3dotgg/tstack | MIT (.agents/skills/LICENSE-tstack) |
+| assets/locales/eu.json | Ehuntabi | Original Basque (euskara) translation of SolidCraft's English command labels, written with Claude Code from the meaning of each English string; terms from Euskaltzaindia, Elhuyar, Itzuli and Euskalterm; not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pending/plane-square-to-line.json | SolidCraft contributors | Original Construct plane command label, help text and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/plane_square_to_line.svg | SolidCraft contributors | original construction icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/model/rotate_member.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| tests/step-regressions/net_steps_back_within_tolerance.step | SolidCraft contributors | written entity by entity from formulas (a tetrahedron whose spline face's control net steps back 0.5 um); import regression fixture | MIT OR Apache-2.0 |
+| `assets/locales/pending/linked-file-folders.json` | SolidCraft contributors | Original linked-files-from-other-folders question and preference translations | MIT OR Apache-2.0 |
+| assets/locales/pending/plugin-design-events.json | SolidCraft contributors | Original plugin design-change messages and translations | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/rect_edge_center.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| docs/design/drawing-ui/add-sheet.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/annotate.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/base-view-first.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/first-drawing.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/layout.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/make-drawing.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/moving-views.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/paper-presets.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/parts-tables.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/picking.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/placing-views.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/ready-to-issue.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/review-export.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/sheet-colour.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/sheets.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/status-card.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/view-selected.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| docs/design/drawing-ui/views-by-part-type.png | SolidCraft contributors | original UI mockup of the Drawing workspace, rendered from an HTML mockup that uses the original SolidCraft drawing icons; no third-party artwork, and not a screenshot of any other CAD product | MIT OR Apache-2.0 |
+| `assets/locales/pending/note-alignment.json` | SolidCraft contributors | Original note alignment labels | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/reload.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/reset.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/window_here.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/window_other.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/window_here.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/small/window_other.svg | SolidCraft contributors | small-slot icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| assets/locales/pending/basque-second-batch.json | Ehuntabi | Original Basque (euskara) translation of 145 more of SolidCraft's English command labels (sketch, solid, construct, surface, view, file, inspect, parameters and browser commands), written with Claude Code from the meaning of each English string; terms from the same glossary as the first batch (Euskaltzaindia, Elhuyar, Itzuli, Euskalterm); not yet reviewed by a Basque speaker with CAD vocabulary; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/pt-PT.json | acebear17 | Original European Portuguese (Portugal) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| `assets/locales/pending/note-legacy-centre.json` | SolidCraft contributors | Original note alignment label | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -1011,10 +1056,11 @@ into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
 
 ## FreeCAD, Rhino and OpenUSD library
 
-FreeCAD `.FCStd` and Rhino `.3dm` files are read, and OpenUSD files read and written, with
+FreeCAD `.FCStd` files are read, Rhino `.3dm` files are read and written, OpenUSD files read and written, and STEP and IGES
+files read and written when that is asked for, with
 [cadmpeg](https://github.com/cadmpeg/cadmpeg) 0.6.12 (Apache-2.0), linked as the crates `cadmpeg-core`,
-`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-rhino`,
-`cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
+`cadmpeg-ir`, `cadmpeg-registry`, `cadmpeg-container`, `cadmpeg-codec-freecad`, `cadmpeg-codec-iges`,
+`cadmpeg-codec-rhino`, `cadmpeg-codec-step`, `cadmpeg-codec-usd` and `cadmpeg-tessellate`
 in native and browser builds (`crates/io/src/native_cad.rs`). Only those open-format codecs are built: no
 default features, so cadmpeg's codecs for commercial CAD formats and its ShapeManager/ACIS
 codec are not compiled in. Its licence text is in THIRD-PARTY-LICENSES.txt; no code from it is

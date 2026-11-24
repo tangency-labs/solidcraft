@@ -114,6 +114,11 @@ pub struct SPoint {
     /// come to (`Document::apply_point_values` works them out before each solve).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exprs: Option<Box<PointExprs>>,
+    /// A point that only helps place or dimension other geometry, as a construction line does:
+    /// features that read a sketch's points (a Hole from the whole sketch) leave it out (#18448).
+    /// Not saved when false, so a design without one is written as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 /// The expressions of a point placed by parameters, over the design's parameters; a coordinate
@@ -861,6 +866,34 @@ pub struct Sketch {
     pub view: SketchView,
 }
 
+impl Sketch {
+    /// Everything of the sketch a numerical solve's residuals can read besides its constraints
+    /// (which a solve reads through its residual blocks, with the values it is solving for), as
+    /// text that tells any two such states apart: for remembering the solver's runs
+    /// (`solver::lm_memo`). Every field is named, so a new one has to be decided on here.
+    pub(crate) fn solve_fingerprint(&self) -> String {
+        let Sketch {
+            points,
+            curves,
+            constraints: _,
+            patterns,
+            links,
+            offsets,
+            freeform_offsets,
+            freeform_chain_offsets,
+            wires,
+            wire_constraints,
+            wires_joined,
+            equations,
+            counters: _,
+            view: _,
+        } = self;
+        format!(
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}"
+        )
+    }
+}
+
 fn is_default_view(v: &SketchView) -> bool {
     *v == SketchView::default()
 }
@@ -874,7 +907,7 @@ impl Default for Sketch {
 impl Sketch {
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
@@ -1019,7 +1052,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
+        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None, construction: false });
         Ok(self.points.len() - 1)
     }
 
@@ -1243,10 +1276,13 @@ impl Sketch {
             | Vertical { l }
             | Length { l, .. }
             | LineAngle { l, .. }
-            | Midpoint { l, .. }
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
+            // The middle of a line is its ends' mean; the middle of an arc is halfway along it.
+            Midpoint { l, .. } if !matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })) => {
+                return Err(SketchError::WrongKind(name(l), "needs a line or an arc".into()));
+            }
             ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
@@ -1334,12 +1370,12 @@ impl Sketch {
             _ => {}
         }
         if let Some(v) = k.value()
-            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle()))
+            && (!v.is_finite() || v.abs() > MAX_COORD || (v < 0.0 && !k.is_angle() && !matches!(k, OffsetDistance { .. })))
         {
             return Err(SketchError::Invalid(format!("dimension value {v}")));
         }
         if let OffsetDistance { output, value, .. } = k
-            && (*value <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
+            && (value.abs() <= 1e-9 || output.len() > 512 || self.offset_distance(output).is_none())
         {
             return Err(SketchError::Invalid("offset dimension needs a nonzero distance and an existing association".into()));
         }
@@ -1465,6 +1501,21 @@ impl Sketch {
                 } else {
                     false
                 }
+            }
+            ConstraintKind::OffsetDistance { ref output, .. } => {
+                if !mag.is_finite() || mag <= 1e-9 || mag > MAX_COORD {
+                    return false;
+                }
+                let Some(constraint) =
+                    self.constraints.iter_mut().find(|c| matches!(&c.kind, ConstraintKind::OffsetDistance { output: id, .. } if id == output))
+                else {
+                    return false;
+                };
+                if let ConstraintKind::OffsetDistance { value, reverse, .. } = &mut constraint.kind {
+                    *reverse = !*reverse;
+                    *value = mag;
+                }
+                true
             }
             _ => false,
         }
@@ -1937,7 +1988,7 @@ impl Sketch {
         // curve alone joins nothing (a circle's radius and centre move independently).
         let own = self.curves.iter().filter_map(|x| match &x.kind {
             CurveKind::Arc { c, a, b } => Some(vec![*c, *a, *b]),
-            CurveKind::Spline { pts, periodic: true, .. } => match (pts.first(), pts.last()) {
+            CurveKind::Spline { pts, periodic: true, control: false, .. } => match (pts.first(), pts.last()) {
                 (Some(a), Some(b)) if a != b => Some(vec![*a, *b]),
                 _ => None,
             },
@@ -2048,6 +2099,11 @@ impl Sketch {
                         .collect(),
                 )
             }
+            CurveKind::Spline { pts, control: true, degree, periodic: true, .. } => {
+                let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
+                let pieces = crate::nurbs::closed_control_beziers(&p, *degree)?;
+                pieces.iter().map(|piece| solidcraft_geom::bezier(piece)).collect()
+            }
             CurveKind::Spline { pts, control: true, degree, nurbs: Some(nurbs), .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 nurbs.segs(&p, *degree)
@@ -2144,8 +2200,10 @@ impl Sketch {
                         solidcore_record::MAX_BEZIER_DEGREE
                     )));
                 }
-                if *periodic {
-                    if *control || *degree != 3 {
+                if *periodic && *control {
+                    crate::periodic::validate_closed_control(pts.len(), *degree)?;
+                } else if *periodic {
+                    if *degree != 3 {
                         return Err(SketchError::Invalid("periodic mode requires a cubic fit spline".into()));
                     }
                     let p = pts
@@ -2670,7 +2728,12 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curves.get(self.curve_index(cid)?)?;
+        Self::curve_point(self.curves.get(self.curve_index(cid)?)?, role)
+    }
+
+    /// The point a role (`start`, `end`, `center`, `major` or `apex`) names on a curve. A reversed
+    /// curve swaps its start and end, so they keep their as-drawn meaning.
+    pub(crate) fn curve_point(c: &Curve, role: &str) -> Option<usize> {
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",

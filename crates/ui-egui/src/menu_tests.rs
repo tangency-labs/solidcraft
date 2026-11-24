@@ -167,6 +167,29 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     assert!(!editing.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&editing));
 }
 
+/// The History bar names the edit item as the Browser does: Edit Sketch on a sketch, Edit
+/// Feature on any other feature (#14366).
+#[test]
+fn the_history_bar_offers_edit_sketch_on_a_sketch() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "Base", "distance": 10, "name": "Block"})).unwrap();
+    let id = |app: &SolveApp, name: &str| app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+    let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
+    let labels = |v: &[Item]| v.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+    let on_sketch = context_menu::items(&app, &Target::Timeline { feature: sketch });
+    assert!(!on_sketch.iter().any(|i| i.label == "Edit Feature"), "{:?}", labels(&on_sketch));
+    let edit = find(&on_sketch, "Edit Sketch");
+    assert_eq!((&*edit.icon, edit.params.clone()), ("sketch", Some(json!({"feature": sketch}))));
+    let on_block = context_menu::items(&app, &Target::Timeline { feature: block });
+    assert!(find(&on_block, "Edit Feature").enabled);
+    assert!(!on_block.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&on_block));
+    context_menu::run_item(&mut app, &edit, pos2(0.0, 0.0));
+    assert_eq!(app.session.active_sketch, Some(sketch), "Edit Sketch opens the sketch that was right-clicked");
+}
+
 /// Solid geometry in the selection keeps the body menu: a right-click on a face offers the
 /// face's commands even when a sketch curve is selected as well.
 #[test]
@@ -1196,8 +1219,8 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let id = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let id = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let t = Target::Canvas { id };
     act(&mut app, &t, "Show/Hide");
     assert!(!app.session.doc.canvases[0].visible);
@@ -1244,13 +1267,15 @@ fn deleting_sketch_entities_ignores_a_canvas_removed_by_undo() {
         png.extend(2u32.to_be_bytes());
         png.extend(2u32.to_be_bytes());
         png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-        let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-        let kept = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
-        let removed = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        let data = crate::scenario::image_file(&png);
+        let kept = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        let removed = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
         // A Browser selection is UI state, so Undo leaves the removed canvas picked.
         app.tree.picked_canvases = vec![removed];
         app.run("edit.undo", json!({})).unwrap();
         assert!(!app.session.doc.canvases.iter().any(|canvas| canvas.id == removed));
+        // Inserting a canvas ended the sketch; open it again to delete from it.
+        app.run("sketch.edit", json!({"sketch": sketch})).unwrap();
         app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": line}]})).unwrap();
         if include_existing_canvas {
             app.tree.picked_canvases.push(kept);
@@ -1283,9 +1308,9 @@ fn edit_canvas_from_the_toolbar_edits_the_picked_canvas() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let first = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
-    let second = app.run("canvas.insert", json!({"data": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let first = app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let second = app.run("canvas.insert", json!({"path": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     app.tree.picked_canvases = vec![second];
     assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
     let panel = app.tree.canvas_panel.clone().unwrap();
@@ -1386,6 +1411,57 @@ fn v_on_a_selected_profile_toggles_its_sketch() {
     assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
 }
 
+/// A construction plane, axis or point picked as a feature (its Features row or its timeline
+/// step) shows and hides with V and with its Features row's menu, as from the Construction folder.
+#[test]
+fn construction_picked_as_a_feature_shows_and_hides() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut app = sample_app();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Lid"})).unwrap();
+    app.run("construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"})).unwrap();
+    app.run("construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"})).unwrap();
+    let names = ["Lid", "Pin", "Spine"];
+    let ids: Vec<u64> = names.iter().map(|n| app.session.doc.find_feature(n).unwrap().id).collect();
+    let hidden = |app: &SolveApp| {
+        let mut h = app.session.visibility.hidden_origin.clone();
+        h.sort();
+        h
+    };
+    let items: Vec<serde_json::Value> = ids.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+    app.run("select.set", json!({ "items": items })).unwrap();
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(hidden(&app), names, "V hides the picked construction features");
+    context_menu::toggle_visibility(&mut app);
+    assert!(hidden(&app).is_empty(), "and shows them again");
+
+    for (id, name) in ids.iter().zip(names) {
+        let t = Target::Feature { id: *id };
+        assert_eq!(find(&context_menu::items(&app, &t), "Show/Hide").shortcut, "V");
+        act(&mut app, &t, "Show/Hide");
+        assert_eq!(hidden(&app), [name], "the Features row's Show/Hide hides {name}");
+        act(&mut app, &t, "Show/Hide");
+        assert!(hidden(&app).is_empty(), "and shows {name} again");
+    }
+    // Other features' rows keep their menu without Show/Hide.
+    let other = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find(|f| {
+            !matches!(
+                f.kind,
+                FeatureKind::Sketch { .. }
+                    | FeatureKind::ConstructionPlane { .. }
+                    | FeatureKind::ConstructionAxis { .. }
+                    | FeatureKind::ConstructionPoint { .. }
+            )
+        })
+        .map(|f| f.id)
+        .unwrap();
+    assert!(!context_menu::items(&app, &Target::Feature { id: other }).iter().any(|i| i.label == "Show/Hide"));
+}
+
 #[test]
 fn v_toggles_what_is_selected() {
     let mut app = sample_app();
@@ -1453,6 +1529,77 @@ fn v_with_a_menu_open_shows_or_hides_what_the_menu_is_for() {
     // With no menu open, V still flips the selection.
     press_v(&mut h);
     assert!(h.app.session.visibility.hidden_bodies.contains(&b), "V without a menu acts on the selection");
+}
+
+/// #14554: V with an origin plane, axis, or point selected in the browser toggles its visibility.
+#[test]
+fn v_on_selected_origin_plane_axis_or_point_toggles_visibility() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Ensure the Origin folder is open so its items are present.
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Toggle plane XY
+    h.step(&json!({"click": {"handle": "row:XY"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "XY".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V hides XY plane");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "XY"), "V shows XY plane again");
+
+    // Toggle axis Z
+    h.step(&json!({"click": {"handle": "row:Z"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "Z".into() }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V hides Z axis");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "Z"), "V shows Z axis again");
+
+    // Toggle origin point O
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }]);
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V hides origin point O");
+    h.step(&json!({"key": "V"})).unwrap();
+    assert!(!h.app.session.visibility.hidden_origin.iter().any(|h| h == "O"), "V shows origin point O again");
+
+    // Context menu on OriginPoint has Show/Hide bound to V
+    let items = context_menu::items(&h.app, &Target::OriginPoint { name: "O".into() });
+    assert_eq!(find(&items, "Show/Hide").shortcut, "V");
+}
+
+/// #14554: Clicking origin point O in the Browser sends a pick that SNAP_POINTS inputs accept (e.g. Offset Plane).
+#[test]
+fn origin_point_in_browser_picks_into_snap_points_input() {
+    let mut h = crate::scenario::Harness::new();
+    h.settle();
+
+    // Start Offset Plane dialog: input 0 is Plane (PLANES), input 1 is "Through point" (SNAP_POINTS).
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "Offset Plane dialog is open");
+
+    // Activate the "Through point" input which accepts SNAP_POINTS
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 1;
+
+    // Ensure the Origin folder is open
+    if !crate::browser::is_open(&h.app, "origin", false) {
+        h.step(&json!({"click": {"handle": "row:Origin"}})).unwrap();
+    }
+
+    // Clicking O row in the Browser picks into the Through point input
+    h.step(&json!({"click": {"handle": "row:O"}})).unwrap();
+
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(
+        d.inputs[1].items,
+        vec![solidcraft_engine::Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }],
+        "Through point input (SNAP_POINTS) takes the origin point O"
+    );
 }
 
 #[test]
@@ -1614,8 +1761,8 @@ fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let rename_key = |app: &SolveApp, target: &Target| {
         context_menu::entries(app, target)
             .into_iter()
@@ -1770,13 +1917,16 @@ fn the_old_construct_layout_is_kept_with_the_toolbar_preference() {
 }
 
 #[test]
-fn the_workspace_menu_lists_design_and_render_and_greys_future_workspaces() {
+fn the_workspace_menu_lists_design_drawing_and_render_only() {
     let app = sample_app();
     let items = context_menu::items(&app, &Target::Workspace);
     assert!(find(&items, "Design").enabled);
     assert!(find(&items, "Render").enabled);
-    assert!(!find(&items, "Animation").enabled);
     assert!(!items.iter().any(|i| i.label.contains("Generative")));
+    // Drawing comes second, right after Design (the owner's order), then Render; workspaces still to
+    // come (Animation, Simulation, Manufacture) aren't listed.
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).filter(|l| !l.is_empty()).collect();
+    assert_eq!(labels, ["Design", "Drawing", "Render"], "{labels:?}");
 }
 
 /// A right-click on a construction plane's browser row opens its menu, like a body's or a
@@ -1797,7 +1947,7 @@ fn construction_plane_row_opens_its_menu() {
     assert_eq!(menu["open"], true, "{menu}");
     assert_eq!(menu["target"], json!({"type": "plane", "id": id}), "{menu}");
     let labels: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).filter(|l| !l.is_empty()).collect();
-    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Find in Timeline"]);
+    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Zoom to Selection", "Find in Timeline"]);
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "Cut".into() }], "the right-click picks the plane");
     context_menu::close(&mut h.app);
 
@@ -2104,6 +2254,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Units,
         Target::VisualStyle,
         Target::ViewTool,
+        Target::SelectionMode,
         Target::ToolbarCommand { id: "solid.extrude".into() },
         Target::Toolbar,
         Target::HistoryControls,
@@ -2945,4 +3096,106 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
     let menu = area(&h);
     let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
     assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
+}
+
+/// A base flange and a contour flange are drawn from a sketch: their History bar menu offers
+/// Edit Profile Sketch on it, as an extrude's does.
+#[test]
+fn sheet_flanges_from_a_sketch_offer_edit_profile_sketch() {
+    let mut app = crate::SolveApp::new(Session::default(), Services::default());
+    app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XZ", "name": "Chain"})).unwrap();
+    app.run("sketch.line", json!({"points": [[200, 0], [240, 0], [240, 30]], "ids": ["c1", "c2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"sketch": "Chain", "curves": ["c1", "c2"], "distance": 20})).unwrap();
+    let doc = &app.session.doc;
+    let id_of = |name: &str| doc.find_feature(name).map(|f| f.id).unwrap_or_else(|| panic!("no {name}"));
+    let of = |ty: &str| doc.features.iter().find(|f| f.kind.type_name() == ty).map(|f| f.id).unwrap_or_else(|| panic!("no {ty}"));
+    let flanges = [of("BaseFlangeFeature"), of("ContourFlangeFeature")];
+    for (flange, sketch) in flanges.into_iter().zip([id_of("Base"), id_of("Chain")]) {
+        let items = crate::timeline::feature_items(&app, flange);
+        let edit = find(&items, "Edit Profile Sketch");
+        assert!(edit.enabled);
+        assert_eq!(edit.params, Some(json!({"sketch": sketch})));
+    }
+}
+
+/// What Select All does on a design with more shown bodies than `select.set` takes: the
+/// whole-body scope. The tests below take it on small designs, where Select All lists the bodies.
+fn select_every_shown_body(app: &mut SolveApp) {
+    app.session.clear_selection();
+    app.session.selection_all_bodies = true;
+}
+
+#[test]
+fn a_whole_body_selection_names_every_shown_body_for_the_menus_and_hide_takes_them_all() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    // The menus build their body lists here: a whole-body selection names every shown body.
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    let bodies = context_menu::sel_bodies(&app);
+    assert_eq!(bodies, shown, "every shown body, in the world's order");
+    // Show/Hide then takes them all in one step (this was the "items must list ..." refusal).
+    app.run("browser.visibility", json!({"items": bodies, "visible": false})).unwrap();
+    let hidden = &app.session.visibility.hidden_bodies;
+    for name in &shown {
+        assert!(hidden.iter().any(|h| h == name), "{name} hidden: {hidden:?}");
+    }
+    // A body hidden afterwards leaves the scope, as it left the list before.
+    assert_eq!(app.session.selected_count().unwrap(), 0, "both hidden: nothing shown is selected");
+}
+
+#[test]
+fn a_whole_body_selection_then_appearance_covers_every_shown_body() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    let bodies = context_menu::sel_bodies(&app);
+    app.run("appearance.assign", json!({"bodies": bodies, "color": "#208040"})).unwrap();
+    for name in ["Block", "Spare"] {
+        assert!(app.session.doc.appearances.bodies.contains_key(name), "{name} took the appearance");
+    }
+}
+
+#[test]
+fn a_whole_body_selection_preselects_every_shown_body_for_move() {
+    use crate::selection::SelectionExt;
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    app.start("solid.move");
+    let d = app.dialog.as_ref().expect("the Move dialog opened");
+    let shown: Vec<String> = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(d.inputs[0].items.body_names(), shown, "a whole-body selection preselects every shown body");
+}
+
+#[test]
+fn a_whole_body_selection_holds_every_shown_body_and_ctrl_click_takes_one_out() {
+    let mut app = sample_app();
+    app.run("solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5})).unwrap();
+    select_every_shown_body(&mut app);
+    // A right-click on a body the scope covers keeps the selection for the menu.
+    assert!(crate::selection::holds_body(&app.session, "Spare"), "Select All holds every shown body");
+    // Ctrl+click on one of them leaves the others selected.
+    crate::viewport::select(&mut app, Some(solidcraft_engine::Sel::Body { name: "Spare".into() }), true, true);
+    let others: Vec<solidcraft_engine::Sel> = app
+        .session
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .filter(|b| b.name != "Spare")
+        .map(|b| solidcraft_engine::Sel::Body { name: b.name.clone() })
+        .collect();
+    assert_eq!(app.session.selection, others);
+    assert!(!app.session.selection_all_bodies);
 }

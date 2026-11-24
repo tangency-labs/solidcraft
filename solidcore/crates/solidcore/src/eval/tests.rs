@@ -676,6 +676,68 @@ fn hostile_parameters_give_none() {
     assert!(c.derivatives(0.5, 2).is_none());
 }
 
+/// A piece from the float below a knot up to the knot is taken from the span it starts in: its
+/// middle rounds onto the knot, whose span on the right is another polynomial. Here x is
+/// `1 - t` on `[0, 1]` and `0` on `[1, 2]`, so the piece's start is `2^-53`, not `0`.
+#[test]
+fn a_bezier_piece_ending_at_a_knot_is_its_own_spans() {
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 2.0, 2.0],
+        vec![
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    );
+    let below = 1.0 - f64::EPSILON / 2.0;
+    assert_eq!(
+        0.5 * (below + 1.0),
+        1.0,
+        "the piece's middle rounds onto the knot"
+    );
+    let piece = c.bezier(below, 1.0).unwrap();
+    let ([x, ..], [e, ..]) = piece[0];
+    assert!((x - f64::EPSILON / 2.0).abs() <= e, "x {x}, bound {e}");
+    assert_eq!(piece[1].0[0], 0.0);
+    // Either side of the knot, and the range's very end, still have their pieces.
+    assert!(c.bezier(1.0, 1.5).is_some_and(|p| p[0].0[0] == 0.0));
+    assert!(c.bezier(2.0, 2.0).is_some());
+    // A piece across the knot is not one span's.
+    assert!(c.bezier(0.5, 1.5).is_none());
+}
+
+/// A control point whose exact coordinate lies below the least subnormal rounds to zero, and its
+/// bound still encloses it; a knot span whose width overflows has no piece.
+#[test]
+fn a_bezier_bound_counts_underflow_and_an_overflowing_span_has_no_piece() {
+    let least = f64::from_bits(1);
+    // x is `least · t` on [0, 1]: at 0.5 it is half the least subnormal.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [least, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(0.5, 1.0).unwrap()[0];
+    // The exact x, half of `least`, is no float: the bound reaches past it from what came back.
+    assert!(x.abs() + least <= e, "x {x}, bound {e}");
+    // x is `t` on [0, 2]: at the least subnormal it is that, and `least / 2` rounds to zero.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 2.0, 2.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(least, 1.0).unwrap()[0];
+    assert!((x - least).abs() <= e, "x {x}, bound {e}");
+    // Knots 2e308 apart: the width is not a number a step can divide by.
+    let c = EvalCurve::new(
+        1,
+        vec![-1e308, -1e308, 1e308, 1e308],
+        vec![[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]],
+    );
+    assert!(c.bezier(0.0, 1.0).is_none());
+}
+
 #[test]
 fn plane_point_and_normal() {
     let s = EvalSurface::Plane {
@@ -1376,6 +1438,120 @@ fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
         (v[0] + FRAC_PI_2).abs() < 1e-9 && v[1].abs() < 1e-9,
         "{v:?}"
     );
+}
+
+/// A 5 mm sphere about z, its seam the meridian through +x (angle −π/2 at the south pole, π/2
+/// at the north), and the circle where the plane at `d` from the centre across direction
+/// `(cos a, sin a, 0)` meets it (angle 0 at its top, a quarter turn towards +y about it).
+fn sphere_seam_and_cut(a: f64, d: f64) -> (Surface, Curve, Curve) {
+    let r = 5.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let seam = Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let (s, c) = a.sin_cos();
+    let cut = Curve::Circle {
+        frame: Frame {
+            origin: [d * c, d * s, 0.],
+            x_axis: [0., 0., 1.],
+            y_axis: [-s, c, 0.],
+        },
+        radius: (r * r - d * d).sqrt(),
+    };
+    (sphere, seam, cut)
+}
+
+/// A sphere less a hole beside its seam (#16872: a ball with a bore in it, after a STEP round
+/// trip): the seam's loop, up the meridian and back down it, has no width, yet the face covers
+/// the whole turn with the hole in it, whichever loop comes first. Taken as wide as the hole, the
+/// face's form was a sliver and its seam loop enclosed nothing.
+#[test]
+fn a_sphere_less_a_hole_beside_its_seam_spans_the_whole_turn() {
+    let (sphere, seam, hole) = sphere_seam_and_cut(0.4, 4.8);
+    let seam_loop = vec![
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], true),
+        (&seam, [-FRAC_PI_2, FRAC_PI_2], false),
+    ];
+    let hole_loop = vec![(&hole, [0., TAU], false)];
+    for loops in [
+        [seam_loop.clone(), hole_loop.clone()],
+        [hole_loop.clone(), seam_loop.clone()],
+    ] {
+        let [u, v] = form::extent(&sphere, &loops, 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+        let from = u[0].rem_euclid(TAU);
+        assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
+        let hole_u = 0.4 + ((u[0] - 0.4) / TAU).ceil() * TAU;
+        assert!(
+            hole_u > u[0] && hole_u < u[1],
+            "the hole in the turn: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "{v:?}"
+        );
+    }
+}
+
+/// A sphere less a bore across its seam (#16872): its loop runs up the seam to the bore, round
+/// the bore's one side, up the seam to the north pole, down the seam's other use, round the
+/// bore's other side and down to the south pole. It passes both poles, so it closes whatever
+/// turns it takes there; the face lies on its left, so over the north pole it turns back a whole
+/// turn and the face covers it. Closing the loop instead took the turns of no width, a box just
+/// as wide as the bore, and the face came out as the bore turned over.
+#[test]
+fn a_loop_over_both_poles_turns_the_way_its_face_lies() {
+    let (sphere, seam, bore) = sphere_seam_and_cut(0.0, 4.0);
+    let below = [-FRAC_PI_2, -(0.6f64.asin())];
+    let above = [0.6f64.asin(), FRAC_PI_2];
+    let outer = [
+        (&seam, below, true),
+        (&bore, [std::f64::consts::PI, TAU], true),
+        (&seam, above, true),
+        (&seam, above, false),
+        (&bore, [0., std::f64::consts::PI], true),
+        (&seam, below, false),
+    ];
+    // Started anywhere round it, the loop takes the same turns.
+    for k in 0..outer.len() {
+        let l: Vec<_> = outer
+            .iter()
+            .cycle()
+            .skip(k)
+            .take(outer.len())
+            .copied()
+            .collect();
+        let [u, v] = form::extent(&sphere, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        assert!(
+            (u[1] - u[0] - TAU).abs() < 1e-9,
+            "start {k}: one turn: {u:?}"
+        );
+        let from = u[0].rem_euclid(TAU);
+        assert!(
+            from.min(TAU - from) < 1e-9,
+            "start {k}: from the seam: {u:?}"
+        );
+        assert!(
+            (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+            "start {k}: {v:?}"
+        );
+    }
 }
 
 /// Half a dome of revolution, its profile a spline from the axis, bounded by a meridian into

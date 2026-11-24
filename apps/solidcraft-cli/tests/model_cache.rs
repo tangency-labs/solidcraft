@@ -214,6 +214,14 @@ fn imported_assemblies_open_from_their_model_as_evaluated() {
     s.execute("file.insert_step", &json!({"path": step.to_string_lossy()})).unwrap();
     s.execute("file.insert_step", &json!({"path": step.to_string_lossy(), "matrix": [1, 0, 0, 200, 0, 1, 0, 0, 0, 0, 1, 0]})).unwrap();
     let _ = std::fs::remove_file(&step);
+    // A save while an import's parts are still checked keeps no model, without waiting (#20133):
+    // the model is kept, with what the checks found, by a save once they have ended.
+    for r in &s.model.results {
+        if let Some(report) = &r.import_report {
+            let _ = report.checks.wait();
+        }
+    }
+    assert!(!s.model.checking_imports());
     check("imported hinge", s);
 }
 

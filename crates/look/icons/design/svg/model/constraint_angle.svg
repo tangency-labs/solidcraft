@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Angle constraint</title>
+  <path d="M8.62 36.69L32 50.19L32 54.69L8.62 41.19Z" fill="#b8c3cf"/>
+  <path d="M55.38 36.69L32 50.19L32 54.69L55.38 41.19Z" fill="#8e9faf"/>
+  <path d="M32 23.19L55.38 36.69L32 50.19L8.62 36.69Z" fill="#e2e8ef"/>
+  <path d="M32 23.19L55.38 36.69L55.38 41.19L32 54.69L8.62 41.19L8.62 36.69Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 36.69L32 50.19L55.38 36.69" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 50.19L32 54.69" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 36.69L32 50.19L44.29 22.82L20.91 9.32Z" fill="#b8c3cf"/>
+  <path d="M8.62 36.69L32 50.19L44.29 22.82L20.91 9.32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.53 44.69L40.92 43.75L40.22 42.88L39.43 42.08L38.57 41.37L37.64 40.73L36.65 40.22L35.61 39.8L34.54 39.48L33.44 39.28L32.32 39.19L31.2 39.22L30.09 39.36" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41.53 44.69L40.92 43.75L40.22 42.88L39.43 42.08L38.57 41.37L37.64 40.73L36.65 40.22L35.61 39.8L34.54 39.48L33.44 39.28L32.32 39.19L31.2 39.22L30.09 39.36" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

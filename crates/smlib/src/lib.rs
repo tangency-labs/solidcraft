@@ -10,6 +10,7 @@ use std::path::Path;
 mod check;
 mod core;
 pub mod export;
+pub mod failure;
 pub mod flat;
 pub mod history;
 pub mod import;
@@ -24,9 +25,19 @@ pub mod sweeps;
 pub mod trace;
 pub mod trim;
 
-pub use check::{CheckLevel, CheckReport};
-pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
+pub use check::CheckLevel;
+pub use check::CheckReport;
+pub use measure::MEASURE_ACCURACY;
+pub use measure::MassProperties;
+pub use measure::PointClass;
+pub use ops::Blend;
+pub use ops::BooleanOp;
+pub use ops::ChamferSecond;
+pub use ops::Hole;
+pub use ops::HoleEdge;
+pub use ops::MAX_POINTS;
+pub use ops::MAX_UNION_BREPS;
+pub use ops::Turn;
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -50,10 +61,17 @@ pub enum Error {
     /// crossing, a hole's wall offset just reaching a side's, so the result would pinch to
     /// nothing along a line. A thinner or a thicker wall builds.
     WallsTouch,
+    /// A shell or offset that failed on a body with a face whose outline touches itself at
+    /// `at`: a corner of one of its loops on another loop, within the two's tolerances (a pad
+    /// or hole whose corner reaches the face's edge there). The walls offset from the two
+    /// would meet at that point, which the offset does not build. Moved clear of the edge,
+    /// or across it, the feature shells. `detail` is the kernel's own failure, kept whole.
+    OutlineTouches { at: [f64; 3], detail: String },
     /// A blend larger than its faces allow, refused with the largest size that builds it
     /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
-    /// middle of the edge it was found for, and why there is no room, when the refusal names them.
-    TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
+    /// middle of the edge it was found for, a point on the limiting face, and why there is no room,
+    /// when the refusal names them.
+    TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, face: Option<[f64; 3]>, why: Option<RoomReason> },
     /// A corner's setback too short for its fill: solidcore's `BlendRefusal::SetbackTooShort`
     /// from the fill's test, the corner's fill not certified at the setback asked. `least` is
     /// the least setback solidcore's fill takes, `at` the corner's point when solidcore gives
@@ -65,10 +83,22 @@ pub enum Error {
     /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
-    /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
+    /// SMLib cannot build this operation exactly.
     Unsupported,
-    /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
-    CornerUnsupported,
+    /// A draft refused by the kernel whose drafted face would cut through a face it does not
+    /// meet (solidcore's `drafted_through`): a hole's wall within the draft of the side. `at` is a
+    /// point of that face between the face's plane and its drafted plane, `depth` how far it
+    /// lies past the drafted plane.
+    DraftCutsThrough { at: [f64; 3], depth: f64 },
+    /// A face move whose tangent blends cannot follow the moved faces, with solidcore's reason
+    /// (`SmOffsetFacesExecutive`'s refusal comment): `exact` false where the blend cannot be taken
+    /// off and put back ([`Error::Unsupported`] without a reason), true where following it needs a
+    /// surface or edge continued that cannot be continued exactly ([`Error::NotExact`] without
+    /// one).
+    BlendsNotFollowed { exact: bool, why: String },
+    /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet: solidcore's
+    /// reason and the vertex's point, where it notes them.
+    CornerUnsupported { why: Option<String>, at: Option<[f64; 3]> },
     /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
     /// no radius builds it (a sharp concave side edge between the rounds, solidcore's `NoRoom`),
     /// else not supported there (`CornerUnsupported`: unequal or variable rounds, a corner of
@@ -80,6 +110,9 @@ pub enum Error {
     /// SMLib reported success but the operation did nothing: a blend that made no face, a face
     /// move or draft that moved no face.
     NoEffect,
+    /// A split tool runs into a face and ends inside it, leaving a crack, and no tool cuts any
+    /// face through: the tool, taken over its whole surface, does not reach across.
+    ToolStopsShort,
     /// The answer is not exact in the input's geometry (a box that would wrap round its
     /// surface, an analytic surface whose speed across a side varies along it).
     NotExact,
@@ -96,11 +129,22 @@ pub enum Error {
     /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]; a fillet or
     /// chamfer failed with the kernel's statement of why, [`solidcore_ops::Error::BlendFailed`]).
     Refused(solidcore_ops::Error),
+    /// SMLib rejected its input and solidcore said why (`SM_ERR_INVALID_INPUT` with its reason:
+    /// `SolidError::InvalidInput`, or solidcore-ops' `Refused`): the routine that rejected it and
+    /// what was wrong, rather than the bare status.
+    Rejected { operation: &'static str, reason: &'static str },
     /// A typed refusal together with the kernel's complete diagnostic, including its
     /// operation, entities and nested causes. The refusal remains available as data.
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
+    /// A classification that needs one nearest point on a face's surface found `found` of them
+    /// (the kernel's `compute_point_parameters`, its `IntersectFailure::NotOneFoot`): the
+    /// point's place on the face is undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
     /// is missing, and the solidcore issue that ports it.
     Unported(&'static str),
@@ -111,7 +155,8 @@ pub enum Error {
 
 /// Why a blend has no room, and what the largest size that builds a refused blend sizes
 /// ([`Error::TooLarge`]): ops' own, as its refusal gives them.
-pub use solidcore_ops::{FitKind, RoomReason};
+pub use solidcore_ops::FitKind;
+pub use solidcore_ops::RoomReason;
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -121,14 +166,22 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument for SMLib"),
             Error::Empty => write!(f, "SMLib returned an empty body"),
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
+            Error::NotOneFoot { found } => write!(f, "a classification found {found} nearest points on the face's surface, where one is needed"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
-            Error::TooLarge { size, kind, at, why } => {
+            Error::OutlineTouches { at: [x, y, z], detail } => write!(
+                f,
+                "a face's outline touches itself at ({x:.5}, {y:.5}, {z:.5}), where a corner of one of its loops lies on another, and the offset does not build walls that meet at a point; the kernel's failure: {detail}"
+            ),
+            Error::TooLarge { size, kind, at, face, why } => {
                 write!(f, "the blend is larger than its faces allow")?;
                 if let Some([x, y, z]) = at {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some([x, y, z]) = face {
+                    write!(f, ", limited by the face containing ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
                     write!(f, ": {}", why.words_for(*kind))?;
@@ -154,7 +207,20 @@ impl std::fmt::Display for Error {
                 }
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
-            Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
+            Error::DraftCutsThrough { at: [x, y, z], depth } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+            ),
+            Error::CornerUnsupported { why, at } => {
+                write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if let Some(why) = why {
+                    write!(f, ": {why}")?;
+                }
+                Ok(())
+            }
             Error::TurnRefused { why, at, .. } => {
                 write!(f, "the swept corner is not built")?;
                 if let Some([x, y, z]) = at {
@@ -168,6 +234,7 @@ impl std::fmt::Display for Error {
                 corner + 1
             ),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
+            Error::ToolStopsShort => write!(f, "the tool runs into the face but ends inside it, so it cuts nothing off"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
             Error::Corner { why, at } => {
                 let at = format!("({:.4}, {:.4}, {:.4})", at[0], at[1], at[2]);
@@ -179,10 +246,13 @@ impl std::fmt::Display for Error {
                     }
                 }
             }
+            Error::BlendsNotFollowed { exact: true, why } => write!(f, "SMLib cannot build this exactly in the input's geometry: {why}"),
+            Error::BlendsNotFollowed { exact: false, why } => write!(f, "SMLib cannot do this yet: {why}"),
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Refused(e) => write!(f, "{e}"),
+            Error::Rejected { operation, reason } => write!(f, "SMLib rejected the input: {reason} ({operation})"),
             Error::RefusedWithDiagnostic { refusal, diagnostic } => write!(f, "{refusal}: {diagnostic}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
@@ -239,6 +309,8 @@ pub fn crash_test() -> Result<()> {
 /// A B-rep. Immutable: operations return new bodies.
 pub struct Brep {
     body: core::Body,
+    /// Every bounded region with more than one shell had its outer shell confirmed on import.
+    enclosing_shell_order_proven: bool,
     /// The body's number in a trace ([`trace`]).
     id: u64,
 }
@@ -252,7 +324,7 @@ impl std::fmt::Debug for Brep {
 impl Brep {
     /// A body solidcore made.
     fn made_core(body: core::Body) -> Brep {
-        Brep { body, id: trace::next_id() }
+        Brep { body, enclosing_shell_order_proven: false, id: trace::next_id() }
     }
 
     /// solidcore's body.
