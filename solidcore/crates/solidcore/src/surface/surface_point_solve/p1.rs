@@ -52,8 +52,8 @@
 //!   point of the stride check. Upstream's in/out best indices of
 //!   `FindPolygonTriangleGuess` (kept when no net point qualifies) are passed in.
 //!   The constructor keeps the target distance (`cpdOptTargetDistance`, `NotUsed`
-//!   upstream, "cbi: do this"): the global solve bounds its answer by it as the tree
-//!   solve does (#20438). `eSolutionRequested` stays unused (`NotUsed`
+//!   upstream, "cbi: do this"): the global solve bounds a minimum by it as the tree
+//!   solve does (#20438; a maximise goes to the tree solve). `eSolutionRequested` stays unused (`NotUsed`
 //!   upstream): the solve finds one candidate (#20438).
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status the outputs
 //!   keep their previous values (initially undefined, [`Vec3::UNDEF`]), and an

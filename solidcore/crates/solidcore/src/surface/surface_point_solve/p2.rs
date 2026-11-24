@@ -1217,8 +1217,12 @@ impl SurfPtGlobalSolver<'_> {
         // best answer so far with the target's square (`GlobalPointSolve_0`) and culls
         // a solution neither better than it nor within the tolerance of it
         // (`AddSortedSolution`, the same expressions): a minimum farther than the
-        // target, or a maximum nearer, by more than the tolerance is not reported.
-        // The tree solve culls no other operation by it.
+        // target by more than the tolerance is not reported. Only a minimise is
+        // bounded here: the sort-out above keeps the nearest candidate for every
+        // operation, so for a maximise it is not the farthest (#13684) and a bound
+        // on it would drop answers the farther candidates honour; the kernel sends
+        // a maximise to the tree solve, which bounds every candidate. The tree solve
+        // culls only a minimum and a maximum by it.
         if found_answer {
             if let Some(target) = self.base.target_distance() {
                 let value = sol.start.solution_value;
@@ -1227,10 +1231,24 @@ impl SurfPtGlobalSolver<'_> {
                 let best = sqrt(best_sq.abs());
                 let (better, far) = match op {
                     SolverOperation::Minimize => (value_sq < best_sq, value > best + loose_tol),
-                    SolverOperation::Maximize => (value_sq > best_sq, value < best - loose_tol),
                     _ => (true, false),
                 };
                 let beyond = !better && far;
+                // (test only: the goldens' certificate of each dropped answer)
+                #[cfg(feature = "wr57-replay")]
+                let beyond = beyond
+                    && crate::surface::surface::replay::wrap_target_bound(
+                        crate::surface::surface::replay::TargetBound {
+                            kernel: k,
+                            surface,
+                            domain: self.base.domain(),
+                            point: self.base.test_point(),
+                            operation: op,
+                            value,
+                            target,
+                            tol: loose_tol,
+                        },
+                    );
                 if beyond {
                     found_answer = false;
                 }

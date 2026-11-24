@@ -916,4 +916,50 @@ mod review_geometry_tests {
         eprintln!("{proven_better} answers proven better than main's");
         assert_eq!(proven_better, 4, "the certified count moved");
     }
+
+    /// The global solves the target distance bounded out (#20438): each named case's solve
+    /// now answers no solution, where before the candidate beyond the target was returned.
+    #[rustfmt::skip]
+    const TARGET_BOUNDED: &[&str] = &[
+        "matrix_0006", "matrix_0034", "matrix_0236", "matrix_0251", "matrix_0281",
+        "matrix_0301", "matrix_0334", "matrix_0452", "matrix_0471", "matrix_0531",
+        "matrix_0562", "matrix_0611", "matrix_0690", "matrix_0702", "matrix_0729",
+        "matrix_0897", "matrix_0898", "matrix_0901", "matrix_1009", "matrix_1087",
+        "matrix_1096", "matrix_1098", "matrix_1155", "plane_scale_1.0_solver_3_30",
+        "plane_scale_100000000.0_solver_3_55",
+    ];
+
+    /// #20438: every solve the target bounded out is replayed (it answers no solution) and
+    /// certified empty, as the tree solve culls (`AddSortedSolution`): each is a minimize
+    /// (the only operation the global solve bounds) whose surface is proven farther than
+    /// `|target| + tol` over the whole solve domain ([`crate::certify::domain_lower_bound`]).
+    /// A case not proven is listed by name and fails the test.
+    #[test]
+    fn target_bounded_solves_are_certified_empty() {
+        let k = Kernel::default();
+        let mut unproven = Vec::new();
+        for &name in TARGET_BOUNDED {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            let Operation::Global { target: Some(target), .. } = input.op else {
+                panic!("{name}: not a global solve with a target");
+            };
+            let output = rust(&input).unwrap();
+            assert_eq!(output.values["status"], [0.0], "{name}");
+            assert_eq!(output.values["out"], [0.0, 1.0], "{name}: not answered empty");
+            let surface = geometry(&k, &input).unwrap();
+            let dom = dom_of(input.dom);
+            let p = v3(input.test);
+            let op = solver_op(input.solver).unwrap();
+            assert_eq!(op, SolverOperation::Minimize, "{name}: only a minimize is bounded");
+            let want = target.abs() + input.tol;
+            let bound = crate::certify::domain_lower_bound(&k, &surface, &dom, p, want);
+            let proved = bound.is_some_and(|lo| lo > want);
+            eprintln!("{name} ({op:?}): target {target:e} tol {:e} bound {bound:?} proved {proved}", input.tol);
+            if !proved {
+                unproven.push(name);
+            }
+        }
+        assert!(unproven.is_empty(), "not certified empty: {unproven:?}");
+    }
 }
