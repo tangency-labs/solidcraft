@@ -340,6 +340,10 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
   `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
+  For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
+  in the agent's settings. This routes requests to `/responses` and lets the model continue
+  reasoning after a tool call. Keep the base URL at `https://api.openai.com/v1` and choose a
+  reasoning effort the model supports. Turn the option off for endpoints that use Chat Completions.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one

@@ -1,8 +1,8 @@
 //! Shell, offset faces, draft and thicken through SMLib: the body goes to SMLib as its schema 4
 //! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
-//! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
-//! error, never a body, unless the evaluation's validation mode skips the check
+//! `crate::smlib_boolean` does for booleans). Where the evaluation's validation mode checks
+//! each step, a result SMLib's own check refuses is an error, never a body
 //! (`crate::validation`).
 //!
 //! SMLib's tags travel through the copies its offset makes, so a shell's inner wall and a
@@ -86,9 +86,9 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
-/// thickness, for its refusals. SMLib's check of the result runs here unless the evaluation's
-/// validation mode leaves it to the feature's end or skips it (`crate::validation`), as for
-/// booleans, blends and sweeps (#17601).
+/// thickness, for its refusals. SMLib's check of the result runs here when the evaluation's
+/// validation mode checks each step, and is left to the feature's end when it checks each
+/// feature (`crate::validation`), as for booleans, blends and sweeps (#17601).
 pub(crate) fn run(
     name: &str,
     b: &Body,
@@ -281,7 +281,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
                     out.push(f);
                 }
             }
-            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+            _ => return Err(KernelError::Invalid(format!("no face at {p}"))),
         }
     }
     Ok(out)

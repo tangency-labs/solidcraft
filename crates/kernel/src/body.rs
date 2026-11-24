@@ -277,12 +277,17 @@ impl KernelForms {
     }
 }
 
-/// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
-/// answer only for that record: a copy whose record was replaced makes its own.
+/// The meshes made of one record (see [`Body::keeping_meshes`]), or its plans (see
+/// [`Body::keeping_plans`]), by tolerance and angle. They answer only for that record: a copy
+/// whose record was replaced makes its own.
 #[derive(Debug)]
 pub(crate) struct MeshMemo {
     record: std::sync::Arc<Brep>,
     made: Remembered,
+    /// Meshes are kept ([`Body::keeping_meshes`]).
+    meshes: bool,
+    /// Plans are kept ([`Body::keeping_plans`]).
+    pub(crate) plans: Option<Remembered<solidcraft_geom::tess::TessPlan>>,
 }
 
 /// Meshes a [`MeshMemo`] keeps at most (the oldest goes first).
@@ -531,6 +536,13 @@ pub(crate) fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
 /// fine enough that a small one still meshes.
 fn coarse_tolerance(span: f64) -> f64 {
     (span * 0.01).clamp(1e-3, 1.0)
+}
+
+/// The tolerance a body of size `size` is displayed at: a chord of a thousandth of it, at least
+/// a micron, and [`DISPLAY_ANGLE`]. The display mesh (`ModelBody::mesh`) and the viewport's plan
+/// at Normal quality are made at it.
+pub fn display_tolerance(size: f64) -> MeshTolerance {
+    MeshTolerance { chord: (size * 1e-3).max(1e-3), angle: Some(DISPLAY_ANGLE) }
 }
 
 /// Box diagonal of a record's vertices and points along its edges (0 when it has none or no
@@ -1640,20 +1652,44 @@ impl Body {
                 return Ok(placed);
             }
         }
-        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, self.record.arc())) {
+        match self.memo().filter(|memo| memo.meshes) {
             Some(memo) => {
-                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
+                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&*self.mesh_plan_shared_untimed(t)?))?;
                 Ok(Mesh::clone(&kept))
             }
-            None => self.mesh_of(&self.mesh_plan_untimed(t)?),
+            None => self.mesh_of(&*self.mesh_plan_shared_untimed(t)?),
         }
+    }
+
+    /// The memo of this record's meshes or plans, when this body keeps one for its record.
+    pub(crate) fn memo(&self) -> Option<&MeshMemo> {
+        self.meshes.as_deref().filter(|m| std::sync::Arc::ptr_eq(&m.record, self.record.arc()))
     }
 
     /// The plan [`Body::mesh`] evaluates: every face's triangulation in its own parameters, each
     /// edge sampled once so faces meet exactly. For an evaluator of its own (the GPU viewport);
     /// [`Body::mesh_of`] gives its mesh without planning again.
     pub fn mesh_plan(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t))
+        self.mesh_plan_shared(t).map(std::sync::Arc::unwrap_or_clone)
+    }
+
+    /// [`Body::mesh_plan`], shared: a body keeping its display plan ([`Body::keeping_plans`])
+    /// gives the plan it made at [`display_tolerance`] before, the same allocation, rather than
+    /// planning again. A plan at any other tolerance is made each time, as before.
+    pub fn mesh_plan_shared(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
+        self.mesh_plan_shared_untimed(t)
+    }
+
+    fn mesh_plan_shared_untimed(&self, t: &MeshTolerance) -> Result<std::sync::Arc<solidcraft_geom::tess::TessPlan>> {
+        let plan = || crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t));
+        match self.memo().and_then(|memo| memo.plans.as_ref()) {
+            // Only the display plan: other qualities' plans and the coarse check's are made for
+            // their moment and not kept for the part's whole life.
+            Some(plans) if !self.is_mesh() && self.display_of.is_none() && t.key() == display_tolerance(self.size()).key() => {
+                remembered(plans, t, plan)
+            }
+            _ => plan().map(std::sync::Arc::new),
+        }
     }
 
     fn mesh_plan_untimed(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
@@ -1709,7 +1745,28 @@ impl Body {
     /// such as cutting it down to the region of each of many contacts.
     pub fn keeping_meshes(&self) -> Body {
         Body {
-            meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.arc().clone(), made: std::sync::Mutex::new(Vec::new()) })),
+            meshes: Some(std::sync::Arc::new(MeshMemo {
+                record: self.record.arc().clone(),
+                made: std::sync::Mutex::new(Vec::new()),
+                meshes: true,
+                plans: None,
+            })),
+            ..self.clone()
+        }
+    }
+
+    /// A copy of this body that keeps its display plan ([`Body::mesh_plan_shared`]) for
+    /// reuse, for as long as the copy (or a clone of it) lives: an imported part's check plans
+    /// it at display tolerance ([`Body::unmeshed_display_faces`]), and its display mesh and the
+    /// viewport's plan take that plan rather than planning the part twice more.
+    pub fn keeping_plans(&self) -> Body {
+        Body {
+            meshes: Some(std::sync::Arc::new(MeshMemo {
+                record: self.record.arc().clone(),
+                made: std::sync::Mutex::new(Vec::new()),
+                meshes: false,
+                plans: Some(std::sync::Mutex::new(Vec::new())),
+            })),
             ..self.clone()
         }
     }
@@ -1805,6 +1862,22 @@ impl Body {
             }
         }
         Ok(crossed)
+    }
+
+    /// Faces with no triangles in the display plan ([`display_tolerance`]), counted again on a
+    /// coarse plan as [`Body::unmeshed_faces`] counts them when the display plan leaves any out.
+    /// A body keeping its plans ([`Body::keeping_plans`]) keeps the display plan for the
+    /// viewport: an import's check of its parts, then its display, plan it once.
+    pub fn unmeshed_display_faces(&self) -> usize {
+        if self.is_mesh() {
+            return 0;
+        }
+        if let Ok(plan) = self.mesh_plan_shared(&display_tolerance(self.size()))
+            && plan.faces_with_triangles(self.face_count()).iter().all(|h| *h)
+        {
+            return 0;
+        }
+        self.unmeshed_faces()
     }
 
     /// Faces with no triangles in a coarse mesh (the mesher failed or gave up), counted on the
@@ -2043,7 +2116,7 @@ impl Body {
     /// it an odd number of times.
     pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
         if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if let Some(m) = &self.mesh {
             let mesh = m.to_mesh();
@@ -2125,7 +2198,7 @@ impl Body {
     /// point's own solve). The first point that cannot be classified fails them all.
     pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
         if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
-            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+            return Err(KernelError::Invalid(format!("point classification: the point {p} is not finite")));
         }
         if self.mesh.is_some() || points.len() < 2 {
             return points.iter().map(|&p| self.classify_point(p)).collect();
@@ -2145,9 +2218,10 @@ impl Body {
     /// faces that turns most toward the ray.
     pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
         let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
-            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
-        })?;
+        let d = dir
+            .normalized()
+            .filter(|d| finite(origin) && finite(*d))
+            .ok_or_else(|| KernelError::Invalid(format!("ray: the origin {origin} and direction {dir} must be finite, the direction not zero")))?;
         if let Some(m) = &self.mesh {
             return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
                 face: 0,

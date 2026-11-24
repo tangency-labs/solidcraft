@@ -16,10 +16,10 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
 | FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
-| Rhino `.3dm` | solids, through cadmpeg | |
+| Rhino `.3dm` | solids, through cadmpeg | Rhino 8, through cadmpeg: bodies with flat faces and straight edges exact, others as meshes; names and colours (desktop only) |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
-| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each part's exact B-rep and a mesh of it, colours, the component tree; in metres with Z up |
+| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each body's mesh, named, with its exact B-rep where cadmpeg's model holds it; looks with metallic, roughness and opacity; the component tree; in metres with Z up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
@@ -37,19 +37,61 @@ wrongly; leave such a body out with `bodies`. A refused export leaves a file alr
 **File → Export OpenUSD…** (`file.export` with a `.usd`, `.usda`, `.usdc` or `.usdz` path) writes an
 OpenUSD stage for NVIDIA Omniverse and Isaac Sim, Blender, Apple's tools and other USD viewers. The
 extension picks the encoding: `.usda` is text, `.usdc` and `.usd` are binary, and `.usdz` is a package of
-one binary file. The bodies are written as `file.export` writes STEP (a design with components, when no
-bodies are chosen, as its component tree), and cadmpeg restates that as USD. Each part is an `Xform` prim
-holding its exact B-rep (a `BrepArray` prim) and a mesh of it for viewers; a part placed more than once is
-written once, under the abstract `Prototypes` prim, and referenced at each placement. Colours become
-`UsdPreviewSurface` materials. The stage is in metres with Z up and says so in its metadata. Metallic,
-roughness, transparency and textures are not written yet, and neither are joints, masses or collision
-shapes.
+one binary file. The design is written straight into cadmpeg's model, which cadmpeg writes as USD. With
+no bodies chosen, each component placement is an `Xform` prim named after the occurrence, holding its
+component's bodies; a component placed more than once is written once, under the abstract `Prototypes`
+prim, and referenced at each placement. Chosen bodies are written where the design shows them, under one
+prim named after the design. Each body is a prim named after it, holding its exact B-rep (a `BrepArray`
+prim) and the mesh SolidCraft draws it with, made at the export's Mesh quality (`quality`: standard, fine
+or finest, as for STL). A mesh body has its mesh alone, and so has a body whose shape cadmpeg's model
+cannot hold exactly yet, with a warning naming it. Looks become `UsdPreviewSurface` materials named after them, with their colour,
+opacity (a transparent look stays transparent), metallic, roughness and index of refraction; a face with a
+look of its own gets that material. The stage is in metres with Z up and says so in its metadata.
+With `physics: true`, an export of the whole design also writes OpenUSD physics for a simulator: its
+rigid, revolute, slider, cylindrical, planar and ball joints (revolute and slider joints keep their limits;
+the others are written without them, with a warning), each grounded placement fixed to the world, each
+placement of a component as a rigid body, each component's mass, centre of mass and principal inertia from
+its bodies' materials, and a physics scene. Gears between two revolute joints and a rack and pinion become
+PhysX gear and rack-and-pinion joints that couple the two joints. PhysX's gears turn opposite ways and its
+rack moves with the pinion's turn, so gears that turn the same way (an internal gear, or reversed
+gears), a rack that moves against the pinion's turn, other joint kinds, suppressed joints, screws, cams
+and other motion links are left out with a warning. With bodies chosen, or a placement that is not rigid, no physics is written, and a
+warning says why. With `render_setup: <name>` and a `.usdz` path, the images that render setup gives the
+bodies (base colour, roughness, metallic, and a normal map the file can show as the renderer does) go
+into the package, on each body's mesh; a `.usda` or `.usdc` file is written without them, with a warning.
+With `images: true` and a `.usdz` path, each picture shown on the model (a decal or a placed image) goes
+into the package as a body of its own in its component, named after it: a quad lifted 0.2 mm off each
+side, its image as its colour and, for a PNG with transparency, its opacity. A hidden picture is not
+written; a `.usda` or `.usdc` file, or an export of chosen bodies, leaves the pictures out with a warning.
+With `render_setup`, a body the setup gives optics is written as glass, in every encoding: the setup's
+index of refraction, and full transmission on the MaterialX OpenPBR shader with the colour 1 mm of the
+absorption leaves (a reader of the preview surface alone shows it opaque, and a warning says so).
+Collision shapes are not written yet.
+
+**File → Export Rhino…** (`file.export` with a `.3dm` path) writes a Rhino 8 file through cadmpeg, from
+the design directly. cadmpeg's Rhino writer does not write assemblies yet, so every body is written where
+the design shows it, named after it and in its colour. A body whose faces are all flat and whose edges
+are all straight is written as its exact shape; cadmpeg cannot write any other exact shape to Rhino yet,
+so a body with round faces is written as its mesh, at the export's Mesh quality, without its name or
+colour. A face's own colour is not written. The reply's warnings name each body this applies to.
+FreeCAD files cannot be exported yet: cadmpeg only writes back a FreeCAD file it read. Rhino export is
+not available in the browser yet.
+
+STEP and IGES are written by SolidCraft's own writers. To compare them with cadmpeg's, turn on
+Preferences › General › Export STEP and IGES with cadmpeg (off by default), or pass `writer: "cadmpeg"`
+to `file.export` (`writer` applies to STEP and IGES only). cadmpeg then writes the file from the design:
+STEP AP242 (edition 1, as SolidCraft's writer declares) with the components and placements, each
+body's colour and each face's own colour, but without the bodies' names, and IGES 5.3 with each body where the design shows it,
+named and in its colour, as cadmpeg's IGES writer writes no assemblies. The reply's warnings say what
+the file leaves out.
 
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
 when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
-General › FreeCAD files turns the rebuild off). Mesh bodies render,
+General › FreeCAD files turns the rebuild off). Preferences › General › Import with cadmpeg (off
+by default) reads STEP, IGES, FreeCAD and Rhino files with cadmpeg straight into B-rep instead of
+through SolidCraft's own STEP and IGES readers, to compare the two. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
 The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
@@ -183,6 +225,22 @@ treated as PrusaSlicer 3, and any other entry is left as it is.
 Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
 scripts and the control channel): a mesh with a constant cross-section as analytic planar and
 cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
+
+Use **Surface → Mesh → Reduce Mesh** to create a separate, simpler mesh without changing the
+original. Select the mesh body and choose either a retained percentage (greater than 0 and less
+than 100) or a positive target triangle count. The status reports the original, target and achieved
+triangle counts, including when a run stops above the target. Open boundary edges and original
+creases sharper than 30° stay in place. The reduced body inherits the source body's colour
+and placement and preserves per-corner normal seams. Reduction does not repair the source.
+Smaller targets can remove more detail: the triangle count is not a geometric tolerance.
+The reduced body can be selected for Convert Mesh, which still requires a closed mesh within its
+triangle limit. The reported count describes the body in the design: mesh exporters that weld
+nearby vertices can write a different count. Scripts can call `mesh.reduce` with `body` and
+exactly one of `percentage` or `triangle_count`; an optional `name` names the history feature.
+
+The **Mesh** section also contains **Convert Mesh**, **Insert Mesh**, and **Save As Mesh**.
+To restore the previous Surface toolbar, enable **Use legacy Surface toolbar** in Layout preferences.
+Mesh panel customizations are kept but hidden while the legacy toolbar is enabled.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate

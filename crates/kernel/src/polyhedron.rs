@@ -224,7 +224,7 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
                     chosen.push(f);
                 }
             }
-            _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
+            _ => return Err(KernelError::Invalid(format!("no face at {p}"))),
         }
     }
     let chosen = crate::offset::with_same_surface(&healed, &chosen);

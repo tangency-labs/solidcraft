@@ -1630,6 +1630,11 @@ impl Surface {
                 // not upstream: spans passed in a row without moving the start on (#21092)
                 let mut stalled = 0usize;
                 while let Some(&(queued_start_t, saved_end)) = stack.last() {
+                    // not upstream: a curve that lies farther off the surface than the
+                    // tolerance fails the accuracy test at every halving, down to an
+                    // eight-thousandth of the curve, so the walk is stopped by the caller's
+                    // token (a work limit, or a cancelled job)
+                    k.check_cancelled(OP)?;
                     // A pending endpoint was dropped relative to an earlier start. Its
                     // parameter and UV point and tangent are taken from the stack, as
                     // upstream. Only when the new span makes a closed-surface seam
@@ -2332,6 +2337,95 @@ mod tests {
         }
         assert!(out.max_drop_to_surf <= 0.01, "{out:?}");
         assert!(out.max_approx_dev <= 0.01, "{out:?}");
+    }
+
+    /// The span walk polls the kernel's token once per step (#20575), so a drop stopped by a
+    /// poll limit is stopped by the walk's own poll. A curve on a flat B-spline patch is
+    /// dropped under a counting token: the unbounded drop gives a curve and a count of polls,
+    /// and the same drop under a limit at each of those polls is refused as cancelled where it polls. The
+    /// refusal at the walk's poll names this operation; the other polls of the drop (the start
+    /// solve, the next-point solve) name their own. Without the walk's poll no limit would
+    /// name this operation, so the assertion fails.
+    #[test]
+    fn a_poll_limit_stops_the_span_walk_with_its_own_refusal() {
+        use crate::kernel::CancelToken;
+
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|u| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|v| CPoint::new(u, v, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.1, 0.1, 0.0, NOW),
+                    CPoint::new(0.4, 0.9, 0.0, NOW),
+                    CPoint::new(0.6, 0.1, 0.0, NOW),
+                    CPoint::new(0.9, 0.9, 0.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let drop = |k: &Kernel| {
+            surface.drop_curve_base::<NoObject>(
+                k,
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                &source,
+                &Extent1d::from_min_max(0.0, 1.0),
+                1.0e-3,
+                true,
+                None,
+            )
+        };
+
+        // no token: the drop makes its curve
+        let free = drop(&Kernel::default()).unwrap();
+        assert!(!free.uv_curves.is_empty());
+
+        // a token that only counts: the polls the whole drop makes
+        let counting = CancelToken::after_polls(u64::MAX);
+        let mut k = Kernel::default();
+        k.set_cancel_token(counting.clone());
+        let counted = drop(&k).unwrap();
+        assert_eq!(counted.uv_curves.len(), free.uv_curves.len());
+        let total = counting.polls().unwrap();
+        assert!(total > 0);
+
+        // a limit at each poll stops the drop; one past the last lets it finish
+        let mut refused_by_the_walk = 0;
+        for limit in 1..=total {
+            let mut k = Kernel::default();
+            k.set_cancel_token(CancelToken::after_polls(limit));
+            if let Err(SolidError::Cancelled { operation }) = drop(&k) {
+                if operation == OP {
+                    refused_by_the_walk += 1;
+                }
+            }
+        }
+        assert!(
+            refused_by_the_walk > 0,
+            "no limit stopped the drop at the span walk's own poll"
+        );
+        let mut k = Kernel::default();
+        k.set_cancel_token(CancelToken::after_polls(total + 1));
+        assert_eq!(drop(&k).unwrap().uv_curves.len(), free.uv_curves.len());
     }
 
     // ---- WR-100: the V degeneracy test ------------------------------------------------

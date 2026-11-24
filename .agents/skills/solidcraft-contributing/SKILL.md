@@ -45,6 +45,12 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.
+- **Check the scope before building.** A change that adds a dependency, background network or CPU
+  work (polling, animation), or a new kind of feature rather than a fix is the kind most often
+  declined after the work is done. Ask on the issue first, and build it once a maintainer agrees.
+- **Fix the cause.** When the right fix is in a lower layer (the kernel, cancellation, a shared
+  helper), say so on the issue instead of building around it in the caller. A workaround that makes
+  a limitation part of the design is held until the cause is fixed.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
   reference data; check `git ls-files` before pushing. Run `cargo xtask fast` before every commit;
   CI runs the full gate (`cargo xtask ci`) on the pull request.
@@ -68,12 +74,22 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   error shape, API, format or schema) gets a design review before later parts are accepted. Drawings
   work targets the `drawings` branch. A UI addition needs full-flow 1280×720 screenshots and a
   small-window check.
-- **Evidence.** For observable CAD, UI or model behaviour (kernel, geometry, assembly and backend
-  changes included), the issue or PR carries real screenshots or a short recording from a small
-  reproduction, preferably before and after, with steps and expected/actual behaviour. Capture it
-  yourself; do not ask a human for evidence you can produce. Diagrams do not replace it. Changes with
-  nothing observable need none. Use a public-safe example, check for private designs, paths and account
-  details, attach the media rather than committing it.
+- **Evidence.** Screenshots go in the PR up front, only in these cases:
+  1. A visible UI change (a new or changed dialog, panel, menu, control, label or layout): before and
+     after, at 1280×720, plus a small-window check for a UI addition.
+  2. A change to what a model looks like (a feature that now builds, or builds differently): one
+     image of the result from a small public-safe reproduction, before and after when there was a
+     before.
+
+  Nothing else needs media: kernel, geometry or backend fixes proven by tests, refactors, tests,
+  documentation, error-message wording (quote the text in the body instead), a rebase or a merge of
+  main, and review fixes that change nothing visible. A recording is optional; when you attach one,
+  add a still image of the key frame, because review tools may not play video. Capture media yourself;
+  do not ask a human for evidence you can produce. Diagrams do not replace it. Check for private
+  designs, paths and account details, and attach the media rather than committing it.
+- **Reviewers ask for media only in those two cases**, and only when the PR has none. Media already in
+  the PR stands through rebases, merges of main and fixes that leave the visible result unchanged;
+  never ask for it again after the fact.
 - **Follow through.** Check the PR's merge status throughout and before handoff. Report the state you
   checked and any conflicts resolved. While the PR is open, keep monitoring it and say clearly that it
   is pending; do not claim it merged without checking.
@@ -259,8 +275,9 @@ sccache is an opt-in tool on your machine. The repository doesn't require it, an
 
 ## 6. Show the result
 
-For visible changes, reproduce the result with a small public-safe example and
-capture actual screenshots or a short recording, preferably before and after.
+For the two cases in "Evidence" above (a visible UI change, or a change to what a
+model looks like), reproduce the result with a small public-safe example and capture
+screenshots, before and after where there was a before. Other changes need no media.
 For model output without a display, run:
 
 ```sh
