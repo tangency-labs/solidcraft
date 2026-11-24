@@ -23,11 +23,15 @@ pub mod constructor;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;
+#[cfg(test)]
+pub(crate) mod g1r_cert;
 pub mod golden;
 #[cfg(test)]
 pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
+#[cfg(test)]
+mod merged_vertex_rows;
 #[cfg(test)]
 mod operand_trim_rows;
 pub mod output;
@@ -51,12 +55,23 @@ pub mod util;
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
+#[cfg(test)]
+mod wr587_replay;
 
-pub use case::{Case, CaseContext, CaseSource};
-pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};
-pub use output::{Deferred, Output, Topology};
+pub use case::Case;
+pub use case::CaseContext;
+pub use case::CaseSource;
+pub use compare::compare;
+pub use compare::AbsFloor;
+pub use compare::CaseDiff;
+pub use compare::Mismatch;
+pub use compare::REL_TOL;
+pub use output::Deferred;
+pub use output::Output;
+pub use output::Topology;
 pub use rng::Rng;
-pub use runner::{RunOptions, UnitDiff};
+pub use runner::RunOptions;
+pub use runner::UnitDiff;
 
 /// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
 /// carries the WR-57 substitution replay's seam while a `wr57_replay` test has one

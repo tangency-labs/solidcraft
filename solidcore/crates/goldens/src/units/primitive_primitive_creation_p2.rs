@@ -13,7 +13,6 @@ use solidcore::curve::composite_curve::OffsetCornerType;
 use solidcore::curve::curve::Curve;
 use solidcore::error::{Result, SolidError};
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::primitive_creation::{
@@ -149,7 +148,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
     let mut ends = Vec::new();
     let mut extra = Vec::new();
     if i.op == 9 {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut model = PrimitiveModel::new(&mut k, fixture_brep(false)?);
         let profile_count = d[4] as usize;
         let profiles = curves(&d[6..6 + 7 * profile_count])?;
@@ -183,7 +182,7 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
             f64::from(result.is_ok()),
         ]);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.)?);
     let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
     let result = match i.op {
@@ -527,6 +526,8 @@ impl UnitDiff for Runner {
 mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+    use solidcore::error::sweep::SweepFailure;
+    use solidcore::kernel::Kernel;
 
     /// Why no requested body exists for the row.
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -673,6 +674,56 @@ mod moved_rows {
             }
             op => panic!("{op}"),
         }
+    }
+
+    /// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired)
+    /// moved two cone rows from one refusal to another (1007 to 1006): their side face is
+    /// now the analytic cylinder, which the sweep's `is_degenerate_curve` check no longer
+    /// takes as a surface degenerating to a curve (the B-spline surface of revolution
+    /// was refused there, 1007), so the call refuses one step later (tangency-labs/solidcraft#15350 tracks that test's
+    /// dependence on the parametrisation). The cone's height is within the B-rep's
+    /// tolerance of zero, so its base and top circles, and each vertex of one with the
+    /// vertex above it, are one within tolerance: no solid of that height has a valid
+    /// B-rep, and the call is refused either way (the API drops the B-rep it was
+    /// building on a refusal, so no body reaches the caller). The refusing step follows:
+    /// the swept profile edge's own curve is the side line from a base vertex to the
+    /// vertex above it, of length the height, within tolerance of zero, so the face
+    /// builder drops that line as degenerate and the sweep refuses with the typed
+    /// [`SweepFailure::SweptEdgeCurveDropped`] (status 1006), which is asserted here.
+    #[test]
+    fn the_cones_below_tolerance_height_stay_refused() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/primitive.primitive_creation_p2/ub215_degenerate_faces.json"
+        ))
+        .unwrap();
+        let mut seen = 0;
+        for name in [
+            "ub215_degenerate_face_side_line_5e-7",
+            "ub215_degenerate_face_side_line_9.9e-7",
+        ] {
+            let case = data["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            assert_eq!(i.op, 1, "{name}: a partial cone");
+            let (result, faces, tolerance) = run(&i);
+            assert!(i.data[1] > 0.0 && i.data[1] <= tolerance, "{name}: height {}", i.data[1]);
+            let err = result.expect_err(name);
+            // the refusal is the sweep's: `create_partial_rotational_sweep` has built the
+            // planar profile face it turns, and no swept face follows (the API layer then
+            // drops this B-rep)
+            assert_eq!(faces, 1, "{name}: the profile face only");
+            assert!(
+                matches!(err.sweep_failure(), Some(SweepFailure::SweptEdgeCurveDropped)),
+                "{name}: {err:?}"
+            );
+            assert_eq!(error(&err), 1006.0, "{name}");
+            seen += 1;
+        }
+        assert_eq!(seen, 2);
     }
 
     /// (row, reason)
