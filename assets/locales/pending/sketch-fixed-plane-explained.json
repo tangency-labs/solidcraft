@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.sketch_use_fixed_plane_explained": "يُنشئ «استخدام مستوى ثابت» المخطط على المستوى الحالي لهذا الوجه. ولن يتبع التعديلات اللاحقة على الوجه."
+  },
+  "de": {
+    "ui.sketch_use_fixed_plane_explained": "„Use fixed plane“ legt die Skizze auf die aktuelle Ebene dieser Fläche. Sie folgt späteren Änderungen der Fläche nicht."
+  },
+  "en": {
+    "ui.sketch_use_fixed_plane_explained": "Use fixed plane makes the sketch on this face's current plane. It won't follow later changes to the face."
+  },
+  "he": {
+    "ui.sketch_use_fixed_plane_explained": "„Use fixed plane” יוצר את הסקיצה על המישור הנוכחי של המשטח. היא לא תעקוב אחר שינויים מאוחרים במשטח."
+  },
+  "ja": {
+    "ui.sketch_use_fixed_plane_explained": "「Use fixed plane」は、この面の現在の平面にスケッチを作成します。後からの面の変更には追従しません。"
+  },
+  "ko": {
+    "ui.sketch_use_fixed_plane_explained": "\"Use fixed plane\"은 이 면의 현재 평면에 스케치를 만듭니다. 이후 면 변경을 따라가지 않습니다."
+  },
+  "vi": {
+    "ui.sketch_use_fixed_plane_explained": "\"Use fixed plane\" tạo bản phác trên mặt phẳng hiện tại của mặt này. Bản phác sẽ không theo các thay đổi sau này của mặt."
+  },
+  "zh": {
+    "ui.sketch_use_fixed_plane_explained": "“Use fixed plane”会在此面的当前平面上创建草图，不会跟随该面之后的更改。"
+  }
+}

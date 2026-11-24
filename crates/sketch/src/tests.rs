@@ -337,6 +337,63 @@ fn conflicting_constraints_fail_and_restore() {
     assert_eq!(sk.points, before.points);
 }
 
+/// A solve under a cancelled token ([`crate::cancel`], the app's Cancel) stops before
+/// its first iteration: the sketch fails and keeps its geometry. The same solve uncancelled
+/// iterates and solves.
+#[test]
+fn cancelled_solve_stops_and_restores() {
+    let build = || {
+        let mut sk = Sketch::new();
+        let l = rect(&mut sk, [v(0.3, -0.2), v(38.0, 1.0), v(41.0, 29.0), v(-1.0, 31.0)]);
+        use ConstraintKind::*;
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 40.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 30.0 }, None).unwrap();
+        sk
+    };
+    let token = crate::cancel::CancelToken::new();
+    token.cancel();
+    let mut sk = build();
+    let before = sk.points.clone();
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert_eq!(rep.iterations, 0, "{rep:?}");
+    assert_eq!(sk.points, before);
+    let mut sk = build();
+    let rep = seeded(false, || solve(&mut sk));
+    assert!(rep.ok() && rep.iterations > 0, "{rep:?}");
+}
+
+/// Cancel stops a solve part way: a long chain whose last link conflicts keeps LM iterating
+/// over every link; cancelled at a fixed point of its work (the token's 2,000th check, inside
+/// its first iterations), it stops there, with fewer iterations than it does uncancelled,
+/// failed, and its geometry as it was.
+#[test]
+fn cancel_stops_a_solve_part_way() {
+    let mut sk = Sketch::new();
+    let mut prev = 0usize;
+    let mut last = 0;
+    for i in 0..400 {
+        let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
+        last = sk.add_line_pts(prev, p, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l: last }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l: last, value: 10.0 }, None).unwrap();
+        prev = p;
+    }
+    sk.add_constraint(ConstraintKind::Vertical { l: last }, None).unwrap();
+    let free = seeded(false, || solve(&mut sk.clone()));
+    assert!(free.iterations > 2, "{free:?}");
+    let before = sk.points.clone();
+    let token = crate::cancel::CancelToken::after_polls(2_000);
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert!(rep.iterations < free.iterations, "{} iterations cancelled, {} not", rep.iterations, free.iterations);
+    assert_eq!(sk.points, before);
+}
+
 #[test]
 fn circles_tangent_equal_concentric() {
     let mut sk = Sketch::new();
