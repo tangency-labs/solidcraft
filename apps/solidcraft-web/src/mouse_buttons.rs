@@ -23,8 +23,10 @@ use egui::{Event, Modifiers, NUM_POINTER_BUTTONS, PointerButton, Pos2};
 use solidcraft_ui_egui::context_menu::BrowserMenu;
 
 /// egui's buttons by their bit in the browser's `buttons` bitmask: bit 0 primary, 1 secondary,
-/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order.
-const BUTTONS: [PointerButton; NUM_POINTER_BUTTONS] =
+/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order. The
+/// bitmask has no bit for a further button (6 and up), so eframe's own press and release events
+/// are all egui hears of one.
+const BUTTONS: [PointerButton; 5] =
     [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle, PointerButton::Extra1, PointerButton::Extra2];
 
 /// The browser's `buttons` bitmask bit for the secondary (right) button.
@@ -221,7 +223,7 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
 #[cfg(target_arch = "wasm32")]
 /// egui's buttons held at the end of the last frame.
 pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
-    ctx.input(|i| BUTTONS.map(|b| i.pointer.button_down(b)))
+    ctx.input(|i| PointerButton::ALL.map(|b| i.pointer.button_down(b)))
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -95,6 +95,14 @@ SolidCraft changes to egui and eframe:
   file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
   (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
 
+- `crates/egui/src/data/input/pointer_button.rs`, `crates/egui-winit/src/lib.rs`,
+  `crates/eframe/src/web/input.rs`: mice with more than five buttons. `PointerButton` has
+  `Extra3` to `Extra13` (buttons 6 to 16; `NUM_POINTER_BUTTONS` is 16), `PointerButton::ALL`,
+  `number` and `from_number`. egui-winit turns winit's `MouseButton::Other(code)` into them by
+  each platform's code (`other_button_number`) and the web runner its `button` 5 and up, where
+  upstream drops them. Tests: `buttons_are_numbered_in_order` (egui) and
+  `further_mouse_buttons_reach_egui_by_number` (egui-winit).
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 
