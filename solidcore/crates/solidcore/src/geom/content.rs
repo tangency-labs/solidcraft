@@ -19,7 +19,7 @@
 
 use std::hash::{Hash, Hasher};
 
-/// A 128-bit digest under construction: two SipHash runs started from different words, so
+/// A 128-bit digest under construction: two `SipHash` runs started from different words, so
 /// two contents share a digest only by a 128-bit collision.
 pub(crate) struct Digest([std::collections::hash_map::DefaultHasher; 2]);
 
@@ -151,16 +151,8 @@ impl<T: Content + ?Sized> Content for &T {
 
 impl<T: Content> Content for Option<T> {
     fn content(&self, d: &mut Digest) -> Option<()> {
-        match self {
-            Some(v) => {
-                d.bool(true);
-                v.content(d)
-            }
-            None => {
-                d.bool(false);
-                Some(())
-            }
-        }
+        d.bool(self.is_some());
+        self.as_ref().map_or(Some(()), |v| v.content(d))
     }
 }
 
@@ -193,12 +185,12 @@ mod tests {
         let faces = b
             .faces()
             .iter()
-            .map(|(_, f)| f.surface.as_ref().and_then(|s| s.content_id()))
+            .map(|(_, f)| f.surface.as_ref().and_then(crate::surface::surface::Surface::content_id))
             .collect();
         let edges = b
             .edges()
             .iter()
-            .map(|(_, e)| e.curve.as_ref().and_then(|c| c.content_id()))
+            .map(|(_, e)| e.curve.as_ref().and_then(crate::curve::curve::Curve::content_id))
             .collect();
         (faces, edges)
     }
@@ -206,7 +198,8 @@ mod tests {
     #[test]
     fn a_body_built_twice_has_the_same_digests() {
         let mut k = Kernel::default();
-        let makers: [(fn(&mut Kernel) -> crate::Result<Brep>, bool); 3] = [
+        type Make = fn(&mut Kernel) -> crate::Result<Brep>;
+        let makers: [(Make, bool); 3] = [
             (
                 |k| create_box(k, Point3::new(1.0, -2.0, 3.0), 10.0, 20.0, 30.0),
                 true,
