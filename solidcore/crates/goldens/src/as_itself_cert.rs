@@ -128,9 +128,8 @@ fn quadratic_spans(knots: &[f64], deg: usize, count: usize) -> Result<usize, Str
 /// once less (multiplicity `p`, not `p + 1`). Returns the control points E adds before
 /// B's first (one per knot E adds below B's interval, less the end knot it lowers).
 fn sub_knots(kb: &[f64], ke: &[f64]) -> Result<usize, String> {
-    let (lo, hi) = match (kb.first(), kb.last()) {
-        (Some(&a), Some(&b)) => (a, b),
-        _ => return Err("no knots".into()),
+    let (Some(&lo), Some(&hi)) = (kb.first(), kb.last()) else {
+        return Err("no knots".into());
     };
     let below = ke.iter().filter(|&&t| t < lo).count();
     let above = ke.iter().filter(|&&t| t > hi).count();
@@ -142,8 +141,14 @@ fn sub_knots(kb: &[f64], ke: &[f64]) -> Result<usize, String> {
         want.pop();
     }
     let inside: Vec<f64> = ke.iter().copied().filter(|&t| lo <= t && t <= hi).collect();
-    if inside.iter().map(|t| t.to_bits()).ne(want.iter().map(|t| t.to_bits())) {
-        return Err(format!("E's knots on B's interval {inside:?} are not B's {want:?}"));
+    if inside
+        .iter()
+        .map(|t| t.to_bits())
+        .ne(want.iter().map(|t| t.to_bits()))
+    {
+        return Err(format!(
+            "E's knots on B's interval {inside:?} are not B's {want:?}"
+        ));
     }
     Ok(below.saturating_sub(1))
 }
@@ -190,10 +195,25 @@ fn arc_on_circle(
     worst: &mut f64,
 ) -> Result<f64, String> {
     for (i, p) in [p0, p1, p2].iter().enumerate() {
-        within(&format!("{what}: point {i} off the circle's plane"), (*p - c).dot(n).abs(), tau, worst)?;
+        within(
+            &format!("{what}: point {i} off the circle's plane"),
+            (*p - c).dot(n).abs(),
+            tau,
+            worst,
+        )?;
     }
-    within(&format!("{what}: start off the circle"), ((p0 - c).length() - rho).abs(), tau, worst)?;
-    within(&format!("{what}: end off the circle"), ((p2 - c).length() - rho).abs(), tau, worst)?;
+    within(
+        &format!("{what}: start off the circle"),
+        ((p0 - c).length() - rho).abs(),
+        tau,
+        worst,
+    )?;
+    within(
+        &format!("{what}: end off the circle"),
+        ((p2 - c).length() - rho).abs(),
+        tau,
+        worst,
+    )?;
     let l0 = (p1 - p0).length();
     let l2 = (p1 - p2).length();
     within(
@@ -240,9 +260,17 @@ pub(crate) fn certify_as_itself(
         _ => base,
     };
     let rev = revolution(k, base)?;
-    let bn = rev.base().gw_nurb().cloned().ok_or("the base has no NURB")?;
+    let bn = rev
+        .base()
+        .gw_nurb()
+        .cloned()
+        .ok_or("the base has no NURB")?;
     if bn.degrees() != e.degrees() {
-        return Err(format!("degrees {:?} against B's {:?}", e.degrees(), bn.degrees()));
+        return Err(format!(
+            "degrees {:?} against B's {:?}",
+            e.degrees(),
+            bn.degrees()
+        ));
     }
     let (pu, pv) = bn.degrees();
     // (A)
@@ -251,7 +279,10 @@ pub(crate) fn certify_as_itself(
     let (bc, ec) = (bn.cpts(), e.cpts());
     for (i, row) in bc.iter().enumerate() {
         for (j, b) in row.iter().enumerate() {
-            let x = ec.get(i + off_u).and_then(|r| r.get(j + off_v)).ok_or("E lost B's rows")?;
+            let x = ec
+                .get(i + off_u)
+                .and_then(|r| r.get(j + off_v))
+                .ok_or("E lost B's rows")?;
             if h(*b).map(f64::to_bits) != h(*x).map(f64::to_bits) {
                 return Err(format!("B's control point {i},{j} moved in E"));
             }
@@ -264,13 +295,35 @@ pub(crate) fn certify_as_itself(
         return Err("a ragged net".into());
     }
     let at = |r: usize, j: usize| -> Result<(Vec3, f64), String> {
-        let c = if rot_u { ec.get(r).and_then(|x| x.get(j)) } else { ec.get(j).and_then(|x| x.get(r)) };
-        c.copied().map(pw).ok_or_else(|| format!("no control point {r},{j}"))
+        let c = if rot_u {
+            ec.get(r).and_then(|x| x.get(j))
+        } else {
+            ec.get(j).and_then(|x| x.get(r))
+        };
+        c.copied()
+            .map(pw)
+            .ok_or_else(|| format!("no control point {r},{j}"))
     };
     let (n_rot, n_gen, r0, k_rot, k_gen, kb_rot, kb_gen) = if rot_u {
-        (nu, nv, off_u, e.u_knots(), e.v_knots(), bn.u_knots(), bn.v_knots())
+        (
+            nu,
+            nv,
+            off_u,
+            e.u_knots(),
+            e.v_knots(),
+            bn.u_knots(),
+            bn.v_knots(),
+        )
     } else {
-        (nv, nu, off_v, e.v_knots(), e.u_knots(), bn.v_knots(), bn.u_knots())
+        (
+            nv,
+            nu,
+            off_v,
+            e.v_knots(),
+            e.u_knots(),
+            bn.v_knots(),
+            bn.u_knots(),
+        )
     };
     let rot_spans = quadratic_spans(k_rot, if rot_u { pu } else { pv }, n_rot)?;
     let p_gen = if rot_u { pv } else { pu };
@@ -291,7 +344,11 @@ pub(crate) fn certify_as_itself(
     let b_gen = spans(kb_gen, nb_gen)?;
 
     let o = rev.position().origin();
-    let z = rev.position().z_axis().unitize().map_err(|x| x.to_string())?;
+    let z = rev
+        .position()
+        .z_axis()
+        .unitize()
+        .map_err(|x| x.to_string())?;
     let radial = |x: Vec3| {
         let v = x - o;
         v - z * z.dot(v)
@@ -315,7 +372,7 @@ pub(crate) fn certify_as_itself(
             js = j;
         }
     }
-    if !(dmax > tau) {
+    if dmax.partial_cmp(&tau) != Some(std::cmp::Ordering::Greater) {
         return Err("row r0 lies on the axis".into());
     }
     let (ps, ws) = at(r0, js)?;
@@ -332,8 +389,18 @@ pub(crate) fn certify_as_itself(
             let (qx, qy) = (rq.dot(e1), rq.dot(e2));
             let want = (q - rq) + e1 * (lx * qx - ly * qy) + e2 * (lx * qy + ly * qx);
             let (p, w) = at(r, j)?;
-            within(&format!("row {r} column {j}: not row r0's turned"), (p - want).length(), tau, &mut worst)?;
-            within(&format!("row {r} column {j}: weight not row r0's scaled"), (w - a * wq).abs(), tw * w.abs(), &mut worst)?;
+            within(
+                &format!("row {r} column {j}: not row r0's turned"),
+                (p - want).length(),
+                tau,
+                &mut worst,
+            )?;
+            within(
+                &format!("row {r} column {j}: weight not row r0's scaled"),
+                (w - a * wq).abs(),
+                tw * w.abs(),
+                &mut worst,
+            )?;
         }
     }
     // (R) column j*'s rotation spans: arcs of one circle about the axis, one sense
@@ -341,7 +408,15 @@ pub(crate) fn certify_as_itself(
     let mut sense = 0.0;
     for s in 0..rot_spans {
         let tri = [at(2 * s, js)?, at(2 * s + 1, js)?, at(2 * s + 2, js)?];
-        let sg = arc_on_circle(&format!("rotation span {s}"), tri, foot, z, dmax, tau, &mut worst)?;
+        let sg = arc_on_circle(
+            &format!("rotation span {s}"),
+            tri,
+            foot,
+            z,
+            dmax,
+            tau,
+            &mut worst,
+        )?;
         if sense != 0.0 && sg != sense {
             return Err(format!("rotation span {s} turns back"));
         }
@@ -354,13 +429,13 @@ pub(crate) fn certify_as_itself(
         let (q0, q1) = (at(r0, g0)?.0, at(r0, g0 + 1)?.0);
         let d = q1 - q0;
         let dl = d.length();
-        if !(dl > 0.0) {
+        if dl.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return Err("B's generator span is a point".into());
         }
         let mut last = f64::NEG_INFINITY;
         for j in 0..n_gen {
             let (q, w) = at(r0, j)?;
-            if !(w > 0.0) {
+            if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 return Err(format!("generator point {j}: a non-positive weight"));
             }
             let t = (q - q0).dot(d) / dl;
@@ -370,7 +445,7 @@ pub(crate) fn certify_as_itself(
                 tau,
                 &mut worst,
             )?;
-            if !(t > last) {
+            if t.partial_cmp(&last) != Some(std::cmp::Ordering::Greater) {
                 return Err(format!("generator point {j} turns back along the line"));
             }
             last = t;
@@ -392,7 +467,15 @@ pub(crate) fn certify_as_itself(
         let mut sense = 0.0;
         for s in 0..gen_spans {
             let tri = [at(r0, 2 * s)?, at(r0, 2 * s + 1)?, at(r0, 2 * s + 2)?];
-            let sg = arc_on_circle(&format!("generator span {s}"), tri, c, n, rho, tau, &mut worst)?;
+            let sg = arc_on_circle(
+                &format!("generator span {s}"),
+                tri,
+                c,
+                n,
+                rho,
+                tau,
+                &mut worst,
+            )?;
             if sense != 0.0 && sg != sense {
                 return Err(format!("generator span {s} turns back"));
             }
@@ -427,7 +510,10 @@ mod tests {
             Extent2d::from_bounds(10.0, 20.0, 100.0, 140.0),
             5.0,
             1.5,
-            TorusOptions { swap_uv: swap, ..TorusOptions::default() },
+            TorusOptions {
+                swap_uv: swap,
+                ..TorusOptions::default()
+            },
         )
         .unwrap();
         let base = Surface::from(t);
@@ -439,11 +525,15 @@ mod tests {
             Point2::new(hi.x + 0.4 * s.x, hi.y + 0.3 * s.y),
             Point2::new(lo.x - 0.3 * s.x, lo.y - 0.2 * s.y),
         ] {
-            o.evaluate_extending(&k, uv, 0, 0, EvaluateFlags::default()).unwrap();
+            o.evaluate_extending(&k, uv, 0, 0, EvaluateFlags::default())
+                .unwrap();
         }
         let e = match o.extended_base_surface().map(Surface::kind) {
             Some(SurfaceKind::BSpline(b)) => b.gw_nurb().cloned().unwrap(),
-            _ => panic!("no B-spline extension: {:?}", o.extended_base_surface().map(Surface::type_code)),
+            _ => panic!(
+                "no B-spline extension: {:?}",
+                o.extended_base_surface().map(Surface::type_code)
+            ),
         };
         (k, base, e)
     }
@@ -470,7 +560,11 @@ mod tests {
     fn a_moved_control_point_is_refused() {
         let (k, base, e) = torus_extension(false);
         // an added corner (no base row), an added middle point, and one of B's own
-        for (i, j) in [(0, 0), (1, e.cpts()[0].len() / 2), (e.cpts().len() / 2, e.cpts()[0].len() / 2)] {
+        for (i, j) in [
+            (0, 0),
+            (1, e.cpts()[0].len() / 2),
+            (e.cpts().len() / 2, e.cpts()[0].len() / 2),
+        ] {
             let bad = moved(&e, i, j, 1e-9);
             assert!(certify_as_itself(&k, &base, &bad).is_err(), "{i},{j}");
         }
