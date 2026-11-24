@@ -40,7 +40,7 @@ pub fn install(window: &impl HasWindowHandle) -> bool {
     // (winit's), overriding `NSView`'s without touching other views.
     unsafe {
         let imp = std::mem::transmute::<extern "C-unwind" fn(&AnyObject, Sel) -> Bool, Imp>(handler);
-        let encoding = [Bool::ENCODING.to_string().as_str(), "@:"].concat();
+        let encoding = [<Bool as objc2::Encode>::ENCODING.to_string().as_str(), "@:"].concat();
         let Ok(types) = std::ffi::CString::new(encoding) else { return false };
         class_replaceMethod(std::ptr::from_ref(class).cast_mut(), sel!(mouseDownCanMoveWindow), imp, types.as_ptr());
     }

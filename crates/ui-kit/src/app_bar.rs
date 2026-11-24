@@ -3579,7 +3579,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
             let moved = pointer.unwrap_or(origin) - origin;
             // A drag that starts on a tab never moves the window (only empty bar space does,
             // `window_chrome::drag_area`), whatever its direction and however many tabs there are.
-            if n > 1 && moved.x.abs() >= moved.y.abs() {
+            if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
             }
         } else if resp.double_clicked() {
