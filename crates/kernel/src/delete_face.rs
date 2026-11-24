@@ -1,5 +1,6 @@
 //! Delete Face with healing extends the neighbours of the selected faces to close the gap.
-//! SolidCore closes a ring groove across both circular rims.
+//! SolidCore closes a ring groove across both circular rims and trims intersecting sphere
+//! and plane extensions to their common circle.
 //!
 //! For a planar gap the body is rebuilt from its own schema 4 record. Faces away from the gap
 //! are kept as they are. Each neighbouring face keeps its plane and its edges outside the gap.
@@ -29,6 +30,35 @@ use crate::{KernelError, Result, guard};
 
 fn fail(m: impl Into<String>) -> KernelError {
     KernelError::Invalid(format!("Delete Face: {}", m.into()))
+}
+
+/// Heal a feature between a sphere and a plane only when the kernel trims their
+/// extensions together. Carry the original face and edge names into the repaired body.
+fn heal_sphere_to_plane(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>) -> Result<Option<Body>> {
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (operand, order) = &*form;
+    let picks: Vec<_> = selected.iter().copied().collect();
+    drop(solidcore_ops::session::take_failure_detail());
+    let heal = || -> solidcore_ops::Result<_> {
+        let Some((healed, history)) = solidcore_ops::trim::remove_feature_with_crossing_patches(operand, order, &picks)? else {
+            return Ok(None);
+        };
+        Ok(Some((healed.to_record()?.0, history)))
+    };
+    let result = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, heal),
+        None => heal(),
+    }
+    .map_err(|e| match e {
+        solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("Delete Face: {message}")),
+        other => {
+            let reason = solidcore_ops::session::take_failure_detail().unwrap_or_else(|| other.to_string());
+            KernelError::Failed(format!("Delete Face: {reason}"))
+        }
+    })?;
+    let Some((record, history)) = result else { return Ok(None) };
+    let history = crate::record::from_ops_edit(&record, history, neighbours);
+    Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
 }
 
 type Key = (i64, i64, i64);
@@ -291,9 +321,6 @@ fn fill_on_planes(
 /// Remove a groove between two turned faces, with its history over the original body. The
 /// kernel decides whether the rims bound a band and records the identity of the surfaces it joins.
 fn heal_ring_groove(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>) -> Result<Option<Body>> {
-    use crate::history::FaceOrigin;
-    use solidcore_ops::history::{Change as OpsChange, FaceOrigin as OpsOrigin};
-
     let Some(form) = body.ops_body() else { return Ok(None) };
     let (operand, order) = &*form;
     let picks: Vec<_> = selected.iter().copied().collect();
@@ -301,32 +328,7 @@ fn heal_ring_groove(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeS
         return Ok(None);
     };
     let (record, _) = healed.to_record().map_err(|e| fail(e.to_string()))?;
-    let faces = history
-        .faces
-        .into_iter()
-        .map(|f| {
-            let change = match f.change {
-                OpsChange::Kept if matches!(f.origins.as_slice(), [OpsOrigin::Face(i)] if neighbours.contains(i)) => Change::Modified,
-                OpsChange::Kept => Change::Kept,
-                OpsChange::Modified => Change::Modified,
-                OpsChange::Split => Change::Split,
-                OpsChange::Merged => Change::Merged,
-                OpsChange::Generated => Change::Generated,
-            };
-            let origins = f
-                .origins
-                .into_iter()
-                .map(|o| match o {
-                    OpsOrigin::Face(face) => FaceOrigin::Face { operand: 0, face },
-                    OpsOrigin::OffsetOf(face) => FaceOrigin::Offset { operand: 0, face },
-                    OpsOrigin::AlongEdge(edge) => FaceOrigin::Edge { operand: 0, edge },
-                })
-                .collect();
-            FaceProv { change, origins }
-        })
-        .collect();
-    let edges: Vec<_> = history.edges.into_iter().map(|e| crate::record::pieces_of(0, e)).collect();
-    let history = crate::record::of_faces(&record, 1, faces, &edges);
+    let history = crate::record::from_ops_edit(&record, history, neighbours);
     Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
 }
 
@@ -392,7 +394,14 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                 Some(Surf::Plane { n, d }) => {
                     planes.insert(f, (n, d));
                 }
-                _ => {
+                other => {
+                    if matches!(other, Some(Surf::Sphere { .. }))
+                        && neighbours.len() == 2
+                        && neighbours.iter().any(|&g| matches!(surf_of(&rec, g), Some(Surf::Plane { .. })))
+                        && let Some(healed) = heal_sphere_to_plane(body, &del, &neighbours).transpose()
+                    {
+                        return Ok(healed);
+                    }
                     let by = efaces
                         .values()
                         .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
@@ -961,6 +970,37 @@ mod tests {
         assert_ne!(bottom[0], 0);
         let refused = delete_faces(&plate, &bottom).unwrap_err().to_string();
         assert!(refused.contains(&format!("the gap left by face {} cannot close", bottom[0])), "{refused}");
+    }
+
+    #[test]
+    fn deleting_a_bevel_keeps_the_ball_and_plate_face_origins() {
+        use crate::history::{Change, FaceOrigin};
+        use solidcore_ops::boolean::{BooleanOp, boolean as join};
+
+        let plate = solidcore_ops::make_cylinder([0.0, 0.0, -2.0], 8.0, 2.0).unwrap();
+        let ball = solidcore_ops::make_sphere([0.0, 0.0, 1.0], 3.0).unwrap();
+        let bevel = solidcore_ops::make_cone([0.0; 3], 4.0, 3.0, 1.0).unwrap();
+        let sharp = join(plate, ball, BooleanOp::Union).unwrap().unwrap();
+        let beveled = join(sharp, bevel, BooleanOp::Union).unwrap().unwrap();
+        let part = crate::Body::from_record(beveled.to_record().unwrap().0).unwrap();
+        let offset = Vec3::new(11.0, -6.0, 9.0);
+        let original = crate::transform(&part, offset, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_2).unwrap();
+        let placed = |p: Vec3| offset + Vec3::new(p.z, p.y, -p.x);
+        let (_, picked) = original.nearest_face(placed(Vec3::new(0.0, 3.5, 0.5))).unwrap();
+        let healed = delete_faces(&original, &[picked]).unwrap();
+        let history = healed.history().unwrap();
+        assert_eq!(healed.face_count(), 4);
+        for (point, change) in [
+            (Vec3::new(6.0, 0.0, 0.0), Change::Modified),
+            (Vec3::new(0.0, 5.0_f64.sqrt(), 3.0), Change::Modified),
+            (Vec3::new(1.0, 0.0, -2.0), Change::Kept),
+            (Vec3::new(8.0, 0.0, -1.0), Change::Kept),
+        ] {
+            let (_, parent) = original.nearest_face(placed(point)).unwrap();
+            let (_, face) = healed.nearest_face(placed(point)).unwrap();
+            assert_eq!(history.faces[face].origins, [FaceOrigin::Face { operand: 0, face: parent }]);
+            assert_eq!(history.faces[face].change, change);
+        }
     }
 
     /// A half-space `n · x <= d` with `n` made unit.
