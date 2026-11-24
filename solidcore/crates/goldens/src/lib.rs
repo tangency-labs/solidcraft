@@ -54,6 +54,8 @@ pub(crate) mod trim_hook;
 pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
+pub(crate) mod wr450_rows;
+#[cfg(test)]
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr587_replay;
@@ -75,13 +77,27 @@ pub use runner::UnitDiff;
 
 /// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
 /// carries the replay seam a test has installed on this thread ([`replay_seam`]: the
-/// WR-587 replay's and the target bound's; the seam state is the kernel's, and the
+/// WR-450 and WR-587 replays' and the target bound's; the seam state is the kernel's, and the
 /// runners make their own kernels, so they take it from here).
 pub(crate) fn runner_kernel() -> solidcore::Kernel {
     let k = solidcore::Kernel::default();
     #[cfg(test)]
     let k = replay_seam::with_seam(k);
     k
+}
+
+/// Whether a substitution replay seam is installed on this thread (only in this crate's
+/// tests): a runner's cache of earlier results is bypassed then, since a cached result
+/// was computed without the seam's answers.
+pub(crate) fn replay_active() -> bool {
+    #[cfg(test)]
+    {
+        replay_seam::active()
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
 }
 
 /// Error from the harness itself (bad fixture, missing file, ...), as opposed
