@@ -648,6 +648,13 @@ impl<'t> Assembly<'t> {
         if loop_count != 1 || edge_loops.len() != 1 || !matches!(edge_loops.first().map(Vec::len), Some(3 | 4)) {
             return Ok(());
         }
+        // A face whose edges the closed forms already take at the tolerance in force is read as it
+        // always was, nothing raised: the proof is for the faces they decline.
+        let fit = self.pcurve_tolerance();
+        let already = pcurve::exact_pcurves(surface, &uses_of(&self.edges, edge_loops, None)?, fit, domain);
+        if matches!(&already, Ok(l) if l.iter().flatten().all(Option::is_some)) {
+            return Ok(());
+        }
         // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
         let mut uses = uses_of(&self.edges, edge_loops, None)?;
         for u in uses.iter_mut().flatten() {

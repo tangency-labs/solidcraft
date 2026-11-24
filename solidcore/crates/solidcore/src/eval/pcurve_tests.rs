@@ -2611,7 +2611,17 @@ fn a_patch_boundary_pcurve_is_exact_where_the_tolerance_covers_its_proved_gap() 
         let raised = SURFACE_GAP_MARGIN * gap.max(1e-6);
         let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), raised, None).unwrap();
         let pc = made[0][0].as_ref().expect("a closed form");
-        assert_eq!(segment_points(pc), [[0., 1.], [1., 1.]]);
+        // The line along the boundary: its ends where the tolerance's closed form puts them (the
+        // edge's own ends projected, up to a few parts in 10⁶ off the corners) or on the corners.
+        let [from, to] = segment_points(pc);
+        assert!(
+            from[0].abs() < 1e-5 && (from[1] - 1.).abs() < 1e-5,
+            "{from:?}"
+        );
+        assert!(
+            (to[0] - 1.).abs() < 1e-5 && (to[1] - 1.).abs() < 1e-5,
+            "{to:?}"
+        );
         assert!(lift_error(&surface, &edge, [0., 1.], pc) <= 0.5 * raised);
         let all = pcurves(&surface, &one(&edge, [0., 1.]), raised).unwrap();
         assert_eq!(all[0][0], *pc);
@@ -2620,6 +2630,27 @@ fn a_patch_boundary_pcurve_is_exact_where_the_tolerance_covers_its_proved_gap() 
     let edge = boundary_edge(2., [0., 1.], [1., 1.], 7.5e-5);
     let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), 1e-6, None).unwrap();
     assert_eq!(made[0][0], None);
+}
+
+/// Where the tolerance in force already takes a boundary edge as a straight line, the pcurve is
+/// that line to the bit (not the proof's, whose ends sit exactly on the patch's corners), so a face
+/// read before this proof is read the same after it.
+#[test]
+fn a_boundary_edge_the_tolerance_already_takes_keeps_the_line_it_always_got() {
+    let surface = twisted(2.);
+    for off in [0.0, 3e-6, 2e-5] {
+        for (from, to) in SIDES {
+            let edge = boundary_edge(2., from, to, off);
+            let tol = 1e-3;
+            let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), tol, None).unwrap();
+            let on = On::new(&surface).unwrap();
+            let eval = CurveEval::new(&edge).unwrap();
+            let old = on
+                .along(&eval, [0., 1.], tol)
+                .expect("the tolerance takes it");
+            assert_eq!(made[0][0], Some(old), "off {off}, {from:?} to {to:?}");
+        }
+    }
 }
 
 /// Anything the proof does not cover is `None`, so the caller carries on as it did.
@@ -3515,6 +3546,38 @@ fn reparametrised_proofs_of_hostile_records_give_errors_or_none() {
         let edge = line([0., 0., 0.], [10. * scale, 0., 0.]);
         let _ = boundary_iso(&big, &edge, [0., 1.], 1e-3);
     }
+}
+
+/// [`uneven_patch`] a hundred times as long (1000 mm): the straight pieces of the map leave an error
+/// that grows with the boundary's length, so the map needs more than a thousand of them to come
+/// within the cap, and the proof finds it.
+#[test]
+fn a_long_boundary_at_an_uneven_pace_gets_a_map_of_thousands_of_pieces() {
+    let scale = 100.0;
+    let row = |y: f64| {
+        [0., 1., 9., 10.]
+            .map(|x| [x * scale, y * scale, 0.])
+            .to_vec()
+    };
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    };
+    let edge = line([0., 0., 0.], [10. * scale, 0., 0.]);
+    let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+        .unwrap()
+        .expect("a map within the cap");
+    let Curve2::Spline { points, .. } = &found.pcurve else {
+        panic!("a spline pcurve")
+    };
+    assert!(
+        points.len() > 1024 && points.len() <= 4096,
+        "{} points",
+        points.len()
+    );
+    assert!(found.gap <= 1e-3, "{}", found.gap);
+    assert!(lift_error(&surface, &edge, [0., 1.], &found.pcurve) <= found.gap);
 }
 
 /// An edge that lies on a patch's boundary but runs at a pace of its own is that boundary's line

@@ -1527,13 +1527,15 @@ impl On {
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
             (SurfaceEval::Eval(..), _) => {
-                // A whole boundary curve of a polynomial patch first, by its proved bound: the
-                // one closed form that does not test the pcurve against a tolerance it was
-                // never raised to (the importer raises an edge's tolerance to cover the proved
-                // bound before it asks).
-                match self.boundary_line(record, curve, [t0, t1], tol) {
-                    Some(b) => Some(b.pcurve),
-                    None => self.along(curve, [t0, t1], tol),
+                // The straight line the tolerance already accepts, as always (so a face the
+                // file's own tolerance reads is read exactly as before, to the bit); failing
+                // that, a whole boundary curve of a polynomial patch by its proved bound (the
+                // importer raises an edge's tolerance to cover the proved bound before it asks).
+                match self.along(curve, [t0, t1], tol) {
+                    Some(pc) => Some(pc),
+                    None => self
+                        .boundary_line(record, curve, [t0, t1], tol)
+                        .map(|b| b.pcurve),
                 }
             }
             _ => None,

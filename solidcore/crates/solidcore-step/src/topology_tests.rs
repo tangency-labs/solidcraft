@@ -4582,13 +4582,17 @@ fn patch_lines(b: &Brep) -> (Vec<(usize, f64)>, usize) {
         let Curve2::Spline { knots, points } = &u.pcurve else { panic!("{:?}", u.pcurve) };
         let e = &b.edges[u.edge as usize];
         let uv = |v: u32| [b.vertices[v as usize].point[0] / 10.0, b.vertices[v as usize].point[1] / 10.0];
-        assert_eq!(points, &vec![uv(e.vertices[0]), uv(e.vertices[1])], "a straight line between its edge's ends");
+        // Between its edge's ends: exactly where the proof gave the line, or (where the tolerance
+        // already took it) where the closed form projects them, a few parts in 10⁶ off.
+        for (got, want) in points.iter().zip([uv(e.vertices[0]), uv(e.vertices[1])]) {
+            assert!(got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-5), "a straight line between its edge's ends: {points:?}");
+        }
         assert_eq!(knots, &vec![e.interval[0], e.interval[0], e.interval[1], e.interval[1]]);
         // The coordinate that does not change along it: v where u runs, else u.
-        let fixed = usize::from(points[0][0] != points[1][0]);
-        assert_eq!(points[0][fixed], points[1][fixed], "constant along its side");
-        let value = points[0][fixed];
-        assert!(value == 0.0 || value == 1.0, "on a boundary: {value}");
+        let fixed = usize::from((points[0][0] - points[1][0]).abs() > 0.5);
+        assert!((points[0][fixed] - points[1][fixed]).abs() < 1e-5, "constant along its side");
+        let value = points[0][fixed].round();
+        assert!((points[0][fixed] - value).abs() < 1e-5 && (value == 0.0 || value == 1.0), "on a boundary: {value}");
         sides.push((fixed, value));
         against += usize::from(!u.forward);
     }

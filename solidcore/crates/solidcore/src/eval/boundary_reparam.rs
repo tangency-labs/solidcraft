@@ -46,8 +46,15 @@ use crate::nurbs::crv_deviation::{certified_distance, norm_up};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{gamma, CPoint, NOW};
 
-/// The most pieces of the pcurve.
-const MOST_PIECES: usize = 1024;
+/// The most points of the pcurve: a spline of the portable B-rep record has at most 4096
+/// (`solidcore_record::brep`), the breakpoints at the boundary's knots included.
+const MOST_POINTS: usize = 4096;
+/// The most pieces of the map before the knots of the boundary are added to its breakpoints. The
+/// straight pieces leave an error that falls with the square of their length and grows with the
+/// boundary's speed (mm per unit of parameter), so a long boundary at an uneven pace needs
+/// thousands: a 400 mm one with an edge at a rough pace takes about 3300 to bring the bound to
+/// 2e-4 mm.
+const MOST_PIECES: usize = 3900;
 /// Pieces of the first, even, try.
 const FIRST_PIECES: usize = 8;
 /// Samples of the boundary per span for the first guess of a projection.
@@ -203,6 +210,7 @@ fn compute(
         )?;
         let (mut ps, mut vs) = (params.clone(), values.clone());
         let found = cross_knots(iso, reversed, &mut ps, &mut vs)
+            .filter(|()| ps.len() <= MOST_POINTS)
             .and_then(|()| certify(edge, iso, &spans, &ps, &vs, [t0, t1]));
         let Some(gap) = found else {
             return best.filter(|b| b.gap <= cap);
