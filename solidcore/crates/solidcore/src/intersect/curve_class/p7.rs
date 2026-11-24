@@ -2574,8 +2574,8 @@ trait FaceQueries<O: ClassObject> {
 /// than that is on it as the seam check sees it, and keeps upstream's bits.
 ///
 /// The seams are those `v` is on now (its point within `1000 * EFF_ZERO` of the face's seam,
-/// `IsOnSeam`), so that taking the fillet's position never moves the vertex off a seam it is
-/// on. When it is on none, they are the seams of the edges at `v` (an edge use's UV trim curve
+/// `IsOnSeam`), so that taking the fillet's position does not move the vertex off a seam it
+/// is on whenever that seam passes within the vertex's tolerance of the position. When it is on none, they are the seams of the edges at `v` (an edge use's UV trim curve
 /// an iso curve on the face's seam, [`iso_curve_seam`](crate::topology::trimming_tools::iso_curve_seam)):
 /// the body's vertex is where the fillet's rail split such an edge. Of these the nearest
 /// seam point wins, the first in `GetFaces` (then `GetEdges`, `GetEdgeuses`) order on a tie.
@@ -2618,7 +2618,8 @@ fn onto_seam(k: &Kernel, b: &Brep, v: VertexId, point: Point3) -> Result<Point3>
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         let was = surface.drop_point::<NoObject>(k, old, &domain, &DropPointOptions::default())?;
         // Written to accept: a NaN gap is not within the near miss.
-        if !was.success || !(was.gap < near_miss) {
+        let on_surface = was.success && was.gap < near_miss;
+        if !on_surface {
             continue;
         }
         let seam = surface.is_on_seam(k, was.result_uv, Some(near_miss))?;
@@ -2658,7 +2659,13 @@ fn onto_seam(k: &Kernel, b: &Brep, v: VertexId, point: Point3) -> Result<Point3>
         }
         let at = dropped.result_uv;
         let (lo, hi) = (domain.min(), domain.max());
-        let nearer = |x: f64, a: f64, b: f64| if (x - a).abs() <= (x - b).abs() { a } else { b };
+        let nearer = |x: f64, lo: f64, hi: f64| {
+            if (x - lo).abs() <= (x - hi).abs() {
+                lo
+            } else {
+                hi
+            }
+        };
         let on = if side == SurfParamType::U {
             Point2::new(nearer(at.x, lo.x, hi.x), at.y)
         } else {
@@ -3052,7 +3059,9 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FilletAccess<O> for Mutable<'_, G> 
     fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()> {
         match self.0.topology_entity_mut(vertex) {
             Some((b, EntityRef::Vertex(v))) => {
-                let point = onto_seam(k, b, v, point)?;
+                // `onto_seam` only refines upstream's `point`: a query it cannot answer
+                // leaves `point` as upstream sets it (cancellation still propagates).
+                let point = ignored(onto_seam(k, b, v, point))?.unwrap_or(point);
                 b.vertex_mut(v)?.point = point;
                 Ok(())
             }

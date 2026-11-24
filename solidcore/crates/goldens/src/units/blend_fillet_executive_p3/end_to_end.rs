@@ -3748,7 +3748,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
     use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
     use solidcore::surface::surface::p2::SurfaceKind;
     use solidcore::topology::brep::p1::HealLoopHandle;
-    use solidcore::topology::face::p4::has_seam_problem_in_brep_mut;
+    use solidcore::topology::face::p4::{has_seam_problem_in_brep_mut, HasSeamProblemOptions};
     use solidcore::topology::vertex;
 
     /// The rows, whose golden status and vertex, edge and face counts (`[0, 27, 42, 10]`)
@@ -3765,7 +3765,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         let mut n = 0;
         for f in p1::faces(body, None).unwrap() {
             let check =
-                has_seam_problem_in_brep_mut::<HealLoopHandle>(k, body, f, Default::default())
+                has_seam_problem_in_brep_mut::<HealLoopHandle>(k, body, f, HasSeamProblemOptions::default())
                     .unwrap();
             if check.problem.near_miss != SurfParamType::Neither {
                 n += 1;
@@ -3833,7 +3833,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
                 &k,
                 &mut body,
                 f,
-                Default::default(),
+                HasSeamProblemOptions::default(),
             )
             .unwrap();
             assert_eq!(
@@ -3878,7 +3878,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
         // (the volume did not move: the row's is the one before)
         let estimates = volume_band(&k, &mut body, &blends, row[1], name);
         let m = &estimates.golden;
-        let at = |p: solidcore::math::Vec3| [p.x, p.y, p.z];
+        let at = |p: Vec3| [p.x, p.y, p.z];
         let mut ours = vec![m.properties.area, m.properties.volume, m.properties.mass];
         ours.extend(at(m.centroid));
         ours.extend(at(m.inertia));
