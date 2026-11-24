@@ -3,7 +3,7 @@
 
 use solidcore::cell_grid as k;
 use solidcore_record::cell_grid::{
-    CellGridPlan, CellGridSpec, CellKind, CellShape, Clip, DotGrid, GridCell,
+    CellGridPlan, CellGridSpec, CellKind, CellShape, Clip, DotGrid, GridCell, SketchCell,
 };
 
 use crate::{loop2, record_loop2, record_vec2, vec2};
@@ -171,4 +171,18 @@ pub fn record_plan(p: &k::CellGridPlan) -> CellGridPlan {
 #[must_use]
 pub fn field(loops: &[solidcore_record::Loop2]) -> Vec<solidcore::prism::profile::Loop2> {
     loops.iter().map(loop2).collect()
+}
+
+/// A record sketched cell as the kernel's.
+#[must_use]
+pub fn sketch_cell(c: &SketchCell) -> k::SketchCell {
+    k::SketchCell {
+        profile: loop2(&c.profile),
+        origin: c.origin.map(vec2),
+        pitch_x: c.pitch_x,
+        pitch_y: c.pitch_y,
+        stagger: c.stagger,
+        cell_angle: c.cell_angle,
+        flip: c.flip,
+    }
 }
