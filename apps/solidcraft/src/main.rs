@@ -3340,8 +3340,10 @@ mod msaa_tests {
     #[test]
     fn the_scene_follows_the_backend_policy_too() {
         use eframe::wgpu::Backend;
-        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 1);
-        assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 1);
+        // Desktop OpenGL takes the chosen count like every native backend; the startup check
+        // falls back to 1x where it draws nothing.
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[1, 4]), 4);
+        assert_eq!(super::scene_samples(Backend::Gl, 4, &[]), 4);
         assert_eq!(super::scene_samples(Backend::Vulkan, 4, &[1, 4]), 4);
         assert_eq!(super::scene_samples(Backend::Dx12, 8, &[1, 2, 4]), 4);
     }
