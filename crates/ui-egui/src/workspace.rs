@@ -1207,7 +1207,10 @@ mod tests {
             h.frames(2);
             assert!(!drawing_inspector_visible(&h), "Escape closes options for {query}");
         }
-        h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
+        // Sheet Settings is in search; the old Sheets strip's settings button is legacy-only.
+        h.step(&json!({"key":"S"})).unwrap();
+        h.step(&json!({"text":"Sheet Settings"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(drawing_inspector_visible(&h));
         h.step(&json!({"key":"Escape"})).unwrap();

@@ -840,6 +840,49 @@ mod tests {
     }
 
     #[test]
+    fn base_view_search_and_ribbon_open_the_same_options_but_json_does_not() {
+        use serde_json::json;
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        h.frames(4);
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        for search in [false, true] {
+            if search {
+                h.step(&json!({"key":"S"})).unwrap();
+                h.step(&json!({"text":"Base View"})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+            } else {
+                h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
+            }
+            h.frames(3);
+            assert_eq!(h.app.drawing_workspace.options, Some(Tool::Base));
+            assert!(placing_view(&h.app));
+            assert!(crate::scenario::handle_at("drawing:placement:orientation:front").is_some());
+            assert!(h.widget("Finish").is_some());
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.drawing_workspace.options.is_none());
+            assert!(!placing_view(&h.app));
+            assert_eq!(h.app.session.doc, before, "opening and dismissing options changes no data");
+            assert_eq!(h.app.session.revision, revision);
+        }
+        let base =
+            h.call("engine.execute", json!({"command":"drawing.view.base","params":{"sheet":"Sheet 1","scale":"1:1","position_mm":[175,140]}}));
+        assert_eq!(base["ok"], true, "{base}");
+        let projected =
+            h.call("engine.execute", json!({"command":"drawing.view.projected","params":{"parent":base["result"]["view"],"side":"right"}}));
+        assert_eq!(projected["ok"], true, "{projected}");
+        assert!(h.app.drawing_workspace.options.is_none());
+        assert!(!placing_view(&h.app));
+        assert!(h.app.dialog.is_none() && h.app.params.is_none(), "JSON execution opens no form");
+    }
+
+    #[test]
     fn base_view_places_projected_views_until_escape() {
         use solidcraft_engine::doc::drawing::view::{ViewKind, ViewPlace};
         use solidcraft_engine::geom::drawing_view::ProjectedSide;
