@@ -511,7 +511,7 @@ fn a_legacy_multi_face_thread_reopens_in_group_selection_mode() {
     let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("Thread") };
     target_bodies.clear();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     assert_eq!(h.app.session.model.state().threads.len(), 2);
     h.app.edit_feature(id);
     h.frames(2);
@@ -758,7 +758,7 @@ fn a_grouped_thread_reopens_named_faces_after_its_shafts_move() {
     assert_eq!(face.0.x, 3.0, "the saved point remains at its original location");
     assert_eq!(additional_faces[0].0.x, 33.0);
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     let features = h.app.session.doc.features.len();
     h.app.edit_feature(id);
     h.frames(2);
@@ -802,7 +802,7 @@ fn an_unchanged_grouped_thread_edit_keeps_its_exact_saved_parameters() {
     let id = h.app.run("solid.thread", json!({"faces":points,"designation":"M6x0.75"})).unwrap()["feature"].as_u64().unwrap();
     let before = h.app.session.doc.feature(id).unwrap().kind.clone();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().expect("the unchanged group can be edited");
@@ -826,7 +826,7 @@ fn a_single_thread_face_keeps_the_selected_body_when_shafts_coincide() {
     let id = h.app.session.doc.features.last().unwrap().id;
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().unwrap();
@@ -868,7 +868,7 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     let id = h.app.run("solid.thread", json!({"faces":[{"body":"B","point":[4,0,2]},{"body":"A","point":[4,0,2]}],"designation":"M8"})).unwrap()["feature"].as_u64().unwrap();
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let mut d = h.app.dialog.take().unwrap();

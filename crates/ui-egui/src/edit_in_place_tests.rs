@@ -194,7 +194,7 @@ fn update_links_run_as_a_command_in_the_part_refreshes_the_assembly_too() {
     settle(&mut f.app);
     save_box(&f.post_file, [10.0, 10.0, 10.0], true);
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     // In any spelling the engine takes; the call may take the refresh up before it answers
     h.call("engine.execute", json!({"command": "Component.Update_Links"}));
     f.app = std::mem::replace(&mut h.app, SolveApp::new(Session::default(), Default::default()));
@@ -432,7 +432,7 @@ fn activate_only_activates_and_edit_in_place_opens_the_placement_right_clicked()
 fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     let mut f = assembly("ribbon");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     h.frames(3);
     assert!(crate::scenario::rect_of("panel:MODEL:FINISH EDITING").is_none(), "no edit in place, no button");
@@ -535,7 +535,7 @@ fn finish_editing_as_a_command_opens_nothing_for_a_part_with_changes() {
 fn finish_editing_is_sent_on_its_own_not_in_a_batch_or_script() {
     let mut f = assembly("control");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
     let steps = json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}, {"command": "Component.Finish_Edit"}]);
@@ -556,7 +556,7 @@ fn finish_editing_is_sent_on_its_own_not_in_a_batch_or_script() {
 fn the_mouse_back_button_finishes_the_edit() {
     let mut f = assembly("mouse-back");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
@@ -575,7 +575,7 @@ fn the_mouse_back_button_finishes_the_edit() {
 fn the_mouse_back_button_still_goes_back_when_it_drags_the_view() {
     let mut f = assembly("mouse-back-mapped");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     h.call("ui.prefs", json!({"nav_button_map": {"extra1": "orbit"}}));
     double_click_component(&mut h.app, json!({"component": f.plate}));
@@ -682,7 +682,7 @@ fn finish_editing_waits_for_the_parts_agent_to_end_its_turn() {
 fn edit_in_place_is_a_command_the_double_click_runs() {
     let mut f = assembly("command-enter");
     let mut h = crate::scenario::Harness::new();
-    h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
+    *h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     // Not linked, or not a placement of it: refused, nothing opens
     let base = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["component"].as_u64().unwrap();
     h.app.run("component.activate", json!({"component": "root"})).unwrap();

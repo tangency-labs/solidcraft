@@ -376,7 +376,7 @@ fn contribution_linked_paste_uses_the_pointer_and_a_numeric_move() {
     use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
-    h.app = contribution_saved_part(&file);
+    *h.app = contribution_saved_part(&file);
     assert!(super::copy(&mut h.app));
     crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
     h.app.run("solid.box", json!({"length":80,"width":50,"height":8,"body_name":"Destination"})).unwrap();
@@ -479,7 +479,7 @@ fn contribution_feature_copy_replaces_the_linked_design_clipboard() {
 fn contribution_native_copy_paste_events_insert_the_saved_design_in_another_tab() {
     let file = ContributionPart::new();
     let mut h = Harness::new();
-    h.app = contribution_saved_part(&file);
+    *h.app = contribution_saved_part(&file);
     h.frames(3);
     clipboard_event(&mut h, egui::Event::Copy, None);
     assert!(h.app.linked_design_clipboard.is_some());

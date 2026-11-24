@@ -566,7 +566,7 @@ fn saved_production_layout_retries_small_startup_without_a_recovery_notice() {
         let layout = h.app.panel_runtime().unwrap().layout().layout().clone();
         let saved = h.app.prefs();
         h.call("ui.resize", serde_json::json!({"width":200,"height":100}));
-        h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        *h.app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         h.app.load_prefs(&saved);
         let recovery = h.app.tr("prefs.panel_layout.recovery").to_string();
         h.frame();

@@ -10048,7 +10048,7 @@ mod tests {
         let edited = panel_runtime::preferences_value(&h.app);
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(panel_runtime::preferences_value(&h.app), edited, "page defaults leave all panel arrangements and saved layouts alone");
-        prefs_window::close(&mut h.app, true);
+        prefs_window::close(&mut *h.app, true);
         assert_eq!(
             panel_runtime::preferences_value(&h.app),
             baseline,
@@ -10078,7 +10078,7 @@ mod tests {
             assert_eq!(crate::panel_runtime::preferences_value(&h.app), current, "failed admission changes no live state");
         }
         h.app.panel_runtime = original_host;
-        prefs_window::close(&mut h.app, true);
+        prefs_window::close(&mut *h.app, true);
         assert!(!h.app.prefs_window.shell.open);
         assert!(h.app.prefs_window.shell.snapshot().is_none());
         assert!(h.app.prefs_window.shell.restore_error().is_none());
