@@ -216,8 +216,9 @@ which suits scripts and agents checking a whole assembly:
 It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default, with the shared
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
-`overlap_mm3`), `nearest` (each body's `nearest` closest bodies) and `unchecked` (pairs whose
-overlap could not be worked out, with the reason). `against` limits the check to pairs with one
+`overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
 (`"component"`): the parts of a bought component that touch by design. Distances are measured on
