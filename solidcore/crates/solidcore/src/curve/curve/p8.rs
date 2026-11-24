@@ -121,10 +121,9 @@
 //!   told apart. The certificates do bounded work: at most 16 control points of a curve's
 //!   stretch for the cones, 4096 piece pairs a level over 24 levels in the subdivision,
 //!   and 64 pieces of each in the conic slope test; past that, or for curve kinds they do
-//!   not cover, the ranges are kept. With `Kernel::fixes.simple_coincidence_crossing_is_point`
-//!   a span pair whose separation keeps one side without vanishing is already the nearest
-//!   point (`Curve::simple_coincidence_checker`), and `drop_ranges_of_tangencies` then makes
-//!   a section tangent to a floor arc at their shared end one point (#18064).
+//!   not cover, the ranges are kept. A face/face section tangent to a floor arc at
+//!   their shared end vertex is made one point by the tangency witness, from the
+//!   surfaces (`crate::intersect::curve_class::witness`, #18064).
 //! - **Flank points of an ellipse's touch (#18828).** After the spurious points are
 //!   culled, consecutive point solutions of a line and an ellipse that is no circle are
 //!   replaced by the line's one touch with the ellipse when the line lies in the ellipse's
@@ -2457,11 +2456,11 @@ impl Curve {
     ///   of one sign; or [`curves_meet_at_most_once`]); else (two curved curves tangent to
     ///   each other, an exact or near overlap, also with a conic over an arc, two touches)
     ///   the stretch keeps its ranges: a tangency has no sign change, so at the scaled zero
-    ///   it is a short coincidence and no bound tells it from one. With
-    ///   `Kernel::fixes.simple_coincidence_crossing_is_point` the span pairs of a one-sided
-    ///   approach are already nearest points, and `drop_ranges_of_tangencies` makes a
-    ///   section tangent to a floor arc at their shared end one point (#18064). So does a curve
-    ///   against itself whose touch is where it folds back onto itself. Curves that come
+    ///   it is a short coincidence and no bound tells it from one. `drop_ranges_of_tangencies`
+    ///   drops the flank ranges beside a touch (a curve against itself whose touch is where
+    ///   it folds back onto itself), and a face/face section tangent to a floor arc at their
+    ///   shared end vertex is made one point by the tangency witness
+    ///   (`crate::intersect::curve_class::witness`, #18064). Curves that come
     ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
     ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
@@ -2810,9 +2809,8 @@ impl Curve {
                 // overlap, a fitted copy touching its edge where the fit is exact, two
                 // touches) and keeps its ranges: a tangency of two curved curves has no
                 // sign change, so at the scaled zero it cannot be told from a short
-                // coincidence. With `simple_coincidence_crossing_is_point` the per-span
-                // nearest points and `drop_ranges_of_tangencies` make the shared-end
-                // tangency of a section and a floor arc one point (#18064)
+                // coincidence (the face/face tangency witness makes the shared-end
+                // tangency of a section and a floor arc one point, #18064)
                 if !(touch_is_alone(
                     k,
                     self,
