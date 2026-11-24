@@ -7016,7 +7016,9 @@ mod persistent_ribbon_tests {
         h.app.ui.tab = "SURFACE".into();
         h.frames(3);
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
-        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "MESH"]);
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "FORMS", "CREATE", "EDIT", "MESH"]);
+        let (_, forms, _) = lists.iter().find(|(p, _, _)| *p == "FORMS").unwrap();
+        assert!(forms.iter().any(|command| command.id == "form.prototype.create"));
         let (_, mesh, count) = lists.iter().find(|(p, _, _)| *p == "MESH").unwrap();
         assert_eq!(mesh.iter().map(|c| c.id).collect::<Vec<_>>(), ["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"]);
         assert_eq!(
@@ -7032,7 +7034,7 @@ mod persistent_ribbon_tests {
         h.app.preferences.legacy_surface_toolbar = true;
         h.frames(3);
         let lists = crate::toolbar_custom::panel_lists_for(&h.app, "SURFACE");
-        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "CREATE", "EDIT", "CONVERT"]);
+        assert_eq!(lists.iter().map(|(p, _, _)| *p).collect::<Vec<_>>(), ["SKETCH", "FORMS", "CREATE", "EDIT", "CONVERT"]);
         let (_, create, count) = lists.iter().find(|(p, _, _)| *p == "CREATE").unwrap();
         assert!(!create.iter().any(|c| c.id == "surface.thicken"));
         assert_eq!(*count, 4);
