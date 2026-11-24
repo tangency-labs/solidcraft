@@ -1550,7 +1550,11 @@ fn a_corrupt_embedded_model_is_a_warning_naming_the_file() {
 fn an_embedded_model_that_changed_or_is_missing_is_reported() {
     let data = base64_wrapped(&packed_box_step());
     let imported = embedded_import(&embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"));
-    assert!(imported.feature.warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("checksums disagree")), "{:?}", imported.feature.warnings);
+    assert!(
+        imported.feature.warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("checksums disagree")),
+        "{:?}",
+        imported.feature.warnings
+    );
     assert!(imported.plan.places.is_empty());
 
     let no_data = r#"(kicad_pcb (general (thickness 1.6))

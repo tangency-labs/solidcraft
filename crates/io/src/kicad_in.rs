@@ -3605,7 +3605,11 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                 // `|…|`: the text between the bars is one atom, whitespace and all. KiCad stores an
                 // embedded file's base64 data this way, wrapped over many lines.
                 let start = index + 1;
-                let end = source.get(start..).and_then(|rest| rest.find('|')).map(|n| start + n).ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
+                let end = source
+                    .get(start..)
+                    .and_then(|rest| rest.find('|'))
+                    .map(|n| start + n)
+                    .ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
                 let text = source.get(start..end).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
                 tokens.push(Token::Atom(text));
                 index = end + 1;
