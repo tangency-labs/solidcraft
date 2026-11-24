@@ -89,9 +89,9 @@ fn rounded_outset_sets_point_class_parameters_on_the_lent_brep() {
         SolidOffsetOptions::default(),
         &mut notifications.context(),
     );
-    let e = result
-        .err()
-        .expect("the overlap group's failed replacement is refused");
+    let Err(e) = result else {
+        panic!("the overlap group's failed replacement is refused");
+    };
     assert!(!e.is_unported_or_cancelled(), "{e}");
     assert_eq!(e.sm_status(), Some(1001), "{e}");
     let reasons: Vec<String> = std::iter::successors(Some(&e), |e| e.cause())

@@ -2,7 +2,7 @@
 topology.proto_topology_p1	gen0012	-
 topology.proto_topology_p1	gen0033	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
 topology.proto_topology_p1	gen0037	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
-topology.proto_topology_p1	gen0052	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p1	gen0052	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p1	gen0054	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1 Topology(ProtoVertexNotAnEnd)
 topology.proto_topology_p1	gen0062	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1 Topology(ProtoVertexNotAnEnd)|topology::proto_topology::p1::VertexDefinition::set_src_topo Topology(BrepSideNotOneOrTwo
 topology.proto_topology_p1	gen0066	topology::proto_topology::p1::ProtoTopologyManager::end_position Topology(ProtoVertexNotAnEnd)
@@ -67,11 +67,11 @@ topology.proto_topology_p1	gen0915	topology::proto_topology::p1 Topology(NotOnOw
 topology.proto_topology_p1	gen0964	-
 topology.proto_topology_p1	gen0966	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p1 Topology(ProtoVertexNotAnEnd)
 topology.proto_topology_p1	gen0974	topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p1	gen0990	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1::ProtoTopologyManager::end_position Topology(ProtoVertexNotAnEnd)
+topology.proto_topology_p1	gen0990	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1::ProtoTopologyManager::end_position Topology(ProtoVertexNotAnEnd)
 topology.proto_topology_p1	gen1000	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate Topology(ProtoEdgeWithoutDefinitions)
 topology.proto_topology_p1	gen1067	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p1	gen1071	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p1	gen1104	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p1 Topology(ProtoVertexNotAnEnd)
+topology.proto_topology_p1	gen1104	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p1 Topology(ProtoVertexNotAnEnd)
 topology.proto_topology_p1	gen1114	-
 topology.proto_topology_p1	gen1137	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p1	gen1142	topology::proto_topology::p1 Topology(NotOnOwnerList)
@@ -113,10 +113,10 @@ topology.proto_topology_p2	gen0034	topology::proto_topology::p1::find_position_f
 topology.proto_topology_p2	gen0041	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0050	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0065	topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen0068	curve::curve::p2::Curve Curve(Failed("the|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
+topology.proto_topology_p2	gen0068	curve::curve::p2::Curve Curve(BaseCurveMethod|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0076	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0080	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
-topology.proto_topology_p2	gen0091	Failed|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
+topology.proto_topology_p2	gen0091	nurbs::b_spline_curve::p1::BSplineCurve::evaluate_point Nurbs(BSpline(RoutineFailed))|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0092	topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0094	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0095	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
@@ -126,10 +126,10 @@ topology.proto_topology_p2	gen0115	intersect::point_class::PointClassification::
 topology.proto_topology_p2	gen0122	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0128	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0132	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
-topology.proto_topology_p2	gen0133	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0133	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0138	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0140	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
-topology.proto_topology_p2	gen0142	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0142	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0148	intersect::point_class::PointClassification::merge_into_object Intersect(UnsupportedObjectKind)|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0161	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0163	topology::proto_topology::p1 Topology(NotOnOwnerList)
@@ -145,7 +145,7 @@ topology.proto_topology_p2	gen0204	nurbs::b_spline_curve_n_lib::BSplineCurve::tr
 topology.proto_topology_p2	gen0218	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0221	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0222	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
-topology.proto_topology_p2	gen0231	curve::curve::p2::Curve Curve(Failed("the|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
+topology.proto_topology_p2	gen0231	curve::curve::p2::Curve Curve(BaseCurveMethod|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0236	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0241	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|intersect::point_class::PointClassification::merge_into_object Intersect(UnsupportedObjectKind)|topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0249	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
@@ -154,14 +154,14 @@ topology.proto_topology_p2	gen0253	intersect::point_class::PointClassification::
 topology.proto_topology_p2	gen0254	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0258	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0260	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen0270	curve::curve::p2::Curve Curve(Failed("the
-topology.proto_topology_p2	gen0272	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0270	curve::curve::p2::Curve Curve(BaseCurveMethod
+topology.proto_topology_p2	gen0272	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0279	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
-topology.proto_topology_p2	gen0280	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0280	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0284	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0288	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0289	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen0292	curve::curve::p2::Curve Curve(Failed("the|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
+topology.proto_topology_p2	gen0292	curve::curve::p2::Curve Curve(BaseCurveMethod|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0306	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0314	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0318	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
@@ -181,23 +181,23 @@ topology.proto_topology_p2	gen0391	intersect::point_class::PointClassification::
 topology.proto_topology_p2	gen0392	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0411	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0422	topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen0423	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
+topology.proto_topology_p2	gen0423	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0433	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p2	gen0441	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0447	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen0449	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
+topology.proto_topology_p2	gen0449	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0450	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0452	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0453	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0463	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0464	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0467	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
-topology.proto_topology_p2	gen0472	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
+topology.proto_topology_p2	gen0472	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0488	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0491	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0495	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0498	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
-topology.proto_topology_p2	gen0502	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0502	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0511	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0513	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0517	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
@@ -213,22 +213,22 @@ topology.proto_topology_p2	gen0561	topology::proto_topology::p1 Topology(NotOnOw
 topology.proto_topology_p2	gen0565	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0573	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0575	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
-topology.proto_topology_p2	gen0576	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0576	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0578	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
 topology.proto_topology_p2	gen0580	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0585	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0629	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
-topology.proto_topology_p2	gen0635	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
+topology.proto_topology_p2	gen0635	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0638	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0642	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
-topology.proto_topology_p2	gen0649	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
+topology.proto_topology_p2	gen0649	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0661	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0676	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0678	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0683	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen0685	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
+topology.proto_topology_p2	gen0685	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0693	InvalidInput|topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen0701	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
+topology.proto_topology_p2	gen0701	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0702	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0709	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0712	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
@@ -237,7 +237,7 @@ topology.proto_topology_p2	gen0715	topology::proto_topology::p2::ProtoTopologyMa
 topology.proto_topology_p2	gen0716	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0726	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0731	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
-topology.proto_topology_p2	gen0736	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
+topology.proto_topology_p2	gen0736	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0747	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0757	InvalidInput|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0761	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
@@ -249,23 +249,23 @@ topology.proto_topology_p2	gen0804	topology::proto_topology::p1 Topology(NotOnOw
 topology.proto_topology_p2	gen0814	-
 topology.proto_topology_p2	gen0822	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0824	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
-topology.proto_topology_p2	gen0825	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
+topology.proto_topology_p2	gen0825	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0835	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0844	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0850	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen0852	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
+topology.proto_topology_p2	gen0852	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0854	topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen0856	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
+topology.proto_topology_p2	gen0856	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0858	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0865	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen0871	InvalidInput|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
-topology.proto_topology_p2	gen0874	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
+topology.proto_topology_p2	gen0874	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen0877	topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0882	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0888	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::update_edges Topology(OldEdgeNotAmongSplit)
 topology.proto_topology_p2	gen0900	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0904	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
-topology.proto_topology_p2	gen0905	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen0905	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen0908	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0913	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0914	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
@@ -274,7 +274,7 @@ topology.proto_topology_p2	gen0920	intersect::point_class::PointClassification::
 topology.proto_topology_p2	gen0923	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen0924	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen0934	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
-topology.proto_topology_p2	gen0941	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
+topology.proto_topology_p2	gen0941	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen0946	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0956	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen0961	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
@@ -285,14 +285,14 @@ topology.proto_topology_p2	gen0998	intersect::point_class::PointClassification::
 topology.proto_topology_p2	gen1001	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen1007	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen1014	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
-topology.proto_topology_p2	gen1029	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen1053	curve::curve::p2::Curve Curve(Failed("the|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
-topology.proto_topology_p2	gen1060	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen1029	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
+topology.proto_topology_p2	gen1053	curve::curve::p2::Curve Curve(BaseCurveMethod|intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
+topology.proto_topology_p2	gen1060	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen1064	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen1071	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen1083	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p2::ProtoTopologyManager::create_proto_edge Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen1086	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
-topology.proto_topology_p2	gen1093	InvalidInput|curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen1093	InvalidInput|curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen1098	InvalidInput|topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen1106	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen1107	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
@@ -310,15 +310,15 @@ topology.proto_topology_p2	gen1171	nurbs::b_spline_curve_n_lib::BSplineCurve::tr
 topology.proto_topology_p2	gen1174	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
 topology.proto_topology_p2	gen1192	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen1193	-
-topology.proto_topology_p2	gen1204	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
+topology.proto_topology_p2	gen1204	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen1214	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen1219	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen1239	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside|topology::proto_topology::p2::ProtoTopologyManager::add_vertex_definition_from_pcs Topology(ClassificationOffTopology)
-topology.proto_topology_p2	gen1256	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen1256	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen1259	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)
 topology.proto_topology_p2	gen1261	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
 topology.proto_topology_p2	gen1272	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p1 Topology(NotOnOwnerList)
-topology.proto_topology_p2	gen1281	InvalidInput|curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen1281	InvalidInput|curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen1285	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p2	gen1294	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
 topology.proto_topology_p2	gen1299	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
@@ -330,7 +330,7 @@ topology.proto_topology_p2	gen1395	InvalidInput|topology::proto_topology::p2::Pr
 topology.proto_topology_p2	gen1406	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen1409	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::imprint_edge_definition Topology(NoFinalVertexAtEnd)
 topology.proto_topology_p2	gen1412	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
-topology.proto_topology_p2	gen1416	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p2	gen1416	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p2	gen1418	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)|topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen1420	topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions Topology(DefinitionWithoutSourceTopology)
 topology.proto_topology_p2	gen1422	nurbs::b_spline_curve_n_lib::BSplineCurve::trim Nurbs(BSpline(ParameterOutside
@@ -372,7 +372,7 @@ topology.proto_topology_p3	gen0317	topology::proto_topology::p1 Topology(NotOnOw
 topology.proto_topology_p3	gen0318	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen0334	-
 topology.proto_topology_p3	gen0341	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
-topology.proto_topology_p3	gen0356	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p3	gen0356	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p3	gen0357	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen0403	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen0415	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
@@ -386,7 +386,7 @@ topology.proto_topology_p3	gen0598	topology::proto_topology::p1 Topology(NotOnOw
 topology.proto_topology_p3	gen0603	-
 topology.proto_topology_p3	gen0605	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen0606	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
-topology.proto_topology_p3	gen0610	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
+topology.proto_topology_p3	gen0610	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen0633	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p3	gen0640	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p3	gen0654	intersect::point_class::PointClassification::find_obj_point_3d Intersect(UnsupportedObjectKind)|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
@@ -445,7 +445,7 @@ topology.proto_topology_p3	gen1616	topology::proto_topology::p1 Topology(ProtoVe
 topology.proto_topology_p3	gen1651	-
 topology.proto_topology_p3	gen1654	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen1673	-
-topology.proto_topology_p3	gen1691	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p3	gen1691	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p3	gen1712	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
 topology.proto_topology_p3	gen1717	topology::proto_topology::p1 Topology(NotOnOwnerList)|topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate Topology(ProtoEdgeWithoutDefinitions)
 topology.proto_topology_p3	gen1722	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot|topology::proto_topology::p1 Topology(NotOnOwnerList)
@@ -481,7 +481,7 @@ topology.proto_topology_p3	gen2347	-
 topology.proto_topology_p3	gen2390	intersect::point_class::PointClassification::compute_point_parameters Intersect(NotOneFoot
 topology.proto_topology_p3	gen2400	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p3	gen2405	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
-topology.proto_topology_p3	gen2414	curve::curve::p2::Curve Curve(Failed("the
+topology.proto_topology_p3	gen2414	curve::curve::p2::Curve Curve(BaseCurveMethod
 topology.proto_topology_p3	gen2434	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen2436	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen2446	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
@@ -495,7 +495,7 @@ topology.proto_topology_p3	gen2595	topology::proto_topology::p1::find_position_f
 topology.proto_topology_p3	gen2613	topology::proto_topology::p1 Topology(NotOnOwnerList)
 topology.proto_topology_p3	gen2615	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen2623	-
-topology.proto_topology_p3	gen2627	curve::curve::p2::Curve Curve(Failed("the|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
+topology.proto_topology_p3	gen2627	curve::curve::p2::Curve Curve(BaseCurveMethod|topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen2639	-
 topology.proto_topology_p3	gen2650	topology::proto_topology::p1::find_position_from_pcs Topology(ClassificationParametersUnset)
 topology.proto_topology_p3	gen2664	-

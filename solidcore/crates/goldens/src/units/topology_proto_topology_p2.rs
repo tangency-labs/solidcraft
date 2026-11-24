@@ -161,14 +161,14 @@ fn has_dup<T: PartialEq>(v: &[T]) -> bool {
 fn pe_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, pe: ProtoEdgeId) -> Result<bool, Fail> {
     match r.mgr.proto_edge_evaluate_mid(k, &r.pool, pe, false, true) {
         Ok(_) => Ok(true),
-        Err(e) => match Output::unported(&e) {
-            Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => {
-                #[cfg(test)]
-                super::topology_proto_topology_p1::witness::error(&e);
-                Ok(false)
+        Err(e) => {
+            if let Some(o) = Output::unported(&e) {
+                return Err(Fail::Deferred(Box::new(o)));
             }
-        },
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
+            Ok(false)
+        }
     }
 }
 
@@ -179,14 +179,14 @@ fn ed_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, ed: solidcore::top
     };
     match d.evaluate_mid(k, &r.pool, false, true) {
         Ok(_) => Ok(true),
-        Err(e) => match Output::unported(&e) {
-            Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => {
-                #[cfg(test)]
-                super::topology_proto_topology_p1::witness::error(&e);
-                Ok(false)
+        Err(e) => {
+            if let Some(o) = Output::unported(&e) {
+                return Err(Fail::Deferred(Box::new(o)));
             }
-        },
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
+            Ok(false)
+        }
     }
 }
 
@@ -1636,6 +1636,8 @@ impl UnitDiff for Runner {
 mod tests {
     use std::collections::BTreeMap;
 
+    use solidcore::error::topology::TopologyFailure;
+    use solidcore::error::Reason;
     use solidcore::topology::proto_topology::p2::ProtoBrep;
 
     use super::super::topology_proto_topology_p1::{proto_state_before, rust_run, SKIP};
@@ -1840,12 +1842,15 @@ mod tests {
     /// midpoint, whose vertices are not its ends, and the imprint later finds no vertex for
     /// them (`SM_ERR_NULL_POINTER`).
     ///
-    /// Five rows end at their first `UpdateEdges` op whose definition crosses the split:
+    /// Five rows fail at their first `UpdateEdges` op whose definition crosses the split:
     /// the split's new vertex definition has no position, because these scripts classify
     /// the definition against bare stand-ins (regions and loops without geometry), so
-    /// `CreateVertexDefinition` refuses with [`SolidError::InvalidInput`] where upstream
-    /// would read an uninitialised position. The op is replayed on the state it starts
-    /// from, so the refusal is pinned to that exact call and message.
+    /// neither classification has parameters and `sm_FindPositionFromPCs` fails, its
+    /// status ignored upstream, which then reads an uninitialised position. Since #18927
+    /// that failure is passed on (`SM_ERR`, the run going on), where main refused the
+    /// unset position afterwards in `CreateVertexDefinition` with
+    /// [`SolidError::InvalidInput`] and the record ended. The op is replayed on the state
+    /// it starts from, so the failure is pinned to that exact call and reason.
     #[test]
     fn wr533_update_edges_rows() {
         let ctx = CaseContext {
@@ -1875,13 +1880,13 @@ mod tests {
             let Ok(out) = rust_run(&s) else {
                 panic!("{name}: the script does not run")
             };
-            // the op the record ends at (skipped)
+            // the first op that fails: main's record ended there (the op skipped)
             let (mut at, mut index) = (0, 0);
-            while out[at + 1] != SKIP {
+            while out[at + 1] == 0.0 {
                 at += 3 + out[at + 2] as usize;
                 index += 1;
             }
-            assert_eq!(at + 2, out.len(), "{name}: the record ends at the skipped op");
+            assert_eq!(out[at + 1], 1001.0, "{name}: the op fails with SM_ERR");
             assert_eq!(ops[index][0] as i64, q::MGR_UPDATE_EDGES, "{name}");
             let Ok(Some(mut r)) = proto_state_before(&s, index) else {
                 panic!("no state before op {index}")
@@ -1920,11 +1925,11 @@ mod tests {
                 .mgr
                 .update_edges(&r.k, &mut r.pool, w, old, &edges, vd)
                 .unwrap_err();
-            assert!(
-                matches!(e, SolidError::InvalidInput { .. })
-                    && e.to_string().contains("position and gap are uninitialised"),
-                "{name}: {e}"
-            );
+            let SolidError::Failed(f) = &e else {
+                panic!("{name}: {e}")
+            };
+            assert_eq!(f.operation, "topology::proto_topology::p1::find_position_from_pcs", "{name}: {e}");
+            assert_eq!(f.reason, Reason::Topology(TopologyFailure::ClassificationParametersUnset), "{name}: {e}");
         }
     }
 }
