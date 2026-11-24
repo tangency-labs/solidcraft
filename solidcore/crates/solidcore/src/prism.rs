@@ -10,17 +10,17 @@
 //! Every query here returns its value with a proved bound, exactly, or not at all (`None` or a
 //! typed refusal): it decides nothing at a tolerance it cannot prove (owner rule 13564).
 
-pub mod export_geometry;
+pub mod arc_conversion;
+pub mod bounds;
 pub mod extrude;
 pub mod fit;
-pub mod import_geometry;
 pub mod measure;
-pub mod path_export;
 pub mod placement;
 pub mod profile;
 pub mod read;
 pub mod recognition;
 pub mod sheet;
+pub mod transform;
 
 #[cfg(test)]
 mod tests;

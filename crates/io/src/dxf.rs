@@ -5,7 +5,7 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_file`].
 
-use solidcore_ops::import_geometry::{scale_point, scale_value};
+use solidcore_ops::dxf::import::{scale_point, scale_value};
 use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 use solidcraft_geom::prelude::*;
 
@@ -749,12 +749,12 @@ fn layered_ellipse(entity: &Ent, k: f64) -> Result<DxfShape> {
     let ratio = layered_required(entity, 40)?;
     let t0 = layered_required(entity, 41)?;
     let t1 = layered_required(entity, 42)?;
-    match solidcore_ops::import_geometry::ellipse_support(c, major, ratio) {
-        solidcore_ops::import_geometry::EllipseSupport::Valid => {}
-        solidcore_ops::import_geometry::EllipseSupport::InvalidMajor => {
+    match solidcore_ops::dxf::import::ellipse_support(c, major, ratio) {
+        solidcore_ops::dxf::import::EllipseSupport::Valid => {}
+        solidcore_ops::dxf::import::EllipseSupport::InvalidMajor => {
             return Err(IoError::Invalid("invalid or degenerate layered DXF ellipse support".into()));
         }
-        solidcore_ops::import_geometry::EllipseSupport::CollapsedMinor => {
+        solidcore_ops::dxf::import::EllipseSupport::CollapsedMinor => {
             return Err(IoError::Invalid("DXF ellipse minor axis collapses in the represented units".into()));
         }
     }

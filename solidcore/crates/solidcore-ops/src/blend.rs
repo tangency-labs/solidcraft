@@ -2938,7 +2938,7 @@ fn chamfer_sides_impl(
                         why,
                     },
                 ) => Error::TooLarge {
-                    size: crate::import_geometry::scale_value(distance, size),
+                    size: solidcore::prism::transform::scale_value(distance, size),
                     kind: FitKind::Distance,
                     at,
                     face,

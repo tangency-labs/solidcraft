@@ -3,7 +3,7 @@
 //! Admission precedes recognition and fitting. A failed conversion returns no partial path;
 //! piece errors always refer to the original input, including after arc splitting or fitting.
 
-use solidcore_ops::path_export as geometry;
+use solidcore_ops::dxf::export as geometry;
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_geom::MAX_FIT_PIECES;
 use solidcraft_geom::prelude::*;
@@ -24,7 +24,7 @@ pub enum DxfPath<'a> {
 }
 
 /// How a path's curves are represented in the DXF file.
-pub use geometry::DxfPathStyle;
+pub use geometry::PathStyle as DxfPathStyle;
 
 /// A polyline vertex. `bulge` describes the edge leaving `at`: `tan(sweep / 4)`.
 /// The terminal vertex of an open polyline has zero bulge.

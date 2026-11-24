@@ -1,6 +1,11 @@
-//! Scalar-unit conversion, chord coordinates and ellipse admission for planar source geometry.
-//! Not upstream. Preserves the reader's ordinary multiplication and hypot order.
+//! Planar scaling and translation: a unit scale of points and scalars, chord coordinates, and a
+//! uniform scale plus translation with one rounding per component (FMA).
+//! Not upstream. Moved from SolidCraft's DXF reader and writer with their ordinary
+//! multiplication and FMA order unchanged.
+use super::arc_conversion::PathRefusal;
+use super::bounds::{finite_point, positive};
 use crate::math::Vec2;
+type Result<T> = std::result::Result<T, PathRefusal>;
 
 /// Scale coordinates without changing the source reader's refusal policy.
 pub fn scale_point(point: Vec2, scale: f64) -> Vec2 {
@@ -22,14 +27,14 @@ pub fn chord_coordinates(point: Vec2, leading_x: f64, trailing_x: f64) -> crate:
         || chord <= 0.0
     {
         return Err(crate::SolidError::invalid_input(
-            "prism::import_geometry::chord_coordinates",
+            "prism::transform::chord_coordinates",
             "coordinates must be finite and the chord must have finite positive length",
         ));
     }
     let normalized = Vec2::new((point.x - leading_x) / chord, point.y / chord);
     if !normalized.x.is_finite() || !normalized.y.is_finite() {
         return Err(crate::SolidError::invalid_input(
-            "prism::import_geometry::chord_coordinates",
+            "prism::transform::chord_coordinates",
             "coordinates in chord units must be finite",
         ));
     }
@@ -39,43 +44,6 @@ pub fn chord_coordinates(point: Vec2, leading_x: f64, trailing_x: f64) -> crate:
 pub fn scale_value(value: f64, scale: f64) -> f64 {
     value * scale
 }
-/// Whether a nonzero source coordinate vanished when scaled.
-pub fn collapsed_coordinate(source: Vec2, scaled: Vec2) -> bool {
-    (source.x != 0.0 && scaled.x == 0.0) || (source.y != 0.0 && scaled.y == 0.0)
-}
-/// The support field that cannot be represented.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EllipseSupport {
-    /// Finite, nondegenerate supporting axes.
-    Valid,
-    /// Invalid centre, major axis or ratio.
-    InvalidMajor,
-    /// The minor axis collapses in represented units.
-    CollapsedMinor,
-}
-/// Admit the original major/minor support without repairing a collapsed axis.
-pub fn ellipse_support(center: Vec2, major: Vec2, ratio: f64) -> EllipseSupport {
-    let radius = major.x.hypot(major.y);
-    let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
-    if !finite(center)
-        || !finite(major)
-        || major == Vec2::ZERO
-        || !radius.is_finite()
-        || radius <= 0.0
-        || !ratio.is_finite()
-        || ratio <= 0.0
-        || ratio > 1.0
-    {
-        return EllipseSupport::InvalidMajor;
-    }
-    let minor = Vec2::new(-major.y * ratio, major.x * ratio);
-    let minor_radius = radius * ratio;
-    if !finite(minor) || minor == Vec2::ZERO || !minor_radius.is_finite() || minor_radius <= 0.0 {
-        return EllipseSupport::CollapsedMinor;
-    }
-    EllipseSupport::Valid
-}
-
 /// Transform retained source anchors with one rounding per component.
 /// The owning reader/writer retains its existing validation and error order.
 pub fn transform_anchor(point: Vec2, scale: f64, translation: Vec2) -> Vec2 {
@@ -83,4 +51,21 @@ pub fn transform_anchor(point: Vec2, scale: f64, translation: Vec2) -> Vec2 {
         point.x.mul_add(scale, translation.x),
         point.y.mul_add(scale, translation.y),
     )
+}
+/// Scale and translate with the original one-rounding FMA semantics.
+pub fn transformed_point(point: Vec2, scale: f64, translation: Vec2) -> Result<Vec2> {
+    finite_point(point)?;
+    finite_point(Vec2::new(
+        point.x.mul_add(scale, translation.x),
+        point.y.mul_add(scale, translation.y),
+    ))
+}
+
+/// Scale a dimension, rejecting nonpositive or nonfinite results.
+pub fn scaled_positive(value: f64, scale: f64) -> Result<f64> {
+    positive(value * scale)
+}
+/// Scale an axis without translating it, retaining ordinary multiplication rounding.
+pub fn scaled_axis(axis: Vec2, scale: f64) -> Result<Vec2> {
+    finite_point(Vec2::new(axis.x * scale, axis.y * scale))
 }

@@ -1,6 +1,8 @@
-//! Bounded conversion of borrowed planar paths to export geometry.
+//! Bounded conversion of borrowed planar paths to lines, circles, arcs in degrees, ellipses,
+//! splines and polylines with bulged edges, certified against a caller's scalar encoding; and
+//! the checks that degree-valued arc fields and centre/major/ratio ellipses are representable.
 //!
-//! Not upstream. Relocated from the application DXF converter without changing arithmetic.
+//! Not upstream. Moved from SolidCraft's DXF writer and reader without changing arithmetic.
 //! Admission precedes recognition and conversion. A failed conversion returns no partial path;
 //! piece errors always refer to the original input, including after arc splitting or fitting.
 //! Arc degree conversion is bounded by canonical one-turn arithmetic roundoff before the
@@ -45,8 +47,8 @@ impl std::fmt::Display for PathRefusal {
 }
 impl std::error::Error for PathRefusal {}
 type Result<T> = std::result::Result<T, PathRefusal>;
-type DxfShape = PathShape<Vec2>;
-type DxfVertex = Vertex<Vec2>;
+type Shape = PathShape<Vec2>;
+type Vertex2 = Vertex<Vec2>;
 
 /// Exact export geometry. The vector parameter permits field-for-field record conversion.
 #[derive(Clone, Debug, PartialEq)]
@@ -109,7 +111,7 @@ pub enum PathShape<P> {
 /// bounded angular rounding cells, not bitwise endpoint identity. Polyline joins require
 /// equal stored endpoints and otherwise emit separate open runs without filling or snapping.
 #[derive(Clone, Copy, Debug)]
-pub enum DxfPath<'a> {
+pub enum PlanarPath<'a> {
     /// A path with no whole-loop recognition intent.
     Open(&'a [Seg2]),
     /// Permit whole-loop recognition and an explicit closing flag when demonstrated.
@@ -119,7 +121,7 @@ pub enum DxfPath<'a> {
 
 /// How a path's curves are represented. Coordinates and tolerances are in millimetres.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DxfPathStyle {
+pub enum PathStyle {
     /// Preserve analytic curves and the original polynomial/rational spline controls.
     Exact,
     /// Collect consecutive lines and circular arcs into polylines with signed bulges.
@@ -177,15 +179,15 @@ fn invalid(reason: &str) -> PathRefusal {
 /// performs no recognition, fitting, allocation of output geometry or wire-format rounding.
 /// Success does not certify any final DXF representation: callers must still pass their
 /// selected result through [`path_shapes`]. Generic conversion keeps its strict policies.
-pub fn admit_path(path: DxfPath<'_>, style: DxfPathStyle) -> Result<()> {
-    if let DxfPathStyle::Arcs { tolerance_mm } = style {
+pub fn admit_path(path: PlanarPath<'_>, style: PathStyle) -> Result<()> {
+    if let PathStyle::Arcs { tolerance_mm } = style {
         if !(tolerance_mm.is_finite() && tolerance_mm >= 1e-9) {
             return Err(invalid("arc tolerance must be finite and at least 1e-9 mm"));
         }
     }
     let segs = match path {
-        DxfPath::Open(segs) => segs,
-        DxfPath::Closed(lp) => lp.segs.as_slice(),
+        PlanarPath::Open(segs) => segs,
+        PlanarPath::Closed(lp) => lp.segs.as_slice(),
     };
     if segs.len() > MAX_PATH_ITEMS {
         return Err(invalid("input piece budget exceeded"));
@@ -212,24 +214,24 @@ pub fn admit_path(path: DxfPath<'_>, style: DxfPathStyle) -> Result<()> {
 /// `Closed` permits recognition, not an invented closing edge: only equal stored endpoints
 /// share a polyline vertex. Mixed or fragmented runs remain open, in original piece order.
 pub fn path_shapes(
-    path: DxfPath<'_>,
-    style: DxfPathStyle,
+    path: PlanarPath<'_>,
+    style: PathStyle,
     encoding: ScalarEncoding,
-) -> Result<Vec<DxfShape>> {
+) -> Result<Vec<Shape>> {
     admit_path(path, style)?;
     let (segs, closed) = match path {
-        DxfPath::Open(segs) => (segs, None),
-        DxfPath::Closed(lp) => (lp.segs.as_slice(), Some(lp)),
+        PlanarPath::Open(segs) => (segs, None),
+        PlanarPath::Closed(lp) => (lp.segs.as_slice(), Some(lp)),
     };
     if let Some(shape) = recognized_path(path, style, encoding)? {
         return Ok(vec![shape]);
     }
     match style {
-        DxfPathStyle::Arcs { .. } if segs.iter().any(|s| !s.is_line_or_arc()) => Err(invalid(
+        PathStyle::Arcs { .. } if segs.iter().any(|s| !s.is_line_or_arc()) => Err(invalid(
             "free-form arc fitting must precede exact conversion",
         )),
-        DxfPathStyle::Polyline => polylines(segs, closed.is_some(), encoding),
-        DxfPathStyle::Exact | DxfPathStyle::Arcs { .. } => {
+        PathStyle::Polyline => polylines(segs, closed.is_some(), encoding),
+        PathStyle::Exact | PathStyle::Arcs { .. } => {
             let mut shapes = Vec::new();
             for (index, seg) in segs.iter().enumerate() {
                 push_shape(
@@ -252,13 +254,13 @@ pub fn path_shapes(
 /// A complete recognized analytic loop, without fitting or converting individual pieces.
 /// The caller admits every source piece first.
 pub fn recognized_path(
-    path: DxfPath<'_>,
-    style: DxfPathStyle,
+    path: PlanarPath<'_>,
+    style: PathStyle,
     encoding: ScalarEncoding,
-) -> Result<Option<DxfShape>> {
+) -> Result<Option<Shape>> {
     let (segs, closed) = match path {
-        DxfPath::Open(segs) => (segs, None),
-        DxfPath::Closed(lp) => (lp.segs.as_slice(), Some(lp)),
+        PlanarPath::Open(segs) => (segs, None),
+        PlanarPath::Closed(lp) => (lp.segs.as_slice(), Some(lp)),
     };
     if let Some(lp) = closed {
         if let Some((c, r)) = loop_circle(lp) {
@@ -279,9 +281,9 @@ pub fn recognized_path(
                 "circle radius",
                 encoding.length,
             )?;
-            return Ok(Some(DxfShape::Circle { c, r }));
+            return Ok(Some(Shape::Circle { c, r }));
         }
-        if !matches!(style, DxfPathStyle::Arcs { .. }) {
+        if !matches!(style, PathStyle::Arcs { .. }) {
             if let Some((c, major, ratio)) = loop_ellipse(lp) {
                 // Keep the recognizer's validated support. Only its axis sign may follow the
                 // first conic's historical DXF frame: negating the axis preserves a full ellipse,
@@ -302,7 +304,7 @@ pub fn recognized_path(
                     }
                 }
                 if ellipse_representable(c, major, ratio, 0.0, TAU, encoding) {
-                    return Ok(Some(DxfShape::Ellipse {
+                    return Ok(Some(Shape::Ellipse {
                         c,
                         major,
                         ratio,
@@ -327,7 +329,7 @@ pub fn exact_piece(
     index: usize,
     total: usize,
     encoding: ScalarEncoding,
-) -> Result<DxfShape> {
+) -> Result<Shape> {
     exact(seg, Piece { index, total }, encoding)
 }
 
@@ -482,7 +484,7 @@ fn arc_degrees_certified(start: f64, sweep: f64, d0: f64, d1: f64) -> Option<boo
     )
 }
 
-fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape> {
+fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<Shape> {
     let shape = match *seg {
         Seg2::Line { a, b } => {
             let encoded_a = encoded_point(a, encoding)
@@ -492,7 +494,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             if a != b && encoded_a == encoded_b {
                 return Err(piece.invalid("line endpoints collapse at writer precision"));
             }
-            DxfShape::Line(a, b)
+            Shape::Line(a, b)
         }
         Seg2::Arc {
             center,
@@ -505,7 +507,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             encoded_positive(radius, piece, "arc radius", encoding.length)?;
             // Admission already refused >TAU. A shorter arc must not acquire a closing edge.
             if sweep.abs() == TAU {
-                return Ok(DxfShape::Circle {
+                return Ok(Shape::Circle {
                     c: center,
                     r: radius,
                 });
@@ -532,7 +534,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             if encoded_a0.rem_euclid(360.0) == encoded_a1.rem_euclid(360.0) {
                 return Err(piece.invalid("arc endpoints collapse in the angular representation"));
             }
-            DxfShape::Arc {
+            Shape::Arc {
                 c: center,
                 r: radius,
                 a0,
@@ -553,7 +555,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
                     wrap(end, encoding.turn_snap_radians),
                 );
                 if ellipse_representable(e.center, e.major, e.ratio, t0, t1, encoding) {
-                    return Ok(DxfShape::Ellipse {
+                    return Ok(Shape::Ellipse {
                         c: e.center,
                         major: e.major,
                         ratio: e.ratio,
@@ -575,7 +577,7 @@ fn exact(seg: &Seg2, piece: Piece, encoding: ScalarEncoding) -> Result<DxfShape>
             bezier_spline(pts, None)
         }
     };
-    if let DxfShape::Spline { ctrl, .. } = &shape {
+    if let Shape::Spline { ctrl, .. } = &shape {
         if let Some(first) = ctrl.first() {
             let encoded_first = encoded_point(*first, encoding)
                 .ok_or_else(|| piece.invalid("spline control cannot be encoded"))?;
@@ -616,7 +618,7 @@ fn encoded_positive(
     Ok(())
 }
 
-fn push_shape(shapes: &mut Vec<DxfShape>, shape: DxfShape) -> Result<()> {
+fn push_shape(shapes: &mut Vec<Shape>, shape: Shape) -> Result<()> {
     if shapes.len() >= MAX_PATH_ITEMS {
         return Err(invalid("output entity budget exceeded"));
     }
@@ -629,12 +631,12 @@ fn push_shape(shapes: &mut Vec<DxfShape>, shape: DxfShape) -> Result<()> {
 
 #[derive(Default)]
 struct Run {
-    vertices: Vec<DxfVertex>,
+    vertices: Vec<Vertex2>,
     end: Option<Vec2>,
 }
 
 struct Polylines {
-    shapes: Vec<DxfShape>,
+    shapes: Vec<Shape>,
     run: Run,
     vertices: usize,
     uninterrupted: bool,
@@ -652,7 +654,7 @@ impl Polylines {
         Ok(())
     }
 
-    fn vertex(&mut self, vertex: DxfVertex) -> Result<()> {
+    fn vertex(&mut self, vertex: Vertex2) -> Result<()> {
         self.reserve_vertices(1)?;
         self.run
             .vertices
@@ -673,7 +675,7 @@ impl Polylines {
         if !(a.is_finite() && b.is_finite() && bulge.is_finite()) {
             return Err(piece.invalid("non-finite polyline vertex or bulge"));
         }
-        self.vertex(DxfVertex { at: a, bulge })?;
+        self.vertex(Vertex2 { at: a, bulge })?;
         self.run.end = Some(b);
         Ok(())
     }
@@ -683,27 +685,24 @@ impl Polylines {
             return Ok(());
         };
         if !closed {
-            self.vertex(DxfVertex {
+            self.vertex(Vertex2 {
                 at: end,
                 bulge: 0.0,
             })?;
         }
         let vertices = std::mem::take(&mut self.run.vertices);
         self.run.end = None;
-        push_shape(
-            &mut self.shapes,
-            DxfShape::BulgedPolyline { vertices, closed },
-        )
+        push_shape(&mut self.shapes, Shape::BulgedPolyline { vertices, closed })
     }
 
-    fn exact(&mut self, shape: DxfShape) -> Result<()> {
+    fn exact(&mut self, shape: Shape) -> Result<()> {
         self.flush(false)?;
         self.uninterrupted = false;
         push_shape(&mut self.shapes, shape)
     }
 }
 
-fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Vec<DxfShape>> {
+fn polylines(segs: &[Seg2], closed: bool, encoding: ScalarEncoding) -> Result<Vec<Shape>> {
     let mut out = Polylines {
         shapes: Vec::new(),
         run: Run::default(),
@@ -834,7 +833,7 @@ fn can_pack(a: Vec2, z: Vec2, bulge: f64, center: Vec2, radius: f64, sweep: f64)
         return false;
     };
     support_residuals(u, v, bulge, ui, vi).is_some()
-        && bulge_arc(DxfVertex { at: a, bulge }, z).is_some()
+        && bulge_arc(Vertex2 { at: a, bulge }, z).is_some()
 }
 
 // The gamma_n relative-error model applies to normal arithmetic. Conservatively retain
@@ -1150,7 +1149,7 @@ fn support_residuals(u: Vec2, v: Vec2, b: f64, ui: SupportPoint, vi: SupportPoin
 /// Reconstruct a non-straight polyline edge with a signed sweep for bounds and validation.
 /// Avoid squaring the chord length or first forming 1/bulge: those can overflow even when
 /// the resulting radius is finite. A zero chord with a nonzero bulge is not an arc.
-pub fn bulge_arc(from: DxfVertex, to: Vec2) -> Option<Seg2> {
+pub fn bulge_arc(from: Vertex2, to: Vec2) -> Option<Seg2> {
     let b = from.bulge;
     if !(from.at.is_finite() && to.is_finite() && b.is_finite()) || b == 0.0 || b.abs() > 1.0 {
         return None;
@@ -1195,12 +1194,12 @@ fn wrap(t: f64, turn_snap_radians: f64) -> f64 {
         r
     }
 }
-fn bezier_spline(pts: &[Vec2], weights: Option<Vec<f64>>) -> DxfShape {
+fn bezier_spline(pts: &[Vec2], weights: Option<Vec<f64>>) -> Shape {
     let degree = pts.len().saturating_sub(1).max(1);
     let knots = std::iter::repeat_n(0.0, degree + 1)
         .chain(std::iter::repeat_n(1.0, degree + 1))
         .collect();
-    DxfShape::Spline {
+    Shape::Spline {
         degree: degree as u8,
         knots,
         ctrl: pts.to_vec(),
@@ -1209,7 +1208,7 @@ fn bezier_spline(pts: &[Vec2], weights: Option<Vec<f64>>) -> DxfShape {
 }
 
 /// Endpoints and directed cardinal extrema of one admitted bulged edge (at most six).
-pub fn bulged_edge_points(from: DxfVertex, to: Vec2) -> Result<Vec<Vec2>> {
+pub fn bulged_edge_points(from: Vertex2, to: Vec2) -> Result<Vec<Vec2>> {
     let mut out = vec![from.at, to];
     if from.bulge == 0.0 {
         return Ok(out);
@@ -1245,4 +1244,62 @@ pub fn bulged_edge_points(from: DxfVertex, to: Vec2) -> Result<Vec<Vec2>> {
         }
     }
     Ok(out)
+}
+
+/// Whether the original degree-valued arc fields can be sampled finitely.
+pub fn arc_fields_finite(a0: f64, a1: f64) -> bool {
+    a0.is_finite()
+        && a1.is_finite()
+        && (a1 - a0).is_finite()
+        && a0.to_radians().is_finite()
+        && a1.to_radians().is_finite()
+}
+/// Whether an axis has a finite nonzero Euclidean length.
+pub fn axis_nonzero(axis: Vec2) -> bool {
+    axis.is_finite() && axis.length_hypot().is_finite() && axis.length_hypot() > 0.0
+}
+/// Whether the interval difference is finite.
+pub fn finite_span(start: f64, end: f64) -> bool {
+    (end - start).is_finite()
+}
+/// Whether a degree value has a finite radian representation.
+pub fn finite_degrees(angle: f64) -> bool {
+    angle.is_finite() && angle.to_radians().is_finite()
+}
+/// Whether rounded degree endpoints remain distinct modulo one turn.
+pub fn distinct_degrees(start: f64, end: f64) -> bool {
+    let span = end - start;
+    span.is_finite() && span.rem_euclid(360.0) != 0.0
+}
+/// The support field that cannot be represented.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EllipseSupport {
+    /// Finite, nondegenerate supporting axes.
+    Valid,
+    /// Invalid centre, major axis or ratio.
+    InvalidMajor,
+    /// The minor axis collapses in represented units.
+    CollapsedMinor,
+}
+/// Admit the original major/minor support without repairing a collapsed axis.
+pub fn ellipse_support(center: Vec2, major: Vec2, ratio: f64) -> EllipseSupport {
+    let radius = major.x.hypot(major.y);
+    let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
+    if !finite(center)
+        || !finite(major)
+        || major == Vec2::ZERO
+        || !radius.is_finite()
+        || radius <= 0.0
+        || !ratio.is_finite()
+        || ratio <= 0.0
+        || ratio > 1.0
+    {
+        return EllipseSupport::InvalidMajor;
+    }
+    let minor = Vec2::new(-major.y * ratio, major.x * ratio);
+    let minor_radius = radius * ratio;
+    if !finite(minor) || minor == Vec2::ZERO || !minor_radius.is_finite() || minor_radius <= 0.0 {
+        return EllipseSupport::CollapsedMinor;
+    }
+    EllipseSupport::Valid
 }

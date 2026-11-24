@@ -1,16 +1,16 @@
-//! Conservative bounds and positive affine transforms for planar export geometry.
+//! Conservative planar bounds: of points, of a whole circle, of a whole ellipse and of a
+//! polyline with bulged edges, each rounded outwards.
 //!
-//! Not upstream. Relocated from the DXF owned model with the original outward bounds,
-//! FMA transform order and explicit refusal domains unchanged. No recursion.
+//! Not upstream. Moved from SolidCraft's DXF writer with the original outward bounds and
+//! explicit refusal domains unchanged. No recursion.
 
-use super::path_export::PathRefusal;
-use super::recognition::RecognitionVector;
+use super::arc_conversion::PathRefusal;
 use crate::geom::certified::next_up;
 use crate::math::Vec2;
 mod bulges;
 pub use bulges::bounds as bulged_bounds;
 type Result<T> = std::result::Result<T, PathRefusal>;
-fn invalid(message: &str) -> PathRefusal {
+pub(super) fn invalid(message: &str) -> PathRefusal {
     PathRefusal {
         piece: None,
         reason: message.into(),
@@ -42,7 +42,7 @@ impl Bounds {
         }
     }
 }
-fn finite_point(point: Vec2) -> Result<Vec2> {
+pub(super) fn finite_point(point: Vec2) -> Result<Vec2> {
     if point.is_finite() {
         Ok(point)
     } else {
@@ -50,7 +50,7 @@ fn finite_point(point: Vec2) -> Result<Vec2> {
     }
 }
 
-fn positive(value: f64) -> Result<f64> {
+pub(super) fn positive(value: f64) -> Result<f64> {
     if value.is_finite() && value > 0.0 {
         Ok(value)
     } else {
@@ -107,47 +107,4 @@ pub fn ellipse_bounds(c: Vec2, major: Vec2, ratio: f64, t0: f64, t1: f64) -> Res
         Vec2::new(-next_up(-(c.x - x)), -next_up(-(c.y - y))),
         Vec2::new(next_up(c.x + x), next_up(c.y + y)),
     )
-}
-
-/// Scale and translate with the original one-rounding FMA semantics.
-pub fn transformed_point(point: Vec2, scale: f64, translation: Vec2) -> Result<Vec2> {
-    finite_point(point)?;
-    finite_point(Vec2::new(
-        point.x.mul_add(scale, translation.x),
-        point.y.mul_add(scale, translation.y),
-    ))
-}
-
-/// Scale a dimension, rejecting nonpositive or nonfinite results.
-pub fn scaled_positive(value: f64, scale: f64) -> Result<f64> {
-    positive(value * scale)
-}
-/// Scale an axis without translating it, retaining ordinary multiplication rounding.
-pub fn scaled_axis(axis: Vec2, scale: f64) -> Result<Vec2> {
-    finite_point(Vec2::new(axis.x * scale, axis.y * scale))
-}
-/// Whether the original degree-valued arc fields can be sampled finitely.
-pub fn arc_fields_finite(a0: f64, a1: f64) -> bool {
-    a0.is_finite()
-        && a1.is_finite()
-        && (a1 - a0).is_finite()
-        && a0.to_radians().is_finite()
-        && a1.to_radians().is_finite()
-}
-/// Whether an axis has a finite nonzero Euclidean length.
-pub fn axis_nonzero(axis: Vec2) -> bool {
-    axis.is_finite() && axis.length_hypot().is_finite() && axis.length_hypot() > 0.0
-}
-/// Whether the interval difference is finite.
-pub fn finite_span(start: f64, end: f64) -> bool {
-    (end - start).is_finite()
-}
-/// Whether a degree value has a finite radian representation.
-pub fn finite_degrees(angle: f64) -> bool {
-    angle.is_finite() && angle.to_radians().is_finite()
-}
-/// Whether rounded degree endpoints remain distinct modulo one turn.
-pub fn distinct_degrees(start: f64, end: f64) -> bool {
-    let span = end - start;
-    span.is_finite() && span.rem_euclid(360.0) != 0.0
 }

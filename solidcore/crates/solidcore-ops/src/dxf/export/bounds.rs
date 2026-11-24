@@ -1,6 +1,7 @@
-//! Owned planar export bounds and transforms, delegated to kernel primitives.
-use crate::path_export::{PathRefusal, PathVertex};
-use solidcore::prism::export_geometry as kernel;
+//! Bounds and placement of written entities, through the kernel's `prism::{bounds, transform}`.
+use super::{PathRefusal, PathVertex, MAX_PATH_ITEMS};
+use solidcore::prism::bounds as kernel;
+use solidcore::prism::{arc_conversion, transform};
 use solidcore_convert as convert;
 use solidcore_record::Vec2;
 type Result<T> = std::result::Result<T, PathRefusal>;
@@ -63,36 +64,16 @@ pub fn point_bounds(points: &[Vec2]) -> Result<Bounds> {
 }
 /// Positive uniform scale and translation, with the kernel's FMA semantics.
 pub fn transformed_point(p: Vec2, scale: f64, translation: Vec2) -> Result<Vec2> {
-    kernel::transformed_point(convert::vec2(p), scale, convert::vec2(translation))
+    transform::transformed_point(convert::vec2(p), scale, convert::vec2(translation))
         .map(convert::record_vec2)
-}
-/// Scale a positive dimension.
-pub fn scaled_positive(value: f64, scale: f64) -> Result<f64> {
-    kernel::scaled_positive(value, scale)
 }
 /// Scale an axis without translating it.
 pub fn scaled_axis(axis: Vec2, scale: f64) -> Result<Vec2> {
-    kernel::scaled_axis(convert::vec2(axis), scale).map(convert::record_vec2)
-}
-/// Check that degree-valued arc fields and their span are finite.
-pub fn arc_fields_finite(start: f64, end: f64) -> bool {
-    kernel::arc_fields_finite(start, end)
+    transform::scaled_axis(convert::vec2(axis), scale).map(convert::record_vec2)
 }
 /// Check for a finite nonzero axis length.
 pub fn axis_nonzero(axis: Vec2) -> bool {
-    kernel::axis_nonzero(convert::vec2(axis))
-}
-/// Check a parameter interval's span.
-pub fn finite_span(start: f64, end: f64) -> bool {
-    kernel::finite_span(start, end)
-}
-/// Check a degree value's radian representation.
-pub fn finite_degrees(value: f64) -> bool {
-    kernel::finite_degrees(value)
-}
-/// Check rounded arc endpoints modulo one turn.
-pub fn distinct_degrees(start: f64, end: f64) -> bool {
-    kernel::distinct_degrees(start, end)
+    arc_conversion::axis_nonzero(convert::vec2(axis))
 }
 /// Bound a bulged path. Length/work admission precedes conversion and payload access.
 pub fn bulged_bounds(
@@ -106,7 +87,7 @@ pub fn bulged_bounds(
         piece: None,
         reason: format!("bulged polyline bounds: {s}"),
     };
-    if !(2..=max_vertices.min(crate::path_export::MAX_PATH_ITEMS)).contains(&count) {
+    if !(2..=max_vertices.min(MAX_PATH_ITEMS)).contains(&count) {
         return Err(fail(
             "vertex count exceeds admission or needs at least two vertices",
         ));
@@ -127,7 +108,7 @@ pub fn bulged_bounds(
         if input.len() >= count {
             return Err(fail("vertex count differs from declared input"));
         }
-        input.push(solidcore::prism::path_export::Vertex {
+        input.push(arc_conversion::Vertex {
             at: convert::vec2(v.at),
             bulge: v.bulge,
         });
@@ -136,4 +117,13 @@ pub fn bulged_bounds(
         return Err(fail("vertex count differs from declared input"));
     }
     kernel::bulged_bounds(&input, closed, max_vertices, max_work).map(record)
+}
+
+/// Transform a retained source anchor with the kernel's original FMA order.
+pub fn transform_anchor(point: Vec2, scale: f64, translation: Vec2) -> Vec2 {
+    convert::record_vec2(transform::transform_anchor(
+        convert::vec2(point),
+        scale,
+        convert::vec2(translation),
+    ))
 }
