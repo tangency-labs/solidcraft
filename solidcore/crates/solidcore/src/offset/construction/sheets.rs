@@ -1035,17 +1035,36 @@ pub fn certify_regular(
     d: f64,
     uv_box: Option<[f64; 4]>,
 ) -> Result<Regularity> {
+    certify_regular_knowing(k, s, d, uv_box, None)
+}
+
+/// [`certify_regular`], given what [`least_wall`] found for the same `s`, `d` and
+/// `uv_box` (`None`: not looked for). A fold names that radius instead of searching for it
+/// again, so a caller that has run [`proved_singular`] on the face does not pay for the
+/// search twice.
+///
+/// # Errors
+///
+/// Those of [`certify_regular`].
+pub fn certify_regular_knowing(
+    k: &Kernel,
+    s: &Nurb,
+    d: f64,
+    uv_box: Option<[f64; 4]>,
+    least: Option<f64>,
+) -> Result<Regularity> {
     let b = Binomials::new();
     let region = patches_in(s, uv_box)?;
     // the face's net, for the fold witness (none: no fold is proved)
     let net = witness_net(s).ok();
-    let mut stack: Vec<(RegularityForms, [f64; 4])> = Vec::new();
+    let mut stack: Vec<(f64, RegularityForms, [f64; 4])> = Vec::new();
     for patch in &region {
-        stack.push((RegularityForms::new(patch, d, &b)?, patch.range));
+        let forms = RegularityForms::new(patch, d, &b)?;
+        stack.push((forms.middle(), forms, patch.range));
     }
     let mut examined = 0usize;
     let mut folds = false;
-    while let Some((forms, range)) = stack.pop() {
+    while let Some((middle, forms, range)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
         if forms.certified() {
@@ -1053,7 +1072,7 @@ pub fn certify_regular(
         }
         let [u0, u1, v0, v1] = range;
         let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-        if forms.middle() < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
+        if middle < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
             // a point where the offset folds, proved
             folds = true;
             break;
@@ -1068,12 +1087,23 @@ pub fn certify_regular(
             [u0, um, vm, v1],
             [um, u1, vm, v1],
         ];
-        stack.extend(forms.quarters().into_iter().zip(ranges));
+        let mut quarters: Vec<(f64, RegularityForms, [f64; 4])> = forms
+            .quarters()
+            .into_iter()
+            .zip(ranges)
+            .map(|(q, r)| (q.middle(), q, r))
+            .collect();
+        // the least middle first: a fold is found before the budget runs out along Q = 0
+        quarters.sort_by(|a, b| b.0.total_cmp(&a.0));
+        stack.extend(quarters);
     }
     if !folds {
         return Ok(Regularity::Regular);
     }
-    let largest = largest_wall(&region, d.signum())?;
+    let largest = match least {
+        Some(largest) => largest,
+        None => largest_wall(&region, d.signum())?,
+    };
     Ok(if largest.is_finite() {
         Regularity::Folds { largest }
     } else {
@@ -1182,82 +1212,151 @@ pub fn proved_singular(
     uv_box: Option<[f64; 4]>,
     resolution: f64,
 ) -> Result<Option<Singular>> {
+    check_reach(d, resolution)?;
+    let Some(radius) = least_wall(s, d, uv_box)? else {
+        return Ok(None);
+    };
+    Ok(singular_at(radius, d, resolution))
+}
+
+/// [`proved_singular`]'s refusal of its inputs: a distance or resolution that is not
+/// finite, or a negative resolution.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for those.
+pub fn check_reach(d: f64, resolution: f64) -> Result<()> {
     if !d.is_finite() || !resolution.is_finite() || resolution < 0.0 {
+        return Err(invalid("a distance or resolution that is not finite"));
+    }
+    Ok(())
+}
+
+/// The least radius of curvature [`proved_singular`] samples on the side of `s` that `d`
+/// displaces it to, over `uv_box`: the radius it and [`certify_regular_knowing`] name.
+/// `None` for an empty region or a distance of zero, where neither looks for one.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a distance that is not finite; those of the Bezier
+/// decomposition.
+pub fn least_wall(s: &Nurb, d: f64, uv_box: Option<[f64; 4]>) -> Result<Option<f64>> {
+    if !d.is_finite() {
         return Err(invalid("a distance or resolution that is not finite"));
     }
     let region = patches_in(s, uv_box)?;
     if region.is_empty() || !positive(d.abs()) {
         return Ok(None);
     }
-    let radius = largest_wall(&region, d.signum())?;
+    largest_wall(&region, d.signum()).map(Some)
+}
+
+/// [`proved_singular`]'s verdict for the least radius `radius` on the displaced side:
+/// `None` when the offset by `d` keeps more than `resolution` of it.
+#[must_use]
+pub fn singular_at(radius: f64, d: f64, resolution: f64) -> Option<Singular> {
     let reach = d.abs();
     if radius - reach > resolution {
-        return Ok(None);
-    }
-    Ok(Some(Singular {
-        radius,
-        collapses: radius - reach >= -resolution,
-    }))
-}
-
-/// The principal curvatures (signed along the NURB normal) of a patch at `(s, t)`.
-fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
-    let p = eval3(&patch.p, s, t);
-    let pu = eval3(&deriv_u3(&patch.p), s, t);
-    let pv = eval3(&deriv_v3(&patch.p), s, t);
-    let puu = eval3(&deriv_u3(&deriv_u3(&patch.p)), s, t);
-    let puv = eval3(&deriv_v3(&deriv_u3(&patch.p)), s, t);
-    let pvv = eval3(&deriv_v3(&deriv_v3(&patch.p)), s, t);
-    let (w, au, av, l2, m2, n2) = match &patch.w {
-        None => (1.0, pu, pv, puu, puv, pvv),
-        Some(w) => {
-            let wv = w.eval(s, t);
-            let (wu, wvd) = (w.deriv_u().eval(s, t), w.deriv_v().eval(s, t));
-            let wuu = w.deriv_u().deriv_u().eval(s, t);
-            let wuv = w.deriv_u().deriv_v().eval(s, t);
-            let wvv = w.deriv_v().deriv_v().eval(s, t);
-            (
-                wv,
-                pu * wv - p * wu,
-                pv * wv - p * wvd,
-                puu * wv - p * wuu,
-                puv * wv - p * wuv,
-                pvv * wv - p * wvv,
-            )
-        }
-    };
-    let ax = au.cross(av);
-    let x = ax.length();
-    if !positive(x) {
         return None;
     }
-    let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
-    let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
-    // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
-    let h = e * n + g * l - 2.0 * f * m;
-    let k = l * n - m * m;
-    let a = x * x;
-    let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
-    let scale = w * w / x;
-    Some((
-        scale * (h - disc) / (2.0 * a),
-        scale * (h + disc) / (2.0 * a),
-    ))
+    Some(Singular {
+        radius,
+        collapses: radius - reach >= -resolution,
+    })
 }
 
-/// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
-/// distance) of the patch at `(s, t)`; infinite where it bends away or the normal vanishes.
-fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
-    match principal_curvatures(patch, s, t) {
-        Some((k1, k2)) => {
-            let k = (k1 * side).max(k2 * side);
-            if k > 0.0 {
-                1.0 / k
-            } else {
-                f64::INFINITY
-            }
+/// A patch's derivative nets up to second order, built once and evaluated at many
+/// `(s, t)`: the wall search samples each patch at 81 points, and one at up to 240 more.
+struct Derivatives {
+    p: Bernstein3,
+    pu: Bernstein3,
+    pv: Bernstein3,
+    puu: Bernstein3,
+    puv: Bernstein3,
+    pvv: Bernstein3,
+    /// `w` and its partials `wu, wv, wuu, wuv, wvv`; `None` for a non-rational patch.
+    w: Option<[Bernstein2; 6]>,
+}
+
+impl Derivatives {
+    fn of(patch: &Patch) -> Self {
+        let pu = deriv_u3(&patch.p);
+        let pv = deriv_v3(&patch.p);
+        Self {
+            p: patch.p.clone(),
+            puu: deriv_u3(&pu),
+            puv: deriv_v3(&pu),
+            pvv: deriv_v3(&pv),
+            pu,
+            pv,
+            w: patch.w.as_ref().map(|w| {
+                let wu = w.deriv_u();
+                let wv = w.deriv_v();
+                let (wuu, wuv, wvv) = (wu.deriv_u(), wu.deriv_v(), wv.deriv_v());
+                [w.clone(), wu, wv, wuu, wuv, wvv]
+            }),
         }
-        None => f64::INFINITY,
+    }
+
+    /// The principal curvatures (signed along the NURB normal) of the patch at `(s, t)`.
+    fn principal_curvatures(&self, s: f64, t: f64) -> Option<(f64, f64)> {
+        let p = eval3(&self.p, s, t);
+        let pu = eval3(&self.pu, s, t);
+        let pv = eval3(&self.pv, s, t);
+        let puu = eval3(&self.puu, s, t);
+        let puv = eval3(&self.puv, s, t);
+        let pvv = eval3(&self.pvv, s, t);
+        let (w, au, av, l2, m2, n2) = match &self.w {
+            None => (1.0, pu, pv, puu, puv, pvv),
+            Some([w, wu_net, wv_net, wuu_net, wuv_net, wvv_net]) => {
+                let wv = w.eval(s, t);
+                let (wu, wvd) = (wu_net.eval(s, t), wv_net.eval(s, t));
+                let wuu = wuu_net.eval(s, t);
+                let wuv = wuv_net.eval(s, t);
+                let wvv = wvv_net.eval(s, t);
+                (
+                    wv,
+                    pu * wv - p * wu,
+                    pv * wv - p * wvd,
+                    puu * wv - p * wuu,
+                    puv * wv - p * wuv,
+                    pvv * wv - p * wvv,
+                )
+            }
+        };
+        let ax = au.cross(av);
+        let x = ax.length();
+        if !positive(x) {
+            return None;
+        }
+        let (e, f, g) = (au.dot(au), au.dot(av), av.dot(av));
+        let (l, m, n) = (l2.dot(ax), m2.dot(ax), n2.dot(ax));
+        // lambda^2 X^2 - lambda H + K = 0, kappa = w^2 lambda / X
+        let h = e * n + g * l - 2.0 * f * m;
+        let k = l * n - m * m;
+        let a = x * x;
+        let disc = (h * h - 4.0 * a * k).max(0.0).sqrt();
+        let scale = w * w / x;
+        Some((
+            scale * (h - disc) / (2.0 * a),
+            scale * (h + disc) / (2.0 * a),
+        ))
+    }
+
+    /// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
+    /// distance) at `(s, t)`; infinite where it bends away or the normal vanishes.
+    fn wall(&self, side: f64, s: f64, t: f64) -> f64 {
+        match self.principal_curvatures(s, t) {
+            Some((k1, k2)) => {
+                let k = (k1 * side).max(k2 * side);
+                if k > 0.0 {
+                    1.0 / k
+                } else {
+                    f64::INFINITY
+                }
+            }
+            None => f64::INFINITY,
+        }
     }
 }
 
@@ -1265,26 +1364,31 @@ fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
 /// grid per patch, then a pattern search about the smallest sample. A point where the
 /// normal vanishes says nothing of the curvature; infinite where no sample bends that way.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
-    let mut best = (f64::INFINITY, 0usize, 0.5, 0.5);
-    for (i, patch) in region.iter().enumerate() {
+    let mut best: Option<(f64, Derivatives, f64, f64)> = None;
+    for patch in region {
+        let nets = Derivatives::of(patch);
+        let mut here = (f64::INFINITY, 0.5, 0.5);
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
-                let r = wall(patch, side, s, t);
-                if r < best.0 {
-                    best = (r, i, s, t);
+                let r = nets.wall(side, s, t);
+                if r < here.0 {
+                    here = (r, s, t);
                 }
             }
         }
+        let smallest = best.as_ref().map_or(f64::INFINITY, |b| b.0);
+        if best.is_none() || here.0 < smallest {
+            best = Some((here.0, nets, here.1, here.2));
+        }
     }
-    let (mut r, i, mut s, mut t) = best;
-    let patch = region.get(i).ok_or_else(|| invalid("no patch"))?;
+    let (mut r, nets, mut s, mut t) = best.ok_or_else(|| invalid("no patch"))?;
     let mut step = 1.0 / 16.0;
     for _ in 0..60 {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
-            let r2 = wall(patch, side, s2, t2);
+            let r2 = nets.wall(side, s2, t2);
             if r2 < r {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }
@@ -1676,6 +1780,41 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// The shell searches a face's least radius on the displaced side once
+    /// ([`least_wall`]) and both of its checks use it: given that radius,
+    /// [`certify_regular_knowing`] answers what [`certify_regular`] answers by searching, and
+    /// [`singular_at`] what [`proved_singular`] does, bit for bit.
+    #[test]
+    fn the_least_radius_found_once_serves_both_checks() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        let res = 1e-6;
+        // the distances `a_septic_rational_patch_is_certified_as_its_cylinder` certifies
+        for d in [-10.5, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            let searched = certify_regular(&k, &s, d, None).unwrap();
+            assert_eq!(
+                certify_regular_knowing(&k, &s, d, None, least).unwrap(),
+                searched,
+                "{d}"
+            );
+            if let Regularity::Folds { largest } = searched {
+                assert_eq!(least.map(f64::to_bits), Some(largest.to_bits()), "{d}");
+            }
+        }
+        // the collapse test at, short of and past the radius, and outwards
+        for d in [-10.5, -10.0, -9.0, 2.0] {
+            let least = least_wall(&s, d, None).unwrap();
+            assert_eq!(
+                least.and_then(|r| singular_at(r, d, res)),
+                proved_singular(&s, d, None, res).unwrap(),
+                "{d}"
+            );
+        }
+        assert_eq!(least_wall(&s, 0.0, None).unwrap(), None);
+        assert!(least_wall(&s, f64::NAN, None).is_err());
     }
 
     /// A cylinder of radius 10 offset towards its axis: by 10 the offset collapses onto

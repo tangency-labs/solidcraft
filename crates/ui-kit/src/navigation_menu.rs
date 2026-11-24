@@ -35,14 +35,19 @@ pub struct NavigationMenuRow<'a> {
     pub enabled: bool,
     pub detail: Option<&'a str>,
     pub submenu: bool,
+    /// A checkbox in the icon slot (its state), for a row that switches a setting on or off.
+    pub check: Option<bool>,
+    /// Nested under the row above it.
+    pub indent: bool,
 }
 impl<'a> NavigationMenuRow<'a> {
     pub fn new(id: &'a str, label: &'a str, icon: &'a str) -> Self {
-        Self { id, label, icon, selected: false, enabled: true, detail: None, submenu: false }
+        Self { id, label, icon, selected: false, enabled: true, detail: None, submenu: false, check: None, indent: false }
     }
     pub fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_ROW), Sense::hover());
+        let rect = if self.indent { Rect::from_min_max(rect.min + vec2(NAV_MENU_ICON, 0.0), rect.max) } else { rect };
         let response = ui.interact(rect, ui.scope_id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
         let ink = if self.selected { crate::layout::ink_on(&t, t.selected_bg, t.form_primary, 3.0) } else { t.form_ink };
         let bg = if self.selected {
@@ -55,7 +60,13 @@ impl<'a> NavigationMenuRow<'a> {
         if let Some(bg) = bg {
             ui.painter().rect_filled(rect, NAV_MENU_RADIUS, bg);
         }
-        if !self.icon.is_empty() {
+        if let Some(on) = self.check {
+            let square = Rect::from_center_size(
+                pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON / 2.0, rect.center().y),
+                vec2(NAV_MENU_ICON - 3.0, NAV_MENU_ICON - 3.0),
+            );
+            super::checks::paint_box(ui, square, &response, on, false);
+        } else if !self.icon.is_empty() {
             let icon =
                 Rect::from_center_size(pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON / 2.0, rect.center().y), vec2(NAV_MENU_ICON, NAV_MENU_ICON));
             icons::paint_ink(ui.painter(), icon, self.icon, if self.selected { ink } else { t.form_dim });

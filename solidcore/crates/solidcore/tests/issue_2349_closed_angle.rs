@@ -31,9 +31,7 @@ use solidcore::{Brep, Kernel};
 fn new_blend_kernel() -> Kernel {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     k
 }

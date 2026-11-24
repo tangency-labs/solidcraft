@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Align drawing annotations</title>
+  <path d="M12 6L12 58" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.5 12L51.5 12A2.5 2.5 0 0 1 54 14.5L54 17.5A2.5 2.5 0 0 1 51.5 20L22.5 20A2.5 2.5 0 0 1 20 17.5L20 14.5A2.5 2.5 0 0 1 22.5 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.5 28L40.5 28A2.5 2.5 0 0 1 43 30.5L43 33.5A2.5 2.5 0 0 1 40.5 36L22.5 36A2.5 2.5 0 0 1 20 33.5L20 30.5A2.5 2.5 0 0 1 22.5 28Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.5 44L47.5 44A2.5 2.5 0 0 1 50 46.5L50 49.5A2.5 2.5 0 0 1 47.5 52L22.5 52A2.5 2.5 0 0 1 20 49.5L20 46.5A2.5 2.5 0 0 1 22.5 44Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

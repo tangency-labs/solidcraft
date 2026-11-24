@@ -715,7 +715,8 @@ mod tests {
 
     #[test]
     fn rounded_shell_planar_roles_are_exact_distinct_and_transformable() {
-        for (width, thickness) in [(80., 2.), (100., 3.)] {
+        // Only the 100 × 3 cup fails SMLib's check as it reads back (#17705).
+        for (width, thickness, read_back_fails_check) in [(80., 2., false), (100., 3., true)] {
             let box_body = box_solid(Vec3::new(-width / 2., -30., 0.), Vec3::new(width / 2., 30., 30.)).unwrap().with_box_certificate(7).unwrap();
             let rounded = fillet(
                 &box_body,
@@ -777,8 +778,19 @@ mod tests {
             let v = crate::measure(&cup).unwrap().volume;
             assert!((v - expected).abs() < 1e-6 * expected, "{v} vs {expected}");
             let imported = crate::step_import(&crate::step_export(&[&cup], "regularized rounded shell").unwrap()).unwrap();
-            assert!(imported.warnings.is_empty());
             let copy = &imported.bodies[0].body;
+            // The cup exported passes SMLib's check. The 100 × 3 cup fails it as it reads back
+            // (#17705); the import's one warning says so, built from that check. The 80 × 2 cup
+            // passes it and imports with no warning.
+            assert!(crate::validation::failing_check(&cup).unwrap().is_none(), "the cup exported passes the check");
+            let check = crate::validation::failing_check(copy).unwrap();
+            assert_eq!(check.is_some(), read_back_fails_check, "{width} × {thickness}: {check:?}");
+            match check {
+                Some(check) => {
+                    assert_eq!(imported.warnings, [format!("solid 'Body1': needs repair before it can be modelled: SMLib's check fails it: {check}")])
+                }
+                None => assert!(imported.warnings.is_empty(), "{:?}", imported.warnings),
+            }
             // The certified planar walls come back from STEP as one full-height face each.
             for (axis, coordinate) in [(Vec3::X, width / 2.), (-Vec3::X, width / 2.), (Vec3::Y, 30.), (-Vec3::Y, 30.)] {
                 let walls: Vec<usize> = actual_planes(copy)

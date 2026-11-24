@@ -11,7 +11,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
-use solidcore::topology::brep::validation::{contains_coincident_topology, validate_pointers};
+use solidcore::topology::brep::validation::validate_pointers;
 use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
@@ -214,14 +214,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        let start = Instant::now();
-        let coincidence =
-            contains_coincident_topology(&k, &mut b, -1.0, true, Some(&mut reports), 2, &key)?;
-        let coincidence_seconds = start.elapsed().as_secs_f64();
-        if !coincidence.pairs.is_empty() || !reports.is_empty() {
-            return Err("unexpected coincident topology".into());
-        }
-        println!("faces={n} edges={} vertices={} pointers_s={pointer_seconds:.6} coincidence_s={coincidence_seconds:.6}",b.edges().len(),b.vertices().len());
+        println!(
+            "faces={n} edges={} vertices={} pointers_s={pointer_seconds:.6}",
+            b.edges().len(),
+            b.vertices().len()
+        );
     }
     Ok(())
 }

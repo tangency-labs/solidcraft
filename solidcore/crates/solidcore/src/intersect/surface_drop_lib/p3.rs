@@ -59,7 +59,8 @@
 //!   through the caller's context, its point-test-off variant) unless the caller's face
 //!   test replaces it. The
 //!   curve cache is built fresh (`make_curve_cache`); a failed build is
-//!   `SM_ERR_NULL_POINTER` (`NER`).
+//!   `SM_ERR_NULL_POINTER` (`NER`), an [`IntersectFailure::CurveCacheNotBuilt`] with the
+//!   build's error as its cause.
 //! - **Offset surface.** `SmOffsetSurface(1.0, *this, FALSE, lSingularities)` is a
 //!   [`DropOffset`]; its evaluations (unit `surface.offset_surface`) return
 //!   [`SolidError::Unported`], so every drop that reaches a non-degenerate curve tangent
@@ -77,20 +78,47 @@
 //!   rejected point is never retried, so subdivision cannot loop on it.
 //!   An unresolved closed-direction seam jump cannot use
 //!   the inaccurate-short-span escape: subdivision must resolve its branch.
+//! - **A span proved off the curve fails.** On an analytic sphere a span that passes the
+//!   sampled test, or the short-span escape, fails when its UV image is proved farther
+//!   than the tolerance from the 3D Hermite span of the curve's drop (`span_proved_off`,
+//!   the certificate of `surface_intersector::sphere_span`), and is subdivided: near a
+//!   pole the clamped samples missed a span 5e-4 off its circle. Upstream accepts it.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
 //!   plan/upstream-issues.md HANG-38); deeper is
-//!   [`SolidError::NotConverged`]. No compared case reaches the second `GetNextPoint` of
-//!   a span yet (the offset surface defers first), so the bound, the span stack and
+//!   [`SolidError::NotConverged`]. The depth alone does not end the loop: a failing
+//!   span whose midpoint rounds onto its start is split there, its empty half passes
+//!   without moving the start, and the span comes back at the same depth. Once, that
+//!   can settle a seam branch (the start dropped again lands on the other side of the
+//!   seam); a span that comes back unchanged loops for ever (#21092: a span one ulp long
+//!   across a closed seam). Not upstream: more spans of no length passed in a row than
+//!   [`MAX_SPAN_DEPTH`] are [`SolidError::NotConverged`] too. No compared case reaches
+//!   the second `GetNextPoint` of a span yet (the offset surface defers first), so the bound, the span stack and
 //!   `sm_AddToCurve` are untested until `surface.offset_surface` lands.
+//! - **C0 knot lines.** Not upstream: the UV curve turns its corner on a `C0` knot line
+//!   of a B-spline surface across which the surface is smooth ([`KnotLines`]). A span with such a line between its ends is
+//!   split where the dropped curve crosses it ([`knot_line_crossing`]), before it is
+//!   tested; a span that ends on a line keeps the tangent of the side it came from; and
+//!   the next span's start there is dropped again looking forward, for the tangent of
+//!   the side it runs to. Upstream's spans share one tangent at every joint, so a span
+//!   across a line, or ending a rounding error past one, turns the corner inside itself:
+//!   a notch a fraction of the tolerance deep whose radius of curvature is far below the
+//!   curve's. Where the two sides' tangents agree the joint is as upstream's.
+//! - **Procedural boundary crossings.** The traced Hermite jets on a procedural
+//!   definition are preserved: neither a near-boundary tangent flattening nor a
+//!   polygon fix-up has a bound on that definition (#17016). Every emitted cubic's
+//!   full control polygon must be finite and inside the UV domain, proving the
+//!   entire polynomial stays there; otherwise the construction fails. Intermediate
+//!   flushes obey the same rule. The trace's existing accuracy checks are retained.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -99,28 +127,30 @@ use crate::geom::solution_array::{SolutionArray, SolutionObject};
 use crate::geom::tol::{approx_tol3d, scaled_zero_of_curve};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_intersector::sphere_span;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::knots::Side;
 use crate::surface::plane::PlaneDropCurve;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFailArgs, SurfaceKind, UNSURE,
 };
 use crate::surface::surface::p4::FaceTest;
-use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 use super::boundary_moves::MoveBound;
+use super::knot_lines::{KnotLine, KnotLines};
 use super::p1::{
     remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
     SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_INVALID_INPUT,
-    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
+    add_to_curve_with_policy, flush_curve_with_policy, seam_uv_tols, BoundaryPolicy, DropOffset,
+    SM_ERR_BAD_SURFACE_POINT, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -161,6 +191,103 @@ pub struct DropCurveOut {
     pub max_approx_dev: f64,
     /// `rUVCurves`: the UV curves (usually one; two for a curve along a seam).
     pub uv_curves: Vec<BSplineCurve>,
+}
+
+/// How many drops [`knot_line_crossing`] makes at most: the false position step with the
+/// Illinois rule at least halves the bracket every second step, so this is past what a
+/// bracket of doubles holds.
+const MAX_CROSSING_DROPS: usize = 128;
+
+/// Not upstream: the drop point, dropped from `start`, where the dropped curve crosses the
+/// surface's `C0` knot line `line` between `start` and `end`, which are on its two sides:
+/// the root of the drop's offset from the line ([`KnotLine::offset`]) over the curve
+/// parameter, bracketed by the two ends and found by false position with the Illinois
+/// rule. The root is a drop point on the line ([`KnotLines::settle`], through
+/// [`DropPt::set_properties`]), its UV tangent that of the side `start` is on.
+///
+/// `None` when the surface is creased where the curve crosses the line (the drop point
+/// there is not put on it), when the bracket closes without a drop point on the line
+/// (the drop jumps across it), or when the point on the line does not drop
+/// ([`SM_SUCCESS`]) as a split point has to: the span is then left to the accuracy test,
+/// as upstream.
+#[allow(clippy::too_many_arguments)] // `GetNextPoint`'s, the span and the line
+fn knot_line_crossing(
+    k: &Kernel,
+    surface: &Surface,
+    offset: &mut DropOffset,
+    singularities: u32,
+    pole_points: &[Point3],
+    uv_domain: &Extent2d,
+    srf_closure: SurfParamType,
+    curve: &Curve,
+    approx_tol_3d: f64,
+    start: &DropPt,
+    end: &DropPt,
+    line: KnotLine,
+) -> Result<Option<DropPt>> {
+    let mut before = (start.t, line.offset(start.uv_pd[0]));
+    let mut after = (end.t, line.offset(end.uv_pd[0]));
+    let mut moved_before: Option<bool> = None;
+    for _ in 0..MAX_CROSSING_DROPS {
+        let mut t = (before.0 * after.1 - after.0 * before.1) / (after.1 - before.1);
+        if !(before.0 < t && t < after.0) {
+            t = 0.5 * (before.0 + after.0);
+        }
+        if !(before.0 < t && t < after.0) {
+            return Ok(None);
+        }
+        let mut point = *end;
+        let status = match start.get_next_point(
+            k,
+            surface,
+            offset,
+            singularities,
+            Some(pole_points),
+            uv_domain,
+            srf_closure,
+            curve,
+            approx_tol_3d,
+            t,
+            &mut point,
+        ) {
+            Ok(code) => code,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let off = line.offset(point.uv_pd[0]);
+        let [on_u_line, on_v_line] = point.on_knot_line;
+        let on_line = if line.direction == SurfParamType::U {
+            on_u_line
+        } else {
+            on_v_line
+        };
+        if on_line {
+            return Ok((status == SM_SUCCESS).then_some(point));
+        }
+        // (an end that was not dropped has no UV point; one within the parameter zero
+        // of the line that was not put on it is on a crease of the surface)
+        if status == SM_ERR_BAD_SURFACE_POINT
+            || !off.is_finite()
+            || offset.knot_lines().is_within_zero(line, point.uv_pd[0])
+        {
+            return Ok(None);
+        }
+        // the Illinois rule: an end kept twice running has its offset halved
+        let on_starts_side = (off < 0.0) == (before.1 < 0.0);
+        if on_starts_side {
+            before = (t, off);
+            if moved_before == Some(true) {
+                after.1 *= 0.5;
+            }
+        } else {
+            after = (t, off);
+            if moved_before == Some(false) {
+                before.1 *= 0.5;
+            }
+        }
+        moved_before = Some(on_starts_side);
+    }
+    Ok(None)
 }
 
 /// The status upstream stores for a failed `GetNextPoint` (see the module notes).
@@ -240,11 +367,23 @@ fn sm_bool(b: bool) -> i32 {
     i32::from(b)
 }
 
+/// A solution index past the drop's solutions: its loops run over the solutions found, after
+/// the check that there is one (`SM_ERR`).
+fn no_such_solution() -> SolidError {
+    SolidError::intersect(
+        OP,
+        IntersectFailure::Defect {
+            why: "the drop read a solution past those it found, though its loops run over \
+                  the solutions found",
+        },
+    )
+}
+
 /// The start UV of solution `i` (`sSolutions[i].m_vStart[0..2]`).
 fn start_uv<O: SolutionObject>(sols: &SolutionArray<O>, i: usize) -> Result<Point2> {
     sols.get(i)
         .map(|s| Point2::new(s.start.parameters[0], s.start.parameters[1]))
-        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))
+        .ok_or_else(no_such_solution)
 }
 
 /// Sets parameter `p` of solution `i`'s start.
@@ -254,11 +393,15 @@ fn set_start_param<O: SolutionObject>(
     p: usize,
     value: f64,
 ) -> Result<()> {
-    let s = sols
-        .get_mut(i)
-        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))?;
+    let s = sols.get_mut(i).ok_or_else(no_such_solution)?;
     let slot = s.start.parameters.get_mut(p).ok_or_else(|| {
-        SolidError::intersect_failed(OP, "the drop solution has no such parameter")
+        SolidError::intersect(
+            OP,
+            IntersectFailure::Defect {
+                why: "a drop solution has no u or v start parameter, though a surface \
+                      solution's start holds both",
+            },
+        )
     })?;
     *slot = value;
     Ok(())
@@ -404,6 +547,85 @@ fn uv_curve_gap(
         None,
     ))?;
     Ok(gap.map_or((0.0, 0.0), |g| (g.max_dist, g.max_dev)))
+}
+
+/// Not upstream: whether, on an analytic sphere, the surface image of the UV Hermite span
+/// [`DropPt::test_span_accuracy`] builds from `start` to `end` is proved farther than
+/// `approx_tol_3d` from the 3D Hermite span of the curve's drop at some parameter
+/// ([`sphere_span::sphere_span_image`] refuses with [`sphere_span::Refusal::Off`]): the
+/// Hermite runs between the surface points of the span's two UV ends with the derivatives
+/// of the radial drop there (`curve`'s tangents projected into the surface's tangent planes
+/// and scaled by `R / |C - c|`), so a curve that lies off the surface, within the drop's own
+/// tests or by an offset, is compared with its drop, not with itself (at a span shrunk to a
+/// point the two ends agree and nothing is proved off).
+/// `false` on any other surface kind, and where the distance is not proved over the
+/// tolerance (certified, or not decided).
+///
+/// The span test samples three interior points, clamped into the domain, and a span shorter
+/// than 1/8000 of the interval passes whatever its samples say. Near a sphere's pole the UV
+/// span turns through much of the domain within a short stretch of the curve: a circle 3e-5
+/// from a unit sphere's pole had a first span 1/8192 of the circle long whose UV cubic reached
+/// u = 1.42 of a `[0, 1]` domain and whose image missed the circle by 5e-4 against a 1e-5
+/// tolerance; the trim curve made from it jumped across the seam and its face failed the
+/// check. Such a span is subdivided, as the samples would have it subdivided had they seen
+/// the miss.
+///
+/// # Errors
+///
+/// Those of the curve evaluations.
+fn span_proved_off(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    start: &DropPt,
+    end: &DropPt,
+    approx_tol_3d: f64,
+) -> Result<bool> {
+    let SurfaceKind::Sphere(sphere) = surface.kind() else {
+        return Ok(false);
+    };
+    let centre = sphere.base().position().origin();
+    let radius = sphere.radius();
+    let delta_t = end.t - start.t;
+    // the drop of the curve at `t`: the surface point at `uv` and the derivative of the
+    // radial drop `c + R (C - c) / |C - c|`, the curve's tangent in the surface's tangent
+    // plane there times `R / |C - c|`, scaled to the span (a curve off the sphere moves its
+    // drop slower or faster than itself; unscaled, every span of an offset circle was
+    // proved off down to the shortest)
+    let at = |t: f64, uv: Point2| -> Result<Option<(Vec3, Vec3)>> {
+        let pd = curve.evaluate(k, t, 1, true, true)?;
+        let (Some(&c), Some(&d)) = (pd.first(), pd.get(1)) else {
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::Defect {
+                    why: "the curve's evaluation at a parameter of its own span, asked for the                           point and the first derivative, returned fewer than two vectors;                           the evaluator builds both for every parameter of the curve",
+                },
+            ));
+        };
+        let dist = (c - centre).length();
+        if !(dist.is_finite() && dist > EFF_ZERO) {
+            return Ok(None);
+        }
+        let p = surface.evaluate_point(k, uv)?;
+        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        Ok(Some((p, d.project_to_plane(n) * (radius / dist * delta_t))))
+    };
+    // a curve point at the centre has no drop: nothing is proved
+    let (Some((p0, d0)), Some((p1, d1))) = (at(start.t, start.uv_pd[0])?, at(end.t, end.uv_pd[0])?)
+    else {
+        return Ok(false);
+    };
+    let lift = |p: Point2| Vec3::new(p.x, p.y, 0.0);
+    let uv = [
+        lift(start.uv_pd[0]),
+        lift(start.uv_pd[1]) * delta_t,
+        lift(end.uv_pd[0]),
+        lift(end.uv_pd[1]) * delta_t,
+    ];
+    Ok(matches!(
+        sphere_span::sphere_span_image(surface, uv, [p0, d0, p1, d1], approx_tol_3d),
+        sphere_span::SpanImage::NotCertified(sphere_span::Refusal::Off)
+    ))
 }
 
 impl Surface {
@@ -753,9 +975,9 @@ impl Surface {
                 CreateUvTrimCurvePathType::DegenSurfaceFail,
                 &early,
             );
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP,
-                "the surface's uv domain is degenerate",
+                IntersectFailure::DegenerateDomain,
             ));
         }
 
@@ -768,17 +990,16 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            return Err(SolidError::intersect_failed(
+            // the caller's domain (rule 9)
+            return Err(SolidError::intersect(
                 OP,
-                "the uv domain does not fit within the surface's natural domain",
+                IntersectFailure::DomainOutsideSurface,
             ));
         }
 
         // UV Tolerances - proportional to surface 3d/UV mapping size
         let srf_nat_domain = self.natural_uv_domain_with_nurb(k)?;
-        let project_size = approx_derivative_lengths(k, self, &srf_nat_domain)?;
-        let uv_tol_x = approx_tol_3d / (project_size.x + 1.0);
-        let uv_tol_y = approx_tol_3d / (project_size.y + 1.0);
+        let (uv_tol_x, uv_tol_y) = seam_uv_tols(k, self, &srf_nat_domain, approx_tol_3d)?;
 
         // temporarily enable slight out-of-bounds convergence (on an evaluation copy)
         let oob = with_out_of_bounds_enabled(self)?;
@@ -786,6 +1007,12 @@ impl Surface {
         // not upstream: a B-spline surface's net bounds the boundary fix-up's moves
         // (`boundary_moves`); its budget is set before each use
         let mut move_bound = MoveBound::of(k, this, approx_tol_3d);
+        // A net cannot bound a move on a surface evaluated from its definition.
+        // Keep its traced Hermite jets instead of flattening a merely nearby,
+        // oblique boundary crossing into a tiny-radius UV bend (#17016).
+        let preserve_uv = this.procedural_definition().is_some()
+            || matches!(this.kind(), SurfaceKind::OffsetSurface(o)
+                if o.base_surface().procedural_definition().is_some());
 
         // surface singularities and their pole points
         let sings = this.get_singularities(k, true, true)?;
@@ -795,6 +1022,8 @@ impl Surface {
 
         // to reduce tolerances - define an offset surface
         let mut offset = DropOffset::new(1.0, singularities);
+        // not upstream: the surface's C0 knot lines, which the spans below end on
+        offset.set_knot_lines(KnotLines::of(this, &s_uv_domain)?);
 
         // Characterize Surface seams and singularities
         let mut singular_direction = SurfParamType::Neither;
@@ -914,12 +1143,9 @@ impl Surface {
             )?
         };
 
-        // there should always be at least one solution
+        // there should always be at least one solution (none found: rule 7)
         if solutions.is_empty() {
-            return Err(SolidError::intersect_failed(
-                OP,
-                "dropping the curve's start onto the surface found no solution",
-            ));
+            return Err(SolidError::intersect(OP, IntersectFailure::NoFoot));
         }
 
         // Classify the 1st start DropSolution point (status ignored upstream)
@@ -1212,16 +1438,18 @@ impl Surface {
             let mut have_start_uv_tan = false;
             let mut fix_bc_change = false;
 
-            // the curve cache (made once)
-            if curve_cache.is_none() {
-                curve_cache = Some(match make_curve_cache::<()>(k, curve, None) {
+            // the curve cache (made once; the build's error stays the cause, rule 6)
+            let cache = match &mut curve_cache {
+                Some(c) => &*c,
+                slot => &*slot.insert(match make_curve_cache::<()>(k, curve, None) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::intersect_missing(OP, "the curve cache")),
-                });
-            }
-            let Some(cache) = curve_cache.as_ref() else {
-                return Err(SolidError::intersect_missing(OP, "the curve cache"));
+                    Err(e) => {
+                        return Err(Failure::new(OP, IntersectFailure::CurveCacheNotBuilt)
+                            .caused_by(e)
+                            .into_error())
+                    }
+                }),
             };
             let span_count = cache.span_count();
 
@@ -1396,18 +1624,24 @@ impl Surface {
                 let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
                 let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
-                while !stack.is_empty() {
+                // not upstream: spans passed in a row without moving the start on (#21092)
+                let mut stalled = 0usize;
+                while let Some(&(queued_start_t, saved_end)) = stack.last() {
+                    // not upstream: a curve that lies farther off the surface than the
+                    // tolerance fails the accuracy test at every halving, down to an
+                    // eight-thousandth of the curve, so the walk is stopped by the caller's
+                    // token (a work limit, or a cancelled job)
+                    k.check_cancelled(OP)?;
                     // A pending endpoint was dropped relative to an earlier start. Its
                     // parameter and UV point and tangent are taken from the stack, as
                     // upstream. Only when the new span makes a closed-surface seam
                     // branch ambiguous is the endpoint dropped again from the actual
                     // start; a failed redrop falls back, once, to the saved point
                     // (the path of the initial endpoint), and never ends the trace.
-                    let (queued_start_t, saved_end) = *stack.last().ok_or_else(|| {
-                        SolidError::intersect_missing(OP, "the pending span endpoint")
-                    })?;
                     end.t = saved_end.t;
                     end.uv_pd = saved_end.uv_pd;
+                    // (not upstream: with the knot lines its UV point is on)
+                    end.on_knot_line = saved_end.on_knot_line;
                     let ambiguous_seam = ((srf_closure == SurfParamType::U
                         || srf_closure == SurfParamType::Both)
                         && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
@@ -1447,14 +1681,53 @@ impl Surface {
                     }
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
 
+                    // not upstream: a span with a C0 knot line of the surface between its
+                    // ends ends on the line (`knot_lines`): the point where the dropped
+                    // curve crosses it becomes the pending end, as a split point does
+                    if let Some(line) = offset.knot_lines().crossed(start.uv_pd[0], end.uv_pd[0]) {
+                        let crossing = knot_line_crossing(
+                            k,
+                            this,
+                            &mut offset,
+                            singularities,
+                            &pole_points,
+                            &s_uv_domain,
+                            srf_closure,
+                            curve,
+                            approx_tol_3d,
+                            &start,
+                            &end,
+                            line,
+                        )?;
+                        if let Some(crossing) = crossing {
+                            if stack.len() >= MAX_SPAN_DEPTH {
+                                return Err(SolidError::NotConverged {
+                                    operation: OP,
+                                    iterations: MAX_SPAN_DEPTH as u32,
+                                });
+                            }
+                            end = crossing;
+                            if max_drop_to_surf < end.drop_to_surf {
+                                max_drop_to_surf = end.drop_to_surf;
+                            }
+                            if max_approx_dev < end.approx_dev {
+                                max_approx_dev = end.approx_dev;
+                            }
+                            stack.push((start.t, end));
+                            continue;
+                        }
+                    }
+
                     // fix boundary tangents
-                    let _fix_bt_change = start.fix_boundary_tangents(
-                        &s_uv_domain,
-                        &mut end,
-                        uv_tol_x,
-                        uv_tol_y,
-                        approx_tol_3d,
-                    );
+                    if !preserve_uv {
+                        let _fix_bt_change = start.fix_boundary_tangents(
+                            &s_uv_domain,
+                            &mut end,
+                            uv_tol_x,
+                            uv_tol_y,
+                            approx_tol_3d,
+                        );
+                    }
 
                     // test the span
                     let acc = start.test_span_accuracy(
@@ -1487,6 +1760,12 @@ impl Surface {
                     {
                         span_passes = true;
                     }
+                    // (not upstream: a span whose image is proved off the curve fails,
+                    // however short, see `span_proved_off`)
+                    if span_passes && span_proved_off(k, this, curve, &start, &end, approx_tol_3d)?
+                    {
+                        span_passes = false;
+                    }
 
                     if span_passes {
                         if max_drop_to_surf < drop_to_surf {
@@ -1505,7 +1784,14 @@ impl Surface {
                         if let Some(b) = move_bound.as_mut() {
                             b.budget = approx_tol_3d - max_approx_dev;
                         }
-                        ignore_status(add_to_curve_bounded(
+                        let policy = if preserve_uv {
+                            BoundaryPolicy::Preserve
+                        } else {
+                            move_bound.as_ref().map_or(BoundaryPolicy::Unbounded, |b| {
+                                BoundaryPolicy::Bounded(k, b)
+                            })
+                        };
+                        let added = add_to_curve_with_policy(
                             k,
                             this,
                             &s_uv_domain,
@@ -1518,16 +1804,45 @@ impl Surface {
                             uv_tol_y,
                             &mut out.uv_curves,
                             &mut fix_bc_change,
-                            move_bound.as_ref(),
-                        ))?;
+                            policy,
+                        );
+                        let refusal = if preserve_uv {
+                            // A failed whole-span domain proof fails the construction;
+                            // it must not leave a partial UV curve behind as success.
+                            added?;
+                            None
+                        } else {
+                            // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                            let refusal = added.as_ref().err().cloned();
+                            ignore_status(added)?;
+                            refusal
+                        };
                         if let Some(b) = move_bound.as_ref() {
                             if b.refused() {
-                                return Err(SolidError::intersect_failed(
-                                    OP_REFUSED,
-                                    "the boundary fix-up refused the dropped curve",
-                                ));
+                                let stop =
+                                    Failure::new(OP_REFUSED, IntersectFailure::BoundaryFixRefused);
+                                return Err(match refusal {
+                                    Some(cause) => stop.caused_by(cause),
+                                    None => stop,
+                                }
+                                .into_error());
                             }
                             max_approx_dev += b.spent();
+                        }
+
+                        // not upstream: a span of no length moves the trace nowhere. More of
+                        // them in a row than the stack is deep can only be a span coming back
+                        // unchanged, so the trace does not converge (#21092)
+                        stalled = if (end.t - start.t).abs() > 0.0 {
+                            0
+                        } else {
+                            stalled + 1
+                        };
+                        if stalled > MAX_SPAN_DEPTH {
+                            return Err(SolidError::NotConverged {
+                                operation: OP,
+                                iterations: u32::try_from(stalled).unwrap_or(u32::MAX),
+                            });
                         }
 
                         // next span starts at this end
@@ -1535,6 +1850,27 @@ impl Surface {
                         start.from_left_u = Some(!truthy(end.from_left_u));
                         start.from_left_v = Some(!truthy(end.from_left_v));
                         have_start_uv_tan = true;
+
+                        // not upstream: on a C0 knot line of the surface the UV tangent
+                        // the span arrived with is that of the side it came from. The
+                        // next span leaves on the side the curve runs to, so its start
+                        // is dropped again looking forward (status ignored, as the span
+                        // start's)
+                        if start.on_knot_line.contains(&true) {
+                            let pd = curve.evaluate(k, start.t, 2, true, true)?;
+                            for (dst, src) in start.crv_pd.iter_mut().zip(pd.iter()) {
+                                *dst = *src;
+                            }
+                            ignore_status(start.set_properties(
+                                k,
+                                this,
+                                &mut offset,
+                                singularities,
+                                approx_tol_3d,
+                                &s_uv_domain,
+                                false,
+                            ))?;
+                        }
                         let _ = stack.pop();
                         continue;
                     }
@@ -1618,7 +1954,14 @@ impl Surface {
             if let Some(b) = move_bound.as_mut() {
                 b.budget = approx_tol_3d - max_approx_dev;
             }
-            flush_curve_bounded(
+            let policy = if preserve_uv {
+                BoundaryPolicy::Preserve
+            } else {
+                move_bound
+                    .as_ref()
+                    .map_or(BoundaryPolicy::Unbounded, |b| BoundaryPolicy::Bounded(k, b))
+            };
+            flush_curve_with_policy(
                 &s_uv_domain,
                 &mut ctrl_poly,
                 &mut knots,
@@ -1626,7 +1969,7 @@ impl Surface {
                 uv_tol_y,
                 &mut out.uv_curves,
                 &mut fix_bc_change,
-                move_bound.as_ref().map(|b| (k, b)),
+                policy,
             )?;
             if let Some(b) = move_bound.as_ref() {
                 max_approx_dev += b.spent();
@@ -1993,6 +2336,95 @@ mod tests {
         assert!(out.max_approx_dev <= 0.01, "{out:?}");
     }
 
+    /// The span walk polls the kernel's token once per step (#20575), so a drop stopped by a
+    /// poll limit is stopped by the walk's own poll. A curve on a flat B-spline patch is
+    /// dropped under a counting token: the unbounded drop gives a curve and a count of polls,
+    /// and the same drop under a limit at each of those polls is refused as cancelled where it polls. The
+    /// refusal at the walk's poll names this operation; the other polls of the drop (the start
+    /// solve, the next-point solve) name their own. Without the walk's poll no limit would
+    /// name this operation, so the assertion fails.
+    #[test]
+    fn a_poll_limit_stops_the_span_walk_with_its_own_refusal() {
+        use crate::kernel::CancelToken;
+
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|u| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|v| CPoint::new(u, v, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.1, 0.1, 0.0, NOW),
+                    CPoint::new(0.4, 0.9, 0.0, NOW),
+                    CPoint::new(0.6, 0.1, 0.0, NOW),
+                    CPoint::new(0.9, 0.9, 0.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let drop = |k: &Kernel| {
+            surface.drop_curve_base::<NoObject>(
+                k,
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                &source,
+                &Extent1d::from_min_max(0.0, 1.0),
+                1.0e-3,
+                true,
+                None,
+            )
+        };
+
+        // no token: the drop makes its curve
+        let free = drop(&Kernel::default()).unwrap();
+        assert!(!free.uv_curves.is_empty());
+
+        // a token that only counts: the polls the whole drop makes
+        let counting = CancelToken::after_polls(u64::MAX);
+        let mut k = Kernel::default();
+        k.set_cancel_token(counting.clone());
+        let counted = drop(&k).unwrap();
+        assert_eq!(counted.uv_curves.len(), free.uv_curves.len());
+        let total = counting.polls().unwrap();
+        assert!(total > 0);
+
+        // a limit at each poll stops the drop; one past the last lets it finish
+        let mut refused_by_the_walk = 0;
+        for limit in 1..=total {
+            let mut k = Kernel::default();
+            k.set_cancel_token(CancelToken::after_polls(limit));
+            if let Err(SolidError::Cancelled { operation }) = drop(&k) {
+                if operation == OP {
+                    refused_by_the_walk += 1;
+                }
+            }
+        }
+        assert!(
+            refused_by_the_walk > 0,
+            "no limit stopped the drop at the span walk's own poll"
+        );
+        let mut k = Kernel::default();
+        k.set_cancel_token(CancelToken::after_polls(total + 1));
+        assert_eq!(drop(&k).unwrap().uv_curves.len(), free.uv_curves.len());
+    }
+
     // ---- WR-100: the V degeneracy test ------------------------------------------------
 
     const WR100_NORMAL_KNOTS: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -2124,5 +2556,129 @@ mod tests {
                 0
             )
         );
+    }
+
+    /// A plane patch over `[0, 2]^2` that is only `C0` in u across `u = 1`: the point
+    /// `(x(u) + v / 2, v, 0)` with `x = u` up to `u = 1` and `x = 1 + 3 (u - 1)` past it
+    /// (cubic in u, the knot 1 three times; linear in v). `Su` is `(1, 0, 0)` before the
+    /// line and `(3, 0, 0)` past it, and `Sv = (1/2, 1, 0)` is not perpendicular to it.
+    fn sheared_plane_with_a_c0_knot_line() -> Surface {
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| {
+                vec![
+                    CPoint::new(x, 0.0, 0.0, NOW),
+                    CPoint::new(x + 1.0, 2.0, 0.0, NOW),
+                ]
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap())
+    }
+
+    /// The straight line `(1.6 + 0.05 t, 0.2 + 0.5 t, 1e-7)`, `t` in `[0, 3]`, 1e-7 above
+    /// [`sheared_plane_with_a_c0_knot_line`], and its exact UV curve there: `v = 0.2 +
+    /// 0.5 t` and `x - v / 2 = 1.5 - 0.2 t`, which is `1` at `t = 2.5`. Before that the
+    /// line is past `u = 1`, `u = 1 + (0.5 - 0.2 t) / 3`; after it `u = 1.5 - 0.2 t`.
+    /// So the UV curve is two straight pieces that meet on the knot line at a corner:
+    /// its tangent is `(-0.2 / 3, 0.5)` before `t = 2.5` and `(-0.2, 0.5)` after.
+    fn line_across_the_knot_line(t: f64) -> (Point3, Point2) {
+        let w = 1.5 - 0.2 * t;
+        let u = if w > 1.0 { 1.0 + (w - 1.0) / 3.0 } else { w };
+        (
+            Point3::new(1.6 + 0.05 * t, 0.2 + 0.5 * t, 1e-7),
+            Point2::new(u, 0.2 + 0.5 * t),
+        )
+    }
+
+    /// WR-753 in the drop: where the dropped curve crosses a `C0` knot line of the
+    /// surface its UV curve turns a corner, so the pieces end on the line, the one that
+    /// arrives with the tangent of the side it came from and the one that leaves with
+    /// that of the side it runs to. The line of [`line_across_the_knot_line`] is dropped
+    /// as one span (the crossing is found inside it) and as two spans that meet at the
+    /// crossing (its drop point there is a rounding error off the line). Either way the
+    /// UV curve is the exact one: two straight pieces, their joint on `u = 1` at `t =
+    /// 2.5`, with the two closed-form tangents there. The line is off the surface (by a
+    /// tenth of the tolerance), so each tangent is dropped onto an offset of the surface,
+    /// which has to answer from the side asked; and `Su . C'` is positive where the line
+    /// runs to smaller u, so the side cannot be read from its sign.
+    ///
+    /// Upstream's pieces share one tangent at every joint. Dropped as one span, the
+    /// line was halved towards the crossing and left a piece 1.8e-4 long across it;
+    /// dropped as two, the second span started with the first one's tangent, and was
+    /// halved the same way.
+    #[test]
+    fn a_dropped_curve_turns_its_corner_on_the_surfaces_c0_knot_line() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let k = Kernel::default();
+        let surface = sheared_plane_with_a_c0_knot_line();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 2.0, 2.0);
+        let interval = Extent1d::from_min_max(0.0, 3.0);
+        let polyline = |knots: &[f64]| {
+            let points: Vec<Point3> = knots
+                .iter()
+                .map(|&t| line_across_the_knot_line(t).0)
+                .collect();
+            let mut multiplicities = vec![1; knots.len()];
+            multiplicities[0] = 2;
+            multiplicities[knots.len() - 1] = 2;
+            Curve::from(
+                BSplineCurve::create_canonical(&CanonicalData {
+                    dim: 3,
+                    degree: 1,
+                    control_points: &points,
+                    form: BSplineCurveForm::Unspecified,
+                    knot_multiplicities: &multiplicities,
+                    knots,
+                    knot_type: KnotType::Unspecified,
+                    weights: None,
+                    trim: None,
+                })
+                .unwrap(),
+            )
+        };
+        for (what, curve) in [
+            ("one span", polyline(&[0.0, 3.0])),
+            ("two spans", polyline(&[0.0, 2.5, 3.0])),
+        ] {
+            let dropped = surface
+                .drop_curve::<NoObject>(&k, &domain, &curve, &interval, 1e-6, true, None, true)
+                .unwrap();
+            assert_eq!(dropped.uv_curves.len(), 1, "{what}");
+            assert!(dropped.max_approx_dev < 1e-6, "{what}: {dropped:?}");
+            let uv = &dropped.uv_curves[0];
+
+            // two pieces, their joint at the crossing and on the knot line
+            let (knots, _) = uv.knots(&k, None).unwrap();
+            assert_eq!(knots.len(), 3, "{what}: {knots:?}");
+            let joint = knots[1];
+            assert!((joint - 2.5).abs() < 1e-6, "{what}: {joint}");
+            assert_eq!(uv.evaluate_point(&k, joint).unwrap().x, 1.0, "{what}");
+
+            // the tangent of each side, in closed form
+            let arriving = uv.evaluate(&k, joint, 1, false, true).unwrap()[1];
+            let leaving = uv.evaluate(&k, joint, 1, true, true).unwrap()[1];
+            for (side, got, want) in [
+                ("arriving", arriving, [-0.2 / 3.0, 0.5]),
+                ("leaving", leaving, [-0.2, 0.5]),
+            ] {
+                assert!(
+                    (got.x - want[0]).abs() < 1e-9 && (got.y - want[1]).abs() < 1e-9,
+                    "{what}, {side}: {got:?}"
+                );
+            }
+
+            // the exact UV curve, to the parameter zero the joint is placed within
+            for i in 0..=3000 {
+                let t = f64::from(i) * 1e-3;
+                let got = uv.evaluate_point(&k, t).unwrap();
+                let want = line_across_the_knot_line(t).1;
+                assert!(
+                    (got.x - want.x).abs() < 1e-7 && (got.y - want.y).abs() < 1e-7,
+                    "{what} at {t}: {got:?}, exact {want:?}"
+                );
+            }
+        }
     }
 }

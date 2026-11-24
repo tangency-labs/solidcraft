@@ -175,8 +175,8 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
         // A copy without git (synced to a build machine) names no commit: say so, never "".
         "solidcraft": Some(git(&["rev-parse", "HEAD"])).filter(|c| !c.is_empty()),
         "solidcore": solidcore_pin(),
-        "fixes": "fixes.json",
-        "areas": areas,
+        // No per-area totals: the corpus test counts the case files, so a stored copy would
+        // only make every pull request that adds a case edit the same lines. They are printed.
         "not_expressible": not,
     });
     write_json(&dir.join("manifest.json"), &m, true)?;

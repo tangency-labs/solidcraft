@@ -1,8 +1,9 @@
 //! tangency-labs/solidcore#1453 (the cylinder form of #1130): a cylinder r5, h10
 //! shelled 1 inward with its top cap open. `MateEdges` intersects the offset faces'
 //! tangent (G1R) B-spline extensions, so every new inner edge between two analytic
-//! faces is marched: the floor circle and the seam line are B-splines, the rim is split
-//! at an extra vertex, and the volume is 3.5e-7 over the closed form.
+//! faces is marched: the floor circle and the seam line are B-splines, the rim was split
+//! at an extra vertex while the marched edges' tolerances were doubled (#18162), and the
+//! volume is 3.5e-7 over the closed form.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -66,9 +67,24 @@ fn inner_edges(k: &Kernel, b: &Brep, on: impl Fn(Point3) -> f64) -> (usize, usiz
     (count, exact, worst)
 }
 
+/// The largest edge tolerance of `b`; each must be finite and nonnegative (`f64::max`
+/// would skip a NaN).
+fn largest_tolerance(b: &Brep) -> f64 {
+    p1::edges(b, None)
+        .unwrap()
+        .into_iter()
+        .map(|e| {
+            let t = b.edge(e).unwrap().tolerance;
+            assert!(t.is_finite() && t >= 0.0, "edge {e:?}: tolerance {t:e}");
+            t
+        })
+        .fold(0.0, f64::max)
+}
+
 struct Shelled {
     edges: usize,
     vertices: usize,
+    largest_tolerance: f64,
     inner: usize,
     exact: usize,
     worst: f64,
@@ -98,15 +114,17 @@ fn shelled(
     let r = Shelled {
         edges: b.edge_list().len(),
         vertices: b.vertex_list().len(),
+        largest_tolerance: largest_tolerance(&b),
         inner,
         exact,
         worst,
         volume,
     };
     eprintln!(
-        "PROBE {label} fixed={fixed}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?}",
+        "PROBE {label} fixed={fixed}: edges={} vertices={} inner={inner} exact={exact} worst={worst:e} volume={volume:?} want={want:?} largest tolerance={:e}",
         r.edges,
-        r.vertices
+        r.vertices,
+        r.largest_tolerance
     );
     r
 }
@@ -119,13 +137,18 @@ fn on_cylinder(p: Point3) -> f64 {
     p.x.hypot(p.y) - 4.0
 }
 
-/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
-/// (upstream) the new inner edges are marched: 7 edges and 5 vertices (the rim split
-/// at an extra vertex). Its volume read 3.5e-7 over until `brep_volume` closed the
-/// marched edges' gaps (#16735): that was the integrator's leak through them, and the
-/// marched solid's volume is pi 25 10 - pi 16 9 to 1e-9 too (1.1e-12 measured). With
-/// the fix: the floor and rim are exact circles, 6 edges and 4 vertices, and the volume
-/// is that closed form to 1e-9.
+/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Without the fix
+/// (upstream) `MateEdges` marches the new inner edges; the seam stays marched after the
+/// shell's last step, `make_edges_on_analytics_exact` (WR-545). Upstream split the rim at an extra vertex
+/// (7 edges and 5 vertices) because each replaced edge's tolerance was doubled to 2e-5
+/// (#18009: the edge tolerance passed as the trim's distance, which `SetUVTrimCurve`
+/// doubles); with the raise at the trims' proved distance (#18162) the march closes the rim
+/// as one edge: 6 edges and 4 vertices, the minimal topology of the shelled cylinder, the
+/// same as the fixed path's, and no edge's tolerance is above upstream's 2e-5. Its volume
+/// read 3.5e-7 over until `brep_volume` closed the marched edges' gaps (#16735): that was
+/// the integrator's leak through them, and the marched solid's volume is pi 25 10 -
+/// pi 16 9 to 1e-9 too (1.1e-12 measured). With the fix: the floor and rim are exact
+/// circles, 6 edges and 4 vertices, and the volume is that closed form to 1e-9.
 #[test]
 fn issue_1453_shelled_cylinder_edges_are_exact() {
     let want = PI * 25.0 * 10.0 - PI * 16.0 * 9.0;
@@ -140,8 +163,13 @@ fn issue_1453_shelled_cylinder_edges_are_exact() {
     );
     assert_eq!(
         (stock.edges, stock.vertices),
-        (7, 5),
-        "upstream's marched rim"
+        (6, 4),
+        "the marched rim one closed edge"
+    );
+    assert!(
+        stock.largest_tolerance <= 2e-5,
+        "no edge looser than upstream's doubled 2e-5: {}",
+        stock.largest_tolerance
     );
     assert!(stock.exact < stock.inner, "a marched inner edge");
     let over = stock.volume.unwrap() - want;
@@ -182,8 +210,12 @@ fn on_frustum(p: Point3) -> f64 {
     p.x.hypot(p.y) - frustum_inner_radius(p.z)
 }
 
-/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. By default its floor
-/// and rim are marched; with the fix they are exact circles on the inner cone.
+/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. `MateEdges` marches its
+/// floor and rim without `offset_analytic_mate_edges`, and the shell's last step,
+/// `make_edges_on_analytics_exact` (WR-545, every shell since its flag was retired), makes
+/// each one the exact circle its plane meets the inner cone on (main pinned them marched,
+/// 0 exact, while that step was off by default). With the fix `MateEdges` makes them
+/// circles itself. Either way the seam, the inner cone against itself, stays marched.
 #[test]
 fn issue_1453_shelled_cone_edges_are_exact() {
     let stock = shelled(
@@ -195,7 +227,17 @@ fn issue_1453_shelled_cone_edges_are_exact() {
         on_frustum,
         None,
     );
-    assert_eq!(stock.exact, 0, "upstream's marched floor and rim");
+    assert_eq!((stock.edges, stock.vertices), (6, 4));
+    assert_eq!(stock.inner, 3, "floor circle, seam, rim circle");
+    assert_eq!(
+        stock.exact, 2,
+        "the shell's last step makes floor and rim circles"
+    );
+    assert!(
+        stock.worst <= 1e-12,
+        "inner edges on the inner cone: {}",
+        stock.worst
+    );
     let fixed = shelled(
         "issue_1453 cone",
         true,
