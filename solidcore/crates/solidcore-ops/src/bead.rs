@@ -50,7 +50,8 @@ pub enum Joint {
 /// the middle of its edge, `face` a point on the face its toe runs off, so the leg to shrink
 /// is the one along that face) or the largest sagitta that builds ([`FitKind::Sagitta`], a
 /// magnitude: the smallest over all the joints of the call, `at` the middle of the edge that
-/// sets it, so a retry at it builds on every joint); [`Error::NoRoom`] where no leg builds;
+/// sets it, so a retry at it builds on every joint); [`Error::NoRoom`] where no leg builds
+/// (none at or above the body's resolution, eight times its tolerance);
 /// [`Error::BlendFailed`] with the kernel's statement for joints it does not build yet (two
 /// beads meeting at a vertex, an edge not straight between two planes, an obtuse toe) and a
 /// leg below the body's resolution; [`Error::Refused`] for an edge listed twice or not in an
@@ -206,10 +207,15 @@ mod tests {
             (NoRoomReason::LegPastFace, FitMeasure::Leg),
             (NoRoomReason::BeadCutsFace, FitMeasure::Sagitta),
         ] {
-            let e = Failure::new("test", BlendFailure::NoRoom(reason))
-                .with_fit(Fit::new(0.0, measure, None))
-                .into_error();
-            assert!(matches!(refused(&k, &b, e), Ok(Error::NoRoom)));
+            for size in [0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let e = Failure::new("test", BlendFailure::NoRoom(reason))
+                    .with_fit(Fit::new(size, measure, None))
+                    .into_error();
+                assert!(
+                    matches!(refused(&k, &b, e), Ok(Error::NoRoom)),
+                    "{measure:?} {size}"
+                );
+            }
         }
     }
 }

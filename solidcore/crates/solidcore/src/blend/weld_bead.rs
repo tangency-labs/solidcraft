@@ -33,6 +33,7 @@
 
 use crate::blend::blend_refusal::setback_below_resolution;
 use crate::blend::fillet_exact::ClassInputs;
+use crate::blend::fillet_executive::p1::is_radius_supported;
 use crate::blend::fillet_executive::NoRoomReason;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
@@ -87,8 +88,10 @@ const TOE_PIECES: u32 = 32;
 ///
 /// The refusal [`NoRoomReason::LegPastFace`] naming the edge and the face, with the largest
 /// leg on that side whose toes stay on the face at the stations (halved down from the leg
-/// until the bracket is `1e-7 (1 + hi)` wide, `hi` its upper end);
-/// those of the drop and of the classification.
+/// until the bracket is `1e-7 (1 + hi)` wide, `hi` its upper end, for legs below about
+/// `1e-7 * 2^64`, past which the 64 halvings end first), or 0 where that leg is below the
+/// smallest the body builds ([`is_radius_supported`]: eight times its tolerance), as no leg
+/// on that side builds; those of the drop and of the classification.
 fn toes_on_faces(
     k: &Kernel,
     target: &Brep,
@@ -129,6 +132,13 @@ fn toes_on_faces(
         // a toe holds up to the face's tolerance past its edge: the fit named keeps it on the
         // face itself
         let fit = (lo - target.face(face)?.tolerance).max(0.0);
+        // a leg below the body's resolution is refused before the toes are read
+        // (`setback_below_resolution`), so a retry at it would not build: no leg fits
+        let fit = if is_radius_supported(fit, target.tolerance()) {
+            fit
+        } else {
+            0.0
+        };
         let edge = Some(TargetEdge::of_target(edge_id));
         return Err(
             Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::LegPastFace))

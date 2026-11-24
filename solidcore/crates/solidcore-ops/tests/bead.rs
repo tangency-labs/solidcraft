@@ -186,27 +186,37 @@ fn a_leg_past_its_face_is_refused_with_the_leg_that_fits_and_its_face() {
     beads(&[&t], &[along([size, LEG])], 0.0).unwrap();
 }
 
-/// A leg of 1e6 along a face that runs only 0.05 past the edge: the halving's bracket shrinks
-/// with the leg it finds, not the leg asked, so the fit is the face's 0.05, not 0 (#21560).
-#[test]
-fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
+/// A plate with a block standing on it whose side ends `w` short of the plate's end: the
+/// joint's edge, and the plate's top, which runs only `w` past it.
+fn narrow_top(w: f64) -> (Body, usize, usize) {
     let plate = make_box([0.0, 0.0, 0.0], [100.0, 100.0, 10.0]).unwrap();
-    let block = make_box([40.0, 0.0, 10.0], [59.95, 100.0, 10.0]).unwrap();
+    let block = make_box([40.0, 0.0, 10.0], [60.0 - w, 100.0, 10.0]).unwrap();
     let part = union_all(vec![plate, block]).unwrap();
-    let e = edge_at(&part, [99.95, 50.0, 10.0]);
+    let e = edge_at(&part, [100.0 - w, 50.0, 10.0]);
     let faces = edge_faces_along(&part, e, [0.0, 0.0, 1.0]).unwrap();
     let top = if faces[0].1 > faces[1].1 {
         faces[0].0
     } else {
         faces[1].0
     };
-    let along_top = |leg| Joint::Edge {
+    (part, e, top)
+}
+
+fn along_top(e: usize, top: usize, leg: f64) -> Joint {
+    Joint::Edge {
         body: 0,
         edge: e,
         legs: [leg, 1.0],
         along: Some(top),
-    };
-    let got = beads(&[&part], &[along_top(1e6)], 0.0);
+    }
+}
+
+/// A leg of 1e6 along a face that runs only 0.05 past the edge: the halving's bracket shrinks
+/// with the leg it finds, not the leg asked, so the fit is the face's 0.05, not 0 (#21560).
+#[test]
+fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
+    let (part, e, top) = narrow_top(0.05);
+    let got = beads(&[&part], &[along_top(e, top, 1e6)], 0.0);
     let Err(Error::TooLarge {
         size,
         kind: FitKind::Leg,
@@ -218,7 +228,24 @@ fn a_leg_far_past_a_narrow_face_is_refused_with_the_leg_that_fits() {
     // the bracket ends 1e-7 (1 + hi) wide, hi just past 0.05 (so under 1.1e-7), below the
     // toe's limit, 0.05 plus the face's tolerance, which is then taken off
     assert!((0.05 - 1.1e-7..=0.05).contains(&size), "{size}");
-    assert_eq!(beads(&[&part], &[along_top(size)], 0.0).unwrap().len(), 1);
+    assert_eq!(
+        beads(&[&part], &[along_top(e, top, size)], 0.0)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+/// A face that runs only 5e-5 past the edge, under eight times the body's tolerance (1e-5):
+/// the leg that keeps its toe on it is below the smallest leg the body builds, so no leg
+/// fits, whatever the leg asked (#21560).
+#[test]
+fn a_face_narrower_than_the_body_s_resolution_leaves_no_room() {
+    let (part, e, top) = narrow_top(5e-5);
+    for leg in [1.0, 1e6] {
+        let got = beads(&[&part], &[along_top(e, top, leg)], 0.0);
+        assert!(matches!(got, Err(Error::NoRoom)), "{leg}: {got:?}");
+    }
 }
 
 #[test]
