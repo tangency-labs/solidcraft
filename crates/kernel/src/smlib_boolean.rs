@@ -136,9 +136,9 @@ mod smlib {
         if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r, operands) } else { body }
     }
 
-    /// An error unless SMLib's check accepts `r`, the result of combining `operands` (checked
-    /// here unless the evaluation's validation mode leaves it to the feature's end,
-    /// `crate::validation`): what was done with the check.
+    /// An error when SMLib's check refuses `r`, the result of combining `operands`, where the
+    /// evaluation's validation mode checks each step (left to the feature's end, or not checked,
+    /// otherwise: `crate::validation`): what was done with the check.
     fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<Step> {
         let step = crate::validation::step();
         if step != Step::Check {
