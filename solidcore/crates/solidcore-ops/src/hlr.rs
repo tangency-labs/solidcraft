@@ -463,6 +463,10 @@ mod tests {
         assert_eq!(surfaces, [("cylinder", 12), ("plane", 6), ("sphere", 8)]);
         assert!(def.report.freeform_faces.is_empty());
         assert_eq!(def.report.tangent_edges, 48);
+        // Boundaries are trimmed in chords: 256 to each quarter circle of radius 2 here, which
+        // sag about 1e-5 mm.
+        let chord = def.report.max_trim_chord;
+        assert!(chord > 0. && chord <= 1e-4, "trim chord {chord}");
 
         // Seen along d = (-1, -2, -3) the convex body's outline is the inner box's outline, a
         // hexagon whose sides are its edges seen along d, each edge e of length 6 drawn
@@ -522,8 +526,20 @@ mod tests {
                 }
             }
         }
-        let hexagon = 12. * ((13f64 / 14.).sqrt() + (10f64 / 14.).sqrt() + (5f64 / 14.).sqrt());
+        let sines = [13f64 / 14., 10. / 14., 5. / 14.].map(f64::sqrt);
+        let hexagon = 12. * sines.iter().sum::<f64>();
         assert!(near(lines, hexagon), "lines {lines}, hexagon {hexagon}");
-        assert!(near(arcs, 4. * PI), "arcs {arcs}, circle {}", 4. * PI);
+        // A face is closed to its trim's chords: a silhouette runs on to within twice their sag
+        // (plus 1e-9 of the face's size) of them, and they lie within one sag of the boundary.
+        // The rounds' outlines end exactly, at the ends of their charts; a corner's runs on along
+        // its sphere, past the boundary to the round along axis i, a great circle square to i,
+        // which it crosses at the angle between the planes square to d and to i, whose sine is
+        // sqrt(1 - d_i^2). Each axis's two outline lines end at four such crossings.
+        let past = 4. * (3. * chord + 1e-8) * sines.iter().map(|s| 1. / s).sum::<f64>();
+        assert!(
+            arcs >= 4. * PI - 1e-6 && arcs <= 4. * PI + past + 1e-6,
+            "arcs {arcs}, circle {}, past it at most {past}",
+            4. * PI
+        );
     }
 }
