@@ -40,7 +40,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;

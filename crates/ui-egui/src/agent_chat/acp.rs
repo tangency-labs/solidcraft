@@ -258,6 +258,13 @@ pub fn system_note(instructions: &str) -> String {
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
 
+/// The Claude Code adapter's built-in tools the session has (`_meta.claudeCode.options.tools`):
+/// only these, so a tool a later Claude Code adds (or one the list above doesn't name, such as its
+/// schedulers and message senders) stays off (#19554). `ExitPlanMode` is how the agent leaves the
+/// plan mode the panel's mode picker offers; it only asks. [`CLAUDE_DISALLOWED_TOOLS`] stays as a
+/// second guard.
+pub const CLAUDE_TOOLS: &[&str] = &["ExitPlanMode"];
+
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
 /// `note` is the system note ([`system_note`]).
@@ -269,7 +276,14 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
         // Its own shell and file tools are off: the agent works through SolidCraft's tools.
-        "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
+        // Only the MCP servers given here (`strictMcpConfig`): not the user's claude.ai
+        // connectors, nor the servers in their own Claude Code configuration (#19554).
+        "claudeCode": {"options": {
+            "allowDangerouslySkipPermissions": false,
+            "disallowedTools": CLAUDE_DISALLOWED_TOOLS,
+            "tools": CLAUDE_TOOLS,
+            "strictMcpConfig": true,
+        }},
     });
     if takes_antigravity_note(init)
         && let Some(meta) = meta.as_object_mut()
@@ -808,6 +822,22 @@ mod tests {
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
+    }
+
+    /// #19554: Claude Code gets only the chat's MCP server, none of the user's claude.ai connectors
+    /// or own servers (`strictMcpConfig`), and only the built-in tools the chat names (`tools`),
+    /// none of which the disallowed list turns off.
+    #[test]
+    fn claude_code_gets_only_the_chats_server_and_named_tools() {
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        for bridge in [Some(&b), None] {
+            let p = session_new_params(std::path::Path::new("/tmp"), bridge, &json!({}), SYSTEM_NOTE);
+            let options = &p["_meta"]["claudeCode"]["options"];
+            assert_eq!(options["strictMcpConfig"], json!(true), "{p}");
+            assert_eq!(options["tools"], json!(["ExitPlanMode"]), "{p}");
+            assert!(CLAUDE_TOOLS.iter().all(|t| !CLAUDE_DISALLOWED_TOOLS.contains(t)));
+            assert_eq!(p["mcpServers"].as_array().map(Vec::len), Some(usize::from(bridge.is_some())));
+        }
     }
 
     /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard

@@ -69,8 +69,8 @@
 //!   (a projected corner at the rotation origin) is not an error: the local solve
 //!   returns [`CurvePropertyNote::CornerOnViewAxis`] with its result, and the solver's
 //!   step ([`CurvePropertyGs::local_solve_branch`]) stops on it as `SolveIt`'s `SER`
-//!   does (a curve failure whose comparison status is `1`). A node without data is `SM_ERR_NULL_POINTER`
-//!   (`NER`); a node whose data is not a leaf span is `InvalidInput` (upstream casts
+//!   does (a curve failure whose comparison status is `1`). A node without data is `InvalidInput`
+//!   with status `SM_ERR_NULL_POINTER` (`NER`; a cache's tree has data at every node); a node whose data is not a leaf span is `InvalidInput` (upstream casts
 //!   whatever `m_pData` holds).
 //! - **`SmFindPCExtremaEFO::Evaluate`** is implemented for [`Curve`] (it calls the
 //!   virtual `IsDegenerate`). An infinite evaluated tangent returns `SM_ERR`
@@ -119,7 +119,7 @@ use crate::curve::curve::p4::{
 use crate::curve::curve::p5::{find_additional_cp_guess, is_periodic, local_property_analysis};
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
 use crate::error::curve::{CurveFailure, PointSolveOption};
-use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -1566,7 +1566,7 @@ impl Curve {
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // some sort of error in solver
                 Err(e) => {
-                    return Err(Failure::new(OP_POINT, CurveFailure::StageFailed)
+                    return Err(Failure::new(OP_POINT, CurveFailure::LocalSolveFailed)
                         .caused_by(e)
                         .into_error());
                 }
@@ -2257,12 +2257,9 @@ impl CurvePropertyNote {
     #[must_use]
     pub fn into_error(self) -> SolidError {
         match self {
-            Self::CornerOnViewAxis => Failure::new(
-                OP_GS,
-                CurveFailure::Failed("a pseudo box corner projects onto the view origin"),
-            )
-            .with_status(1)
-            .into_error(),
+            Self::CornerOnViewAxis => Failure::new(OP_GS, CurveFailure::CornerOnViewAxis)
+                .with_status(1)
+                .into_error(),
         }
     }
 }
@@ -2299,8 +2296,8 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a node without data, `InvalidInput` for a missing
-    /// branch node, curve, option vector or value or a node that is not a curve
+    /// `InvalidInput` for a node without data (status `SM_ERR_NULL_POINTER`) or a
+    /// missing branch node, curve, option vector or value or a node that is not a curve
     /// leaf; those of the evaluations, `LocalPropertyAnalysis` and
     /// `sm_FindAdditionalCpGuess`.
     pub fn local_solve_branch_with_note(
@@ -2316,7 +2313,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let tree = self.base.tree(0)?;
         let curve_node = tree.node(curve_node_id)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::curve_stage_failed(OP_GS, SM_ERR_NULL_POINTER));
+            return Err(SolidError::curve(OP_GS, CurveFailure::CurveNodeWithoutData));
         }
         let bez_span = *tree.curve_span(curve_node)?;
         let owner = tree.owner_object()?;
@@ -2613,7 +2610,7 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::curve::line::{BoundedLineOptions, Line};
-    use crate::error::SM_ERR;
+    use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
 
     fn hermite(p1: [f64; 3], d1: [f64; 3], p2: [f64; 3], d2: [f64; 3]) -> Curve {
         Curve::from(HermiteCurve::new(

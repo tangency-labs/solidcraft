@@ -4,7 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::chain_edit::{remove_chain, Junction, Section};
-use super::{bspline_part_with_nurb, delete_fillet_face, ner, null, refused, stage_failed};
+use super::{
+    bspline_part_with_nurb, defect, delete_fillet_face, edge_curve, editing_disabled, face_surface,
+    null, own, refused,
+};
 use crate::blend::fillet_exact::{
     circle_spine_station, classify_blend_spine, BlendQuadric, BlendSpine, ExactBlend, QuadricKind,
 };
@@ -40,7 +43,7 @@ pub fn delete_fillet_faces(
         return Err(null("no fillet faces selected"));
     };
     if !b.editing_enabled() {
-        return Err(stage_failed());
+        return Err(editing_disabled());
     }
     let selected: BTreeSet<_> = faces.iter().copied().collect();
     if selected.len() != faces.len() {
@@ -181,13 +184,10 @@ impl Band {
         tol: f64,
         junctions: &mut BTreeMap<EdgeId, Junction>,
     ) -> Result<Section> {
-        let rail = ner(edge::curve(b, self.rails[0])?)?;
+        let rail = edge_curve(b, self.rails[0])?;
         let mid = rail.evaluate_point(k, edge::interval(b, self.rails[0])?.mid())?;
         let [a, z] = self.supports;
-        let surfaces = [
-            ner(face::p2::surface(b, a)?)?,
-            ner(face::p2::surface(b, z)?)?,
-        ];
+        let surfaces = [face_surface(b, a)?, face_surface(b, z)?];
         // At zero offset the existing blend spine classifier intersects the support
         // surfaces themselves. The nearest meridian crossing picks the local branch.
         let quadric = |s: &crate::surface::surface::Surface| {
@@ -236,13 +236,13 @@ impl Band {
             let near = (vertex::point(b, vertices[0])? + vertex::point(b, vertices[1])?) * 0.5;
             let (origin, normal) = if next.is_some() {
                 // A shared circular section lies in the rolling ball's normal plane.
-                let curve = ner(edge::curve(b, eid)?)?;
+                let curve = edge_curve(b, eid)?;
                 let arc = Ellipse::is_nurb_curve_circle(k, curve, None)?
                     .ok_or_else(|| refused(R::CornerNeedsFittedIntersection))?;
                 let placement = arc.canonical().position;
                 (placement.origin(), placement.z_axis())
             } else {
-                let end = ner(face::p2::surface(b, end_face)?)?.is_planar(k, tol)?;
+                let end = face_surface(b, end_face)?.is_planar(k, tol)?;
                 if !end.is_planar {
                     return Err(refused(R::CornerNeedsFittedIntersection));
                 }
@@ -277,7 +277,10 @@ impl Band {
         };
         // Prove the entire new trim lies on both supports, including a long arc
         // across the parameter seam. A pair of accepted endpoints is insufficient.
-        let net = ner(bspline_part_with_nurb(&sharp)?)?;
+        let net = own(
+            bspline_part_with_nurb(&sharp)?,
+            "a line or circle just made has a B-spline part",
+        )?;
         for s in surfaces {
             let support =
                 AnalyticSupport::of(s).ok_or_else(|| refused(R::TangentSurfacesDoNotMeet))?;
@@ -341,7 +344,9 @@ fn check_connected(first: FaceId, bands: &BTreeMap<FaceId, Band>) -> Result<()> 
     let mut seen = BTreeSet::new();
     while let Some(f) = visit.pop() {
         if seen.insert(f) {
-            let band = bands.get(&f).ok_or_else(stage_failed)?;
+            let band = bands
+                .get(&f)
+                .ok_or_else(|| defect("a band's neighbours are drawn from the bands"))?;
             visit.extend(band.adjacent.into_iter().flatten());
         }
     }
