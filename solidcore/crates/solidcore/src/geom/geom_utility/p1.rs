@@ -25,6 +25,7 @@
 //! | [`circle_find_silhouette_points`] | `smgu_CircleFindSilhouettePoints` |
 //! | [`cones_are_disjoint_perpen`]         | `smgu_ConesAreDisjointPerpen`                    |
 //! | [`line_coplanar_circle_intersect`], [`line_coplanar_circle_intersect_distinct`] | `smgu_LineCoPlanarCircleIntersect` |
+//! | [`line_coplanar_ellipse_touch`] | not upstream |
 //! | [`circle_coplanar_circle_intersect`], [`circle_coplanar_circle_intersect_in_contact`], [`CircleCircle`] | `smgu_CircleCoPlanarCircleIntersect` |
 //! | [`line_intersect_sphere`], [`LineSphere`] | `smgu_LineIntersectSphere`                   |
 //! | [`intersect_three_planes`]            | `smgu_IntersectThreePlanes`                      |
@@ -154,9 +155,11 @@ pub fn add_point(points: &mut Vec<Point3>, tol: f64, pnt: Point3) -> Result<()> 
         }
     }
     if points.len() > 1 {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::add_point",
-            "the point set is not empty",
+            GeomFailure::PointSetFull {
+                points: points.len(),
+            },
         ));
     }
     points.push(pnt);
@@ -374,13 +377,15 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "a line has no direction"));
+        let length = line_vec1.length().min(line_vec2.length());
+        return Err(SolidError::geom(OP, GeomFailure::ZeroDirection { length }));
     }
 
     // error - parallel or coincident lines
     let cross = line_vec1.cross(line_vec2);
     if cross.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "the lines are parallel"));
+        let measure = cross.length_squared();
+        return Err(SolidError::geom(OP, GeomFailure::Parallel { measure }));
     }
 
     // get minimum distance vector direction
@@ -391,9 +396,9 @@ pub fn line_line_closest_point(
     let plane_v2 = cross.cross(line_vec2).unitize()?;
 
     let t1 = line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2)
-        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
+        .map_err(SolidError::geom_call(OP))?;
     let t2 = line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1)
-        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
+        .map_err(SolidError::geom_call(OP))?;
     Ok((t1, t2))
 }
 
@@ -414,10 +419,9 @@ pub fn line_plane_intersect(
 
     let plane_eq_d = -plane_norm.dot(plane_pnt);
     let tol = EFF_ZERO * line_vec.max_dimension() + EFF_ZERO_SQ;
-    line_plane_parameter_from_offset(line_vec.dot(plane_norm), tol, || {
-        plane_eq_d + line_pnt.dot(plane_norm)
-    })
-    .ok_or_else(|| SolidError::geom_failed(OP, "the line is parallel to the plane"))
+    let denom = line_vec.dot(plane_norm);
+    line_plane_parameter_from_offset(denom, tol, || plane_eq_d + line_pnt.dot(plane_norm))
+        .ok_or_else(|| SolidError::geom(OP, GeomFailure::Parallel { measure: denom }))
 }
 
 /// The signed parameter where a line meets the plane through the given point.
@@ -528,9 +532,9 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the line is parallel to the plane",
+            GeomFailure::Parallel { measure: denom },
         )); // Parallel case
     }
 
@@ -636,7 +640,13 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     // Upstream calls the 3d smgu_LinePointDistance (points converted with z = 0).
     let (dist_to_line, _) = line_point_distance(Vec3::from(a), vec, Vec3::from(b));
     if dist_to_line < 2.0 * EFF_ZERO * a.distance_squared(c) {
-        return Err(SolidError::geom_failed(OP, "the points are collinear")); // Radius would be bigger than 1 / SM_EFF_ZERO.
+        // Radius would be bigger than 1 / SM_EFF_ZERO.
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::CollinearPoints {
+                measure: dist_to_line,
+            },
+        ));
     }
 
     // Set up the 2x2 as described.
@@ -653,7 +663,10 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     let numer1 = a00 * b1 - a10 * b0;
 
     if determ.abs() < numer0.abs() * EFF_ZERO || determ.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the points are collinear"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::CollinearPoints { measure: determ },
+        ));
     }
 
     Ok(Point2::new(numer0 / determ, numer1 / determ))
@@ -690,9 +703,9 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the dimension is neither 2 nor 3",
+            GeomFailure::BadDimension { dimension },
         ));
     }
 
@@ -904,9 +917,9 @@ pub fn line_coplanar_circle_intersect_distinct(
     // Unitize the line vector.
     let scale = line_vec.length();
     if scale < EFF_ZERO * circle_radius {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::line_coplanar_circle_intersect",
-            "the line has no direction",
+            GeomFailure::ZeroDirection { length: scale },
         ));
     }
     line_vec /= scale;
@@ -971,6 +984,83 @@ pub fn line_coplanar_circle_intersect_distinct(
     } else {
         Ok(vec![t0 / scale, t1 / scale])
     }
+}
+
+/// Not upstream (#18828): whether a line touches the ellipse `center + radii[0] cos u *
+/// x_axis + radii[1] sin u * y_axis` (`x_axis`, `y_axis` orthonormal) rather than cutting
+/// through it, by the contact rule [`line_coplanar_circle_intersect_distinct`] applies to a
+/// circle, and if so the line parameter (along `line_vec`) of the touch. The line is
+/// projected into the ellipse's plane.
+///
+/// Take `n` the unit normal to the line in the plane pointing from the centre to the line,
+/// `c` the line's distance from the centre and `h = √((a n·x)² + (b n·y)²)` the distance
+/// from the centre of the ellipse's tangent line with normal `n` (`a`, `b` the radii'
+/// magnitudes). The ellipse lies in the strip `|n·(p - centre)| <= h` and meets the strip's
+/// edge only at its support point `centre + (a² (n·x) x + b² (n·y) y) / h`. So when `c >=
+/// h` the line does not enter the ellipse and comes nearest it at the support point's drop
+/// onto the line, `c - h` away; and when `c < h` the ellipse reaches `h - c` past the line.
+/// For a circle `h` is the radius and the support point the centre's drop onto the line:
+/// these are the circle's `d >= r` and `r - d`. The line touches when `c >= h`, or when the
+/// overlap `h - c` is within `contact_tolerance` (not proved past it,
+/// [`within_contact_tol`]) and the whole ellipse is not (`h + c`), as the circle's contact
+/// rule; the touch is the support point's drop. Otherwise it cuts through the ellipse and
+/// this returns `None`. With a `contact_tolerance` of zero the overlap is still read through
+/// the rounding of its two lengths ([`within_contact_tol`]'s allowance alone), so a line
+/// tangent to the ellipse touches it whichever way the last bits of `c` and `h` fall.
+///
+/// An ellipse with no extent across the line (`h` not positive: a radius of zero, so the
+/// ellipse is a segment along the line's direction, or a point) has no support point to
+/// touch at, and this returns `None` for it too.
+///
+/// # Errors
+/// [`GeomFailure::ZeroDirection`] when the projected line vector is shorter than
+/// `SM_EFF_ZERO` times the larger radius.
+pub fn line_coplanar_ellipse_touch(
+    line_pnt: Point3,
+    line_vec: Vec3,
+    center: Point3,
+    x_axis: Vec3,
+    y_axis: Vec3,
+    radii: [f64; 2],
+    contact_tolerance: f64,
+) -> Result<Option<f64>> {
+    const OP: &str = "geom::geom_utility::p1::line_coplanar_ellipse_touch";
+    let (a, b) = (radii[0].abs(), radii[1].abs());
+    let normal = x_axis.cross(y_axis);
+    let line_pnt = point_project_to_plane(line_pnt, center, normal);
+    let mut line_vec = vector_project_to_plane(line_vec, normal);
+    let scale = line_vec.length();
+    if scale < EFF_ZERO * a.max(b) {
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ZeroDirection { length: scale },
+        ));
+    }
+    line_vec /= scale;
+    // the line's normal in the plane, toward the line from the centre, and its distance
+    let mut n = normal.unitize_or_z().cross(line_vec);
+    let mut c = n.dot(line_pnt - center);
+    if c < 0.0 {
+        n = -n;
+        c = -c;
+    }
+    let (nx, ny) = (n.dot(x_axis), n.dot(y_axis));
+    let h = sm_sqrt((a * nx) * (a * nx) + (b * ny) * (b * ny));
+    if h <= 0.0 || h.is_nan() {
+        return Ok(None);
+    }
+    // the support point's drop onto the line: where the two come nearest
+    let support = center + (a * a * nx) / h * x_axis + (b * b * ny) / h * y_axis;
+    let t = (support - line_pnt).dot(line_vec);
+    let nearest = line_pnt + t * line_vec;
+    let size = nearest.max_dimension().max(center.max_dimension()) + a.max(b);
+    let contact = contact_tolerance.max(0.0);
+    let touches = c >= h
+        || (within_contact_tol(h - c, contact, size) && !within_contact_tol(h + c, contact, size));
+    if !touches {
+        return Ok(None);
+    }
+    Ok(Some(t / scale))
 }
 
 /// Result of [`circle_coplanar_circle_intersect`] (`rlNumIntersections` and
@@ -1193,7 +1283,13 @@ pub fn line_intersect_sphere(
     // compute 1/2 distance between the point solutions
     let disc = sphere_radius * sphere_radius - b * b;
     if disc < EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the line misses the sphere")); // can't really happen
+        // upstream: "can't really happen". Past the touch test r - b > SM_EFF_ZERO (1 + r),
+        // so disc > SM_EFF_ZERO (1 + r) r, which is below SM_EFF_ZERO when r (1 + r) < 1:
+        // a sphere of radius under about 0.618 can still reach here
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ShortChord { discriminant: disc },
+        ));
     }
     let d = sm_sqrt(disc);
 
@@ -1271,9 +1367,11 @@ pub fn plane_point_distance(
     test_point: Point3,
 ) -> Result<f64> {
     if plane_norm.length_squared() - 1.0 > EFF_ZERO {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::plane_point_distance",
-            "the plane normal is not a unit vector",
+            GeomFailure::NormalNotUnit {
+                length_squared: plane_norm.length_squared(),
+            },
         ));
     }
 
@@ -1438,7 +1536,7 @@ pub fn vec_lin_comb_two_vectors(basis1: Vec3, basis2: Vec3, vector: Vec3) -> Res
 
     // `det == 0.0` in case dNumer0 or dNumer1 is 0 exactly.
     if det == 0.0 || det.abs() < numer0.abs() * EFF_ZERO || det.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::geom_failed(OP, "the system is singular"));
+        return Err(SolidError::geom(OP, GeomFailure::Singular { measure: det }));
     }
 
     Ok(Point2::new(numer0 / det, numer1 / det))
@@ -1671,9 +1769,9 @@ pub fn inverse_3x3(a0: &[f64; 3], a1: &[f64; 3], a2: &[f64; 3]) -> Result<[[f64;
     let det = vec_triple_product(a0, a1, a2);
 
     if is_zero(det) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p1::inverse_3x3",
-            "the matrix is singular",
+            GeomFailure::Singular { measure: det },
         ));
     }
 
@@ -1952,6 +2050,143 @@ mod tests {
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)
+    }
+
+    /// The ellipse `centre + 3 cos u * x + 2 sin u * y` in a tilted plane, for the
+    /// line/ellipse touch tests: its centre, axes and radii.
+    fn tilted_ellipse() -> (Point3, Vec3, Vec3, [f64; 2]) {
+        let x = v(1.0, 1.0, 0.0).unitize_or_z();
+        let y = v(-1.0, 1.0, 1.0).unitize_or_z();
+        let y = (y - x * y.dot(x)).unitize_or_z();
+        (v(10.0, -4.0, 2.5), x, y, [3.0, 2.0])
+    }
+
+    /// The point of the tilted ellipse at angle `u` and its unit tangent there.
+    fn ellipse_at(u: f64) -> (Point3, Vec3) {
+        let (c, x, y, [a, b]) = tilted_ellipse();
+        let p = c + a * u.cos() * x + b * u.sin() * y;
+        let t = (-a * u.sin() * x + b * u.cos() * y).unitize_or_z();
+        (p, t)
+    }
+
+    /// Where the line from `p` along `dir` touches the tilted ellipse, if it does.
+    fn ellipse_touch(p: Point3, dir: Vec3, contact: f64) -> Option<Point3> {
+        let (c, x, y, r) = tilted_ellipse();
+        line_coplanar_ellipse_touch(p, dir, c, x, y, r, contact)
+            .unwrap()
+            .map(|t| p + t * dir)
+    }
+
+    /// Not upstream (#18828): the line/ellipse touch rule. A tangent touches at its tangent
+    /// point whatever its direction and wherever it starts; a line a hair inside a tangent
+    /// touches at the drop of the tangent point only within the contact tolerance; a line
+    /// outside the ellipse comes nearest it at the drop of the support point; a line
+    /// through the centre and a chord between two well-separated points cut through it.
+    #[test]
+    fn a_line_touches_an_ellipse_only_within_the_contact_tolerance_of_tangent() {
+        let (c, x, y, _) = tilted_ellipse();
+        for u in [0.0, 0.5 * PI, 0.7, 2.0, 4.1] {
+            let (p, t) = ellipse_at(u);
+            for (start, dir) in [(p - 0.8 * t, t), (p + 1.3 * t, -2.0 * t)] {
+                // (a tangent's rounding can put it a hair inside: the boolean's contact
+                // tolerance takes it, as for a circle)
+                let touch = ellipse_touch(start, dir, 1e-5).expect("a tangent touches");
+                assert!(touch.distance(p) < 1e-12, "u {u}: {touch:?} vs {p:?}");
+                // and with no contact tolerance its rounding alone does not make it a cut
+                let touch = ellipse_touch(start, dir, 0.0).expect("a tangent touches");
+                assert!(touch.distance(p) < 1e-12, "u {u}: {touch:?} vs {p:?}");
+            }
+        }
+        // 1e-6 inside the tangent at u = 0.7: a touch within a contact tolerance of 1e-5,
+        // at the tangent point's drop; a cut with none, or with a contact tolerance of 1e-7
+        let (p, t) = ellipse_at(0.7);
+        let inward = (c - p - t * (c - p).dot(t)).unitize_or_z();
+        let inside = p + 1e-6 * inward;
+        let touch = ellipse_touch(inside - t, t, 1e-5).expect("within the contact tolerance");
+        assert!(touch.distance(inside) < 1e-9, "{touch:?}");
+        assert!(ellipse_touch(inside - t, t, 0.0).is_none());
+        assert!(ellipse_touch(inside - t, t, 1e-7).is_none());
+        // 1e-3 outside the tangent at u = 2.0: nearest at the tangent point's drop
+        let (p, t) = ellipse_at(2.0);
+        let outward = (p - c - t * (p - c).dot(t)).unitize_or_z();
+        let near = ellipse_touch(p + 1e-3 * outward, t, 0.0).expect("outside");
+        assert!(near.distance(p + 1e-3 * outward) < 1e-12);
+        // through the centre, and a chord between u = 0.3 and u = 2.6, cut through it
+        for dir in [x, y, x + y] {
+            assert!(ellipse_touch(c + 0.25 * dir, dir, 1e-5).is_none());
+        }
+        let (p0, _) = ellipse_at(0.3);
+        let (p1, _) = ellipse_at(2.6);
+        assert!(ellipse_touch(p0, p1 - p0, 1e-5).is_none());
+        // a tiny ellipse within the contact tolerance of the line all round is cut, as a
+        // circle is
+        let tiny = line_coplanar_ellipse_touch(
+            v(-1.0, 0.0, 0.0),
+            Vec3::X,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            [3e-6, 2e-6],
+            1e-5,
+        )
+        .unwrap();
+        assert!(tiny.is_none());
+        // an ellipse with one radius zero is a segment: along the line's direction it has
+        // no extent across the line and no support point to touch at
+        let flat = |radii| {
+            line_coplanar_ellipse_touch(
+                v(0.0, 1.0, 0.0),
+                Vec3::X,
+                Point3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                radii,
+                1e-5,
+            )
+            .unwrap()
+        };
+        assert!(flat([2.0, 0.0]).is_none());
+        assert!(flat([0.0, 0.0]).is_none());
+        // and a line with no direction in the ellipse's plane is refused, as for a circle
+        let along_normal = line_coplanar_ellipse_touch(
+            p,
+            Vec3::Z,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            [3.0, 2.0],
+            0.0,
+        );
+        assert!(along_normal.is_err());
+    }
+
+    /// Not upstream (#18828): an ellipse whose radii differ by 1e-9 touches a line exactly
+    /// where the circle rule says the circle of the same radius does, and at the same point.
+    #[test]
+    fn a_near_circle_ellipse_touches_where_its_circle_does() {
+        let (c, r) = (v(1.0, 2.0, 3.0), 5.0);
+        for (p, dir, contact) in [
+            (v(-10.0, 7.0, 3.0), Vec3::X, 0.0),
+            (v(-10.0, 7.0 - 1e-6, 3.0), Vec3::X, 1e-5),
+            (v(-10.0, 7.0 - 1e-6, 3.0), Vec3::X, 0.0),
+            (v(-10.0, 7.2, 3.0), Vec3::X, 1e-5),
+            (v(-10.0, 3.5, 3.0), v(1.0, 0.1, 0.0), 1e-5),
+        ] {
+            let circle =
+                line_coplanar_circle_intersect_distinct(p, dir, c, Vec3::Z, r, 0.0, 0.0, contact)
+                    .unwrap();
+            let ellipse =
+                line_coplanar_ellipse_touch(p, dir, c, Vec3::X, Vec3::Y, [r + 1e-9, r], contact)
+                    .unwrap();
+            match (circle.as_slice(), ellipse) {
+                ([t], Some(e)) => assert!(((t - e) * dir.length()).abs() < 1e-6, "{p:?}"),
+                // (the circle rule with no band finds no point for a miss; the touch rule
+                // names where the line comes nearest)
+                ([], Some(_)) => assert!(p.y > 7.0, "{p:?}"),
+                ([_, _], None) => {}
+                (cs, e) => panic!("{p:?}: circle {cs:?}, ellipse {e:?}"),
+            }
+        }
     }
 
     #[test]

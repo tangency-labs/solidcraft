@@ -1,0 +1,4 @@
+{
+  "issue": "tangency-labs/solidcore#2697",
+  "reason": "step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3"
+}

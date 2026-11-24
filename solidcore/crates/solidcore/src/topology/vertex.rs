@@ -12,6 +12,8 @@
 //! | [`crate::topology::Vertex`]                 | `SmVertex` (members; `Default` is `SmVertex()`, `Drop` `~SmVertex`) |
 //! | [`point`], [`set_point`]                    | `SmVertex::GetPoint`, `SetPoint`                 |
 //! | [`tolerance`], [`set_tolerance`], [`refresh_tolerance`] | `SmVertex::GetTolerance`, `SetTolerance`, `RefreshTolerance` (`SM_USE_OLDTOL`) |
+//! | `edge_end_reach` (crate)                    | none (not upstream: a bound on the vertex's distance to its edge ends) |
+//! | `cover_merged_ends` (crate)                 | none (not upstream: a point merge's vertex covers its edge ends, #21340) |
 //! | [`is_exact`], [`set_exact`]                 | `SmVertex::IsExact`, `SetExact` (without `SM_TOLERANT_WATCH`) |
 //! | [`poly_vertex`], [`set_poly_vertex`]        | `SmVertex::GetPolyVertex`, `SetPolyVertex`       |
 //! | [`primary_vertexuse`], [`vertexuses`], [`vertexuses_with_attribute`] | `SmVertex::GetPrimaryVertexuse`, `GetVertexuses` |
@@ -1317,6 +1319,71 @@ pub fn refresh_tolerance(b: &mut Brep, v: VertexId, nested_refreshes: bool) -> R
     set_tolerance(b, v, t, true, true)
 }
 
+/// Not upstream (#18166, #21340): an upper bound on the distance from `v`'s point to the
+/// ends of all its edges at `v`. Each end's distance is the evaluated end point's distance
+/// plus the evaluation's error, bounded per coordinate from the curve's own data
+/// ([`crate::curve::curve::Curve::point_error_bound`]: its control points, not the size of
+/// the point it returns) times `√3`, each step rounded up by 4 ulps. An end with no such
+/// bound, an end whose evaluation fails, and a non-finite reach add nothing, so the bound
+/// is certified and covers the ends whose error is bounded; it says nothing of the
+/// others. `0` for a vertex with no such end.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub(crate) fn edge_end_reach(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
+    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
+    let at = b.vertex(v)?.point;
+    let mut reach = 0.0_f64;
+    for x in edges(b, v, None)? {
+        let rec = b.edge(x)?;
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
+        for (end, t) in [
+            (s0, rec.interval.evaluate(0.0)),
+            (s1, rec.interval.evaluate(1.0)),
+        ] {
+            if end != Some(v) {
+                continue;
+            }
+            let Ok(p) = curve.evaluate_point(k, t) else {
+                continue;
+            };
+            let Some(error) = curve.point_error_bound(t) else {
+                continue;
+            };
+            let far = up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt())));
+            if far.is_finite() {
+                reach = reach.max(far);
+            }
+        }
+    }
+    Ok(reach)
+}
+
+/// Not upstream (#21340): after a point merge has sized `v` to the merged neighbourhood, a
+/// ball of radius `v`'s tolerance, grows `v` to twice [`edge_end_reach`] when that reach is
+/// within the ball, so every end it bounds lies within half the tolerance (`AssertValid`'s
+/// test of an edge end; doubling is exact). Grow-only, and at most doubles the tolerance.
+/// A reach beyond the ball (an `sss_point` move can carry the vertex off its edges,
+/// #21511) and an end with no bound on its evaluation's error change nothing, so no
+/// uncertified figure becomes a tolerance.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub(crate) fn cover_merged_ends(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<()> {
+    let tol = tolerance(b, v)?;
+    let reach = edge_end_reach(k, b, v)?;
+    let cover = 2.0 * reach;
+    if reach <= tol && cover.is_finite() {
+        set_tolerance(b, v, cover, true, true)?;
+    }
+    Ok(())
+}
+
 /// `Notify`: passes `PostEdit`, `SplitInBrep`, `MergeInBrep` and `ChangeGeometry` to
 /// every vertex use ([`vertexuse::notify`], each under `vertexuse_ref(vu)`) so they
 /// clear their cached gaps, then the notification to [`topo::notify`]
@@ -2359,5 +2426,107 @@ mod tests {
         e0.curve = Some(Curve::from(CompositeCurve::new(3)));
         e0.interval = Extent1d::from_min_max(-1.0, 0.0);
         assert!(!is_topological_vertex(&k, &mut b, v[1]).unwrap());
+    }
+
+    /// #21340: the chain's middle vertex v1 moved `off` from its edges' common end at
+    /// `(1, 0, 0)`, with tolerance `tol`; edge 0 optionally an offset of its line (a curve
+    /// kind with no bound on its evaluation's error) at `offset` in the plane of normal z.
+    fn merged(tol: f64, off: Vec3, offset: Option<f64>) -> (Kernel, Brep, VertexId) {
+        let (mut b, v, e) = chain(true, Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        if let Some(d) = offset {
+            let rec = b.edge_mut(e[0]).unwrap();
+            let line = rec.curve.take().unwrap();
+            let c = crate::curve::offset_curve::OffsetCurve::new(
+                3,
+                line,
+                Extent1d::from_min_max(0.0, 1.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                d,
+                true,
+            )
+            .unwrap();
+            let c = Curve::from(c);
+            assert!(c.point_error_bound(1.0).is_none());
+            rec.curve = Some(c);
+        }
+        let vr = b.vertex_mut(v[1]).unwrap();
+        vr.point += off;
+        vr.tolerance = tol;
+        (Kernel::default(), b, v[1])
+    }
+
+    /// The farthest end of `v`'s edges at it: (distance, whether every end is within half
+    /// `v`'s tolerance).
+    fn farthest(k: &Kernel, b: &Brep, v: VertexId) -> (f64, bool) {
+        let at = b.vertex(v).unwrap().point;
+        let tol = b.vertex(v).unwrap().tolerance;
+        let mut far = 0.0_f64;
+        for x in edges(b, v, None).unwrap() {
+            let rec = b.edge(x).unwrap();
+            let (s0, s1) = crate::topology::edge::start_end_vertices(b, x).unwrap();
+            for (end, t) in [(s0, rec.interval.min()), (s1, rec.interval.max())] {
+                if end == Some(v) {
+                    let p = rec.curve.as_ref().unwrap().evaluate_point(k, t).unwrap();
+                    far = far.max(at.distance(p));
+                }
+            }
+        }
+        (far, far <= 0.5 * tol)
+    }
+
+    #[test]
+    fn issue_21340_merged_vertex_covers_ends_inside_its_ball() {
+        // both line ends 0.3 from v1, inside the ball of radius 0.5: v1 grows to twice the
+        // certified reach, just above 0.6, and covers both ends
+        let (k, mut b, v) = merged(0.5, Vec3::new(0.0, 0.3, 0.0), None);
+        assert!(!farthest(&k, &b, v).1);
+        let reach = edge_end_reach(&k, &b, v).unwrap();
+        assert!((0.3..=0.3 * (1.0 + 1e-12)).contains(&reach), "{reach}");
+        cover_merged_ends(&k, &mut b, v).unwrap();
+        assert_eq!(
+            b.vertex(v).unwrap().tolerance.to_bits(),
+            (2.0 * reach).to_bits()
+        );
+        let (far, covered) = farthest(&k, &b, v);
+        assert!(covered && (far - 0.3).abs() < 1e-15, "{far}");
+
+        // already larger than twice the reach: grow-only, unchanged
+        let (k, mut b, v) = merged(0.7, Vec3::new(0.0, 0.3, 0.0), None);
+        cover_merged_ends(&k, &mut b, v).unwrap();
+        assert_eq!(b.vertex(v).unwrap().tolerance, 0.7);
+    }
+
+    #[test]
+    fn issue_21340_merged_vertex_keeps_its_tolerance_past_its_ball() {
+        // the ends 0.3 from v1, outside the ball of radius 0.2 (#21511's `sss_point` case):
+        // the reach is not the merge's neighbourhood and v1 stays at 0.2
+        let (k, mut b, v) = merged(0.2, Vec3::new(0.0, 0.3, 0.0), None);
+        assert!(edge_end_reach(&k, &b, v).unwrap() > 0.2);
+        cover_merged_ends(&k, &mut b, v).unwrap();
+        assert_eq!(b.vertex(v).unwrap().tolerance, 0.2);
+    }
+
+    #[test]
+    fn issue_21340_merged_vertex_takes_no_uncertified_end() {
+        // edge 0 an offset of its line by 0.1 (no bound on its evaluation's error), its end
+        // farther from v1 (moved 0.3 in z: sqrt(0.09 + 0.01)) than edge 1's line end: the
+        // reach and the grown tolerance are those with edge 0 left out
+        let off = Vec3::new(0.0, 0.0, 0.3);
+        let (k, mut b, v) = merged(0.5, off, Some(0.1));
+        assert!(farthest(&k, &b, v).0 > 0.31);
+        let (_, mut without, w) = merged(0.5, off, None);
+        without.edge_mut(EdgeId::from_index(0)).unwrap().curve = None;
+        assert_eq!(
+            edge_end_reach(&k, &b, v).unwrap().to_bits(),
+            edge_end_reach(&k, &without, w).unwrap().to_bits()
+        );
+        cover_merged_ends(&k, &mut b, v).unwrap();
+        cover_merged_ends(&k, &mut without, w).unwrap();
+        let tol = b.vertex(v).unwrap().tolerance;
+        assert_eq!(
+            tol.to_bits(),
+            without.vertex(w).unwrap().tolerance.to_bits()
+        );
+        assert!(tol > 0.6 && tol < 0.62, "{tol}");
     }
 }

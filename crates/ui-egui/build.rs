@@ -1,6 +1,8 @@
 //! Build information for Help › About: the git commit and the build date (UTC). Both fall back to
 //! "unknown" when git is missing (a source tarball). Also one test per UI scenario file
 //! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit.
+// A build script reports to cargo on stderr; nothing else reads it (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -42,7 +44,9 @@ fn main() {
     }
 }
 
-/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` and the shared crates' catalogs
+/// `$OUT_DIR/locales/<id>.json.z`, which the app embeds (the JSON deflated: the 38 catalogs are
+/// 17 MB as text and under 5 MB packed, and a run reads one or two of them), and
+/// `$OUT_DIR/locales/<id>.json`, which the tests read: each catalog in `assets/locales` and the shared crates' catalogs
 /// in `crates/ui-text/locales` (the words of the kit's Preferences window and pages), merged per
 /// language, plus the messages of `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`,
 /// one file per change, folded into the catalogs on main), so a pull request's new strings work
@@ -101,6 +105,9 @@ fn merged_locales() -> Result<(), String> {
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     for (id, catalog) in catalogs {
         let text = serde_json::to_string(&catalog).map_err(|e| e.to_string())?;
+        let mut packer = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        std::io::Write::write_all(&mut packer, text.as_bytes()).map_err(|e| e.to_string())?;
+        std::fs::write(out.join(format!("{id}.json.z")), packer.finish().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         std::fs::write(out.join(format!("{id}.json")), text).map_err(|e| e.to_string())?;
     }
     Ok(())

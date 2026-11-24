@@ -86,6 +86,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 .ok_or("view.pick: `point_px` must be a number from 0 to 1024".to_string())? as f32,
         ),
     };
+    let clouds_on = solidcraft_engine::point_cloud_pick::clouds_requested(p)?;
     let cloud_radius = match p.get("cloud_radius") {
         None | Some(Value::Null) => solidcraft_engine::point_cloud_pick::DEFAULT_CLOUD_RADIUS_MM,
         Some(v) => {
@@ -184,8 +185,13 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             ),
             _ => (None, None),
         };
-        let cloud_max = if all || wireframe { None } else { face_t.map(|t| t + slack) };
-        let cloud_hits = cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all);
+        // Whatever is nearest in front hides the cloud: the first kept face or the section's cap.
+        let cover_t = match (kept.first().map(|c| c.t), cap.as_ref().map(|c| c.t)) {
+            (Some(f), Some(c)) => Some(f.min(c)),
+            (f, c) => f.or(c),
+        };
+        let cloud_max = if all || wireframe { None } else { cover_t.map(|t| t + slack) };
+        let cloud_hits = if clouds_on { cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all) } else { Vec::new() };
         hits.push(match (all, cap, kept) {
             (true, cap, kept) => {
                 let mut rows: Vec<(f64, Value)> = Vec::new();
@@ -802,7 +808,7 @@ fn cloud_candidates(
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut best_depth = max_depth;
+    // Every cloud is searched to the same depth: the nearest across clouds is chosen after.
     for raw_cloud in solidcraft_engine::view::shown_point_clouds(&app.session) {
         if raw_cloud.is_empty() {
             continue;
@@ -814,28 +820,18 @@ fn cloud_candidates(
             Some(pos) => {
                 let px = point_px.unwrap_or_else(|| ((cloud.point_size as f32) * 0.5 + 2.0).max(6.0));
                 let (a, b) = crate::pick_index::reach(proj, pos, px);
-                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, best_depth, section, |w| {
+                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, max_depth, section, |w| {
                     proj.to_screen(w).map(|sp| sp.distance(pos)).filter(|d| *d <= px)
                 })
                 .map(|(h, dpx)| (h, Some(dpx)))
             }
-            None => solidcraft_engine::point_cloud_pick::pick_cloud_ray(
-                &cloud,
-                index.as_deref(),
-                input.o,
-                input.d,
-                cloud_radius,
-                0.0,
-                best_depth,
-                section,
-            )
-            .map(|h| (h, None)),
-        };
-        if let Some((h, dpx)) = hit {
-            if !all {
-                best_depth = Some(best_depth.map_or(h.depth, |cur| cur.min(h.depth)));
+            None => {
+                solidcraft_engine::point_cloud_pick::pick_cloud_ray(&cloud, index.as_deref(), input.o, input.d, cloud_radius, 0.0, max_depth, section)
+                    .map(|h| (h, None))
             }
-            out.push((h, dpx));
+        };
+        if let Some(h) = hit {
+            out.push(h);
         }
     }
     out.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));

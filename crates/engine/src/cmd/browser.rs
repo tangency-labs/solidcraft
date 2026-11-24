@@ -62,6 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .begins_edit()
         .icon("body")
         .contract(&REPAIR_CONTRACT)
         .output(output_schema_for::<RepairResult>)
@@ -1548,6 +1549,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1767,9 +1769,38 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
+        }
         if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
             for end in ends {
                 if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameTrim { to, .. } = &mut f.kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
                     && anchor.target.body == old
                 {
                     let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
@@ -1850,7 +1881,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -2291,7 +2322,7 @@ mod tests {
         run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
         // The user hides the body while the rename is being evaluated.
         run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
-        s.accept_computed(computed);
+        s.accept_computed(computed).unwrap();
         assert!(!s.body_visible("Stud"));
         assert_eq!(s.visibility.hidden_bodies, ["Stud"]);
         run(&mut s, "edit.undo", json!({}));
@@ -2321,7 +2352,7 @@ mod tests {
                 if computed {
                     let mut scratch = s.scratch();
                     run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
-                    s.accept_computed(scratch);
+                    s.accept_computed(scratch).unwrap();
                 } else {
                     run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
                 }

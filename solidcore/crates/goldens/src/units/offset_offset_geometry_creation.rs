@@ -915,6 +915,13 @@ impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
         fp2::tolerance(self.brep_r(face)?, fid(face))
     }
 
+    fn face_has_loopuses(&self, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        solidcore::topology::face::p4::has_loopuses(self.brep_r(face)?, fid(face))
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -4704,11 +4711,11 @@ mod tests {
             assert_eq!((nat.min(), nat.max()), (0.0, main_max), "{name}");
             assert!(curve.is_closed(&k, &nat, same_tol).unwrap(), "{name}");
             assert!(
-                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol, true).unwrap(),
                 "{name}"
             );
             assert!(
-                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol, true).unwrap(),
                 "{name}"
             );
             // the script through that op now: the trim finds no second point (status 0, no
