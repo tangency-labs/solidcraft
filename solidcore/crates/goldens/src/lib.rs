@@ -33,6 +33,8 @@ pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
 #[cfg(test)]
+mod merged_vertex_rows;
+#[cfg(test)]
 mod operand_trim_rows;
 pub mod output;
 pub(crate) mod own_builder;
@@ -55,6 +57,8 @@ pub mod util;
 pub(crate) mod wr493_rows;
 #[cfg(test)]
 mod wr57_replay;
+#[cfg(test)]
+mod wr587_replay;
 
 pub use case::Case;
 pub use case::CaseContext;

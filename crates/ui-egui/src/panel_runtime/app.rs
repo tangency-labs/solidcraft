@@ -917,7 +917,7 @@ impl AppPanelRuntime {
                         app.shell.browser = Some(rect);
                         crate::scenario::publish_rect("browser:card", rect);
                     }
-                    "history" => {
+                    "history" | "timeline-2d" => {
                         app.shell.history = Some(rect);
                         crate::scenario::publish_rect("history:card", rect);
                         crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
@@ -1407,6 +1407,12 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            // The 2D Timeline shows only at the bottom: a History on the left has no switch.
+            let view = ControlId(super::production::TIMELINE_VIEW.into());
+            host.set_header_action_visible(InstanceId("history".into()), view.clone(), !app.preferences.timeline_left);
+            for instance in ["history", "timeline-2d"] {
+                host.set_header_action_trailing(InstanceId(instance.into()), view.clone());
+            }
             host.set_header_content(InstanceId("browser".into()), browser_header);
             // The open search box holds the magnifier.
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());

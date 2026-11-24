@@ -144,6 +144,12 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
                 "anchor": "bottom_left", "mirror": true}),
         ),
         (
+            "frame_trim",
+            json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],
+                "to": [{"type": "member", "member": {"feature": "F", "line": "l2"}, "side": "left"}, {"type": "plane", "plane": plane("frame_trim")}],
+                "end": "start", "gap": "frame_trim.gap"}),
+        ),
+        (
             "frame_plate",
             json!({"type":"frame_plate","member":{"feature":7,"line":"line1"},"plane":plane("plate"),"shape":{"shape":"rectangle","width":"plate.width","height":"plate.height"},"holes":{"pattern":"circle","diameter":"plate.hole","pitch_diameter":"plate.pitch","count":6,"angle":"plate.hole_angle"},"thickness":"plate.thickness","offset":"plate.offset","x_offset":"plate.x","y_offset":"plate.y","angle":"plate.angle"}),
         ),

@@ -113,6 +113,8 @@ pub enum Target {
     },
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
+    /// The 2D Timeline's settings button: its options.
+    Timeline2dOptions,
     /// The History folder, with History in the browser: the History controls as menu entries.
     HistoryFolder,
     /// A feature in the History bar.
@@ -467,6 +469,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::AppBar { id } => crate::app_bar_custom::items(app, id.as_deref()),
         Target::Quick => crate::quick_menu::items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
+        Target::Timeline2dOptions => crate::timeline_2d::option_items(app),
         Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
@@ -2068,7 +2071,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
-            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
+            let default_name = crate::export_name::default_for_bodies(app, &bodies);
+            let name = crate::export_name::offered(app, body, &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
@@ -2302,6 +2306,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
         "ui.historyClear" => crate::timeline::clear_history(app),
+        "ui.timeline2dCellDots" | "ui.timeline2dActivation" | "ui.timeline2dUnsuppress" => {
+            let (field, value) = match item.id.as_str() {
+                "ui.timeline2dCellDots" => ("timeline_2d_cell_dots", &p["on"]),
+                "ui.timeline2dActivation" => ("timeline_2d_component_activation", &p["on"]),
+                _ => ("timeline_2d_unsuppress_mode", &p["mode"]),
+            };
+            if let Err(e) = crate::prefs::set(app, &json!({ field: value })) {
+                app.set_status(e, true);
+            }
+        }
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {
@@ -2971,6 +2985,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::Toolbar
         | Target::AppBar { .. }
         | Target::HistoryControls
+        | Target::Timeline2dOptions
         | Target::Workspace
         | Target::NamedViews
         | Target::ViewGizmo
