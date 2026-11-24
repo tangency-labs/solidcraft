@@ -13,12 +13,15 @@
 //! `S + r N` as one Taylor expansion in the foot's parameters ([`offset_taylor`],
 //! tangency-labs/solidcraft#16652), where the fork sums the expansions of `S` and `r N`: the
 //! same algebra, but only the first keeps their cancellation near the face's focal
-//! distance. The floating-point jets keep the fork's sum.
+//! distance. It does so only where the offset is not proved short of that distance
+//! (`offset_near_focal`, #19306); elsewhere, and in the floating-point jets, it keeps the
+//! fork's sum.
 
 use std::borrow::Cow;
 
 use super::series::{GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, STORE_E, V3};
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit};
+use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -27,6 +30,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
+use crate::nurbs::nurbs_crv::MAX_DERIV;
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -185,17 +189,29 @@ impl Nurbs {
         let q = s.degree(SurfParamType::V);
         let u = full_knots(&ku, &mu);
         let v = full_knots(&kv, &mv);
-        if p < 1 || q < 1 || u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
-            // "SmGnSectionFSG: a face's NURBS data do not agree"
-            return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: a face's NURBS data do not agree"
+        if p < 1 || q < 1 {
+            return Err(SolidError::blend(
                 OP,
-                "a face's NURBS data do not agree",
+                BlendFailure::SectionUnsupported(SectionLimit::DegreeBelowOne),
+            ));
+        }
+        if u.len() != lnu + p + 1 || v.len() != lnv + q + 1 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a face's knots do not number its control points plus its order: a \
+                          B-spline surface the kernel holds keeps the two consistent",
+                },
             ));
         }
         if cps.len() != lnu * lnv {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "a face's control net does not match its knots",
+                BlendFailure::Defect {
+                    why: "a face's control net is not its rows by its columns: a B-spline \
+                          surface the kernel holds keeps its net that size",
+                },
             ));
         }
         let mut pw = Vec::new();
@@ -206,9 +222,9 @@ impl Nurbs {
             let positive = w > 0.0;
             if !positive {
                 // "SmGnSectionFSG: a face's weights are not positive"
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "a face's weights are not positive",
+                    BlendFailure::SectionUnsupported(SectionLimit::FaceWeightNotPositive),
                 ));
             }
         }
@@ -529,9 +545,12 @@ pub fn surface_partials_pinned(
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
     if lk > MAX_K {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: lk,
+                most: MAX_K,
+            }),
         ));
     }
     let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
@@ -562,7 +581,13 @@ pub fn surface_partials_pinned(
     for a in 0..=lk {
         for b in 0..=(lk - a) {
             let v = d.get(a).and_then(|r| r.get(b)).copied().ok_or_else(|| {
-                SolidError::blend_failed(OP, "the surface has no partial of this order")
+                SolidError::blend(
+                    OP,
+                    BlendFailure::Defect {
+                        why: "the surface's evaluation returned fewer partials than asked: it \
+                              returns every partial up to the orders asked",
+                    },
+                )
             })?;
             out.set(a, b, V3::from_vec3(v));
         }
@@ -760,6 +785,53 @@ pub fn offset_taylor<T: GnScalar>(pf: &Partials<T>, d0: T, deg: usize) -> Result
     Ok(out)
 }
 
+/// How far towards a face's focal distance [`offset_near_focal`] lets an offset reach and
+/// still take it as the sum of the expansions of `S` and `d0 N`: a quarter of the way,
+/// `d0 k <= 1/4` for both principal curvatures `k`. Measured on a cylinder's rim
+/// chamfered by c (radius 10, `d0 k = c / 10`), the joint expansion certifies with the same
+/// work at 0.1 and 0.3 (5275 and 5183 cancel-token polls against the sum's 5275 and 5219),
+/// in 1.5 times the time, and with less from 0.5 on (5490 against 6338, half the time);
+/// a round of 1 on a round of 3 (`d0 k = 1/3`) takes 34 spans with it, 37 without.
+const FOCAL_REACH: f64 = 0.25;
+
+/// Whether an enclosure takes a face's offset point `S + d0 N` as one expansion
+/// ([`offset_taylor`], #16652) rather than as the sum of the expansions of `S` and `d0 N`
+/// (#19306). The two are the same algebra, each an enclosure; the joint one costs more (its
+/// own coefficients at every evaluation, and one more series composed with the feet) and
+/// is only tighter where the sum loses a cancellation. The offset's first partials are
+/// `W_u = (I - d0 W) S_u`, `W` the shape operator, whose eigenvalues `1 - d0 k_i` (`k_i`
+/// the principal curvatures along N) vanish at a focal distance; the sum's widths grow as
+/// `|S_u| + |d0 N_u|`, at most `(1 + d0 k) / (1 - d0 k)` times the joint ones' where
+/// `0 <= d0 k < 1`, and no wider where `d0 k <= 0` (the offset away from the centre of
+/// curvature). So the sum is kept where `d0 k_i <= FOCAL_REACH` (a ratio of at most 5/3)
+/// is proved for both curvatures at every point the partials `pf` enclose, as
+/// `I - (d0 / FOCAL_REACH) W` positive definite:
+/// `A = t X [[E, F], [F, G]] - d0 [[l, m], [m, n]]` (`t = FOCAL_REACH`,
+/// `X = |S_u x S_v|`, `l = S_uu . (S_u x S_v)`, ...) with `A_11` and `det A` proved
+/// positive in `T` (`det A = t^2 X^4 - t d0 X H + d0^2 K`, the form whose sign is the
+/// offset's regularity in `offset::construction::sheets`, there with `t = 1`). Not proved
+/// (near a focal distance, a box too wide to tell, a NaN), the joint expansion is taken.
+/// The test reads the partials to order 2: a caller that has fewer (0 past what it
+/// computed) evaluates at degree 0, where the two differ only in their rounding. Always
+/// false where `T` takes the sum ([`GnScalar::JOINT_OFFSET`]).
+fn offset_near_focal<T: GnScalar>(pf: &Partials<T>, d0: T) -> bool {
+    if !T::JOINT_OFFSET {
+        return false;
+    }
+    let dot = |a: V3<T>, b: V3<T>| a.x * b.x + a.y * b.y + a.z * b.z;
+    let (su, sv) = (pf.at(1, 0), pf.at(0, 1));
+    let n = V3 {
+        x: su.y * sv.z - su.z * sv.y,
+        y: su.z * sv.x - su.x * sv.z,
+        z: su.x * sv.y - su.y * sv.x,
+    };
+    let tx = T::of(FOCAL_REACH) * dot(n, n).sqrt();
+    let a11 = tx * dot(su, su) - d0 * dot(pf.at(2, 0), n);
+    let a12 = tx * dot(su, sv) - d0 * dot(pf.at(1, 1), n);
+    let a22 = tx * dot(sv, sv) - d0 * dot(pf.at(0, 2), n);
+    !(a11.is_positive() && (a11 * a22 - a12 * a12).is_positive())
+}
+
 /// The offset's constant term `d0` (its series' at `sigma^0 eps^0`): `r_i s_i`, or the
 /// law's radius there times the side.
 fn offset_d0<T: GnScalar>(sys: &GnSystem<'_, T>, rf: f64, sidef: f64) -> T {
@@ -875,9 +947,12 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
     for (f, ((xf, pf), (&rf, sidef))) in rows.enumerate() {
         let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the station's system has no foot for the face",
+                BlendFailure::Defect {
+                    why: "the station's system has no foot for a face: its feet are taken in \
+                          exact pairs",
+                },
             ));
         };
         let mut du = xu.clone();
@@ -887,9 +962,10 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
         // powers and monomials past the degree computed are 0 there and left out
         let top = lm.min(tr.degree());
-        // the offset point's own expansion (enclosures, #16652): its constant offset d0
+        // the offset point's own expansion (enclosures near a focal distance, #16652,
+        // #19306): its constant offset d0
         let d0 = offset_d0(sys, rf, sidef);
-        let wt = if T::JOINT_OFFSET {
+        let wt = if offset_near_focal(pf, d0) {
             Some(offset_taylor(pf, d0, top)?)
         } else {
             None
@@ -899,9 +975,12 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut pv = vec![Ser::constant(T::of(1.0))];
         for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last(), pv.last()) else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the face's powers are missing",
+                    BlendFailure::Defect {
+                        why: "the face's powers lack the previous order: they start with the \
+                              0th and each order pushes its own before the next is asked",
+                    },
                 ));
             };
             pu.push(lu.mul_valued(&du, a - 1, 1, tr));
@@ -995,8 +1074,11 @@ struct GnFaceSeries<T: GnScalar> {
     n: VSer<T>,
     /// The offset point's joint expansion composed with the feet ([`offset_taylor`]).
     wv: VSer<T>,
-    /// Its coefficients, to the orders' total degree (none before the first evaluation).
+    /// Its coefficients, to the orders' total degree (none before the first evaluation,
+    /// and none where the offset is the sum, [`offset_near_focal`]).
     wt: Option<Vec<V3<T>>>,
+    /// Whether the offset is the joint expansion, decided at the first evaluation.
+    joint: Option<bool>,
 }
 
 impl<T: GnScalar> GnFaceSeries<T> {
@@ -1020,6 +1102,7 @@ impl<T: GnScalar> GnFaceSeries<T> {
             n: vz.clone(),
             wv: vz,
             wt: None,
+            joint: None,
         }
     }
 }
@@ -1138,9 +1221,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
         let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
         for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
             let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the station's system has no foot for the face",
+                    BlendFailure::Defect {
+                        why: "the station's system has no foot for a face: its feet are taken \
+                              in exact pairs",
+                    },
                 ));
             };
             let mut du = xu.clone();
@@ -1149,9 +1235,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             dv.set(0, 0, T::of(0.0));
             for a in 1..=top {
                 let (Some(lu), Some(lv)) = (fs.pu.get(a - 1), fs.pv.get(a - 1)) else {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the face's powers are missing",
+                        BlendFailure::Defect {
+                            why: "the face's kept powers lack an order: they start with the \
+                                  0th and each order pushes its own before the next is asked",
+                        },
                     ));
                 };
                 let (nu, nv) = (
@@ -1163,9 +1252,12 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
                     fs.pv.push(zero.clone());
                 }
                 let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the face's powers are missing",
+                        BlendFailure::Defect {
+                            why: "the face's kept powers lack an order: they start with the \
+                                  0th and each order pushes its own before the next is asked",
+                        },
                     ));
                 };
                 pua.merge_computed(&nu, btr);
@@ -1174,10 +1266,16 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
             merge_v(&mut fs.s, &vzero, btr);
             merge_v(&mut fs.su, &vzero, btr);
             merge_v(&mut fs.sv, &vzero, btr);
-            // the offset point's joint expansion (#16652), its coefficients once per orders
-            // (each the same whatever degree it is computed to, so [`gn_evaluate_vn`]'s)
-            if T::JOINT_OFFSET && fs.wt.is_none() {
-                fs.wt = Some(offset_taylor(pf, offset_d0(sys, rf, sidef), lm)?);
+            // the offset point's joint expansion near a focal distance (#16652, #19306),
+            // decided and its coefficients computed once per orders (each the same whatever
+            // degree it is computed to, so [`gn_evaluate_vn`]'s)
+            if fs.joint.is_none() {
+                let d0 = offset_d0(sys, rf, sidef);
+                let near = offset_near_focal(pf, d0);
+                if near {
+                    fs.wt = Some(offset_taylor(pf, d0, lm)?);
+                }
+                fs.joint = Some(near);
             }
             merge_v(&mut fs.wv, &vzero, btr);
             let mut fa = 1.0_f64;
@@ -1368,9 +1466,9 @@ pub fn solve4(ca: &[[f64; 4]; 4], cb: &[f64; 4]) -> Result<[f64; 4]> {
         let regular = a.at(p, c).abs() > 1.0e-13 * scale;
         if !regular {
             // "the blend's system is singular at a station (its faces' normals agree there)"
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the blend's system is singular at a station (its faces' normals agree there)",
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NormalsAgree),
             ));
         }
         for j in 0..5 {
@@ -1520,12 +1618,27 @@ pub fn leader_series_sided(
     if !c.is_rational()? {
         derivs = derivs.min(c.degree()?);
     }
-    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
-    let mut d = c.evaluate(s, derivs, !before, false).map_err(|_| {
-        SolidError::blend_failed(
+    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated": a
+    // rational leader's order can pass the most the curve evaluator takes
+    if derivs > MAX_DERIV {
+        return Err(SolidError::blend(
             OP,
-            "the leader's derivatives of this order are not evaluated",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_DERIV,
+            }),
+        ));
+    }
+    let mut d = c.evaluate(s, derivs, !before, false).map_err(|e| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "the leader's evaluation failed at an order within the most the curve \
+                      evaluator takes, on a curve whose degree it just read",
+            },
         )
+        .caused_by(e)
+        .into_error()
     })?;
     d.resize(tr.s() + 2, Vec3::ZERO);
     let zero = V3 {
@@ -1536,16 +1649,11 @@ pub fn leader_series_sided(
     let mut l = VSer::constant(zero);
     let mut d1 = l;
     let mut fact = 1.0_f64;
-    for j in 0..=tr.s() {
+    // (`d` holds the orders 0 to `tr.s() + 1`: each j and the next, j to `tr.s()`)
+    for (j, (dj, dj1)) in d.iter().zip(d.iter().skip(1)).enumerate() {
         if j > 0 {
             fact *= j as f64;
         }
-        let (Some(dj), Some(dj1)) = (d.get(j), d.get(j + 1)) else {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the leader has no derivative of this order",
-            ));
-        };
         let cl = [dj.x, dj.y, dj.z];
         let cd = [dj1.x, dj1.y, dj1.z];
         for ((la, da), (&x, &y)) in l.a.iter_mut().zip(d1.a.iter_mut()).zip(cl.iter().zip(&cd)) {
@@ -1644,9 +1752,12 @@ fn solve_station_body(
     let law = opts.law;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: tr.s(),
+                most: MAX_S,
+            }),
         ));
     }
     let lk = tr.s() + tr.e() + 1;
@@ -1679,6 +1790,8 @@ fn solve_station_body(
     let point = Trunc::new(0, 0)?;
     let mut converged = false;
     let mut it = 0;
+    // the last iteration's residual and step, for a station that does not converge
+    let mut last: Option<(f64, f64)> = None;
     while it < 50 && !converged {
         *steps += 1;
         let pp = partials_at(&x, 2)?;
@@ -1711,12 +1824,19 @@ fn solve_station_body(
         if res <= tol && step <= STATION_STEP {
             converged = true;
         }
+        last = Some((res, step));
         it += 1;
     }
     if !converged {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the feet of a station did not converge",
+            BlendFailure::StationDidNotConverge {
+                s,
+                residual: last.map(|(res, _)| res),
+                tolerance: tol,
+                step: last.map(|(_, step)| step),
+                iterations: u32::try_from(it).ok(),
+            },
         ));
     }
 
@@ -2289,7 +2409,8 @@ mod tests {
     /// [`GnIncremental`] fed as the feet's Taylor models feed it (x filled in order by
     /// order, each order evaluated with the lower ones' coefficients set and its own 0,
     /// then one whole evaluation), against [`gn_evaluate_vn`] at each call: equal bit for
-    /// bit. Returns the positions it computed and those the whole evaluations compute.
+    /// bit. Returns the positions it computed and those the whole evaluations compute, and
+    /// whether each face's offset (by `r`) is the joint expansion ([`offset_near_focal`]).
     fn incremental_matches_whole<T: GnScalar + PartialEq + core::fmt::Debug>(
         mk: impl Fn(f64) -> T,
         s: usize,
@@ -2297,7 +2418,8 @@ mod tests {
         n: usize,
         law: bool,
         hold: bool,
-    ) -> (u64, u64) {
+        r: [f64; 2],
+    ) -> (u64, u64, [bool; 2]) {
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
         let mut next = move || {
             seed = seed
@@ -2347,11 +2469,15 @@ mod tests {
             p: [p0, p1],
             leader,
             tangent,
-            r: [0.5, 0.75],
+            r,
             side: [1.0, -1.0],
             hold,
             law: law.then_some(&law_ser),
         };
+        let near = [
+            offset_near_focal(p0, offset_d0(&sys, r[0], 1.0)),
+            offset_near_focal(p1, offset_d0(&sys, r[1], -1.0)),
+        ];
         let tr = Trunc::new(s, e).unwrap();
         let mut sx = [0.3, -0.2, 0.1, 0.4].map(|c| Ser::constant(mk(c)));
         let mut inc = GnIncremental::new(&sys);
@@ -2389,7 +2515,7 @@ mod tests {
             inc.evaluate(&sx, tr).unwrap(),
             gn_evaluate_vn(&sys, &sx, tr).unwrap()
         );
-        (before, whole)
+        (before, whole, near)
     }
 
     #[test]
@@ -2397,13 +2523,24 @@ mod tests {
         let tm = |v: f64| {
             crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
         };
+        // the enclosures' offsets taken both ways: as the sum (far from a focal distance)
+        // and as the joint expansion (#19306)
+        let mut seen = [false; 2];
         for (s, e, n) in [(3, 2, 2), (2, 3, 2), (3, 0, 0), (2, 2, 0), (4, 1, 1)] {
             for (law, hold) in [(false, false), (true, false), (false, true)] {
-                incremental_matches_whole(|v| v, s, e, n, law, hold);
-                incremental_matches_whole(Ivl::from, s, e, n, law, hold);
-                incremental_matches_whole(tm, s, e, n, law, hold);
+                for r in [[0.5, 0.75], [8.0, 12.0]] {
+                    incremental_matches_whole(|v| v, s, e, n, law, hold, r);
+                    let (_, _, ni) = incremental_matches_whole(Ivl::from, s, e, n, law, hold, r);
+                    let (_, _, nt) = incremental_matches_whole(tm, s, e, n, law, hold, r);
+                    for near in ni.into_iter().chain(nt) {
+                        if let Some(x) = seen.get_mut(usize::from(near)) {
+                            *x = true;
+                        }
+                    }
+                }
             }
         }
+        assert_eq!(seen, [true, true]);
     }
 
     /// The work counter of the feet's Taylor models: their order-by-order evaluations
@@ -2413,7 +2550,7 @@ mod tests {
     fn incremental_evaluation_computes_each_order_once() {
         // the certificate's orders: order 3 in sigma, 2 in eps, the jets of order 2 the
         // faces'
-        let (inc, whole) = incremental_matches_whole(|v| v, 3, 2, 2, false, false);
+        let (inc, whole, _) = incremental_matches_whole(|v| v, 3, 2, 2, false, false, [0.5, 0.75]);
         let full = u64::from(Trunc::new(3, 2).unwrap().computed_mask().count_ones());
         assert_eq!(full, 12);
         assert!(
@@ -2430,7 +2567,13 @@ mod tests {
         let error = surface_partials(&k, &s, Point2::new(0.5, 0.5), MAX_K + 1).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "the order is past the most the series hold")
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                    order: MAX_K + 1,
+                    most: MAX_K
+                })
+            )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
@@ -2563,6 +2706,87 @@ mod tests {
                 let near = |r: f64| (radius - r).abs() < 1e-11;
                 assert!(near(0.01) || near(19.99), "d0 {d0}: radius {radius}");
             }
+        }
+    }
+
+    /// #19306: an enclosure takes the offset point as one expansion only where the offset is
+    /// not proved short of a focal distance by [`FOCAL_REACH`], `d0 k <= 1/4` for both
+    /// principal curvatures `k` at every point its partials enclose. On
+    /// `z = (a u^2 + b v^2) / 2` at its origin (principal curvatures `a` and `b` along +z,
+    /// the focal distances `1 / a` and `1 / b`), in intervals and in Taylor models; over a
+    /// box of curvatures; for a NaN; on the cylinder of radius 10 as its rational net; and
+    /// never for the floating-point jets, which keep the sum.
+    #[test]
+    fn the_offset_is_one_expansion_only_near_a_focal_distance() {
+        fn quadric<T: GnScalar>(mk: impl Fn(f64) -> T, a: T, b: T) -> Partials<T> {
+            let v = |x: f64, y: f64| V3 {
+                x: mk(x),
+                y: mk(y),
+                z: mk(0.0),
+            };
+            let mut p = Partials::default();
+            p.set(1, 0, v(1.0, 0.0));
+            p.set(0, 1, v(0.0, 1.0));
+            p.set(
+                2,
+                0,
+                V3 {
+                    z: a,
+                    ..v(0.0, 0.0)
+                },
+            );
+            p.set(
+                0,
+                2,
+                V3 {
+                    z: b,
+                    ..v(0.0, 0.0)
+                },
+            );
+            p
+        }
+        let tm = <crate::blend::fillet_section::feet_tm::Ft as GnScalar>::of;
+        // (a, b, d0, near): near where d0 a or d0 b passes 1/4
+        let cases = [
+            (1.0, 0.25, 0.2, false),
+            (1.0, 0.25, 0.3, true),
+            (1.0, 0.25, -3.0, false),
+            (1.0, -1.0, 0.2, false),
+            (1.0, -1.0, -0.2, false),
+            (1.0, -1.0, 0.3, true),
+            (1.0, -1.0, -0.3, true),
+            // past both focal distances: det(I - 4 d0 W) > 0, but not definite
+            (1.0, 1.0, 2.5, true),
+            // a plane has none
+            (0.0, 0.0, 1.0e6, false),
+        ];
+        for (a, b, d0, near) in cases {
+            let pi = quadric(Ivl::from, Ivl::from(a), Ivl::from(b));
+            assert_eq!(offset_near_focal(&pi, Ivl::from(d0)), near, "{a} {b} {d0}");
+            let pt = quadric(tm, tm(a), tm(b));
+            assert_eq!(offset_near_focal(&pt, tm(d0)), near, "{a} {b} {d0}");
+            assert!(
+                !offset_near_focal(&quadric(|x| x, a, b), d0),
+                "{a} {b} {d0}"
+            );
+        }
+        // over a box of curvatures a in [0.8, 1.2]: 0.2 is short of a quarter of the way for
+        // every one, 0.22 only for some (the middle's 1 among them)
+        let pb = quadric(Ivl::from, Ivl::new(0.8, 1.2), Ivl::from(0.25));
+        assert!(!offset_near_focal(&pb, Ivl::from(0.2)));
+        assert!(offset_near_focal(&pb, Ivl::from(0.22)));
+        let pi = quadric(Ivl::from, Ivl::from(1.0), Ivl::from(0.25));
+        assert!(offset_near_focal(&pi, Ivl::from(f64::NAN)));
+        // the cylinder of radius 10: toward its axis, near past 2.5; away from it, never
+        let (n, u, v, ku, kv) = cylinder_at();
+        let pc = nurbs_partials::<Ivl>(&n, ku, kv, Ivl::from(u), Ivl::from(v), 2);
+        let pf = nurbs_partials::<f64>(&n, ku, kv, u, v, 1);
+        let (s, su, sv) = (pf.at(0, 0), pf.at(1, 0), pf.at(0, 1));
+        let outward = (su.y * sv.z - su.z * sv.y) * s.x + (su.z * sv.x - su.x * sv.z) * s.y;
+        let toward = if outward > 0.0 { -1.0 } else { 1.0 };
+        for (d, near) in [(2.4, false), (2.6, true), (9.99, true)] {
+            assert_eq!(offset_near_focal(&pc, Ivl::from(d * toward)), near, "{d}");
+            assert!(!offset_near_focal(&pc, Ivl::from(-d * toward)), "{d}");
         }
     }
 

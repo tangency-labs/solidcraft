@@ -346,6 +346,33 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### library entry
+
+One material or one appearance kept in a *material library*, known by an id that stays the same
+when the entry is edited.
+
+Each edit gives the entry a new revision. A library folder holds one file per entry; the file's
+name is only a label.
+
+- **In SolidCraft:** `solidcraft_io::library::Listed` and the catalog's `Entry` (`id`, `revision`,
+  `provenance`, `definition`); the `materials/` and `appearances/` folders of a library folder.
+- **Don't use:** item, record, preset (a starter appearance's own word).
+- **Elsewhere:** library material, library appearance, asset.
+- **For translators:** one thing kept in a library; not a line of a list or a table.
+
+### library place
+
+Where SolidCraft reads material libraries from: the built-in library, one library folder, or a
+folder of library folders.
+
+A place that can't be read stays listed, with the reason. Where a library's data came from is
+its provenance, not its place.
+
+- **In SolidCraft:** `solidcraft_io::library::Place` (`built_in`, `library`, `folder`).
+- **Don't use:** source (that is where the data came from), location, path.
+- **Elsewhere:** library location, library path.
+- **For translators:** a place on a disk or a drive; not a place in a design.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -358,6 +385,22 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Don't use:** material for a render or visual material.
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
+
+### material library
+
+A named collection of *materials* and *appearances* kept outside any design, which designs copy
+from.
+
+A design keeps its own copy of what it uses, so a change to a library never changes a design by
+itself. A library folder is marked by its `<Library name>.sclibrary.json` file; the built-in
+library can't be changed.
+
+- **In SolidCraft:** `solidcraft_io::library::Library` and `Set`; `library.inspect`, `library.export`
+  and `library.apply`; the `solidcraft-library/2` file and the `solidcraft-library-folder/1`
+  manifest.
+- **Don't use:** catalogue for the library itself (the single-file format is the catalog), pack.
+- **Elsewhere:** material library, material database, appearance library.
+- **For translators:** a collection of materials; not a code library or a book library.
 
 ### moment of inertia
 
@@ -375,10 +418,23 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### multi-trim
+
+Cutting a frame member by the shapes of the other members it meets, so that it fits against them.
+
+A frame's corner cuts, copes, fitted ends, the pieces where members cross and the notches where they
+overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame is finished.
+
+- **In SolidCraft:** `frame.multi_trim` ("Multi-Trim Corner"); the Frame Member's `corners`
+  parameter and design-file key.
+- **Don't use:** cope (one kind of cut it makes), trim on its own.
+- **Elsewhere:** member trim, coping, end fitting.
+- **For translators:** not a sketch's trim of a curve and not a surface trim.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
-with a leader. A note on a view moves with the view.
+with a leader. A note on a view moves with the view. Its alignment (left, centre or right, as a title block's) says which end of its text sits at its place, each line standing that way. A note saved before alignments has none: its block is centred and its lines start at the block's left edge, as they always did.
 
 - **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
   `notes`.
@@ -439,6 +495,17 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
+
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
+
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
 
 ### pattern instance
 
@@ -666,6 +733,16 @@ A program that shows web pages, such as the one that runs SolidCraft's web build
 - **For translators:** not the *browser* panel. Where a language uses one word for both, use the
   CAD word for the panel.
 
+### weld gap
+
+The space left between frame members where they meet, for a weld to fill.
+
+- **In SolidCraft:** the `gap` parameter of `frame.member` and `frame.multi_trim` and of each
+  `corners` entry, and the same design-file keys; the Frame Member dialog's Gap rows.
+- **Don't use:** clearance; gap on its own where it could mean a hem gap.
+- **Elsewhere:** weld gap, root gap, root opening.
+- **For translators:** not a sheet metal hem gap and not a clearance.
+
 ## Words with more than one meaning
 
 An English word that means two things can be translated correctly for only one of them while both
@@ -687,6 +764,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
+| | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
@@ -694,6 +772,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
+| Tab | flat material a sheet metal Tab adds to a panel | tab (sheet metal) | `sheet.tab`, `cmd.sheet_tab` |
+| | a page of the ribbon or of a document strip | tab (ribbon, document) | the ribbon tabs, the document tabs |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
 | | a fillet | *fillet* | `solid.fillet` |
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
@@ -709,6 +789,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Mounting plate
+
+A separate, constant-thickness plate attached to a structural member's planar face,
+used as a base plate or bolted end plate. A bolt pattern describes the through holes
+in the plate; creating one does not drill or join the supporting member.
 
 ## Two commands, one label
 
@@ -731,3 +817,7 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Gusset
+
+A reinforcing plate fitted between two structural support faces. SolidCraft keeps it as a separate fabrication body with its own dimensions and persistent attachments.

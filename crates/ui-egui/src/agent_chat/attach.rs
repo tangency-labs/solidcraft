@@ -324,11 +324,14 @@ fn picture_within(name: String, bytes: &[u8], limit: usize) -> Result<Attachment
     limits.max_image_height = Some(MAX_DECODE_SIDE);
     limits.max_alloc = Some(1024 * 1024 * 1024);
     reader.limits(limits);
-    let img = reader.decode().map_err(|e| failed(&name, e))?;
+    let (img, turned) = solidcraft_engine::upright_image::decode_upright(reader).map_err(|e| failed(&name, e))?;
     if img.width() == 0 || img.height() == 0 {
         return Err(refused("ui.agent_chat_file_empty_picture", &name, &[]));
     }
+    // A picture the EXIF orientation turned is sent as the upright pixels: its own bytes would show
+    // it on its side to a reader that ignores the tag, with the size of the turned picture (#19138).
     if let Some(mime) = mime
+        && !turned
         && img.width().max(img.height()) <= MAX_SIDE
         && bytes.len() <= limit
     {
@@ -512,6 +515,26 @@ mod tests {
 
     fn png(path: &Path, w: u32, h: u32) {
         image::RgbaImage::from_pixel(w, h, image::Rgba([200, 30, 30, 255])).save(path).unwrap();
+    }
+
+    /// #19138: a photo stored turned (EXIF orientation 6) is attached upright: its size and its chip
+    /// are the turned picture's, and it is sent as upright pixels, not as its own bytes that carry the tag.
+    #[test]
+    fn a_photo_with_an_exif_orientation_is_attached_upright() {
+        let plain = picture_within("plain.jpg".into(), &crate::test_pictures::jpeg(40, 60, None), MAX_SENT_BYTES).unwrap();
+        let tagged = picture_within("exif6.jpg".into(), &crate::test_pictures::jpeg(60, 40, Some(6)), MAX_SENT_BYTES).unwrap();
+        let (Content::Picture { size: plain_size, bytes: plain_bytes, .. }, Content::Picture { size: tagged_size, bytes: tagged_bytes, .. }) =
+            (&plain.content, &tagged.content)
+        else {
+            panic!("pictures")
+        };
+        assert_eq!((*plain_size, *tagged_size), ([40, 60], [40, 60]));
+        assert_eq!(plain_bytes.as_slice(), &crate::test_pictures::jpeg(40, 60, None)[..], "an untagged photo goes as its own bytes");
+        assert_ne!(tagged_bytes.as_slice(), &crate::test_pictures::jpeg(60, 40, Some(6))[..], "a tagged one is sent as upright pixels");
+        let sent = image::load_from_memory(tagged_bytes).unwrap();
+        assert_eq!((sent.width(), sent.height()), (40, 60));
+        let thumb = tagged.thumb.as_ref().expect("a chip");
+        assert!(thumb.size[1] > thumb.size[0], "the chip is portrait: {:?}", thumb.size);
     }
 
     #[test]

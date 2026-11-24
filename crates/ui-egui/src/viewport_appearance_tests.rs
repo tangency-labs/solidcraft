@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -305,8 +305,9 @@ fn appearance_edits_upload_palette_rows_only() {
 /// to the indirect draws' buffer alone, not to buffers of their own as well, and its shared
 /// edges (where the device draws them) to the edges' buffer; a scene adding a part that fits
 /// the buffers' room uploads that part's triangles and edges alone, not again every part before
-/// it (a design being opened adds parts at every scene); and the same parts again upload none.
-/// Every placement is drawn each time. Skipped without a GPU adapter.
+/// it (a design being opened adds parts at every scene); and the same parts again upload none,
+/// nor a highlight lighting a placement's edges. Every placement is drawn each time. Skipped
+/// without a GPU adapter.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_after() {
@@ -378,6 +379,14 @@ fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_a
     let (again, triangles) = draw(2);
     assert_eq!(again.geometry, 0, "the same parts upload no triangles or edges");
     assert_eq!(triangles, drawn(2), "and are drawn as before");
+    // A placement lit (hovered or selected) draws its edges again from the model's segment
+    // buffer: the highlight uploads none of them.
+    if with_edges {
+        let lit = crate::gpu::GpuScene { lit_instanced_edges: scene(1).instanced, ..Default::default() };
+        let lit: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(lit)));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &none), (1, &lit)));
+        assert_eq!(frames.highlight_uploads().geometry, 0, "a lit part's edges are the model's");
+    }
 }
 
 /// A body out of the view is left out of its block's draws: two boxes far apart, drawn with
@@ -798,6 +807,38 @@ fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
     assert!(crate::open_meshing::session_world(&h.app.session).sketch(outline).is_none());
     h.app.session.visibility.hidden_sketches.push(outline);
     assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
+}
+
+/// A sketch that failed for a lost projection marks where the lost face was on the model: the
+/// point the face was picked at, with the point under it in the sketch's plane (#5048). Shown
+/// or open for editing it is marked once; used by another feature, or hidden, it isn't. The mark
+/// follows its component when the component moves.
+#[test]
+fn a_lost_projection_marks_where_its_face_was_on_the_model() {
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, outline, part) = part_lost(true);
+    assert!(super::lost_sources(&h.app).is_empty(), "used by Peg, not shown");
+    h.app.session.visibility.shown_sketches.push(outline);
+    let marked = |h: &crate::scenario::Harness| super::lost_sources(&h.app);
+    let check = |sources: &[super::LostSource], at: Vec3| {
+        let [source] = sources else { panic!("{sources:?}") };
+        assert!(source.at.dist(at) < 1e-6, "picked on the block's front face: {source:?}");
+        // Guide is 30 off XZ: the foot is straight across from the pick, in the sketch's plane.
+        let across = source.foot - source.at;
+        assert!(across.x.abs() < 1e-6 && across.z.abs() < 1e-6 && (across.len() - 30.0).abs() < 1e-6, "{source:?}");
+    };
+    // Only Block's face lost its name: Block2's projection is still found.
+    check(&marked(&h), Vec3::new(20.0, 0.0, 5.0));
+    h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 0, 50]})).unwrap();
+    h.frames(2);
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert!(marked(&h).is_empty(), "hidden");
+    h.app.session.visibility.hidden_sketches.retain(|s| *s != outline);
+    h.app.run("sketch.edit", json!({"sketch": "Outline"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
 }
 
 /// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,

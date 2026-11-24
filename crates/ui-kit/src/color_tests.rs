@@ -398,13 +398,13 @@ fn step_buttons_nudge_rgb_and_hsv_channels_by_one() {
     tall(&ctx, vec![], &mut rgb);
     tall_click(&ctx, "color:spin:G:down", &mut rgb);
     assert_eq!(rgb, [0, 0, 0]);
-    // H steps one degree, V one percent, on the same gamma HSV as the square.
+    // H steps one degree, V one byte in U8, on the same gamma HSV as the square.
     let mut rgb = [255, 0, 0];
     tall(&ctx, vec![], &mut rgb);
     tall_click(&ctx, "color:spin:H:up", &mut rgb);
     assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 1.0));
     tall_click(&ctx, "color:spin:V:down", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 0.99));
+    assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 254.0 / 255.0));
 }
 
 #[test]
@@ -413,11 +413,36 @@ fn typed_hsv_values_set_the_colour_within_their_ranges() {
     let mut rgb = [255, 0, 0];
     tall(&ctx, vec![], &mut rgb);
     tall_type(&ctx, "H", "120", &mut rgb);
-    tall_type(&ctx, "S", "50", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.5, 1.0));
+    tall_type(&ctx, "S", "51", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.2, 1.0));
     // A hostile typed value is bounded by the field's range.
     tall_type(&ctx, "V", "1e300", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.5, 1.0));
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.2, 1.0));
+}
+
+/// S and V use the active number format, as R, G and B do: bytes in U8, 0 to 1 in F, and percent
+/// in Hex. H stays in degrees (#10201).
+#[test]
+fn saturation_and_value_follow_the_number_format() {
+    let ctx = crate::test_support::context();
+    let mut rgb = [255, 0, 0];
+    tall(&ctx, vec![], &mut rgb);
+    tall_click(&ctx, "color:format:F", &mut rgb);
+    tall_type(&ctx, "S", "0.5", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 0.5, 1.0));
+    tall_click(&ctx, "color:spin:V:down", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 0.5, 0.99));
+    tall_type(&ctx, "H", "120", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.5, 0.99));
+    // A hostile typed value is bounded by the 0 to 1 range.
+    tall_type(&ctx, "S", "1e300", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 1.0, 0.99));
+    let mut rgb = [255, 0, 0];
+    tall_click(&ctx, "color:format:Hex", &mut rgb);
+    tall_type(&ctx, "S", "50", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 0.5, 1.0));
+    tall_click(&ctx, "color:spin:V:down", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 0.5, 0.99));
 }
 
 #[test]

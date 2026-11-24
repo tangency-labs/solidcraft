@@ -36,14 +36,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, with or without `fillet_exact_round_classes`.
+/// Every fix, with or without `fillet_exact_round_classes`.
 fn all_fixes(exact_classes: bool) -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity"
-            && (exact_classes || name != "fillet_exact_round_classes")
-        {
+        if exact_classes || name != "fillet_exact_round_classes" {
             *f.flag_mut(name).unwrap() = true;
         }
     }

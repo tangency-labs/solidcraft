@@ -1,7 +1,8 @@
 //! Point clouds: scanned points (a PLY or XYZ file) kept in the design as a reference to model
 //! from (#5151). They are not bodies: nothing is built from them, they are drawn as points.
-//! The points travel inside the design file (a binary part of the container, base64 in plain
-//! JSON), so it reopens without the original file. They are single precision, relative to the
+//! The points travel inside the design file, as binary parts of the container, so it reopens
+//! without the original file; the design holds them as numbers, never text, and a plain JSON
+//! design can't hold them ([`crate::Document::binary_data`]). They are single precision, relative to the
 //! cloud's own `origin` (double precision), so a scan far from the design's origin keeps its
 //! detail.
 
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solidcore_record::Vec3;
 
-use crate::canvas::{base64_decode, base64_encode};
+use crate::canvas::base64_decode;
 pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Indices, Keep, MAX_CELLS, MAX_COLUMNS, MAX_NAMES, Names, On};
 use crate::{DocError, IDENTITY, Mat, Result};
 
@@ -98,6 +99,49 @@ pub enum Source<'a> {
     Corners(&'a [f32]),
     /// A column on the element itself.
     Element(&'a [f32]),
+}
+
+/// Pre-resolved filters for point-level visibility checks (`PointCloud::point_filter`).
+#[derive(Clone, Debug)]
+pub struct PointFilter<'a> {
+    entries: Vec<(Source<'a>, &'a Keep)>,
+}
+
+impl PointFilter<'_> {
+    /// Whether this cloud has no point-level filters active.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Whether point `index` at design-space position `world` passes every active point filter.
+    pub fn keeps(&self, index: usize, world: Vec3) -> bool {
+        for (source, keep) in &self.entries {
+            let val = match *source {
+                Source::Coordinate(0) => world.x,
+                Source::Coordinate(1) => world.y,
+                Source::Coordinate(2) => world.z,
+                Source::Coordinate(_) => continue,
+                Source::Corners(v) | Source::Element(v) => match v.get(index) {
+                    Some(x) => f64::from(*x),
+                    None => return false,
+                },
+            };
+            if !val.is_finite() {
+                return false;
+            }
+            let ok = match keep {
+                Keep::Range { range: [lo, hi] } => (*lo..=*hi).contains(&val),
+                Keep::Values { values } => {
+                    let rounded = val.round();
+                    (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&rounded) && values.contains(&(rounded as i32))
+                }
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 /// How a cloud's points are coloured.
@@ -211,6 +255,25 @@ impl PointCloud {
         let p = self.points.get(i)?;
         let local = self.origin + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
         Some(crate::apply_point(&self.transform, local))
+    }
+    /// Transform a world-space ray `(o, d)` into the raw `points` frame (before `origin` and
+    /// `transform`). Because `transform` is rigid, distances along and perpendicular to the ray
+    /// are preserved exactly.
+    pub fn local_ray(&self, o: Vec3, d: Vec3) -> Option<(Vec3, Vec3)> {
+        let dir = d.normalized()?;
+        if crate::is_identity(&self.transform) {
+            return Some((o - self.origin, dir));
+        }
+        let inv = crate::mat_inverse(&self.transform)?;
+        let lo = crate::apply_point(&inv, o) - self.origin;
+        let ld = (crate::apply_point(&inv, o + dir) - crate::apply_point(&inv, o)).normalized()?;
+        Some((lo, ld))
+    }
+    /// Pre-resolved filter test for points of this cloud: matches the GPU shader and histogram
+    /// filter semantics on `On::Point` properties and design coordinates (`x`, `y`, `z`).
+    pub fn point_filter(&self) -> PointFilter<'_> {
+        let entries = self.filters.iter().filter_map(|f| self.source(&f.property, On::Point).map(|source| (source, &f.keep))).collect();
+        PointFilter { entries }
     }
     /// The corners of the box around the points, in the cloud's placement (mm), or `None` for
     /// an empty cloud.
@@ -468,12 +531,16 @@ impl PartialEq for Points {
     }
 }
 
+/// Never the points themselves: a container writes them to a part of their own and its record keeps
+/// this empty text, which older releases read as "in the part".
 impl Serialize for Points {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.to_bytes()))
+        s.serialize_str("")
     }
 }
 
+/// The empty text a container's record keeps, or an older plain JSON design's base64 points,
+/// decoded once as it opens.
 impl<'de> Deserialize<'de> for Points {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
@@ -511,12 +578,14 @@ impl PartialEq for Colors {
     }
 }
 
+/// Never the colours themselves, as [`Points`].
 impl Serialize for Colors {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.0))
+        s.serialize_str("")
     }
 }
 
+/// As [`Points`]: empty, or an older plain JSON design's base64 colours.
 impl<'de> Deserialize<'de> for Colors {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         let s = String::deserialize(d)?;
@@ -568,11 +637,16 @@ mod tests {
         }
     }
 
+    /// The points are never written as text (a container keeps them as a part); an older plain JSON
+    /// design's base64 points and colours still read, once, and copies share them.
     #[test]
-    fn points_round_trip_through_json_and_stay_shared() {
+    fn older_base64_points_read_none_are_written_as_text_and_copies_share_them() {
         let c = cloud(vec![0.0, 1.0, 2.0, -3.5, 4.25, 1e6], vec![255, 0, 10, 1, 2, 3]);
-        let json = serde_json::to_string(&c).unwrap();
-        let back: PointCloud = serde_json::from_str(&json).unwrap();
+        let mut json = serde_json::to_value(&c).unwrap();
+        assert_eq!((json["points"].clone(), json["colors"].clone()), (serde_json::json!(""), serde_json::json!("")), "never as text");
+        json["points"] = crate::canvas::base64_encode(&c.points.to_bytes()).into();
+        json["colors"] = crate::canvas::base64_encode(&c.colors.0).into();
+        let back: PointCloud = serde_json::from_value(json).unwrap();
         assert_eq!(back, c);
         assert_eq!(back.points.get(1), Some([-3.5, 4.25, 1e6]));
         assert_eq!(back.colors.get(0), Some([255, 0, 10]));
@@ -606,7 +680,8 @@ mod tests {
     fn damaged_clouds_are_refused() {
         // Not whole points, not finite, not base64.
         for points in ["AAAA", "AADAfwAAwH8AAMB/", "!!!!"] {
-            let json = serde_json::to_string(&cloud(vec![0.0; 3], Vec::new())).unwrap().replace("\"AAAAAAAAAAAAAAAA\"", &format!("\"{points}\""));
+            let json =
+                serde_json::to_string(&cloud(vec![0.0; 3], Vec::new())).unwrap().replace("\"points\":\"\"", &format!("\"points\":\"{points}\""));
             assert!(serde_json::from_str::<PointCloud>(&json).is_err(), "{points}");
         }
         assert!(cloud(vec![0.0; 6], vec![1, 2, 3]).check().is_err(), "one colour for two points");
@@ -654,7 +729,10 @@ mod tests {
         c.transform[3][2] = 100.0;
         assert_eq!(c.shade(c.color_range())(0), height_ramp(1.0));
         assert_eq!((height_ramp(0.0), height_ramp(1.0), height_ramp(f64::NAN)), ([40, 70, 200], [230, 70, 50], [40, 70, 200]));
-        let back: PointCloud = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        // The settings read back; the points themselves are a container's part, never text.
+        let mut back: PointCloud = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert!(back.points.is_empty());
+        (back.points, back.colors) = (c.points.clone(), c.colors.clone());
         assert_eq!(back, c);
     }
 }

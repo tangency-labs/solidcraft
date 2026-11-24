@@ -640,3 +640,91 @@ fn a_ray_names_a_face_it_cannot_meet_exactly() {
         Err(0)
     );
 }
+
+/// A tetrahedron seen from above: its slanted face faces the viewer, its floor faces away and its
+/// two upright faces are edge-on, so its outline is the slanted face's three edges, each whole.
+#[test]
+fn a_tetrahedrons_outline_from_above_is_its_slanted_faces_edges() {
+    let b = tetra();
+    let q = Query::new(&b);
+    let out = q.outline_stretches(Vec3::new(0., 0., 1.), 1.0).unwrap();
+    // Face 2 (corners 1, 2, 3) is the slanted one: its edges join those corners.
+    let corner = |p: Vec3| {
+        TETRA
+            .iter()
+            .position(|c| len(Vec3::new(p.x - c[0], p.y - c[1], p.z - c[2])) < 1e-12)
+    };
+    let mut ends: Vec<[usize; 2]> = out
+        .iter()
+        .map(|s| {
+            assert!(s.whole, "{s:?}");
+            // The edge it names joins the corners it ends at, over its whole interval.
+            let edge = &b.edges[s.edge];
+            let point = |v: u32| {
+                let p = b.vertices[v as usize].point;
+                Vec3::new(p[0], p[1], p[2])
+            };
+            let mut named = [
+                corner(point(edge.vertices[0])).unwrap(),
+                corner(point(edge.vertices[1])).unwrap(),
+            ];
+            named.sort_unstable();
+            assert_eq!(s.range, edge.interval, "{s:?}");
+            let mut e = [corner(s.ends[0]).unwrap(), corner(s.ends[1]).unwrap()];
+            e.sort_unstable();
+            assert_eq!(e, named, "{s:?}");
+            e
+        })
+        .collect();
+    ends.sort_unstable();
+    assert_eq!(ends, vec![[1, 2], [1, 3], [2, 3]], "{out:?}");
+    // A view that is no unit vector, or not finite, is refused, not taken for one that sees
+    // nothing.
+    assert!(q.outline_stretches(Vec3::new(0., 0., 2.), 1.0).is_err());
+    assert!(q
+        .outline_stretches(Vec3::new(f64::NAN, 0., 1.), 1.0)
+        .is_err());
+    assert!(q.outline_stretches(Vec3::new(0., 0., 1.), 0.0).is_err());
+}
+
+/// A tube's side seen across its axis is an open sheet: its border faces the viewer on the half of
+/// each circle nearer the viewer, and that half is its outline. The half crosses each circle's
+/// start, so it is two stretches, and the stretches stop where the side turns edge-on, square to
+/// the view on the axis. The seam is never outline.
+#[test]
+fn a_tubes_outline_across_its_axis_is_its_rims_near_halves() {
+    let b = tube();
+    let q = Query::new(&b);
+    let out = q.outline_stretches(Vec3::X, 10.0).unwrap();
+    assert!(out.iter().all(|s| s.edge != 1), "the seam: {out:?}");
+    for rim in [0usize, 2] {
+        let mine: Vec<_> = out.iter().filter(|s| s.edge == rim).collect();
+        let [t0, t1] = q.edge_interval(rim).unwrap();
+        // In the circle's order: from its start, round to the first edge-on point; from the
+        // second edge-on point round to its end.
+        let [first, second] = mine.as_slice() else {
+            panic!("rim {rim}: {out:?}")
+        };
+        assert!(!first.whole && !second.whole);
+        assert_eq!(first.range[0], t0, "{first:?}");
+        assert_eq!(second.range[1], t1, "{second:?}");
+        assert!(first.range[1] < second.range[0], "{first:?} {second:?}");
+        for (s, end) in [(first, 1usize), (second, 0)] {
+            let p = s.ends[end];
+            // Edge-on: on the plane x = 1 through the axis, 2 from it. A face faces the viewer
+            // from a lean of 1e-9 (`outline::FACING`), which a radius of 2 puts 2e-9 off that
+            // plane.
+            assert!(
+                (p.x - 1.).abs() < 1e-8 && ((p.y - 2.).abs() - 2.).abs() < 1e-8,
+                "{p:?}"
+            );
+            // The circle's start and end, on the side facing the viewer.
+            assert!((s.ends[1 - end].x - 3.).abs() < 1e-9, "{s:?}");
+        }
+        // The two edge-on points are the circle's two sides.
+        assert!(
+            (first.ends[1].y - second.ends[0].y).abs() > 3.9,
+            "{first:?} {second:?}"
+        );
+    }
+}

@@ -338,10 +338,11 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 /// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
 /// opening), which SMLib refuses (solidcore#3252), or just past the largest blend that fits fails
 /// as an operation: `blend` of the edge on the body with that face
-/// carried on as a slab behind its plane, over the edge's length, and of the material that blend
+/// carried on as a slab behind its plane, between the planes of the faces the edge ends on, and
+/// of the material that blend
 /// adds, what stands over the face's outline (its sheet thickened along its normal) and what
 /// stands past the edge's line, on the other face's side of it (a box on that side of the line,
-/// over the edge's length), joined to the body. So the blend ends where the face's outline ends,
+/// between the same two planes), joined to the body. So the blend ends where the face's outline ends,
 /// on the surface of whatever the face turns into there, carried on square to the face, and is
 /// whole where it stands over the other face (leaning back, or curving away behind the edge's
 /// line). The sheet's prism and the box reach as far either way from the plane, and the box as
@@ -351,8 +352,10 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
 ///
 /// The kernel says where that gives the blend it would build on an unbounded face, and
 /// measures the slab ([`solidcore_ops::carried_faces_ordered`]: a straight concave edge, a flat
-/// face of it, and a flat face square to the edge at each end, so the slab's square ends add no
-/// material the blend could run into). This only sequences the operations, each recording its
+/// face of it, and at each end a flat face whose plane holds that face's normal, so each end of
+/// the slab lies in the plane of the face the blend ends on there and adds no material the blend
+/// could run into; such a face is square to the edge, or leans, as a sloped cut the edge ends on
+/// does, and the slab's end leans with it). This only sequences the operations, each recording its
 /// history. `Ok(None)` where it does not apply, or where the blend itself fails on the body
 /// with the face carried on too (carrying the face on does not make room for it): the caller
 /// keeps SMLib's refusal. Where the blend builds there but a later step fails for every face,
@@ -389,7 +392,8 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     let Ok((picked, _)) = crate::blend_smlib::picked_edges(body, &[pick]) else { return Ok(None) };
     let [e] = picked.as_slice() else { return Ok(None) };
     let e = *e;
-    let Some((ops, order)) = body.ops_body() else { return Ok(None) };
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
     let Ok(found) = solidcore_ops::carried_faces_ordered(ops, order, e, reach) else { return Ok(None) };
     if found.is_empty() {
         return Ok(None);
@@ -413,7 +417,6 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     // the blend itself fails with the face carried on, so carrying it on does not apply.
     let carry = |c: &solidcore_ops::CarriedFace| -> std::result::Result<Body, Option<FailedStep>> {
         let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
-        let length = c.outline[1][0];
         let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
         let what = "building the slab that carries the face on";
         let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).map_err(failed(what))?;
@@ -431,10 +434,10 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
         let room = bounds.min.dist(bounds.max) + size * 1e-3 + 1.0;
         let prism = crate::thicken(&sheet, 2.0 * room, true).map_err(failed("thickening the flat face's sheet"))?;
         // Past the edge's line the fill stands over the other face, not over the flat face's
-        // outline, and is kept whole.
-        let (from, to) = if c.other_side > 0.0 { (0.0, room) } else { (-room, 0.0) };
-        let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
+        // outline, and is kept whole: between the slab's two ends, as far as the slab reaches.
         let what = "building the box past the edge's line";
+        let beyond = c.past_edge(room).map_err(|e| failed(what)(KernelError::Failed(e.to_string())))?;
+        let beyond = Loop2::polygon(&beyond.map(|p| Vec2::new(p[0], p[1])));
         let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).map_err(failed(what))?;
         let beyond = beyond.into_iter().next().ok_or_else(|| nothing(what))?;
         let what = "joining the face's prism and the box past the edge's line";
@@ -1208,7 +1211,8 @@ fn second_face_first(l0: f64, l1: f64) -> Option<bool> {
 fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
     let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
     let [e] = picked.as_slice() else { return None };
-    let (ops, order) = body.ops_body()?;
+    let form = body.ops_body()?;
+    let (ops, order) = &*form;
     let leans = |dir: [f64; 3]| solidcore_ops::edge_faces_along_ordered(ops, order, *e, dir).ok();
     let [(f0, l0), (f1, l1)] = leans([0.0, 0.0, if flip { -1.0 } else { 1.0 }])?;
     if f0 == f1 {
@@ -1286,9 +1290,10 @@ pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize)
     let (_, chain, picked) = picked_chain(body, picks)?;
     let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
     let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
-    let Some((ops, order)) = body.ops_body() else {
+    let Some(form) = body.ops_body() else {
         return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
     };
+    let (ops, order) = &*form;
     chain
         .into_iter()
         .skip(picked)
@@ -1350,6 +1355,15 @@ fn smooth_join(rec: &Faces, e: usize) -> Result<bool> {
 /// passes over.
 fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>> {
     let mut chain = seeds.to_vec();
+    // Which edges `chain` holds, beside it, so the walk asks in one step rather than scanning the
+    // chain for every edge it looks at, which made it slow down with the square of the chain's
+    // length (#19245).
+    let mut in_chain = vec![false; rec.rec.edges.len()];
+    for &s in seeds {
+        if let Some(slot) = in_chain.get_mut(s) {
+            *slot = true;
+        }
+    }
     // Each edge's smoothness, decided once.
     let mut smooth: Vec<Option<bool>> = vec![None; rec.rec.edges.len()];
     let mut smooth_at = |f: usize| -> Result<bool> {
@@ -1364,24 +1378,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
     };
     let leaving = |e: usize, v: u32| leaving(&rec.rec, e, v);
     let cos = solidcraft_geom::TANGENT_CHAIN.cos();
-    let accept = normal_reach(rec);
-    // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
-    // body): the direction into its second face, square to it, points against its first face's
-    // outward normal. A face lies to the left of its loop seen from its surface's natural normal.
-    // None for an edge without exactly two uses, or where a normal cannot be found.
-    let convex = |e: usize, v: u32| -> Option<bool> {
-        let edge = rec.rec.edges.get(e)?;
-        let [ua, ub] = edge.uses.as_slice() else { return None };
-        let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
-            Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
-            Loop::Vertex { .. } => return None,
-        };
-        let p = rec.point(v)?;
-        let along = rec.tangent(e, edge.vertices[0] != v)?;
-        let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
-        let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
-        Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
-    };
+    let convex = |e: usize, v: u32| convex_at(rec, e, v);
     let mut k = 0;
     while k < chain.len() {
         let Some(&e) = chain.get(k) else { break };
@@ -1391,17 +1388,40 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
             let Some(d) = leaving(e, v) else { continue };
             for (f, other) in rec.rec.edges.iter().enumerate() {
                 let passed_over = hidden.get(f).copied().unwrap_or(false);
-                if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_at(f)? {
+                let held = in_chain.get(f).copied().unwrap_or(true);
+                if passed_over || held || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth_at(f)? {
                     continue;
                 }
                 let turns_over = matches!((convex(e, v), convex(f, v)), (Some(a), Some(b)) if a != b);
                 if !turns_over && leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
+                    if let Some(slot) = in_chain.get_mut(f) {
+                        *slot = true;
+                    }
                     chain.push(f);
                 }
             }
         }
     }
     Ok(chain)
+}
+
+/// Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the body):
+/// the direction into its second face, square to it, points against its first face's outward
+/// normal. A face lies to the left of its loop seen from its surface's natural normal. None for an
+/// edge without exactly two uses, or where a normal cannot be found.
+fn convex_at(rec: &Faces, e: usize, v: u32) -> Option<bool> {
+    let accept = normal_reach(rec);
+    let edge = rec.rec.edges.get(e)?;
+    let [ua, ub] = edge.uses.as_slice() else { return None };
+    let forward_b = match rec.rec.faces.get(ub.face as usize)?.loops.get(ub.r#loop as usize)? {
+        Loop::Edges { edges } => edges.get(ub.position as usize)?.forward,
+        Loop::Vertex { .. } => return None,
+    };
+    let p = rec.point(v)?;
+    let along = rec.tangent(e, edge.vertices[0] != v)?;
+    let natural_b = rec.normal_at(ub.face as usize, p, accept)? * rec.side(ub.face as usize)?;
+    let into_b = natural_b.cross(if forward_b { along } else { along * -1.0 });
+    Some(into_b.dot(rec.normal_at(ua.face as usize, p, accept)?) < 0.0)
 }
 
 /// Before blending exactly `edges` (the record's edges `picks` took, in order): refuses an edge
@@ -1476,18 +1496,28 @@ pub(crate) fn rounds_too_small(body: &Body, picks: &[Vec3], edges: &[usize], rad
 /// Whether the point uncovered is material is the body's exact point classification.
 pub(crate) fn rounds_into_hollow(body: &Body, picks: &[Vec3], edges: &[usize], radii: &[f64]) -> Result<()> {
     let rec = Faces::of(body)?;
+    // The refused edge that opens at the smallest radius: that radius is the largest that keeps
+    // every refused edge's round out of its hollow, and the refusal names it, so a fillet feature
+    // searches for the largest radius that fits from there (`named_fit`).
+    let mut first: Option<(f64, usize, f64, Vec3)> = None;
     for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
         let Some(section) = Section::of(&rec, e) else { continue };
         // Only an opening under the round's radius (less the tolerance) refuses it.
-        let Some((_, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
-        let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
-        return Err(KernelError::TooLarge(format!(
-            "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
-             {:.3}) and open the part",
-            at.x, at.y, at.z
-        )));
+        let Some((opens, at)) = section.opening(body, &rec, edges, radii, r - section.tolerance)? else { continue };
+        if first.is_none_or(|(least, ..)| opens < least) {
+            first = Some((opens, i, r, at));
+        }
     }
-    Ok(())
+    let Some((opens, i, r, at)) = first else { return Ok(()) };
+    let pick = picks.get(i).map(|p| format!(" at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
+    Err(KernelError::TooLarge(format!(
+        "the round of radius {r} mm on the edge{pick} would cut through the material behind it into the hollow at ({:.3}, {:.3}, \
+         {:.3}) and open the part; {}",
+        at.x,
+        at.y,
+        at.z,
+        largest_fit_note("radius", opens)
+    )))
 }
 
 /// The section of a round of a straight, convex edge between two planar faces, as
@@ -1938,6 +1968,178 @@ mod tests {
             assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
             last = m.volume;
         }
+    }
+
+    /// An L-shaped prism 40 tall, its notch's faces at x = 8 and y = 8, whose arm ends at x = -22
+    /// in a face rounded 18 along its bottom and top edges: the arm's face in the notch (y = 8,
+    /// 30 wide) turns into those rounds' arcs 12 from the notch's concave edge, at both caps.
+    /// Rounded 22, the edge's contact line on that face (at x = -14) runs past both arcs, SMLib
+    /// refuses it, and the round is built by carrying the face on. Its material is its section
+    /// r^2 (1 - pi/4) over the edge's 40, less what stands past each arc: u past the contact
+    /// line the round stands r - sqrt(r^2 - u^2) off the face and the arc lies
+    /// 18 - sqrt(18^2 - (10 - u)^2) off the cap, for u from 0 to 10, where the arc starts (their
+    /// product by Simpson's rule). The rounds' cylinders carry on over what is cut off there and
+    /// the caps over the round's ends: one face more (11); the concave edge and the face's two
+    /// cap edges gone, the round's two contact lines, two cap arcs and two edges on the
+    /// cylinders new (27 edges); the edge's two ends gone, the contact lines' four new (18
+    /// vertices). The face's sheet, whose two quarter circles each run on round their circle
+    /// when continued, has to thicken for it.
+    #[test]
+    fn a_concave_round_runs_on_past_both_rounded_corners_of_its_face() {
+        let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        let outline = [(-22.0, 8.0), (8.0, 8.0), (8.0, -32.0), (70.0, -32.0), (70.0, 32.0), (-22.0, 32.0)].map(|(x, y)| Vec2::new(x, y));
+        let prism = crate::build::extrude(&plane, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 40.0).unwrap();
+        let prism = prism.into_iter().next().unwrap();
+        let body = fillet(&prism, &[Vec3::new(-22.0, 20.0, 0.0), Vec3::new(-22.0, 20.0, 40.0)], 18.0).unwrap();
+        let before = crate::measure(&body).unwrap();
+        let quarter = 1.0 - std::f64::consts::FRAC_PI_4;
+        // the L's 4688 mm² over 40, less the two rounds along the arm's 24 mm end, to the
+        // measure's accuracy (1e-8 of the volume)
+        let rounded_prism = 187_520.0 - 2.0 * quarter * 324.0 * 24.0;
+        assert!((before.volume - rounded_prism).abs() < 1e-8 * rounded_prism, "{}", before.volume);
+        assert_eq!((before.faces, before.edges, before.vertices), (10, 24, 16));
+        let pick = Vec3::new(8.0, 8.0, 20.0);
+        let (r, corner, reach): (f64, f64, f64) = (22.0, 18.0, 10.0);
+        assert!(fillet(&body, &[pick], r).is_err(), "SMLib refuses the round");
+        let past = |u: f64| (r - (r * r - u * u).sqrt()) * (corner - (corner * corner - (reach - u).powi(2)).sqrt());
+        let n = 2000;
+        let h = reach / f64::from(n);
+        let past_arc =
+            h / 3.0 * (past(0.0) + past(reach) + (1..n).map(|i| f64::from(if i % 2 == 1 { 4 } else { 2 }) * past(h * f64::from(i))).sum::<f64>());
+        let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap();
+        assert!(gone.is_empty());
+        let m = crate::measure(&rounded).unwrap();
+        let added = m.volume - before.volume;
+        let full = quarter * r * r * 40.0;
+        // the difference of two measures, each to its accuracy
+        assert!(m.shells == 1 && (full - 2.0 * past_arc - added).abs() < 2e-8 * m.volume, "added {added} of {full} less {}", 2.0 * past_arc);
+        assert_eq!((m.faces, m.edges, m.vertices), (11, 27, 18));
+        assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{:?}", m.bbox);
+        assert_eq!(faces_from_edge(&rounded, &body, pick), 1);
+        // the contact lines: on the notch's other face from cap to cap, on the arm's face between the arcs
+        let on_arc = corner - (corner * corner - reach * reach).sqrt();
+        for v in [Vec3::new(8.0, -14.0, 0.0), Vec3::new(8.0, -14.0, 40.0), Vec3::new(-14.0, 8.0, on_arc), Vec3::new(-14.0, 8.0, 40.0 - on_arc)] {
+            assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
+        }
+    }
+
+    /// The L-shaped prism above with the top of its arm cut off by a plane that rises 1 in 2 from
+    /// z = 24 at the arm's end (x = -22) to the top at x = 10, and the arm's end rounded 11 along
+    /// its bottom edge and along its edge with that plane. The notch's concave edge now ends on
+    /// the sloped plane, at z = 39, which is not square to it. Rounded 22, its contact line on the
+    /// arm's face (at x = -14) runs past where that face turns into the bottom round's arc
+    /// (x = -11), so SMLib refuses the round, and it is built by carrying the face on between the
+    /// bottom and the sloped plane, whose plane holds the face's normal.
+    ///
+    /// Its material: s from the contact line toward the edge the round stands
+    /// r - sqrt(r^2 - s^2) off the face and the plane is 28 + s / 2 up, which over the round's 22
+    /// is 28 r^2 (1 - pi/4) + r^3 / 12; less what stands past the arc, u past the contact line
+    /// r - sqrt(r^2 - u^2) off the face and 11 - sqrt(11^2 - (3 - u)^2) off the bottom, for u
+    /// from 0 to 3 (Simpson's rule). One face more (12). The concave edge and the face's bottom
+    /// edge are gone; the round's two contact lines, its arcs on the bottom and on the sloped
+    /// plane and its edge on the bottom round's cylinder are new (30 edges). The edge's two ends
+    /// and the bottom edge's other end are gone; the contact lines' four ends and the point where
+    /// the round leaves the bottom for that cylinder are new (20 vertices).
+    #[test]
+    fn a_concave_round_runs_on_past_a_rounded_corner_where_its_edge_ends_on_a_sloped_cut() {
+        let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        let outline = [(-22.0, 8.0), (8.0, 8.0), (8.0, -32.0), (70.0, -32.0), (70.0, 32.0), (-22.0, 32.0)].map(|(x, y)| Vec2::new(x, y));
+        let prism = crate::build::extrude(&plane, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 40.0).unwrap();
+        let prism = prism.into_iter().next().unwrap();
+        // what lies above z = 35 + x / 2, drawn in y = -40 (x across, z up) and run to y = 40
+        let side = Plane { origin: Vec3::new(0.0, -40.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let above = [(-30.0, 20.0), (30.0, 50.0), (-30.0, 50.0)].map(|(x, z)| Vec2::new(x, z));
+        let above = crate::build::extrude(&side, &[Region2 { outer: Loop2::polygon(&above), holes: vec![] }], -80.0, 0.0).unwrap();
+        let cut = crate::boolean(&prism, &above.into_iter().next().unwrap(), crate::BoolOp::Cut).unwrap().unwrap();
+        let body = fillet(&cut, &[Vec3::new(-22.0, 20.0, 0.0), Vec3::new(-22.0, 20.0, 24.0)], 11.0).unwrap();
+        let before = crate::measure(&body).unwrap();
+        // The L's 4688 mm² over 40; less the cut, 255 mm² of the side view over the arm's 24 and
+        // 1 mm² over the block's 64; less the rounds along the arm's 24 mm end, the bottom one
+        // in a square corner and the top one in a corner of 90° + atan(1/2), whose half angle's
+        // cotangent is (sqrt(5) - 1) / 2 and which the round turns atan(2) through.
+        let quarter = 1.0 - std::f64::consts::FRAC_PI_4;
+        let top_round = (5.0_f64.sqrt() - 1.0) / 2.0 - 2.0_f64.atan() / 2.0;
+        let rounded_end = 187_520.0 - 255.0 * 24.0 - 64.0 - 121.0 * 24.0 * (quarter + top_round);
+        assert!((before.volume - rounded_end).abs() < 1e-8 * rounded_end, "{} against {rounded_end}", before.volume);
+        assert_eq!((before.faces, before.edges, before.vertices), (11, 27, 18));
+        let pick = Vec3::new(8.0, 8.0, 19.5);
+        let (r, corner, reach): (f64, f64, f64) = (22.0, 11.0, 3.0);
+        assert!(fillet(&body, &[pick], r).is_err(), "SMLib refuses the round");
+        let past = |u: f64| (r - (r * r - u * u).sqrt()) * (corner - (corner * corner - (reach - u).powi(2)).sqrt());
+        let n = 2000;
+        let h = reach / f64::from(n);
+        let past_arc =
+            h / 3.0 * (past(0.0) + past(reach) + (1..n).map(|i| f64::from(if i % 2 == 1 { 4 } else { 2 }) * past(h * f64::from(i))).sum::<f64>());
+        let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap();
+        assert!(gone.is_empty());
+        let m = crate::measure(&rounded).unwrap();
+        let added = m.volume - before.volume;
+        let full = 28.0 * r * r * quarter + r.powi(3) / 12.0;
+        // the difference of two measures, each to its accuracy
+        assert!(m.shells == 1 && (full - past_arc - added).abs() < 2e-8 * m.volume, "added {added} of {full} less {past_arc}");
+        assert_eq!((m.faces, m.edges, m.vertices), (12, 30, 20));
+        assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{:?}", m.bbox);
+        assert_eq!(faces_from_edge(&rounded, &body, pick), 1);
+        // The contact lines: on the notch's other face from the bottom to the sloped plane (39 up
+        // at x = 8); on the arm's face from the bottom round's arc to the plane (28 up at
+        // x = -14). And where the round leaves the bottom for that round's cylinder, at x = -11.
+        let on_arc = corner - (corner * corner - reach * reach).sqrt();
+        let leaves = -14.0 + (r * r - reach * reach).sqrt();
+        for v in [
+            Vec3::new(8.0, -14.0, 0.0),
+            Vec3::new(8.0, -14.0, 39.0),
+            Vec3::new(-14.0, 8.0, on_arc),
+            Vec3::new(-14.0, 8.0, 28.0),
+            Vec3::new(-11.0, leaves, 0.0),
+        ] {
+            assert!(has_vertex(&rounded, v, 1e-6), "no vertex at {v:?}");
+        }
+    }
+
+    /// A wall on a plate of two tiles with rounded rims (#19454): two 20 x 20 x 10 tiles side by
+    /// side, each with its four top edges rounded 5, and on them the box from (3, 3, 5) to
+    /// (37, 17, 15) with its upright edges rounded 1. Six faces of each tile less the two that
+    /// meet and the two tops under the wall, their eight rounds, and the wall's top, four sides
+    /// and four corners: 24 faces. The foot of the wall's front on the second tile, picked at
+    /// (25, 3, 9.6), with its tangent chain: the line from that tile's ridge at x = 23 and the
+    /// half of the wall's corner arc it runs on into, up to the ridge of the plate's corner.
+    ///
+    /// The round ends on that ridge on the plate's next round, which falls away under it. Its
+    /// contact line on the wall reaches that round's surface only up to the radius 1/2 (the
+    /// kernel's test of it derives that): under it the round builds, and from it on the round
+    /// is refused as too large, saying why and naming a radius under 1/2, where it failed
+    /// with status 1001 before ("Fillet Face Creation Error" at 0.5, "Vertex Computation
+    /// Failure" at 1 and 2).
+    #[test]
+    fn a_round_passing_over_the_face_it_ends_on_names_the_radius_that_fits() {
+        let tile = |x: f64| {
+            let b = crate::build::box_solid(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 20.0, 20.0, 10.0)).unwrap();
+            let rim = [(x + 10.0, 0.0), (x + 10.0, 20.0), (x, 10.0), (x + 20.0, 10.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+            fillet(&b, &rim, 5.0).unwrap()
+        };
+        let plate = crate::boolean(&tile(0.0), &tile(20.0), crate::BoolOp::Union).unwrap().unwrap();
+        let wall = crate::build::box_solid(Vec3::new(3.0, 3.0, 5.0), Vec3::new(37.0, 17.0, 15.0)).unwrap();
+        let uprights = [(3.0, 3.0), (37.0, 3.0), (37.0, 17.0), (3.0, 17.0)].map(|(x, y)| Vec3::new(x, y, 10.0));
+        let wall = fillet(&wall, &uprights, 1.0).unwrap();
+        let body = crate::boolean(&plate, &wall, crate::BoolOp::Union).unwrap().unwrap();
+        let before = crate::measure(&body).unwrap();
+        assert_eq!((before.faces, before.shells), (24, 1));
+        let picks = tangent_chain(&body, &[Vec3::new(25.0, 3.0, 9.6)]).unwrap();
+        assert_eq!(picks.len(), 2, "the line and the corner arc's half: {picks:?}");
+        for r in [0.5, 1.0, 2.0] {
+            match fillet(&body, &picks, r) {
+                Err(KernelError::TooLarge(why)) => {
+                    assert!(why.contains("the round passes over the face it ends on"), "{r}: {why}");
+                    let fits = named_fit(&why).unwrap_or_else(|| panic!("{r}: no radius named: {why}"));
+                    assert!(fits < 0.5 && fits > 0.45, "{r}: {why}");
+                }
+                other => panic!("{r}: not refused as too large: {:?}", other.map(|b| crate::measure(&b).map(|m| m.volume))),
+            }
+        }
+        let rounded = fillet(&body, &picks, 0.4).unwrap();
+        let m = crate::measure(&rounded).unwrap();
+        assert!(m.shells == 1 && m.volume > before.volume, "{} against {}", m.volume, before.volume);
+        assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
     }
 
     /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
@@ -2426,7 +2628,7 @@ mod tests {
 
         let angle = 45f64.to_radians();
         assert!(matches!(plain(6.45, angle), Err(KernelError::Failed(_))));
-        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("times the distances given")));
+        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("the largest distance that fits is")));
         let (largest, mut last) = carried(6.43, angle);
         assert_eq!(crate::encode_native_body(&largest).unwrap(), crate::encode_native_body(&plain(6.43, angle).unwrap()).unwrap());
         for d in [6.44, 6.45, 6.5, 7.0, 8.0] {
@@ -2840,6 +3042,164 @@ mod tests {
         assert_eq!(tangent_chain(&near, &[pick]).unwrap().len(), 240);
         let (corner, pick) = polygon_prism(120);
         assert_eq!(tangent_chain_edges(&corner, &[pick]).unwrap().len(), 1, "3° is a corner");
+    }
+
+    /// The tangent chain walked by scanning the chain for every edge it looks at, as [`chain_of`]
+    /// did before it kept a membership array beside the chain (#19245): the order the chain must
+    /// keep.
+    fn chain_by_scan(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
+        let mut chain = seeds.to_vec();
+        let cos = solidcraft_geom::TANGENT_CHAIN.cos();
+        let mut k = 0;
+        while k < chain.len() {
+            let e = chain[k];
+            k += 1;
+            for v in rec.rec.edges[e].vertices {
+                let Some(d) = leaving(&rec.rec, e, v) else { continue };
+                for (f, other) in rec.rec.edges.iter().enumerate() {
+                    if hidden.get(f).copied().unwrap_or(false)
+                        || chain.contains(&f)
+                        || other.uses.len() < 2
+                        || !other.vertices.contains(&v)
+                        || smooth_join(rec, f).unwrap()
+                    {
+                        continue;
+                    }
+                    let turns_over = matches!((convex_at(rec, e, v), convex_at(rec, f, v)), (Some(a), Some(b)) if a != b);
+                    if !turns_over && leaving(&rec.rec, f, v).is_some_and(|g| d.dot(g) < -cos) {
+                        chain.push(f);
+                    }
+                }
+            }
+        }
+        chain
+    }
+
+    /// Keeping chain membership in an array changes neither which edges a tangent chain holds nor
+    /// their order (#19245). On a 240-gon prism's top outline (one pick, and two picks on
+    /// opposite sides), a box with its vertical edges rounded (a top edge, and a top and a bottom
+    /// edge together), a box with one vertical edge rounded and the rounded plate with its boss,
+    /// the chain is the one the scanning walk gives, edge for edge. Where the number of edges is
+    /// known it is checked too (0: not checked). On a flat pyramid, where two edges run on from
+    /// one vertex, it is checked from every lateral edge and every pair of them.
+    #[test]
+    fn a_tangent_chain_keeps_its_edges_and_their_order() {
+        let (prism, pick) = polygon_prism(240);
+        let far = Vec3::new(-pick.x, -pick.y, pick.z);
+        let block = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+        let corners = [Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0), Vec3::new(40.0, 30.0, 10.0), Vec3::new(0.0, 30.0, 10.0)];
+        let all_round = fillet(&block, &corners, 5.0).unwrap();
+        let one_round = fillet(&block, &[Vec3::new(40.0, 30.0, 10.0)], 5.0).unwrap();
+        let plate = boss_on_rounded_plate();
+        let cases: [(&str, &Body, Vec<Vec3>, usize); 6] = [
+            ("240-gon, one pick", &prism, vec![pick], 240),
+            ("240-gon, two picks", &prism, vec![pick, far], 240),
+            ("rounded box, top edge", &all_round, vec![Vec3::new(20.0, 30.0, 20.0)], 8),
+            ("rounded box, top and bottom", &all_round, vec![Vec3::new(20.0, 30.0, 20.0), Vec3::new(20.0, 0.0, 0.0)], 16),
+            ("one rounded corner", &one_round, vec![Vec3::new(20.0, 30.0, 20.0)], 3),
+            ("plate and boss", &plate, vec![Vec3::new(26.796894836538296, -10.5, -12.0)], 0),
+        ];
+        for (name, body, picks, expected) in cases {
+            let (rec, chain, _) = picked_chain(body, &picks).unwrap();
+            let (seeds, hidden) = crate::blend_smlib::picked_edges(body, &picks).unwrap();
+            let mut unique: Vec<usize> = Vec::new();
+            for e in seeds {
+                if !unique.contains(&e) {
+                    unique.push(e);
+                }
+            }
+            assert_eq!(chain, chain_by_scan(&rec, &unique, &hidden), "{name}: the chain changed");
+            if expected > 0 {
+                assert_eq!(chain.len(), expected, "{name}: {chain:?}");
+            }
+        }
+        // A very flat pyramid over 8 base corners in near-opposite pairs: at the apex every
+        // lateral edge runs on into two others (each within 2°), so the chain's order there
+        // depends on the order the walk takes them in. From every lateral edge and every ordered
+        // pair of them.
+        let pyramid = flat_star_pyramid();
+        let rec = Faces::of(&pyramid).unwrap();
+        let apex = (0..rec.rec.vertices.len() as u32).find(|&v| rec.point(v).is_some_and(|p| p.z > 0.1)).unwrap();
+        let lateral: Vec<usize> = (0..rec.rec.edges.len()).filter(|&e| rec.rec.edges[e].vertices.contains(&apex)).collect();
+        assert_eq!(lateral.len(), 8);
+        let none = vec![false; rec.rec.edges.len()];
+        let mut most_at_apex = 0;
+        let mut seed_sets: Vec<Vec<usize>> = lateral.iter().map(|&e| vec![e]).collect();
+        for &a in &lateral {
+            seed_sets.extend(lateral.iter().filter(|&&b| b != a).map(|&b| vec![a, b]));
+        }
+        for seeds in seed_sets {
+            let chain = chain_of(&rec, &seeds, &none).unwrap();
+            assert_eq!(chain, chain_by_scan(&rec, &seeds, &none), "pyramid from {seeds:?}: the chain changed");
+            let at_apex = chain.iter().skip(seeds.len()).take_while(|&&e| rec.rec.edges[e].vertices.contains(&apex)).count();
+            most_at_apex = most_at_apex.max(at_apex);
+        }
+        assert!(most_at_apex >= 2, "no seed ran on into two edges at the apex");
+    }
+
+    /// The four-sided die of #19583: the tetrahedron on a triangle of circumradius 16.3 with
+    /// its apex 16.33 above the middle. Its corners are sharp: at a base corner the faces'
+    /// normals stand 116.5°, 116.5° and 101.6° apart, past the arccos(-1/3) = 109.47° of a
+    /// regular tetrahedron's corner, up to which the kernel's ball between three rounds was one
+    /// patch. Rounding every edge at such a corner failed ("Corner Edge Computation Failure").
+    ///
+    /// The reporter's five edges build at 2 mm, and all six give the solid rounded all over.
+    /// Its volume is in closed form (the kernel's own test of this part derives it from the
+    /// vertices): the tetrahedron drawn in about its incentre by k = (ρ - r) / ρ with the ball
+    /// of radius r rolled over it, V k³ + S k² r + M k r² + 4 π r³ / 3 (Steiner). Here
+    /// V = (√3 / 4) 16.3² × 16.33 = 1878.7198740245956, S = 1118.0376853849825, the inradius
+    /// ρ = 3 V / S = 5.041117750993379, and M, half the sum of each edge's length times the
+    /// angle between its faces' normals, is 147.48907003975233: 1615.6336937306553 at r = 2.
+    /// Its faces: the 4 faces, the 6 rounds, one patch for the apex's ball (its normals are
+    /// 101.6° apart, one patch as before) and three for each base corner's: 20.
+    #[test]
+    fn every_edge_of_a_tetrahedron_rounds_with_a_ball_at_each_corner() {
+        let (radius, height, r) = (16.3_f64, 16.33_f64, 2.0_f64);
+        let apex = Vec3::new(0.0, 0.0, height);
+        let base = [-30.0_f64, 90.0, 210.0].map(|a| Vec3::new(radius * a.to_radians().cos(), radius * a.to_radians().sin(), 0.0));
+        let mut planes = vec![crate::HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 }];
+        for i in 0..3 {
+            let n = (base[i] - apex).cross(base[(i + 1) % 3] - apex).normalized().unwrap();
+            let n = if n.z < 0.0 { n * -1.0 } else { n };
+            planes.push(crate::HalfSpace { n, d: n.dot(apex) });
+        }
+        let body = crate::convex_polyhedron(&planes).unwrap();
+        let before = crate::measure(&body).unwrap();
+        assert_eq!((before.faces, before.edges, before.vertices), (4, 6, 4));
+        let (sharp, all_over) = (1878.7198740245956_f64, 1615.6336937306553_f64);
+        assert!((before.volume - sharp).abs() < 1e-9 * sharp, "{} against {sharp}", before.volume);
+        // a point on each edge: the base's three, then the three to the apex
+        let middles =
+            [(0, 1), (1, 2), (2, 0)].map(|(i, j)| (base[i] + base[j]) * 0.5).into_iter().chain(base.map(|b| (b + apex) * 0.5)).collect::<Vec<_>>();
+
+        // the reporter's five edges: the base's three and two of the apex's
+        let five = fillet(&body, &middles[..5], r).unwrap();
+        let m = crate::measure(&five).unwrap();
+        assert!(m.shells == 1 && five.validity().is_empty(), "{:?}", five.validity());
+        assert!(m.volume < before.volume && m.volume > all_over, "{}", m.volume);
+        let all = fillet(&body, &middles, r).unwrap();
+        let m = crate::measure(&all).unwrap();
+        assert!(m.shells == 1 && all.validity().is_empty(), "{:?}", all.validity());
+        assert!((m.volume - all_over).abs() < 1e-9 * all_over, "{} against {all_over}", m.volume);
+        assert_eq!(m.faces, 20);
+    }
+
+    /// A very flat pyramid (0.42 high over a base of radius 30) whose 8 base corners come in
+    /// near-opposite pairs, so from the apex every lateral edge runs on into two others, each
+    /// within 2°.
+    fn flat_star_pyramid() -> Body {
+        let (r, h) = (30.0, 0.42);
+        let angles = [0.0f64, 0.6, 89.7, 90.4, 179.6, 180.4, 269.6, 270.3];
+        let apex = Vec3::new(0.0, 0.0, h);
+        let p: Vec<Vec3> = angles.iter().map(|a| Vec3::new(r * a.to_radians().cos(), r * a.to_radians().sin(), 0.0)).collect();
+        let mut planes = vec![crate::HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 }];
+        for i in 0..p.len() {
+            let (a, b) = (p[i], p[(i + 1) % p.len()]);
+            let n = (a - apex).cross(b - apex).normalized().unwrap();
+            let n = if n.z < 0.0 { n * -1.0 } else { n };
+            planes.push(crate::HalfSpace { n, d: n.dot(apex) });
+        }
+        crate::convex_polyhedron(&planes).unwrap()
     }
 
     /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent
@@ -3263,6 +3623,10 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
+        // The refusal names the radius it opens at, 4 + 2 sqrt2 to the micrometre, so a fillet
+        // feature searches for the largest that fits from there.
+        let named = named_fit(&e).unwrap();
+        assert!((named - (4.0 + 2.0 * std::f64::consts::SQRT_2)).abs() <= 5e-7, "{e}");
         let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 

@@ -9,7 +9,8 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use crate::blend::fillet_section::interval::Ivl;
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -182,9 +183,11 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -214,7 +217,7 @@ pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::CurveWithoutNurb))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -414,9 +417,11 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
         [lo, hi] if lo <= hi => (-lo).max(0.0),
         _ => return Ok(None),
     };
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let mut bound = 0.0_f64;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
@@ -589,9 +594,11 @@ pub(crate) fn off_surface_bound(
         }
         Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
     };
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let origin = match *a {
         Implicit::Plane { origin, .. } | Implicit::Cone { origin, .. } => origin,
         Implicit::Sphere { centre, .. } | Implicit::Torus { centre, .. } => centre,
@@ -968,13 +975,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutNurb))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
+        .ok_or_else(|| SolidError::surface(OP_EXACT, SurfaceFailure::CurveWithoutControlPoints))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -1361,15 +1368,17 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
+    let nurb = form.gw_nurb().ok_or_else(|| {
+        Failure::new(OP_EXACT, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error()
+    })?;
     let (segs, o) = curve_segments(spine)?;
+    // `curve_segments` above has returned `CurveWithoutNurb` for a spine without its NURB
     let spine_breaks = spine
         .nurb
         .as_ref()
-        .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
+        .map_or_else(Vec::new, |n| breaks(n.knots()));
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1548,7 +1557,8 @@ impl AnalyticSupport {
     }
 
     /// Its implicit equation's data.
-    pub(crate) fn implicit(&self) -> Implicit {
+    #[must_use]
+    pub fn implicit(&self) -> Implicit {
         let axis = |p: &Axis2Placement| p.x_axis().cross(p.y_axis());
         match self {
             Self::Plane { placement, .. } => Implicit::Plane {
@@ -1639,14 +1649,84 @@ impl AnalyticSupport {
     /// what proves the support and the form agree: [`lies_on`] proves the point set, and
     /// the evaluation proves the parametrisation, including the frame the placement imposes
     /// about the axis and, for a sphere, the whole orientation, none of which the implicit
-    /// equation constrains (#2588). The surface takes `form` as its NURB.
+    /// equation constrains (#2588). The surface takes `form` as its NURB. A short arc fails
+    /// the evaluation: a centre rebuilt from it is good only to about the radius over the
+    /// square of the sweep. [`Self::place_on`] carries a cone or cylinder whose own axis the
+    /// form lies on.
     ///
     /// # Errors
     ///
     /// `InvalidInput` where `form` is off the analytic surface or is not its
     /// parametrisation; those of the recognisers, the evaluations and [`lies_on`].
     pub fn build(&self, k: &Kernel, form: BSplineSurface) -> Result<Surface> {
-        // the placement's axes as stored: unit and square to rounding (8 ulps)
+        if !self.placement_is_square() {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's placement is not orthonormal",
+            ));
+        }
+        let implicit_ok = lies_on(&form, &self.implicit())?;
+        if let Self::Plane {
+            placement,
+            uv_scale,
+            domain,
+        } = *self
+        {
+            if !implicit_ok {
+                return Err(SolidError::invalid_input(
+                    OP_BUILD,
+                    "a support's analytic kind disagrees with its NURBS form",
+                ));
+            }
+            return Ok(Surface::from(Plane::from_stored(
+                placement, uv_scale, domain, form,
+            )));
+        }
+        // a surface of revolution: the one the kernel recognises in the form, which must be
+        // this one, take the form as its NURB and evaluate as the form at the form's own
+        // parameters
+        let surface = self.on_form(k, &form)?;
+        if implicit_ok && evaluates_as(k, &surface, &form)? {
+            return Ok(surface);
+        }
+        if !implicit_ok {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's analytic kind disagrees with its NURBS form",
+            ));
+        }
+        Err(not_form())
+    }
+
+    /// This cone or cylinder on `form`: the form's sweep and generator, and this support's
+    /// axis, radius and semi-angle. The form lies on this support. A short sweep, whose
+    /// trigonometric point is a few ulps off its Bézier, keeps these numbers.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` where the placement is not orthonormal, `form` is off this support,
+    /// or the kernel recognises no cone in `form`; those of the recogniser and [`lies_on`].
+    pub(crate) fn place_on(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
+        if !matches!(self, Self::Cylinder { .. } | Self::Cone { .. }) {
+            return Err(not_form());
+        }
+        if !self.placement_is_square() {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's placement is not orthonormal",
+            ));
+        }
+        if !lies_on(form, &self.implicit())? {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's analytic kind disagrees with its NURBS form",
+            ));
+        }
+        self.on_form(k, form)
+    }
+
+    /// The placement's axes as stored: unit and square to rounding (8 ulps).
+    fn placement_is_square(&self) -> bool {
         let p = match self {
             Self::Plane { placement, .. }
             | Self::Cylinder { placement, .. }
@@ -1656,37 +1736,7 @@ impl AnalyticSupport {
         };
         let ulps = 8.0 * f64::EPSILON;
         let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-        let square = p.x_axis().dot(p.y_axis()).abs() <= ulps;
-        if !(unit(p.x_axis()) && unit(p.y_axis()) && square) {
-            return Err(SolidError::invalid_input(
-                OP_BUILD,
-                "a support's placement is not orthonormal",
-            ));
-        }
-        if !lies_on(&form, &self.implicit())? {
-            return Err(SolidError::invalid_input(
-                OP_BUILD,
-                "a support's analytic kind disagrees with its NURBS form",
-            ));
-        }
-        if let Self::Plane {
-            placement,
-            uv_scale,
-            domain,
-        } = *self
-        {
-            return Ok(Surface::from(Plane::from_stored(
-                placement, uv_scale, domain, form,
-            )));
-        }
-        // a surface of revolution: the one the kernel recognises in the form, which must be
-        // this one, take the form as its NURB and evaluate as the form at the form's own
-        // parameters
-        let surface = self.on_form(k, &form)?;
-        if !evaluates_as(k, &surface, &form)? {
-            return Err(not_form());
-        }
-        Ok(surface)
+        unit(p.x_axis()) && unit(p.y_axis()) && p.x_axis().dot(p.y_axis()).abs() <= ulps
     }
 
     /// The largest ratio, over the form's Greville points, of this support's analytic
@@ -2256,7 +2306,12 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
             let c = cps.get(i * nv + j).ok_or_else(|| {
-                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+                SolidError::surface(
+                    OP_DERIVE,
+                    SurfaceFailure::Defect {
+                        why: "the net has no control point (i, j) with i < nu and j < nv, though `control_points` returns the (n + 1)(m + 1) points of the net's rows, each of which holds m + 1 points by `srf_basic::Surface`'s invariant",
+                    },
+                )
             })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
@@ -2482,7 +2537,8 @@ impl AnalyticSupport {
 
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
-    /// whose endpoint tangent and chord recover its centre and radius together. A cylinder
+    /// whose chord and middle weight recover its centre and radius together (The NURBS Book,
+    /// §7.3 and §7.5: the weight is the cosine of the half sweep). A cylinder
     /// keeps that pair from the first row; averaging independently recovered radii breaks
     /// their correlated rounding on shallow arcs. The axis is a cylinder's columns' direction
     /// (its generators) through the first row's centre, or a cone's circular-row normal. The
@@ -2532,10 +2588,14 @@ impl AnalyticSupport {
         let along_v = spread(true) <= spread(false);
         let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
         // Each row's circle from its first rational quadratic arc, control points p0, p1,
-        // p2 (The NURBS Book, sections 7.3 and 7.5): the angle between its first tangent
-        // leg and chord is half the sweep, so r = |leg| cot(half sweep). Build the centre
-        // from p0 along the inward normal by r: the radius and centre then reproduce p0
-        // together, without a shallow arc's circumcentre rounding shifting it off its frame.
+        // p2 (The NURBS Book, sections 7.3 and 7.5). The angle α between the tangent leg
+        // and the chord is the half sweep. A wide span recovers the centre from that leg,
+        // which is exact for a circle of an exactly representable radius (a line at radius
+        // 5 revolved about the axis). A short span's leg is nearly parallel to the chord,
+        // and the centre built from the leg sits off the axis: 6.8×10⁻¹³ mm on the 12° rib,
+        // 1.06 times the rounding `build` allows. There the middle weight w1/√(w0 w2) is
+        // cos α, the radius is the chord over 2 sin α, and the centre lies r |cos α| from
+        // the chord's midpoint. That puts the 12° rib 2.7×10⁻¹⁴ mm off.
         let degree = form.degree(if along_v {
             crate::nurbs::b_spline_surface::SurfParamType::V
         } else {
@@ -2544,6 +2604,7 @@ impl AnalyticSupport {
         if degree != 2 || len < 3 {
             return None;
         }
+        let (_, nv_cp, cps) = form.control_points().ok()?;
         let circle = |r: usize| -> Option<(Vec3, f64, Vec3)> {
             let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
             let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
@@ -2569,9 +2630,42 @@ impl AnalyticSupport {
             };
             let tangent = unit(leg)?;
             let across = unit(chord)?;
-            let inward = unit(normal)?.cross(tangent);
-            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
-            let centre = p0 + inward * radius;
+            // sin α. At about 15° and above the leg is a stable reading of the circle.
+            // Below that the chord and the weight are.
+            let sine = tangent.cross(across).length();
+            let (centre, radius) = if sine >= 0.25 {
+                let inward = unit(normal)?.cross(tangent);
+                let radius = leg.length() * tangent.dot(across) / sine;
+                (p0 + inward * radius, radius)
+            } else {
+                let plane = unit(normal)?;
+                let at_cp = |c: usize| {
+                    let (i, j) = if along_v { (r, c) } else { (c, r) };
+                    let index = i.checked_mul(nv_cp)?.checked_add(j)?;
+                    cps.get(index)
+                };
+                let weight_of = |c: &crate::nurbs::math::CPoint| if c.w == NOW { 1.0 } else { c.w };
+                let (w0, w1, w2) = (
+                    weight_of(at_cp(0)?),
+                    weight_of(at_cp(1)?),
+                    weight_of(at_cp(2)?),
+                );
+                // The end weights share a sign and the middle one is not zero. cos α is
+                // w1/√(w0 w2), negative for a span past 180° and for a row whose weights
+                // are all negated. Both are the same circle. The control triangle's normal
+                // turns over with that row, and the centre offset uses |cos α|.
+                if !(w0 * w2 > 0.0 && w1.is_finite() && w1 != 0.0) {
+                    return None;
+                }
+                let cos_half = w1 / (w0 * w2).sqrt();
+                let sin_half = ((1.0 - cos_half) * (1.0 + cos_half)).sqrt();
+                if !(sin_half.is_finite() && sin_half > 0.0) {
+                    return None;
+                }
+                let radius = chord.length() / (2.0 * sin_half);
+                let centre = p0 + chord * 0.5 + plane.cross(across) * (radius * cos_half.abs());
+                (centre, radius)
+            };
             (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
                 .then_some((centre, radius, normal))
         };
