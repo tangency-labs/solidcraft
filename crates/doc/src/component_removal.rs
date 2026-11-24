@@ -1,6 +1,7 @@
 //! Removing a component tree: its components, the features made in them, their placements, and
 //! every assembly record that refers to them.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use crate::{DocError, Document, FeatureKind, Result};
@@ -21,6 +22,18 @@ pub struct RemovedTree {
 }
 
 impl Document {
+    /// The assembly built at the current history position. A copy when necessary leaves the
+    /// original occurrence and assembly records intact for later reactivation.
+    pub fn active_assembly(&self) -> Cow<'_, Document> {
+        let inactive = self.inactive_pattern_occurrences();
+        if inactive.is_empty() {
+            return Cow::Borrowed(self);
+        }
+        let mut active = self.clone();
+        active.remove_occurrences(&inactive);
+        Cow::Owned(active)
+    }
+
     /// Did feature `f` make the component tree it sits at the top of: an inserted file
     /// (`Feature::inserted`) or a linked design's bodies? Deleting it then removes that tree.
     pub fn feature_owns_component(&self, f: &crate::Feature) -> bool {
@@ -130,13 +143,7 @@ impl Document {
     /// either side on one (with those joints' motion links and motion keys), the joint origins
     /// on them, their places in contact sets and their exploded moves. Returns the joints removed.
     pub fn remove_occurrences(&mut self, occurrences: &BTreeSet<u64>) -> BTreeSet<u64> {
-        let joints: BTreeSet<u64> = self
-            .assembly
-            .joints
-            .iter()
-            .filter(|j| j.a.occurrences().chain(j.b.occurrences()).any(|o| occurrences.contains(&o)))
-            .map(|j| j.id)
-            .collect();
+        let joints: BTreeSet<u64> = self.assembly.joints.iter().filter(|j| j.uses_any_occurrence(occurrences)).map(|j| j.id).collect();
         for group in &mut self.timeline_groups {
             group.joints.retain(|id| !joints.contains(id));
         }

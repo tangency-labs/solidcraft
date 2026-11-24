@@ -1,7 +1,7 @@
 //! Versioned design packages. Entries are never extracted to filesystem paths. The optional
 //! model cache is only read back by the build that wrote it, for the exact document it was
 //! written with.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 #[cfg(test)]
 use std::io::Write;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -134,6 +134,10 @@ const LIMITS: Limits = Limits {
 /// is still written in full, never refused (data loss), and the caller says it is over the limit.
 const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
 
+/// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since the
+/// bytes don't come from outside and a save may be over that limit (#18686).
+const WRITTEN_LIMITS: Limits = Limits { check_size: |_| Ok(()), ..SAVE_LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
@@ -171,7 +175,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(SAVE_LIMITS))
+        PackageWriter(Writer::for_save(SAVE_LIMITS, max_expanded))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -368,7 +372,12 @@ fn write_container(
         let mut parts: Vec<String> = doc
             .drawings
             .iter()
-            .flat_map(|d| d.images.iter().map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format)).collect::<Vec<_>>())
+            .flat_map(|d| {
+                d.images
+                    .iter()
+                    .map(|i| solidcraft_doc::blob::part_name(&i.data, &i.format))
+                    .chain(d.newer_file.iter().flat_map(|file| file.part_names().map(String::from)))
+            })
             .collect();
         parts.sort();
         parts.dedup();
@@ -417,7 +426,9 @@ fn write_container(
         && writer.room(2, manifest.len().saturating_add(data.len()), budget)
     {
         writer.part("cache/preview.json", &manifest, false)?;
-        writer.part("cache/preview.bin", &data, false)?;
+        // Deflated: the window's saves keep it in every design (#19328), and the meshes shrink
+        // well, so a design grows by much less than the meshes' raw size.
+        writer.part("cache/preview.bin", &data, true)?;
     }
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
@@ -528,11 +539,9 @@ fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
 fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u8>> {
     let n = cloud.points.len();
     let colored = !cloud.colors.is_empty();
-    let size = n
-        .checked_mul(if colored { 15 } else { 12 })
-        .and_then(|b| b.checked_add(24))
-        .filter(|&b| b <= crate::limits::max_design_bytes())
-        .ok_or_else(|| invalid("point cloud too large"))?;
+    // No open-size filter: a save writes a design over that limit and says so (#18686); a
+    // coloured cloud of the points a cloud may hold can be past it.
+    let size = n.checked_mul(if colored { 15 } else { 12 }).and_then(|b| b.checked_add(24)).ok_or_else(|| invalid("point cloud too large"))?;
     let mut bytes = Vec::with_capacity(size);
     bytes.extend_from_slice(POINTS_MAGIC);
     bytes.extend_from_slice(&(n as u64).to_le_bytes());
@@ -569,6 +578,13 @@ fn encode_complex(complex: &solidcraft_doc::point_cloud::Complex) -> Result<Opti
     Ok(Some(bytes))
 }
 
+/// A complex blob's length in bytes, its `header` and then 4 bytes for each index and value, or
+/// `None` when that does not fit in a `usize` (a 32-bit build, such as the web app, reading the
+/// counts of a shared file).
+fn complex_len(header: usize, segments: usize, triangles: usize, counts: &[usize]) -> Option<usize> {
+    counts.iter().try_fold(segments.checked_add(triangles)?, |n, &c| n.checked_add(c))?.checked_mul(4)?.checked_add(header)
+}
+
 /// Fills `complex`, read from its record with empty numbers, from its part ([`encode_complex`]).
 /// What the numbers mean is checked with the points ([`decode_cloud`]).
 fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Complex) -> Result<()> {
@@ -590,8 +606,7 @@ fn decode_complex(bytes: &[u8], complex: &mut solidcraft_doc::point_cloud::Compl
     for _ in 0..columns {
         counts.push(word()?.min(MAX_POINTS.max(MAX_CELLS) + 1));
     }
-    let words = counts.iter().fold(segments + triangles, |n, c| n + c);
-    if bytes.len() != at + words * 4 {
+    if complex_len(at, segments, triangles, &counts) != Some(bytes.len()) {
         return Err(invalid("invalid point cloud complex lengths"));
     }
     let mut values = bytes[at..].as_chunks::<4>().0.iter();
@@ -725,6 +740,16 @@ pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
 }
 
+/// [`read_design_provenance_chain`] for a container this process just wrote: no open-size limit,
+/// since the bytes don't come from outside. A save over that limit keeps its history for the next
+/// save (#18686).
+pub fn written_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
+    if !is_design_container(bytes) {
+        return None;
+    }
+    DesignContainerReader::from_written_bytes(bytes).ok()?.provenance_chain()
+}
+
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
 pub fn read_design_provenance_file(path: &str) -> Option<ProvenanceReport> {
     read_design_provenance_file_checked(path).ok().flatten()
@@ -838,6 +863,19 @@ fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignP
 /// This type does not turn untrusted cached data into editable geometry.
 pub struct DesignContainerReader<R: Read + Seek> {
     reader: PackageReader<R>,
+}
+
+impl<'a> DesignContainerReader<Cursor<&'a [u8]>> {
+    /// Inspect only bytes this process just wrote. Report the expanded opening limit separately so
+    /// an oversized save can still inspect its cache and keep its provenance chain.
+    pub fn from_written_bytes(bytes: &'a [u8]) -> Result<Self> {
+        Ok(Self { reader: PackageReader(Reader::with_open_limits(Cursor::new(bytes), WRITTEN_LIMITS, Some(LIMITS))?) })
+    }
+
+    /// Whether the directory of the just-written container exceeds a part or total opening limit.
+    pub fn exceeds_expanded_open_limit(&self) -> bool {
+        self.reader.exceeds_expanded_open_limit
+    }
 }
 
 impl<R: Read + Seek> DesignContainerReader<R> {
@@ -1168,15 +1206,27 @@ fn hydrate_newer<R: Read + Seek>(
     if !is_known_container(&container) {
         file.container = Some(container);
     }
-    // A blob a typed record uses comes back from that record; others only for what is kept.
-    for name in reader.part_names() {
+    // A blob a typed record uses comes back from that record. Others are kept only when a string in
+    // what is kept or in a feature this build couldn't read is their name. One walk finds them all,
+    // where a walk for each part took minutes on a file of thousands of parts and a large feature.
+    let names = reader.part_names();
+    let mut unused_blobs: HashSet<&str> = names.iter().map(String::as_str).filter(|name| name.starts_with("blobs/")).collect();
+    let mut used = |text: &str| {
+        unused_blobs.remove(text);
+    };
+    file.strings(&mut used);
+    for feature in &doc.features {
+        if let FeatureKind::NewerFileFeature { raw } = &feature.kind {
+            solidcraft_format::newer::strings_in(&raw.0, &mut used);
+        }
+    }
+    for name in &names {
         let ours = matches!(name.as_str(), "document.json" | "container.json")
             || name.starts_with("cache/")
             || name.starts_with("drawings/")
-            || plugin_part(&name).is_some();
-        let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
-        if !ours && !unused_blob {
-            file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
+            || plugin_part(name).is_some();
+        if !ours && !unused_blobs.contains(name.as_str()) {
+            file.parts.push((name.clone(), reader.limited_part(name, part_limit(name))?.into()));
         }
     }
     // Looking counts against what a design may expand to only once: the reads below are the real ones.
@@ -1213,19 +1263,6 @@ fn is_known_container(container: &Value) -> bool {
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
 pub(crate) fn is_container_version(format: &str) -> bool {
     format == LEGACY_VERSION || format.strip_prefix("solidcraft-container/").is_some_and(|n| n.parse::<u32>().is_ok())
-}
-
-/// Whether a feature this build couldn't read refers to this blob.
-fn foreign_mentions(features: &[solidcraft_doc::Feature], name: &str) -> bool {
-    fn names(value: &Value, name: &str) -> bool {
-        match value {
-            Value::String(s) => s == name,
-            Value::Array(a) => a.iter().any(|x| names(x, name)),
-            Value::Object(o) => o.values().any(|x| names(x, name)),
-            _ => false,
-        }
-    }
-    features.iter().any(|f| matches!(&f.kind, FeatureKind::NewerFileFeature { raw } if names(&raw.0, name)))
 }
 
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
@@ -1732,6 +1769,43 @@ mod tests {
         crate::limits::test_cap::set(None);
     }
 
+    /// A coloured cloud is 15 bytes a point, so one a cloud may hold can be over the open limit; the
+    /// save encodes it instead of refusing it (#18686). A 1 MB limit for this thread stands in for
+    /// the real one.
+    #[test]
+    fn a_coloured_cloud_over_the_open_limit_is_still_encoded() {
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Complex, PointCloud, Points};
+        crate::limits::test_cap::set(Some(1 << 20));
+        let n = max_design() / 15 + 1;
+        let cloud = PointCloud {
+            id: 1,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: solidcore_record::Vec3::new(0.0, 0.0, 0.0),
+            points: Points::new(vec![0.0; n * 3].into()),
+            colors: Colors(vec![128; n * 3].into()),
+            source_points: n as u64,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex::default(),
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        };
+        let encoded = encode_cloud(&cloud);
+        let limit = max_design();
+        crate::limits::test_cap::set(None);
+        let bytes = encoded.expect("a valid cloud is written whatever the open limit");
+        assert_eq!(bytes.len(), n * 15 + 24);
+        assert!(bytes.len() > limit);
+    }
+
     #[test]
     fn seekable_preview_defers_large_source_blob_until_document_read() {
         let mut doc = Document::new("Deferred source");
@@ -2184,6 +2258,42 @@ mod tests {
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+    }
+
+    #[test]
+    fn optional_caches_keep_a_compressible_design_within_the_expanded_open_limit() {
+        let mut doc = Document::new("Compressible imports");
+        for pad in ["a", "b"] {
+            doc.add_feature(
+                FeatureKind::Import {
+                    file: format!("{pad}.step"),
+                    step: pad.repeat(2 << 20).into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let required = write_design_container_with_cache(&doc, DesignCompression::Fast, None, None).unwrap();
+        let expanded: usize = parts(&required).values().map(Vec::len).sum();
+        // Both imports fit individually. Together the required entries leave at most one
+        // byte for optional parts, despite plenty of space in the compressed file.
+        crate::limits::test_cap::set(Some(expanded.div_ceil(2)));
+        let preview = DesignPreview { meshes: vec![mesh()] };
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, Some(&preview), Some(&native_geometry())).unwrap();
+        let reopened = crate::read_design(&bytes);
+        assert!(!DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+
+        // Lower the cap just enough that only the sum of the required entries exceeds it.
+        crate::limits::test_cap::set(Some((expanded - 1) / 2));
+        assert!(bytes.len() < max_design());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).is_err());
+        assert!(DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+        crate::limits::test_cap::set(None);
+        assert_eq!(reopened.unwrap().to_json(), doc.to_json());
+        assert_eq!(bytes, required);
     }
 
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
@@ -2888,6 +2998,57 @@ mod tests {
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
     }
 
+    /// A newer build's container keeps exactly the blobs that what this build can't read names,
+    /// each as a whole string at any depth (not an object's key, not part of a longer text). What
+    /// this build can't read here is a feature, fields it doesn't know, a section it leaves out
+    /// whole and an element it leaves out of a list. Which blobs those name is found in one walk of
+    /// what is kept, not one walk for each part. With these thousands of parts and an unread
+    /// feature holding a long list, checking each part against all of it took seconds, and a
+    /// crafted file of about 1 MB took minutes.
+    #[test]
+    fn a_newer_builds_container_keeps_exactly_the_blobs_its_unread_parts_name() {
+        let mut entries = parts(&write_design_container(&document()).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
+        let blobs: Vec<String> = (0..9_000).map(|i| format!("blobs/{i}")).collect();
+        let every = |step: usize| blobs.iter().step_by(step).cloned().collect::<Vec<_>>();
+        // An unread feature names every third blob, deep in its record and after a long list.
+        let future = json!({
+            "id": 9000,
+            "name": "Lattice1",
+            "type": "gyroid_lattice",
+            "cells": vec![0; 200_000],
+            "layers": [{"parts": every(3)}],
+            // Neither a key nor a longer text names a blob.
+            "by_part": {"blobs/1": true},
+            "note": "blobs/2 is not a name",
+        });
+        metadata["features"].as_array_mut().unwrap().push(future);
+        // A field this build doesn't know names every fifth, and one it doesn't know at the top names
+        // blobs/4. Typed reading drops both, so they are kept as fields.
+        metadata["features"][0]["future_field"] = json!({"refs": every(5)});
+        metadata["future_top_field"] = json!([[{"part": "blobs/4"}]]);
+        // A point cloud this build can't read leaves its section out whole, and only it names
+        // blobs/7.
+        metadata["point_clouds"] = json!([{"id": 9001, "name": "Scan", "points_blob": "blobs/7", "complex": {"columns": {"nz": "packed"}}}]);
+        // A parameter this build can't read is left out of the list, and only it names blobs/8.
+        metadata["params"].as_array_mut().unwrap().push(json!({"name": "Lookup", "expression": {"kind": "table", "rows": ["blobs/8"]}}));
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        for blob in &blobs {
+            entries.insert(blob.clone(), Vec::new());
+        }
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let file = opened.newer_file.as_ref().unwrap();
+        let unread = &file.not_understood;
+        assert!(unread.iter().any(|what| what.starts_with("section `point_clouds`")), "{unread:?}");
+        assert!(unread.iter().any(|what| what.starts_with("parameter `Lookup`")), "{unread:?}");
+        let kept: BTreeSet<&str> = file.parts.iter().map(|(name, _)| name.as_str()).collect();
+        let named: BTreeSet<&str> =
+            blobs.iter().enumerate().filter(|(i, _)| i % 3 == 0 || i % 5 == 0 || [4, 7, 8].contains(i)).map(|(_, blob)| blob.as_str()).collect();
+        assert_eq!(kept, named);
+    }
+
     /// A newer build's import whose records this build cannot read costs that feature, which is
     /// kept as the file has it, not the whole design; so do records this build reads but with a
     /// field it does not have (at the top or within a body), which saving its reading would drop.
@@ -3502,6 +3663,55 @@ mod tests {
         assert!(decode_mesh(&bytes, &mut mesh()).is_err());
     }
 
+    /// A point cloud's segments, triangles and numbers decode as saved, and counts that don't fit
+    /// the blob are refused. On a 32-bit build (the web app) 64 counts of 20 million values pass
+    /// `u32::MAX` bytes, so an unchecked length panics there, or wraps and lets a short blob
+    /// through with shorter columns than its counts.
+    #[test]
+    fn a_point_cloud_complex_whose_counts_overflow_its_length_is_refused() {
+        use solidcraft_doc::point_cloud::{Column, Complex, Floats, Indices, MAX_CELLS, MAX_COLUMNS, MAX_POINTS, On};
+        let column = Column { name: "nz".into(), on: On::Point, integer: false, values: Floats::default() };
+        let saved = Complex {
+            segments: Indices(vec![0, 1].into()),
+            triangles: Indices(vec![0, 1, 2].into()),
+            columns: vec![Column { values: Floats(vec![1.0, 2.0, 3.0].into()), ..column.clone() }],
+            names: Vec::new(),
+        };
+        let valid = encode_complex(&saved).unwrap().unwrap();
+        let read = |bytes: &[u8], columns: usize| {
+            let mut complex = Complex { columns: vec![column.clone(); columns], ..Complex::default() };
+            decode_complex(bytes, &mut complex).map(|()| complex)
+        };
+        assert_eq!(read(&valid, 1).unwrap(), saved);
+        for length in 0..valid.len() {
+            assert!(read(&valid[..length], 1).is_err());
+        }
+        assert!(read(&[valid.as_slice(), &[0; 4]].concat(), 1).is_err());
+
+        // Lengths past a `usize` are `None` at any width, never a panic.
+        assert_eq!(complex_len(32, usize::MAX, 1, &[]), None);
+        assert_eq!(complex_len(32, 0, 0, &[usize::MAX, 1]), None);
+        assert_eq!(complex_len(32, 0, 0, &[usize::MAX / 4 + 1]), None);
+        assert_eq!(complex_len(usize::MAX, 0, 0, &[1]), None);
+        assert_eq!(complex_len(40, 2, 3, &[3]), Some(40 + 8 * 4));
+
+        // A blob of its header alone whose counts (each clamped as it is read) add up to 2^30
+        // values. At 4 bytes each that is 2^32, which a 32-bit length wraps to 0, so an unchecked
+        // sum took the header alone for the whole blob (a 64-bit host refused it even so).
+        let clamp = MAX_POINTS.max(MAX_CELLS) + 1;
+        let full = (1usize << 30) / clamp;
+        assert!(full < MAX_COLUMNS);
+        let mut counts = vec![u32::MAX as usize; full];
+        counts.push((1 << 30) - full * clamp);
+        counts.resize(MAX_COLUMNS, 0);
+        let mut header = COMPLEX_MAGIC.to_vec();
+        for n in [0, 0, MAX_COLUMNS].into_iter().chain(counts) {
+            header.extend_from_slice(&(n as u64).to_le_bytes());
+        }
+        let e = read(&header, MAX_COLUMNS).unwrap_err();
+        assert!(e.to_string().contains("invalid point cloud complex lengths"), "{e}");
+    }
+
     #[test]
     fn hostile_archive_paths_versions_and_truncations_are_errors() {
         let bytes = write_design_container(&document()).unwrap();
@@ -3547,7 +3757,7 @@ mod tests {
 
     /// Printable text that compresses poorly (93 characters: about 6.5 bits each). No `*`, so
     /// it never ends a STEP comment.
-    fn noise(length: usize) -> String {
+    pub(super) fn noise(length: usize) -> String {
         let mut state = 0x2545_f491_4f6c_dd1du64;
         (0..length)
             .map(|_| {

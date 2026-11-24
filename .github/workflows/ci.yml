@@ -40,6 +40,8 @@
 # advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
 # The kernel rig (kernel-rig.yml, called as a reusable workflow) runs on approved pull requests and
 # merge groups, for the rig areas the diff reaches, and `ci` requires it.
+# On a pull request every job that builds or tests merges the PR onto today's main right after the
+# checkout (.github/actions/merge-main), not GitHub's refs/pull/N/merge, which can be hours old.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -118,6 +120,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 60 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: Install advisory scanner
         run: cargo install cargo-deny --version 0.20.2 --locked
@@ -202,14 +205,14 @@ jobs:
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
           # glue, the vendored egui, winit (its Windows event loop builds only there) and kernel,
-          # the title bar's hit test (crates/frame, which the Windows title-bar work adds), their
-          # scripts, the control server (its refusals, #10967), or a lockfile change that moves the
-          # graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share
-          # it.
+          # the title bar's hit test (the window chrome and the app bar's title-bar module, which
+          # the app's Windows-only window procedure answers from), their scripts, the control
+          # server (its refusals, #10967), or a lockfile change that moves the graphics stack
+          # (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|crates/frame/*|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
+                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -271,10 +274,13 @@ jobs:
             fi
           }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
-          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
-          # the paths say.
+          # holding one, runs them whatever the paths say. The group's pull requests are its
+          # first-parent commits: "Merge pull request #N from ..." merge commits, or "<title> (#N)"
+          # (squash commits, or merge commits titled from the pull request). A pull request's own
+          # commits are off the first-parent line, so an issue number in one of them is not read.
           group_has_render_label() {
-            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+            for pr in $(git log --first-parent --format=%s "$1" \
+              | sed -nE 's/^Merge pull request #([0-9]+) .*/\1/p; s/.*\(#([0-9]+)\)$/\1/p'); do
               if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
                 return 0
               fi
@@ -451,6 +457,11 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
@@ -485,6 +496,10 @@ jobs:
         run: |
           cargo xtask mesh-decisions
           cargo test -p xtask mesh_decisions --locked
+      - name: Apps compute no geometry
+        run: |
+          cargo xtask app-geometry
+          cargo test -p xtask app_geometry --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
@@ -523,6 +538,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -541,6 +557,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy
@@ -571,6 +588,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -665,6 +683,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -672,6 +695,11 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
@@ -809,6 +837,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
@@ -817,6 +850,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
@@ -1018,6 +1052,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -1083,6 +1118,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -1145,6 +1181,7 @@ jobs:
       VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1171,6 +1208,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1199,6 +1237,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-app
@@ -1239,6 +1278,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
@@ -1430,6 +1470,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
@@ -1459,6 +1500,7 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Export solidcore/ alone
         run: |
           mkdir -p "$RUNNER_TEMP/sc"
@@ -1511,6 +1553,7 @@ jobs:
       BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Main saves the cache; every other run restores it, read-only.
@@ -1660,6 +1703,7 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Main saves the cache; every other run restores it, read-only.
@@ -1699,6 +1743,7 @@ jobs:
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -1742,6 +1787,7 @@ jobs:
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
