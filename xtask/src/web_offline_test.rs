@@ -82,7 +82,7 @@ const SIGN_IN: &str = "/sign-in";
 const CONNECTIONS_PER_SERVER: usize = 6;
 
 /// Exercise the real browser build's command bridge, using the same Chrome harness as the offline test.
-pub fn run_api(site: &str) -> Result<(), String> {
+pub fn run_api(site: &str, smoke: bool) -> Result<(), String> {
     let site = std::fs::canonicalize(site).map_err(|e| format!("{site}: {e}; build apps/solidcraft-web with trunk first"))?;
     if !site.join("index.html").is_file() {
         return Err(format!("{}: index.html missing; build apps/solidcraft-web with trunk first", site.display()));
@@ -93,6 +93,9 @@ pub fn run_api(site: &str) -> Result<(), String> {
     server.set(Mode::Serve(site));
     let browser = Chrome::launch(&chrome, &work.0.join("profile"))?;
     let mut cdp = browser.connect()?;
+    if smoke {
+        return smoke_test(&mut cdp, server.port);
+    }
     let downloads = work.0.join("downloads");
     std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
     cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
@@ -124,6 +127,104 @@ pub fn run_api(site: &str) -> Result<(), String> {
     println!("web-api-test: {}", drawing_test(&browser, server.port)?);
     Ok(())
 }
+
+/// One launch, a synthetic saved design opened through the real UI thread, and three
+/// composited frames after camera changes. The full API and offline tests remain separate.
+fn smoke_test(cdp: &mut Cdp, port: u16) -> Result<(), String> {
+    let started = Instant::now();
+    cdp.call("Page.enable", json!({}))?;
+    cdp.call("Page.addScriptToEvaluateOnNewDocument", json!({"source": SMOKE_ERRORS}))?;
+    cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 720, "deviceScaleFactor": 1, "mobile": false}))?;
+    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{port}{PREFIX}")}))?;
+    loop {
+        let state = match cdp.eval("({error: window.smokeError, ready: !!window.solidcraft && !document.getElementById('solidcraft_loading')})") {
+            Ok(state) => state,
+            // Navigation can replace about:blank's execution context during the first poll.
+            Err(e) if e.contains("Execution context was destroyed") || e.contains("Cannot find context") => Value::Null,
+            Err(e) => return Err(e),
+        };
+        if let Some(error) = state["error"].as_str() {
+            return Err(format!("web-api-test smoke: startup: {error}"));
+        }
+        if state["ready"] == true {
+            break;
+        }
+        if started.elapsed() > LAUNCH_TIMEOUT {
+            return Err(format!("web-api-test smoke: startup timed out after {LAUNCH_TIMEOUT:?}"));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    println!("web-api-test smoke: {}", cdp.eval(&format!("window.smokeRun(() => {SMOKE_TEST})"))?);
+    cdp.call("Page.startScreencast", json!({"format": "jpeg", "quality": 10, "everyNthFrame": 1}))?;
+    for yaw in [0.3, 0.8, 1.3] {
+        let previous_image = cdp.presented_image.clone();
+        cdp.eval(&format!("window.smokeRun(() => window.solidcraft.request('ui.camera', {{yaw: {yaw}, fit: true}}))"))?;
+        let before = cdp.presented_frames;
+        let frame_started = Instant::now();
+        loop {
+            // This crosses the app's frame loop; rAF alone would only prove the browser is alive.
+            let ui = cdp.eval("window.smokeRun(() => window.solidcraft.request('ui.inspect'))")?;
+            if let Some(error) = cdp.eval("window.smokeError")?.as_str() {
+                return Err(format!("web-api-test smoke: frame: {error}"));
+            }
+            // Use the composited image: draw counters can be zero when a viewport texture is reused.
+            if cdp.presented_frames > before
+                && !cdp.presented_image.is_empty()
+                && cdp.presented_image != previous_image
+                && ui["camera"]["yaw"].as_f64().is_some_and(|got| (got - yaw).abs() < 1e-6)
+            {
+                break;
+            }
+            if frame_started.elapsed() > Duration::from_secs(30) {
+                return Err(format!("web-api-test smoke: no composited model frame at yaw {yaw}; UI: {ui}"));
+            }
+        }
+    }
+    cdp.call("Page.stopScreencast", json!({}))?;
+    println!("web-api-test smoke: three composited model frames; passed in {:.1}s", started.elapsed().as_secs_f64());
+    Ok(())
+}
+
+// Installed before navigation, so a panic in the first app frame cannot escape the test.
+const SMOKE_ERRORS: &str = r#"
+window.smokeError = null;
+const reportError = console.error;
+console.error = (...args) => {
+    window.smokeError ||= args.map(String).join(' ');
+    reportError.apply(console, args);
+};
+addEventListener('error', e => { window.smokeError ||= String(e.error?.stack || e.message); });
+addEventListener('unhandledrejection', e => { window.smokeError ||= String(e.reason?.stack || e.reason); });
+window.smokeRun = async run => {
+    let timer;
+    const failed = new Promise((_, reject) => {
+        const deadline = performance.now() + 60_000;
+        timer = setInterval(() => {
+            if (window.smokeError) reject(new Error(window.smokeError));
+            else if (performance.now() > deadline) reject(new Error('browser smoke commands timed out'));
+        }, 100);
+    });
+    try { return await Promise.race([run(), failed]); }
+    finally { clearInterval(timer); }
+};
+"#;
+
+const SMOKE_TEST: &str = r#"(async () => {
+    const app = window.solidcraft;
+    const check = (ok, message) => { if (!ok) throw new Error(message); };
+    await app.request('ui.home', {open: false});
+    await app.execute('solid.box', {length: 30, width: 20, height: 10, body_name: 'Browser smoke box'});
+    const kept = await app.request('document.export');
+    await app.execute('file.new');
+    check((await app.inspect()).bodies.length === 0, 'new design is empty');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'saved design opens without feature errors');
+    const opened = await app.inspect({measure: true});
+    check(opened.bodies.length === 1, 'opened design has one body');
+    check(Math.abs(opened.bodies[0].volume_mm3 - 6000) < 0.001, 'opened box volume is 6000 mm³');
+    const ui = await app.request('ui.inspect');
+    check(ui.home === false && ui.viewport[2] > 600 && ui.viewport[3] > 200, 'model viewport is visible');
+    return 'opened a saved 30 × 20 × 10 mm box; volume 6000 mm³';
+})()"#;
 
 /// The drawing milestone's plate (#4894 W23, acceptance case 84) made and checked by commands
 /// alone in a tab of its own, so the steps before leave nothing in it. Kept as a host keeps a
@@ -1248,6 +1349,8 @@ fn http(port: u16, method: &str, path: &str) -> Result<Vec<u8>, String> {
 struct Cdp {
     stream: TcpStream,
     next: u64,
+    presented_frames: u64,
+    presented_image: String,
 }
 
 impl Cdp {
@@ -1279,7 +1382,7 @@ impl Cdp {
         if !head.starts_with(b"HTTP/1.1 101") {
             return Err(format!("DevTools handshake refused: {}", String::from_utf8_lossy(&head)));
         }
-        Ok(Cdp { stream, next: 0 })
+        Ok(Cdp { stream, next: 0, presented_frames: 0, presented_image: String::new() })
     }
 
     fn send_frame(&mut self, opcode: u8, payload: &[u8]) -> Result<(), String> {
@@ -1352,6 +1455,17 @@ impl Cdp {
         self.send_frame(0x1, json!({ "id": id, "method": method, "params": params }).to_string().as_bytes())?;
         loop {
             let reply: Value = serde_json::from_str(&self.recv()?).map_err(|e| format!("DevTools: {e}"))?;
+            if reply["method"] == "Page.screencastFrame" {
+                self.presented_frames += 1;
+                self.presented_image = reply["params"]["data"].as_str().unwrap_or_default().to_owned();
+                self.next += 1;
+                self.send_frame(
+                    0x1,
+                    json!({"id": self.next, "method": "Page.screencastFrameAck", "params": {"sessionId": reply["params"]["sessionId"]}})
+                        .to_string()
+                        .as_bytes(),
+                )?;
+            }
             if reply["id"] == id {
                 if let Some(e) = reply.get("error") {
                     return Err(format!("{method}: {e}"));
