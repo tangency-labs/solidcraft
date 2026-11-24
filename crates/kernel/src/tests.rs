@@ -2595,6 +2595,50 @@ fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
     assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
 }
 
+/// #21608: a shelled D, three sides of a 60 × 40 rectangle closed by an arc that meets them at
+/// sharp corners, bulging out (s = 1) or biting in (s = −1). The band's far edge moves the lines
+/// by the width and the arc's radius by it, so it closes where they cross. Both bands, inside and
+/// outside, add their area times the height and keep the counts of the lip's faces.
+#[test]
+fn raise_band_where_an_arc_meets_lines_at_sharp_corners() {
+    let (w, h, t) = (1.5, 2.0, 3.0);
+    let half = (20.0f64 / 30.0).atan();
+    let big = (30.0f64 * 30.0 + 20.0 * 20.0).sqrt();
+    for s in [1.0, -1.0] {
+        let cx = 30.0 * s;
+        let d_shape = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::ZERO, b: Vec2::new(60.0, 0.0) },
+                Seg2::Line { a: Vec2::new(60.0, 0.0), b: Vec2::new(60.0, 40.0) },
+                Seg2::Line { a: Vec2::new(60.0, 40.0), b: Vec2::new(0.0, 40.0) },
+                Seg2::Arc { center: Vec2::new(cx, 20.0), radius: big, start: 20f64.atan2(-cx), sweep: 2.0 * s * half },
+            ],
+        };
+        let b = extrude(&Plane::XY, &[Region2 { outer: d_shape, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+        let sh = shell(&b, &[Vec3::new(30.0, 20.0, 15.0)], t).unwrap();
+        let v0 = measure(&sh).unwrap().volume;
+        // The D moved in by d: lines y = d, x = 60 − d, y = 40 − d, and the circle of radius
+        // big − s·d meeting y = d at x₁; a rectangle from x₁, with the circle's segment beyond
+        // the chord x = x₁ added (bulging out) or taken away (biting in).
+        let area = |d: f64| {
+            let rho = big - s * d;
+            let x1 = cx - s * (rho * rho - (20.0 - d) * (20.0 - d)).sqrt();
+            let theta = 2.0 * ((20.0 - d) / rho).asin();
+            (60.0 - d - x1) * (40.0 - 2.0 * d) + s * rho * rho / 2.0 * (theta - theta.sin())
+        };
+        for outside in [false, true] {
+            let lip = raise_band(&sh, Vec3::new(30.0, 1.5, 15.0), w, h, outside).unwrap();
+            assert!(lip.validity().is_empty(), "s {s}, outside {outside}: {:?}", lip.validity());
+            let band = if outside { area(0.0) - area(w) } else { area(w) - area(t) };
+            let v = measure(&lip).unwrap().volume;
+            assert!(rel(v, v0 + band * h) < 1e-6, "s {s}, outside {outside}: {v} vs {}", v0 + band * h);
+            // The shell's 11 faces less the rim, the rim's rest, 4 walls on each side and the top;
+            // 4 new edges round the band's edge, 4 up from it and from the loop, 8 on the top.
+            assert_eq!((lip.face_count(), lip.edge_count(), lip.vertex_count()), (20, 44, 28), "s {s}, outside {outside}");
+        }
+    }
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
