@@ -12,18 +12,16 @@ pub struct DesignTabPrefs {
     pub show_switcher: bool,
     /// A drawing sheet opens as a view of its design.
     pub sub_tab_sheets: bool,
-    /// Editing a sketch opens it as a view of its design.
-    pub sub_tab_sketches: bool,
     /// Render and Animate open as views of their design.
     pub sub_tab_render: bool,
-    /// Opening a sheet, sketch or workspace a view already shows activates that view.
+    /// Opening a sheet or workspace a view already shows activates that view.
     pub reuse_views: bool,
     /// A design opens with the views it had when it was last closed.
     pub reopen_views: bool,
 }
 
 impl DesignTabPrefs {
-    /// Whether the app opens views by itself (a sketch being edited, the Render workspace) so the
+    /// Whether the app opens views by itself (a sheet being opened, the Render workspace) so the
     /// strip can show them: only while the strip shows views, as sub-tabs or a switcher. Off, a
     /// design keeps the views the user opened and its tab stays as it was before design views.
     pub fn opens_views_by_itself(&self) -> bool {
@@ -40,7 +38,6 @@ impl DesignTabPrefs {
     pub fn opens_sub_tab(&self, kind: ViewKind) -> bool {
         match kind {
             ViewKind::Model => true,
-            ViewKind::Sketch => self.sub_tab_sketches,
             ViewKind::Sheet => self.sub_tab_sheets,
             ViewKind::Render | ViewKind::Animation => self.sub_tab_render,
         }
@@ -53,7 +50,6 @@ impl From<&Prefs> for DesignTabPrefs {
             views_as_tabs: p.design_views_as_tabs,
             show_switcher: p.show_design_view_switcher,
             sub_tab_sheets: p.design_sub_tab_sheets,
-            sub_tab_sketches: p.design_sub_tab_sketches,
             sub_tab_render: p.design_sub_tab_render,
             reuse_views: p.design_reuse_views,
             reopen_views: p.design_reopen_views,

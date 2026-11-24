@@ -235,8 +235,9 @@ fn hostile_rails_are_refused() {
         p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
         assert!(s.execute("surface.loft", &p).is_err(), "surface {bad}");
     }
-    // Rails on what the railed loft does not build yet.
-    let apex = json!({"sections": [{"sketch": "Base"}, {"sketch": "Rail", "point": "arc.start"}], "rails": rail});
+    // A loft to a point whose rail stops short of the apex (the arc's top end, 40 up).
+    let apex =
+        json!({"sections": [{"sketch": "Base"}, {"sketch": "Rail", "point": "arc.start"}], "rails": [{"sketch": "Rail", "curves": ["short"]}]});
     assert!(s.execute("solid.loft", &apex).is_err());
     // Rings (a circle with a hole) loft without rails, not with them yet.
     let ring = |name: &str| json!({"sketch": name, "profiles": [{"point": [7.5, 0]}]});
@@ -248,4 +249,66 @@ fn hostile_rails_are_refused() {
     let refused = s.execute("surface.loft", &g1).unwrap_err().to_string();
     assert!(refused.contains("not supported yet"), "{refused}");
     assert_eq!(s.doc.features.len(), before, "nothing was added");
+}
+
+/// To [`setup`]'s sketches, `Tip`: the point `apex` 40 above the circles' centre; and `Spine` on
+/// XZ: the line `side` from the circle at x = 10 straight to the apex, and the arc `bow` from the
+/// circle at x = −10 to the apex bulging out through (−9, 0, 20).
+fn apex_sketches(s: &mut Session) {
+    run(s, "sketch.create", json!({"name": "Tip", "plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(s, "sketch.point", json!({"point": [0, 0], "id": "apex"}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sketch.create", json!({"plane": "XZ", "name": "Spine"}));
+    // The XZ sketch's y runs down world Z.
+    run(s, "sketch.line", json!({"points": [[10, 0], [0, -40]], "ids": ["side"]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-10, 0], "end": [0, -40], "through": [-9, -20], "id": "bow"}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// A circle lofted to a sketch point along a rail (#20985): a straight rail from the circle to the
+/// apex gives the cone, π · 10² · 40 / 3, named as the loft to the point without the rail, and the
+/// rail is saved with it; an arc rail bulging out makes a fuller solid that still ends at the apex.
+#[test]
+fn a_loft_to_a_point_follows_its_rail() {
+    let mut s = setup();
+    apex_sketches(&mut s);
+    let to_point = |rails: Value, body: &str| json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": "new", "body_name": body, "rails": rails});
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": "new", "body_name": "Cone"}));
+    run(&mut s, "solid.loft", to_point(json!([{"sketch": "Spine", "curves": ["side"]}]), "Railed"));
+    let cone = PI * 100.0 * 40.0 / 3.0;
+    let m = measure(&s, "Railed");
+    assert!((m.volume - cone).abs() < 1e-4 * cone, "volume {} vs {cone}", m.volume);
+    assert!((m.bbox.max.z - 40.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert_eq!(face_names(&mut s, "Cone"), face_names(&mut s, "Railed"));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((measure(&reopened, "Railed").volume - m.volume).abs() < 1e-9 * cone);
+
+    run(&mut s, "solid.loft", to_point(json!([{"sketch": "Spine", "curves": ["bow"]}]), "Bowed"));
+    let bowed = measure(&s, "Bowed");
+    assert!(bowed.volume > cone && bowed.volume < PI * 100.0 * 40.0, "volume {} between {cone} and the cylinder", bowed.volume);
+    assert!((bowed.bbox.max.z - 40.0).abs() < 1e-6 && bowed.bbox.min.x < -10.0 + 1e-3, "{:?}", bowed.bbox);
+}
+
+/// The railed loft to a point (#20985) given apex first is the same cone; as a cut it takes the
+/// cone out of a box round it (30 × 30 × 45 less π · 10² · 40 / 3); joined to a block under its
+/// base it adds the cone to it (30 × 30 × 5 plus the cone).
+#[test]
+fn a_railed_loft_to_a_point_cuts_joins_and_takes_its_sections_either_way_round() {
+    let cone = PI * 100.0 * 40.0 / 3.0;
+    let rails = json!([{"sketch": "Spine", "curves": ["side"]}]);
+    let apex_first = json!([{"sketch": "Tip", "point": "apex"}, {"sketch": "Base"}]);
+    let mut s = setup();
+    apex_sketches(&mut s);
+    run(&mut s, "solid.loft", json!({"sections": apex_first, "operation": "new", "body_name": "Flipped", "rails": rails}));
+    let v = measure(&s, "Flipped").volume;
+    assert!((v - cone).abs() < 1e-4 * cone, "apex first: volume {v} vs {cone}");
+
+    for (op, corner, height, want) in [("cut", 0.0, 45.0, 30.0 * 30.0 * 45.0 - cone), ("join", -5.0, 5.0, 30.0 * 30.0 * 5.0 + cone)] {
+        let mut s = setup();
+        apex_sketches(&mut s);
+        run(&mut s, "solid.box", json!({"corner": [-15, -15, corner], "length": 30, "width": 30, "height": height, "body_name": "Stock"}));
+        run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": op, "rails": rails}));
+        let v = measure(&s, "Stock").volume;
+        assert!((v - want).abs() < 1e-4 * want, "{op}: volume {v} vs {want}");
+    }
 }

@@ -88,7 +88,7 @@ use crate::curve::curve::p4::is_degenerate_base;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
 use crate::error::nurbs::BSplineFailure;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
@@ -265,6 +265,11 @@ fn as_sm_curve(curve: &BSplineCurve) -> SmCurve {
 /// The operation path of [`approximate_tangent_field`].
 const OP_APPROX_FIELD: &str = "nurbs::b_spline_surface_n_lib::p2::approximate_tangent_field";
 
+/// Why a surface evaluation that comes back short is the kernel's fault: `evaluate` returns
+/// one row per u order and one entry per v order asked for.
+const SHORT_SURFACE_EVALUATION: &str = "the surface evaluation returned fewer derivatives than \
+     the orders it was asked for, and it returns one per order asked";
+
 /// A tangent field seen as an `SmCurve` (its virtual `Evaluate`, `EvaluatePoint`,
 /// `GetNaturalInterval` and `GetDim` as `SmCurve::ApproximateCurve` reaches them).
 struct FieldCurve<'f, 'a>(&'f TangentField<'a, SmSurface>);
@@ -430,18 +435,14 @@ fn approximate_tangent_field(
     let match_parameterization = false;
 
     // need 2 breakpoints to define the curve interval
-    let (Some(&first), Some(&last)) = (breaks.first(), breaks.last()) else {
+    let [first, .., last] = *breaks else {
         return Err(SolidError::b_spline(
             OP_APPROX_FIELD,
-            BSplineFailure::Failed("the curve has fewer than two breakpoints"),
+            BSplineFailure::TooFewBreakpoints {
+                given: breaks.len(),
+            },
         ));
     };
-    if breaks.len() < 2 {
-        return Err(SolidError::b_spline(
-            OP_APPROX_FIELD,
-            BSplineFailure::Failed("the curve has fewer than two breakpoints"),
-        ));
-    }
 
     // low work - degenerate curves
     if is_degenerate_base(k, &curve, EFF_ZERO, None)? {
@@ -549,9 +550,9 @@ fn approximate_tangent_field(
                 if subdivisions >= MAX_APPROXIMATION_SUBDIVISIONS {
                     return Err(SolidError::b_spline(
                         OP_APPROX_FIELD,
-                        BSplineFailure::Failed(
-                            "the tangent field needs more subdivisions than allowed",
-                        ),
+                        BSplineFailure::SubdivisionCap {
+                            limit: MAX_APPROXIMATION_SUBDIVISIONS,
+                        },
                     ));
                 }
                 subdivisions += 1;
@@ -561,9 +562,10 @@ fn approximate_tangent_field(
                 if !mid_t.is_finite() || mid_t == last_t || mid_t == curr_t {
                     return Err(SolidError::b_spline(
                         OP_APPROX_FIELD,
-                        BSplineFailure::Failed(
-                            "the parameter interval cannot be subdivided further",
-                        ),
+                        BSplineFailure::IntervalNotSplittable {
+                            lo: last_t,
+                            hi: curr_t,
+                        },
                     ));
                 }
                 let mid_pv = field_eval2(k, &curve, mid_t, true)?; // NonZeroTangent values
@@ -896,7 +898,9 @@ impl BSplineSurface {
         if curves_3d.len() < 4 {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("a corner blend needs at least four boundary curves"),
+                BSplineFailure::TooFewBoundaryCurves {
+                    given: curves_3d.len(),
+                },
             ));
         }
         let curve_cnt = curves_3d.len();
@@ -929,9 +933,7 @@ impl BSplineSurface {
                 {
                     return Err(SolidError::b_spline(
                         OP,
-                        BSplineFailure::Missing(
-                            "a boundary's parameter curve or neighbouring surface",
-                        ),
+                        BSplineFailure::BoundaryWithoutSurface,
                     ));
                 }
             }
@@ -942,9 +944,8 @@ impl BSplineSurface {
         let mut uv_crvs: Vec<Option<BSplineCurve>> = Vec::new();
         for (i, ((curve, uv), srf)) in curves_3d.iter().zip(uv_curves).zip(neighbours).enumerate() {
             // sm_CreateNonRationalCurve: SmBSplineCurve *pNurb = SM_CAST_PTR(SmBSplineCurve, pCurve); NER(pNurb);
-            let curve = (*curve).ok_or_else(|| {
-                SolidError::b_spline(OP, BSplineFailure::Missing("a boundary curve"))
-            })?;
+            let curve = (*curve)
+                .ok_or_else(|| SolidError::b_spline(OP, BSplineFailure::BoundaryCurveMissing))?;
             // copy NUBs and their UVTrimCurves, approx NURBs and drop them to make their
             // UVTrimCurves
             let base = srf.map(|n| n.surface);
@@ -970,14 +971,13 @@ impl BSplineSurface {
             // Not upstream (WR-613): the given 3D curves, as the body's edges run along
             // them, that the face-sided patch's guard reads its seams along
             let originals: Vec<SmCurve> = if face_sides != 0 && !create_bilinear_patch {
+                // (every curve is given: the boundaries above were built from them)
                 curves_3d
                     .iter()
-                    .map(|c| {
-                        c.map(|c| SmCurve::from(c.clone())).ok_or_else(|| {
-                            SolidError::b_spline(OP, BSplineFailure::Missing("a boundary curve"))
-                        })
-                    })
-                    .collect::<Result<_>>()?
+                    .flatten()
+                    .copied()
+                    .map(|c| SmCurve::from(c.clone()))
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -1067,23 +1067,22 @@ impl BSplineSurface {
         // should be given
         if rail1_used_as_spine_curve {
             if rail1.is_none() {
-                return Err(SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Missing("the spine rail"),
-                ));
+                return Err(SolidError::b_spline(OP, BSplineFailure::SpineRailMissing));
             }
             if intersections_with_rails.is_none() {
                 return Err(SolidError::b_spline(
                     OP,
-                    BSplineFailure::Missing("the rail intersections"),
+                    BSplineFailure::RailIntersectionsMissing,
                 ));
             }
         }
 
         if (rail1.is_some() || rail2.is_some()) && intersections_with_rails.is_none() {
-            return Err(SolidError::b_spline(
+            // the same condition, with upstream's other status here
+            return Err(SolidError::b_spline_with_status(
                 OP,
-                BSplineFailure::Failed("rails are given without their intersections"),
+                BSplineFailure::RailIntersectionsMissing,
+                crate::error::SM_ERR,
             ));
         }
         if num_sections == 0 {
@@ -1290,24 +1289,30 @@ impl BSplineSurface {
 
             // evaluate rail curve start and use the tangent to build a orthonormal
             // vector set
-            let r1 = rail1.as_deref().ok_or_else(|| {
-                SolidError::b_spline(OP, BSplineFailure::Missing("the spine rail"))
-            })?;
+            let (Some(r1), Some(spine), Some(params)) =
+                (rail1.as_deref(), rails[0].as_ref(), int_params.as_deref())
+            else {
+                return Err(SolidError::b_spline_with_status(
+                    OP,
+                    BSplineFailure::Defect {
+                        why: "the spine path lost the spine rail or the rail intersections, \
+                              which the input check requires with a spine and nothing since \
+                              removes",
+                    },
+                    SM_ERR_NULL_POINTER,
+                ));
+            };
             let pv = r1.evaluate(r1.natural_interval().min(), 1, true, false)?;
             let tangent = pv.get(1).copied().ok_or_else(|| {
                 SolidError::b_spline(
                     OP,
-                    BSplineFailure::Failed("the spine rail has no tangent at its start"),
+                    BSplineFailure::Defect {
+                        why: "the spine rail's evaluation with one derivative returned no \
+                              derivative, and it returns one row per order asked",
+                    },
                 )
             })?;
             let [_, _, z_axis] = tangent.make_unit_ortho_vectors(None)?;
-
-            let spine = rails[0].as_ref().ok_or_else(|| {
-                SolidError::b_spline(OP, BSplineFailure::Missing("the spine rail"))
-            })?;
-            let params = int_params.as_deref().ok_or_else(|| {
-                SolidError::b_spline(OP, BSplineFailure::Missing("the rail intersections"))
-            })?;
             // (the spine path makes the sections compatible its own way: not traced)
             if let Some(m) = maps.as_mut() {
                 for x in m.iter_mut() {
@@ -1376,7 +1381,7 @@ impl BSplineSurface {
                         Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
                             return Err(e)
                         }
-                        Err(_) => {
+                        Err(e) => {
                             // It failed with derivative fields try it without them
                             if has_dir_array {
                                 sk.der = None;
@@ -1387,11 +1392,8 @@ impl BSplineSurface {
                                 )
                                 .map_err(SolidError::nurbs_routine(OP))?
                             } else {
-                                // its not working - signal an error
-                                return Err(SolidError::b_spline(
-                                    OP,
-                                    BSplineFailure::Failed("the boundary continuity cannot be met"),
-                                ));
+                                // its not working - signal an error, with the fit's
+                                return Err(SolidError::nurbs_routine(OP)(e));
                             }
                         }
                     }
@@ -1438,10 +1440,7 @@ impl BSplineSurface {
 
         // check input - trim domain not contained within natural domain
         if !trim_domain.is_contained_by(&natural_domain, EFF_ZERO_PARAM) {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the trim domain is not inside the surface's domain"),
-            ));
+            return Err(SolidError::b_spline(OP, BSplineFailure::TrimDomainOutside));
         }
 
         // no work - natural domain is same size as trim domain
@@ -1609,10 +1608,9 @@ impl BSplineSurface {
         let _ = trim_domain.set_min_max(Point2::new(ul, vl), Point2::new(ur, vr));
 
         // local surface pointer
-        let sur_p = self
-            .nurb
-            .as_ref()
-            .ok_or_else(|| SolidError::b_spline(OP, BSplineFailure::Missing("the NURBS form")))?;
+        let sur_p = self.nurb.as_ref().ok_or_else(|| {
+            SolidError::b_spline_with_status(OP, BSplineFailure::NoNurbsForm, SM_ERR_NULL_POINTER)
+        })?;
 
         // extract patch defined by trim boundaries from surP into sur1
         let sur1 = extract_patch(sur_p, Rectangle::new(ul, ur, vl, vr))
@@ -1800,9 +1798,9 @@ impl BSplineSurface {
                     .ok_or_else(|| {
                         SolidError::b_spline(
                             OP,
-                            BSplineFailure::Failed(
-                                "the evaluation returned fewer derivatives than asked for",
-                            ),
+                            BSplineFailure::Defect {
+                                why: SHORT_SURFACE_EVALUATION,
+                            },
                         )
                     })
             };
@@ -1813,9 +1811,9 @@ impl BSplineSurface {
                     .ok_or_else(|| {
                         SolidError::b_spline(
                             OP,
-                            BSplineFailure::Failed(
-                                "the evaluation returned fewer derivatives than asked for",
-                            ),
+                            BSplineFailure::Defect {
+                                why: SHORT_SURFACE_EVALUATION,
+                            },
                         )
                     })?;
                 *slot = v;
@@ -1872,9 +1870,9 @@ impl BSplineSurface {
                         .ok_or_else(|| {
                             SolidError::b_spline(
                                 OP,
-                                BSplineFailure::Failed(
-                                    "the evaluation returned fewer derivatives than asked for",
-                                ),
+                                BSplineFailure::Defect {
+                                    why: SHORT_SURFACE_EVALUATION,
+                                },
                             )
                         })
                 };
@@ -1973,18 +1971,18 @@ impl BSplineSurface {
                         re.get(1).and_then(|r| r.first()).copied().ok_or_else(|| {
                             SolidError::b_spline(
                                 OP,
-                                BSplineFailure::Failed(
-                                    "the evaluation returned fewer derivatives than asked for",
-                                ),
+                                BSplineFailure::Defect {
+                                    why: SHORT_SURFACE_EVALUATION,
+                                },
                             )
                         })?;
                     let mut re_sv =
                         re.first().and_then(|r| r.get(1)).copied().ok_or_else(|| {
                             SolidError::b_spline(
                                 OP,
-                                BSplineFailure::Failed(
-                                    "the evaluation returned fewer derivatives than asked for",
-                                ),
+                                BSplineFailure::Defect {
+                                    why: SHORT_SURFACE_EVALUATION,
+                                },
                             )
                         })?;
 
@@ -2010,10 +2008,7 @@ impl BSplineSurface {
 
             // If we make it to here we are unable to get both of the first derivatives to
             // a non-zero size.
-            Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("both first derivatives cannot be made nonzero"),
-            ))
+            Err(SolidError::b_spline(OP, BSplineFailure::TangentsVanish))
         })();
         match status {
             Ok(()) => Ok(d),
@@ -2136,9 +2131,7 @@ fn corner_blend_4(
                 if !boundary_curve.is_degenerate(k, EFF_ZERO, None)? {
                     return Err(SolidError::b_spline(
                         OP,
-                        BSplineFailure::Failed(
-                            "a boundary curve without a surface is not degenerate",
-                        ),
+                        BSplineFailure::FreeBoundaryNotDegenerate,
                     ));
                 }
 
@@ -3047,7 +3040,9 @@ fn coons_side_frames_at(
                 .ok_or_else(|| {
                     SolidError::b_spline(
                         OP_CORNER,
-                        BSplineFailure::Failed("the evaluation returned no point"),
+                        BSplineFailure::Defect {
+                            why: SHORT_SURFACE_EVALUATION,
+                        },
                     )
                 })?;
             let normal = ignored(coons_side_normal_nearest(
@@ -3100,7 +3095,9 @@ fn coons_side_angle(
                 d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
                     SolidError::b_spline(
                         OP_CORNER,
-                        BSplineFailure::Failed("the evaluation returned no first derivative"),
+                        BSplineFailure::Defect {
+                            why: SHORT_SURFACE_EVALUATION,
+                        },
                     )
                 })
             };
@@ -3170,10 +3167,7 @@ fn refine_to_spans(surface: &mut BSplineSurface, param: SurfParamType, spans: us
     const OP: &str = OP_CORNER;
     let (knots, _) = surface.knots(param, None)?;
     if knots.len() < 2 {
-        return Err(SolidError::b_spline(
-            OP,
-            BSplineFailure::Failed("the surface has fewer than two knots"),
-        ));
+        return Err(SolidError::b_spline(OP, BSplineFailure::PatchWithoutSpan));
     }
     let new_knots = refinement_new_knots(&knots, spans);
     if !new_knots.is_empty() {
@@ -3242,27 +3236,32 @@ fn project_coons_side_rows(
     if nu < 5 || nv < 5 || pu < 1 || pv < 1 {
         return Err(SolidError::b_spline(
             OP,
-            BSplineFailure::Failed("the patch has too few control points or a zero degree"),
+            BSplineFailure::PatchTooCoarse {
+                u_count: nu,
+                v_count: nv,
+                u_degree: pu,
+                v_degree: pv,
+            },
         ));
     }
     let nurb = patch
         .gw_nurb()
         .ok_or_else(|| SolidError::b_spline(OP, BSplineFailure::NoNurbsForm))?;
     let (ku, kv) = (nurb.u_knots().to_vec(), nurb.v_knots().to_vec());
-    if ku.len() != nu + pu + 1 || kv.len() != nv + pv + 1 {
+    // (counts that agree give each direction at least degree + 6 knots)
+    let (true, Some(&ku_first), Some(&ku_last), Some(&kv_first), Some(&kv_last)) = (
+        ku.len() == nu + pu + 1 && kv.len() == nv + pv + 1,
+        ku.first(),
+        ku.last(),
+        kv.first(),
+        kv.last(),
+    ) else {
         return Err(SolidError::b_spline(
             OP,
-            BSplineFailure::Failed(
-                "the patch's knot, control point and degree counts do not agree",
-            ),
-        ));
-    }
-    let (Some(&ku_first), Some(&ku_last), Some(&kv_first), Some(&kv_last)) =
-        (ku.first(), ku.last(), kv.first(), kv.last())
-    else {
-        return Err(SolidError::b_spline(
-            OP,
-            BSplineFailure::Failed("the patch has no knots"),
+            BSplineFailure::Defect {
+                why: "the corner patch's knot, control point and degree counts do not agree, \
+                      and the NURBS form the patch holds is built only with counts that do",
+            },
         ));
     };
     let su = Extent1d::from_min_max(ku_first, ku_last);
@@ -3784,7 +3783,7 @@ fn grade_corner_spans(surface: &mut BSplineSurface, face_sides: u32, grade: u32)
         let Some((&end, &next)) = ends else {
             return Err(SolidError::b_spline(
                 OP_CORNER,
-                BSplineFailure::Failed("the surface has fewer than two knots"),
+                BSplineFailure::PatchWithoutSpan,
             ));
         };
         let mut out = Vec::new();
@@ -3987,7 +3986,10 @@ fn corner_blend_n(
         if dist_prev > approx_tol || dist_next > approx_tol {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the boundary curve ends do not meet"),
+                BSplineFailure::EndsApart {
+                    distance: max2(dist_prev, dist_next),
+                    tolerance: approx_tol,
+                },
             )); // Ends don't match
         }
 
@@ -4098,7 +4100,8 @@ mod tests {
         assert!((nd.max().y - 0.9).abs() < 1e-12);
         // outside the domain fails
         let mut bad = Extent2d::from_bounds(-1.0, 0.0, 0.5, 0.5);
-        assert!(s.trim_with_domain(&mut bad).is_err());
+        let e = s.trim_with_domain(&mut bad).unwrap_err();
+        assert_b_spline(&e, BSplineFailure::TrimDomainOutside, crate::error::SM_ERR);
     }
 
     /// A cubic-by-linear surface with u knots `u` (clamped) and v knots `v`, its
@@ -4222,7 +4225,22 @@ mod tests {
     fn corner_blend_needs_four_curves() {
         let k = &crate::Kernel::default();
         let r = BSplineSurface::create_corner_blend(k, &[], &[], &[], &[], 1e-3, 0.1, true);
-        assert!(r.is_err());
+        assert_b_spline(
+            &r.unwrap_err(),
+            BSplineFailure::TooFewBoundaryCurves { given: 0 },
+            crate::error::SM_ERR,
+        );
+    }
+
+    /// `e` is the B-spline failure `cause` with `status`, of the class the cause names.
+    fn assert_b_spline(e: &SolidError, cause: BSplineFailure, status: i32) {
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&crate::error::nurbs::NurbsFailure::BSpline(cause)),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+        assert_eq!(e.kind(), cause.kind(), "{e:?}");
     }
 
     /// WR-613: a corner control point next to a side on a face of the body and a blend
@@ -4996,5 +5014,43 @@ mod tests {
         let k = &crate::Kernel::default();
         let r = BSplineSurface::create_skinned_surface(k, &[], SkinnedSurfaceOptions::default());
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
+        // a spine asked for without the rail
+        let spine = SkinnedSurfaceOptions {
+            rail1_used_as_spine_curve: true,
+            ..SkinnedSurfaceOptions::default()
+        };
+        let r = BSplineSurface::create_skinned_surface(k, &[], spine);
+        assert_b_spline(
+            &r.unwrap_err(),
+            BSplineFailure::SpineRailMissing,
+            SM_ERR_NULL_POINTER,
+        );
+        // a spine rail without the intersections: upstream's NER, 1006
+        let mut rail =
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0)).unwrap();
+        let spine = SkinnedSurfaceOptions {
+            rail1: Some(&mut rail),
+            rail1_used_as_spine_curve: true,
+            ..SkinnedSurfaceOptions::default()
+        };
+        let r = BSplineSurface::create_skinned_surface(k, &[], spine);
+        assert_b_spline(
+            &r.unwrap_err(),
+            BSplineFailure::RailIntersectionsMissing,
+            SM_ERR_NULL_POINTER,
+        );
+        // a rail without the intersections and no spine: the same cause, upstream's 1001
+        let mut rail =
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0)).unwrap();
+        let rails = SkinnedSurfaceOptions {
+            rail1: Some(&mut rail),
+            ..SkinnedSurfaceOptions::default()
+        };
+        let r = BSplineSurface::create_skinned_surface(k, &[], rails);
+        assert_b_spline(
+            &r.unwrap_err(),
+            BSplineFailure::RailIntersectionsMissing,
+            crate::error::SM_ERR,
+        );
     }
 }

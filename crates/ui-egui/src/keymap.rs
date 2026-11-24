@@ -236,7 +236,9 @@ pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
 /// Panel bindings own arrows only while shared chrome has actual keyboard focus.
 /// Every other application-reserved key remains protected for every command.
 fn reserved_for(id: &str, key: &str) -> bool {
+    // Undo and Redo own the undo keys: they are ordinary bindings that can be moved or removed.
     RESERVED.contains(&key)
+        && !(matches!(id, "edit.undo" | "edit.redo") && matches!(key, "Ctrl+Z" | "Ctrl+Y" | "Ctrl+Shift+Z"))
         && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
             && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
 }
@@ -381,8 +383,18 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
+        None => default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut)).into_iter().map(str::to_string).collect(),
     }
+}
+
+/// The keys a command has until the user changes them: its registered shortcut, and for Redo
+/// also Ctrl+Shift+Z (#12902).
+fn default_keys(id: &str, shortcut: Option<&'static str>) -> Vec<&'static str> {
+    let mut keys: Vec<&'static str> = shortcut.filter(|k| !k.is_empty()).into_iter().collect();
+    if id == "edit.redo" {
+        keys.push("Ctrl+Shift+Z");
+    }
+    keys
 }
 
 /// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
@@ -399,7 +411,7 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+        None => default_keys(command.id, command.shortcut),
     }
 }
 
@@ -551,13 +563,16 @@ fn variant_for_key(app: &SolveApp, id: &'static str) -> &'static str {
 }
 
 /// Outside a sketch: the SKETCH-tab command bound to `key` that a new sketch would start. Not
-/// Normal/Construction (a mode of the drawing in progress) nor the Finish Sketch panel.
+/// Normal/Construction (a mode of the drawing in progress), the Finish Sketch panel, nor a Modify
+/// tool other than Offset, which offsets a face sketch's projected edges.
 fn sketch_tool_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     if app.session.active_sketch.is_some() || crate::render_workspace::active(app) {
         return None;
     }
     commands_for(app, key).into_iter().find(|id| {
-        solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && c.id != "sketch.construction")
+        solidcraft_engine::find_command(id).is_some_and(|c| {
+            c.tab == "SKETCH" && c.panel != "FINISH SKETCH" && (c.panel != "MODIFY" || c.id == "sketch.offset") && c.id != "sketch.construction"
+        })
     })
 }
 
@@ -613,7 +628,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 
 /// Keep a command's keys, as a change only when they aren't its default.
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    let default = default_keys(id, solidcraft_engine::find_command(id).and_then(|c| c.shortcut));
     if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {
@@ -624,8 +639,55 @@ fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
 pub fn reset(app: &mut SolveApp, id: Option<&str>) {
     match id {
         Some(id) => drop(app.keymap.custom.remove(id)),
-        None => app.keymap.custom.clear(),
+        None => {
+            app.keymap.custom.clear();
+            app.preferences.preview_reselect_modifier = Default::default();
+        }
     }
+}
+
+fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
+    use crate::tool_modifiers::{Platform, PreviewModifier};
+    let platform = Platform::of(ui.ctx());
+    let label = app.tr("prefs.preview_reselect_modifier");
+    let binding = app.preferences.preview_reselect_modifier;
+    let key = binding.shown_label(platform, app);
+    if !query.is_empty() && ![label, "preview_reselect", key, "Modifier Keys"].iter().any(|text| text.to_lowercase().contains(query)) {
+        return;
+    }
+    ui.strong(app.tr_label("Modifier Keys"));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        if app.keymap.read_only {
+            ui.label(egui::RichText::new(key).strong());
+            return;
+        }
+        let combo = ui.allocate_ui(egui::vec2(160.0, ui_kit::row_height()), |ui| {
+            ui_kit::dropdown_menu(ui, "preview_reselect_modifier", key, |ui| {
+                for choice in PreviewModifier::CHOICES {
+                    if platform != Platform::Mac && choice == PreviewModifier::Primary {
+                        continue;
+                    }
+                    let handle = format!("prefs:preview_modifier:{choice:?}");
+                    let response =
+                        ui_kit::list_picker(ui, &handle, choice.shown_label(platform, app), app.preferences.preview_reselect_modifier == choice);
+                    if response.clicked() {
+                        app.preferences.preview_reselect_modifier = choice;
+                        ui.close();
+                    }
+                    crate::scenario::publish_handle(&handle, response.rect.center());
+                }
+            })
+        });
+        crate::scenario::publish_handle("prefs:preview_modifier", combo.inner.rect.center());
+        let reset =
+            ui.add_enabled_ui(binding != PreviewModifier::default(), |ui| ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Small)).inner;
+        crate::scenario::publish_handle("prefs:preview_modifier_reset", reset.rect.center());
+        if reset.clicked() {
+            app.preferences.preview_reselect_modifier = PreviewModifier::default();
+        }
+    });
+    ui.separator();
 }
 
 /// The Keyboard Shortcuts page of Preferences: search, rebind (click, then press the key), clear,
@@ -754,12 +816,13 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
+        modifier_keys(app, ui, &q);
         let commands: Vec<_> = command_specs()
             .into_iter()
             .filter_map(|c| {
                 let keys = keys_for_spec(app, c);
                 let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
-                let label = app.tr_label(c.label);
+                let label = app.tr_command(c.id, c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
                     crate::ui_kit::settings_search::shows_all(ui)
@@ -1250,6 +1313,49 @@ mod tests {
         h.frames(2);
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
         assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
+    }
+
+    /// #20639: Undo and Redo are ordinary bindings. The exact chord decides, so Ctrl+Shift+Z
+    /// bound to Redo redoes and never undoes, and a removed key does nothing.
+    #[test]
+    fn undo_and_redo_keys_are_real_bindings_matched_exactly() {
+        let press_key = |h: &mut crate::scenario::Harness, shift: bool, key: &str| {
+            h.step(&json!({"key": key, "cmd": true, "shift": shift})).unwrap();
+            h.frames(2);
+        };
+        let new_box = || {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10})).unwrap();
+            h
+        };
+        // The defaults still undo with Ctrl+Z and redo with Ctrl+Y and Ctrl+Shift+Z.
+        let mut h = new_box();
+        let done = h.app.session.undo.len();
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1, "Ctrl+Z undoes");
+        press_key(&mut h, false, "Y");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Y redoes");
+        press_key(&mut h, false, "Z");
+        press_key(&mut h, true, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Shift+Z redoes");
+        // Redo moved to Ctrl+Shift+Z alone: it redoes, Ctrl+Y no longer does.
+        bind_at(&mut h.app, "edit.redo", None, "Ctrl+Shift+Z", false).unwrap();
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1);
+        press_key(&mut h, false, "Y");
+        assert_eq!(h.app.session.undo.len(), done - 1, "Ctrl+Y is no longer bound");
+        press_key(&mut h, true, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Shift+Z redoes and does not undo");
+        // Undo with its key removed: Ctrl+Z runs nothing.
+        bind_at(&mut h.app, "edit.undo", Some(0), "", false).unwrap();
+        assert!(keys(&h.app, "edit.undo").is_empty());
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done, "Ctrl+Z does nothing without a binding");
+        // Reset brings the defaults back.
+        reset(&mut h.app, None);
+        press_key(&mut h, false, "Z");
+        assert_eq!(h.app.session.undo.len(), done - 1);
     }
 
     fn app() -> SolveApp {
@@ -2054,6 +2160,83 @@ mod tests {
         h.frames(1);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "V starts the command given it");
         assert!(!hidden(&h));
+    }
+
+    #[test]
+    fn preview_modifier_picker_changes_resets_and_cancels() {
+        use crate::tool_modifiers::PreviewModifier;
+        let mut harness = crate::scenario::Harness::new();
+        harness.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        harness.step(&json!({"shot":"preview-modifier-settings"})).unwrap();
+        for (choice, binding) in [("Control", PreviewModifier::Control), ("Alt", PreviewModifier::Alt), ("Disabled", PreviewModifier::Disabled)] {
+            harness.step(&json!({"click":{"handle":"prefs:preview_modifier"}})).unwrap();
+            harness.step(&json!({"click":{"handle":format!("prefs:preview_modifier:{choice}")}})).unwrap();
+            assert_eq!(harness.app.preferences.preview_reselect_modifier, binding);
+        }
+        harness.step(&json!({"widget":"Reset", "near":"Hide preview for reselect"})).unwrap();
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        harness.app.preferences.preview_reselect_modifier = PreviewModifier::Shift;
+        harness.step(&json!({"widget":"Restore page defaults"})).unwrap();
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        harness.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+    }
+
+    #[test]
+    fn preview_modifier_filter_and_read_only_help() {
+        let mut harness = crate::scenario::Harness::new();
+        harness.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        harness.app.keymap.filter = "preview".into();
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_some());
+        harness.app.keymap.filter = "not a shortcut".into();
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_none());
+        harness.app.keymap.filter.clear();
+        harness.app.keymap.read_only = true;
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_none());
+        assert!(harness.widget("Hide preview for reselect").is_some());
+    }
+
+    #[test]
+    fn preview_modifier_exports_imports_and_rejects_invalid_settings_atomically() {
+        use crate::tool_modifiers::PreviewModifier;
+        let mut source = app();
+        for binding in PreviewModifier::CHOICES {
+            source.preferences.preview_reselect_modifier = binding;
+            let mut restored = app();
+            let exported = crate::toolbar_custom::export(&source);
+            assert_eq!(exported["navigation_bar"], json!(source.preferences.navigation_bar));
+            crate::toolbar_custom::import(&mut restored, &exported).unwrap();
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            assert_eq!(json!(restored.preferences.navigation_bar), exported["navigation_bar"]);
+        }
+        let mut restored = app();
+        restored.preferences.preview_reselect_modifier = PreviewModifier::Alt;
+        crate::toolbar_custom::import(&mut restored, &json!({"format":"solidcraft-shortcuts/1", "shortcuts":{}})).unwrap();
+        assert_eq!(restored.preferences.preview_reselect_modifier, PreviewModifier::Alt);
+        let before = crate::toolbar_custom::export(&restored);
+        assert!(
+            crate::toolbar_custom::import(
+                &mut restored,
+                &json!({
+                    "format":"solidcraft-shortcuts/1", "preview_reselect_modifier":"unknown", "shortcuts":{"solid.extrude":"Shift+E"},
+                    "navigation_bar": source.preferences.navigation_bar
+                })
+            )
+            .is_err()
+        );
+        assert_eq!(crate::toolbar_custom::export(&restored), before);
+        assert!(
+            crate::toolbar_custom::import(
+                &mut restored,
+                &json!({"format":"solidcraft-shortcuts/1", "preview_reselect_modifier":"shift", "navigation_bar":"invalid"})
+            )
+            .is_err()
+        );
+        assert_eq!(crate::toolbar_custom::export(&restored), before);
+        assert_eq!(restored.preferences.preview_reselect_modifier, PreviewModifier::Alt);
     }
 }
 

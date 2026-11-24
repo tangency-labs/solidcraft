@@ -5,6 +5,8 @@
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
+pub use solidcore_ops::prism::{symmetric_offset_intervals, symmetric_offset_probe_points};
+
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
@@ -343,7 +345,7 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 /// neighbours now meet at one point). Loops of arcs on one circle, and loops of lines, arcs and
 /// free curves (spline and conic pieces, such as the outlines of text) where the arcs meet their
 /// neighbours tangentially are supported.
-pub(crate) fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
+pub fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
     if d == 0.0 {
         return Ok(lp.segs.iter().copied().map(Some).collect());
     }
