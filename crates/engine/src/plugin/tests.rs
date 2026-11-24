@@ -2042,6 +2042,7 @@ mod native {
                     package_hash: Some(read_package(&f.path()).unwrap().approval),
                     command_groups: BTreeSet::from(["file".into()]),
                     folders: vec![FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write }],
+                    fuel: None,
                     memory_mib: None,
                     input_folder: false,
                 },
