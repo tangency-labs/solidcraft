@@ -17,10 +17,10 @@ use crate::boolean::BooleanOp;
 use crate::order::Order;
 use crate::Body;
 
+use super::ChamferLocation;
+use super::FilletLocation;
 use super::LightenConfig;
 use super::PocketDepthSpec;
-use super::FilletLocation;
-use super::ChamferLocation;
 
 pub(super) trait Vec2Ext {
     fn len(self) -> f64;
@@ -126,24 +126,33 @@ pub(super) trait Seg2Ext {
 impl Seg2Ext for Seg2 {
     fn start(&self) -> Vec2 {
         match *self {
-            Seg2::Line { a, .. } => a,
-            Seg2::Arc { center, radius, start, .. } => {
-                Vec2::new(center.x + radius * start.cos(), center.y + radius * start.sin())
-            }
+            Seg2::Line { a, .. } | Seg2::Conic { a, .. } => a,
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                ..
+            } => Vec2::new(
+                center.x + radius * start.cos(),
+                center.y + radius * start.sin(),
+            ),
             Seg2::Cubic { p0, .. } => p0,
-            Seg2::Conic { a, .. } => a,
             Seg2::Bezier { ref p, .. } => p.first().copied().unwrap_or(Vec2::ZERO),
         }
     }
     fn end(&self) -> Vec2 {
         match *self {
-            Seg2::Line { b, .. } => b,
-            Seg2::Arc { center, radius, start, sweep } => {
+            Seg2::Line { b, .. } | Seg2::Conic { b, .. } => b,
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 let ang = start + sweep;
                 Vec2::new(center.x + radius * ang.cos(), center.y + radius * ang.sin())
             }
             Seg2::Cubic { p3, .. } => p3,
-            Seg2::Conic { b, .. } => b,
             Seg2::Bezier { ref p, .. } => p.last().copied().unwrap_or(Vec2::ZERO),
         }
     }
@@ -178,14 +187,29 @@ impl Seg2Ext for Seg2 {
     fn reversed(&self) -> Seg2 {
         match *self {
             Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
-            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Seg2::Arc {
                 center,
                 radius,
                 start: start + sweep,
                 sweep: -sweep,
             },
-            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
-            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: b, apex, b: a, w },
+            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
+                p0: p3,
+                p1: p2,
+                p2: p1,
+                p3: p0,
+            },
+            Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+                a: b,
+                apex,
+                b: a,
+                w,
+            },
             Seg2::Bezier { n, p } => {
                 let mut rev = p;
                 rev.reverse();
@@ -196,7 +220,12 @@ impl Seg2Ext for Seg2 {
     fn point_at(&self, t: f64) -> Vec2 {
         match *self {
             Seg2::Line { a, b } => Vec2::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t),
-            Seg2::Arc { center, radius, start, sweep } => {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 let ang = start + sweep * t;
                 Vec2::new(center.x + radius * ang.cos(), center.y + radius * ang.sin())
             }
@@ -208,9 +237,18 @@ impl Seg2Ext for Seg2 {
             Seg2::Line { a, b } => {
                 let d = b - a;
                 let l2 = d.len2();
-                if l2 < 1e-18 { 0.0 } else { ((p - a).dot(d) / l2).clamp(0.0, 1.0) }
+                if l2 < 1e-18 {
+                    0.0
+                } else {
+                    ((p - a).dot(d) / l2).clamp(0.0, 1.0)
+                }
             }
-            Seg2::Arc { center, start, sweep, .. } => {
+            Seg2::Arc {
+                center,
+                start,
+                sweep,
+                ..
+            } => {
                 if sweep.abs() < 1e-12 {
                     return 0.0;
                 }
@@ -221,7 +259,11 @@ impl Seg2Ext for Seg2 {
                     if rel > sweep {
                         let d_end = (rel - sweep).min(TAU - rel);
                         let d_start = rel.min(TAU - rel);
-                        if d_start < d_end { 0.0 } else { 1.0 }
+                        if d_start < d_end {
+                            0.0
+                        } else {
+                            1.0
+                        }
                     } else {
                         (rel / sweep).clamp(0.0, 1.0)
                     }
@@ -231,7 +273,11 @@ impl Seg2Ext for Seg2 {
                     if rel > abs_sweep {
                         let d_end = (rel - abs_sweep).min(TAU - rel);
                         let d_start = rel.min(TAU - rel);
-                        if d_start < d_end { 0.0 } else { 1.0 }
+                        if d_start < d_end {
+                            0.0
+                        } else {
+                            1.0
+                        }
                     } else {
                         (rel / abs_sweep).clamp(0.0, 1.0)
                     }
@@ -247,11 +293,26 @@ impl Seg2Ext for Seg2 {
                 let m = a.lerp(b, t);
                 (Seg2::Line { a, b: m }, Seg2::Line { a: m, b })
             }
-            Seg2::Arc { center, radius, start, sweep } => (
-                Seg2::Arc { center, radius, start, sweep: sweep * t },
-                Seg2::Arc { center, radius, start: start + sweep * t, sweep: sweep * (1.0 - t) },
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => (
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep: sweep * t,
+                },
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start: start + sweep * t,
+                    sweep: sweep * (1.0 - t),
+                },
             ),
-            ref other => (other.clone(), other.clone()),
+            ref other => (*other, *other),
         }
     }
 }
@@ -262,7 +323,7 @@ pub(super) trait Region2Ext {
 
 impl Region2Ext for Region2 {
     fn area(&self) -> f64 {
-        crate::prism::region_area(self).map(|a| a.value).unwrap_or(0.0)
+        crate::prism::region_area(self).map_or(0.0, |a| a.value)
     }
 }
 
@@ -271,8 +332,16 @@ pub(super) fn body_planar_face(record: &Brep, face_idx: usize) -> Option<Plane> 
     let face = record.faces.get(face_idx)?;
     let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let (o, u, v_raw) = match &face.surface {
-        Surface::Plane { origin, u_axis, v_axis } => (v(*origin), v(*u_axis), v(*v_axis)),
-        Surface::PlaneThrough { origin, u_point, v_point } => {
+        Surface::Plane {
+            origin,
+            u_axis,
+            v_axis,
+        } => (v(*origin), v(*u_axis), v(*v_axis)),
+        Surface::PlaneThrough {
+            origin,
+            u_point,
+            v_point,
+        } => {
             let o = v(*origin);
             (o, v(*u_point) - o, v(*v_point) - o)
         }
@@ -337,7 +406,6 @@ fn body_height_span(record: &Brep, plane: &Plane, normal: Vec3) -> (f64, f64) {
     (min_h, max_h)
 }
 
-
 pub(super) trait Loop2Ext {
     fn is_closed(&self, tol: f64) -> bool;
     fn reversed(&self) -> Loop2;
@@ -346,12 +414,18 @@ pub(super) trait Loop2Ext {
 
 impl Loop2Ext for Loop2 {
     fn is_closed(&self, tol: f64) -> bool {
-        let Some(first) = self.segs.first() else { return false };
-        let Some(last) = self.segs.last() else { return false };
+        let Some(first) = self.segs.first() else {
+            return false;
+        };
+        let Some(last) = self.segs.last() else {
+            return false;
+        };
         if last.end().dist(first.start()) > tol {
             return false;
         }
-        self.segs.windows(2).all(|w| w[0].end().dist(w[1].start()) <= tol)
+        self.segs
+            .windows(2)
+            .all(|w| w[0].end().dist(w[1].start()) <= tol)
     }
     fn reversed(&self) -> Loop2 {
         Loop2 {
@@ -368,7 +442,12 @@ impl Loop2Ext for Loop2 {
                     }
                     pts.push(b);
                 }
-                Seg2::Arc { center, radius, start, sweep } => {
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => {
                     let steps = if radius > 1e-6 && tol > 1e-9 {
                         let dtheta = 2.0 * (1.0 - (tol / radius).min(0.5)).acos().max(0.05);
                         ((sweep.abs() / dtheta).ceil() as usize).clamp(4, 128)
@@ -377,7 +456,8 @@ impl Loop2Ext for Loop2 {
                     };
                     for k in 0..=steps {
                         let ang = start + sweep * (k as f64 / steps as f64);
-                        let p = Vec2::new(center.x + radius * ang.cos(), center.y + radius * ang.sin());
+                        let p =
+                            Vec2::new(center.x + radius * ang.cos(), center.y + radius * ang.sin());
                         if pts.last().is_none_or(|q: &Vec2| q.dist(p) > 1e-6) {
                             pts.push(p);
                         }
@@ -385,7 +465,7 @@ impl Loop2Ext for Loop2 {
                 }
                 _ => {
                     for k in 0..=8 {
-                        let p = seg.point_at(k as f64 / 8.0);
+                        let p = seg.point_at(f64::from(k) / 8.0);
                         if pts.last().is_none_or(|q: &Vec2| q.dist(p) > 1e-6) {
                             pts.push(p);
                         }
@@ -442,7 +522,11 @@ fn closest_point_on_poly(pt: Vec2, poly: &[Vec2]) -> Vec2 {
         let b = poly[(i + 1) % n];
         let ab = b - a;
         let l2 = ab.len2();
-        let t = if l2 > 1e-8 { ((pt - a).dot(ab) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        let t = if l2 > 1e-8 {
+            ((pt - a).dot(ab) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let p = a + ab * t;
         let d2 = (pt - p).len2();
         if d2 < best_d2 {
@@ -481,12 +565,20 @@ fn detect_circle(pts: &[Vec2], tol: f64) -> Option<Circle2D> {
     if den.abs() < 1e-6 {
         return None;
     }
-    let center = p0 + Vec2::new(v.y * u.len2() - u.y * v.len2(), u.x * v.len2() - v.x * u.len2()) / den;
+    let center = p0
+        + Vec2::new(
+            v.y * u.len2() - u.y * v.len2(),
+            u.x * v.len2() - v.x * u.len2(),
+        ) / den;
     let r = (p0 - center).len();
     if !r.is_finite() || r < 0.25 {
         return None;
     }
-    if pts.iter().all(|p| ((*p - center).len() - r).abs() <= tol) { Some(Circle2D { center, radius: r }) } else { None }
+    if pts.iter().all(|p| ((*p - center).len() - r).abs() <= tol) {
+        Some(Circle2D { center, radius: r })
+    } else {
+        None
+    }
 }
 
 /// Compute signed area of a `Loop2` via dense polyline sampling (positive = CCW).
@@ -498,7 +590,7 @@ fn loop2_signed_area(lp: &Loop2) -> f64 {
             _ => 12,
         };
         for k in 0..steps {
-            pts.push(s.point_at(k as f64 / steps as f64));
+            pts.push(s.point_at(f64::from(k) / f64::from(steps)));
         }
     }
     polygon_area(&pts)
@@ -506,7 +598,13 @@ fn loop2_signed_area(lp: &Loop2) -> f64 {
 
 /// Extract exact analytical `Loop2`s (`Line` / `Arc` / `Seg2`) for `face_idx` via `body.planar_edges`.
 /// Returns `None` for a loop if any edge has non-Seg spline pieces or does not close cleanly.
-fn extract_exact_face_loop2s(body: &Body, order: &Order, record: &Brep, face_idx: usize, plane: &Plane) -> Option<(Loop2, Vec<Loop2>)> {
+fn extract_exact_face_loop2s(
+    body: &Body,
+    order: &Order,
+    record: &Brep,
+    face_idx: usize,
+    plane: &Plane,
+) -> Option<(Loop2, Vec<Loop2>)> {
     let face = record.faces.get(face_idx)?;
     let mut exact_loops: Vec<(Loop2, f64)> = Vec::new();
 
@@ -520,7 +618,9 @@ fn extract_exact_face_loop2s(body: &Body, order: &Order, record: &Brep, face_idx
             let pieces = opt_pieces?;
             let mut edge_segs: Vec<Seg2> = Vec::with_capacity(pieces.len());
             for p in pieces {
-                let crate::prism::PlanarPiece::Seg(seg) = p else { return None };
+                let crate::prism::PlanarPiece::Seg(seg) = p else {
+                    return None;
+                };
                 edge_segs.push(seg);
             }
             if !u.forward {
@@ -532,9 +632,11 @@ fn extract_exact_face_loop2s(body: &Body, order: &Order, record: &Brep, face_idx
             // Verify chaining against previous segment endpoint (flip if stored opposite).
             if let (Some(prev), Some(first)) = (loop_segs.last(), edge_segs.first()) {
                 if prev.end().dist(first.start()) > 1e-2
-                    && edge_segs.last().is_some_and(|last| prev.end().dist(last.end()) < 1e-2)
+                    && edge_segs
+                        .last()
+                        .is_some_and(|last| prev.end().dist(last.end()) < 1e-2)
                 {
-                edge_segs.reverse();
+                    edge_segs.reverse();
                     for s in &mut edge_segs {
                         *s = s.reversed();
                     }
@@ -583,8 +685,15 @@ fn extract_exact_face_loop2s(body: &Body, order: &Order, record: &Brep, face_idx
 }
 
 /// Extract the outer loop (CCW) and interior hole loops (CW) of `face_idx` in `plane` local 2D coordinates.
-fn extract_face_loops(record: &Brep, face_idx: usize, plane: &Plane) -> Result<(Vec<Vec2>, Vec<Vec<Vec2>>), String> {
-    let face = record.faces.get(face_idx).ok_or_else(|| format!("face {face_idx} out of range"))?;
+fn extract_face_loops(
+    record: &Brep,
+    face_idx: usize,
+    plane: &Plane,
+) -> Result<(Vec<Vec2>, Vec<Vec<Vec2>>), String> {
+    let face = record
+        .faces
+        .get(face_idx)
+        .ok_or_else(|| format!("face {face_idx} out of range"))?;
 
     if face.loops.is_empty() {
         return Err(format!("target face {face_idx} has no boundary loops"));
@@ -635,7 +744,9 @@ fn extract_face_loops(record: &Brep, face_idx: usize, plane: &Plane) -> Result<(
     }
 
     if loops.is_empty() {
-        return Err(format!("target face {face_idx} has no valid boundary loops"));
+        return Err(format!(
+            "target face {face_idx} has no valid boundary loops"
+        ));
     }
 
     let mut best_idx = 0;
@@ -706,7 +817,11 @@ fn offset_ccw_polygon(pts: &[Vec2], dist: f64) -> Option<Vec<Vec2>> {
             let dir1 = curr_norm * sign;
             let theta0 = dir0.y.atan2(dir0.x);
             let theta1 = dir1.y.atan2(dir1.x);
-            let sweep = if dist < 0.0 { (theta1 - theta0).rem_euclid(TAU) } else { -((theta0 - theta1).rem_euclid(TAU)) };
+            let sweep = if dist < 0.0 {
+                (theta1 - theta0).rem_euclid(TAU)
+            } else {
+                -((theta0 - theta1).rem_euclid(TAU))
+            };
             let steps = ((sweep.abs() / 0.15).ceil() as usize).clamp(2, 16);
             for s in 0..=steps {
                 let ang = theta0 + sweep * (s as f64 / steps as f64);
@@ -743,7 +858,11 @@ fn offset_ccw_polygon(pts: &[Vec2], dist: f64) -> Option<Vec<Vec2>> {
         }
     }
 
-    if out.len() >= 3 && polygon_area(&out) > 1e-3 { Some(out) } else { None }
+    if out.len() >= 3 && polygon_area(&out) > 1e-3 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Convert a CCW polygon into a `Region2`, using an analytical circle `Loop2::circle` when circular.
@@ -753,10 +872,16 @@ fn ccw_loop_to_region_offset(pts: &[Vec2], inward_dist: f64) -> Option<Region2> 
         if r_new <= 0.25 {
             return None;
         }
-        return Some(Region2 { outer: Loop2::circle(circ.center, r_new), holes: Vec::new() });
+        return Some(Region2 {
+            outer: Loop2::circle(circ.center, r_new),
+            holes: Vec::new(),
+        });
     }
     let poly = offset_ccw_polygon(pts, inward_dist)?;
-    Some(Region2 { outer: Loop2::polygon(&poly), holes: Vec::new() })
+    Some(Region2 {
+        outer: Loop2::polygon(&poly),
+        holes: Vec::new(),
+    })
 }
 
 /// Offset curve representation for exact Line/Arc corner fillet center calculation.
@@ -772,17 +897,35 @@ fn offset_seg_signed(seg: &Seg2, r: f64) -> Option<OffsetCurve> {
         Seg2::Line { a, b } => {
             let dir = (b - a).normalized()?;
             let left = Vec2::new(-dir.y, dir.x);
-            Some(OffsetCurve::Line { p: a + left * r, dir })
+            Some(OffsetCurve::Line {
+                p: a + left * r,
+                dir,
+            })
         }
-        Seg2::Arc { center, radius, sweep, .. } => {
+        Seg2::Arc {
+            center,
+            radius,
+            sweep,
+            ..
+        } => {
             let off_r = if sweep > 0.0 { radius - r } else { radius + r };
-            if off_r <= 1e-5 { None } else { Some(OffsetCurve::Circle { center, radius: off_r }) }
+            if off_r <= 1e-5 {
+                None
+            } else {
+                Some(OffsetCurve::Circle {
+                    center,
+                    radius: off_r,
+                })
+            }
         }
         _ => {
             let a = seg.start();
             let dir = seg.start_tangent();
             let left = Vec2::new(-dir.y, dir.x);
-            Some(OffsetCurve::Line { p: a + left * r, dir })
+            Some(OffsetCurve::Line {
+                p: a + left * r,
+                dir,
+            })
         }
     }
 }
@@ -814,7 +957,16 @@ fn intersect_offset_curves(a: OffsetCurve, b: OffsetCurve) -> Vec<Vec2> {
                 vec![p + dir * (-b_coef - sq), p + dir * (-b_coef + sq)]
             }
         }
-        (OffsetCurve::Circle { center: c1, radius: r1 }, OffsetCurve::Circle { center: c2, radius: r2 }) => {
+        (
+            OffsetCurve::Circle {
+                center: c1,
+                radius: r1,
+            },
+            OffsetCurve::Circle {
+                center: c2,
+                radius: r2,
+            },
+        ) => {
             let d_vec = c2 - c1;
             let d = d_vec.len();
             if d < 1e-9 || d > r1 + r2 + 1e-7 || d < (r1 - r2).abs() - 1e-7 {
@@ -826,7 +978,11 @@ fn intersect_offset_curves(a: OffsetCurve, b: OffsetCurve) -> Vec<Vec2> {
             let ex = d_vec / d;
             let ey = Vec2::new(-ex.y, ex.x);
             let mid = c1 + ex * a_len;
-            if h < 1e-9 { vec![mid] } else { vec![mid + ey * h, mid - ey * h] }
+            if h < 1e-9 {
+                vec![mid]
+            } else {
+                vec![mid + ey * h, mid - ey * h]
+            }
         }
     }
 }
@@ -837,7 +993,12 @@ fn merge_continuous_loop(lp: &Loop2) -> Loop2 {
     if lp.segs.len() <= 1 {
         return lp.clone();
     }
-    let mut segs: Vec<Seg2> = lp.segs.iter().copied().filter(|s| s.length() > 1e-4).collect();
+    let mut segs: Vec<Seg2> = lp
+        .segs
+        .iter()
+        .copied()
+        .filter(|s| s.length() > 1e-4)
+        .collect();
     if segs.len() <= 1 {
         return lp.clone();
     }
@@ -849,12 +1010,38 @@ fn merge_continuous_loop(lp: &Loop2) -> Loop2 {
             (Seg2::Line { a: p0, b: p1 }, Seg2::Line { a: q0, b: q1 }) => {
                 let d1 = (p1 - p0).normalized()?;
                 let d2 = (q1 - q0).normalized()?;
-                if d1.dot(d2) > 1.0 - 1e-6 && d1.cross(d2).abs() < 1e-4 { Some(Seg2::Line { a: p0, b: q1 }) } else { None }
+                if d1.dot(d2) > 1.0 - 1e-6 && d1.cross(d2).abs() < 1e-4 {
+                    Some(Seg2::Line { a: p0, b: q1 })
+                } else {
+                    None
+                }
             }
-            (Seg2::Arc { center: c1, radius: r1, start: st1, sweep: sw1 }, Seg2::Arc { center: c2, radius: r2, sweep: sw2, .. }) => {
+            (
+                Seg2::Arc {
+                    center: c1,
+                    radius: r1,
+                    start: st1,
+                    sweep: sw1,
+                },
+                Seg2::Arc {
+                    center: c2,
+                    radius: r2,
+                    sweep: sw2,
+                    ..
+                },
+            ) => {
                 let total = sw1 + sw2;
-                if c1.dist(c2) < 1e-3 && (r1 - r2).abs() < 1e-3 && sw1.signum() == sw2.signum() && total.abs() < TAU - 1e-4 {
-                    Some(Seg2::Arc { center: c1, radius: r1, start: st1, sweep: total })
+                if c1.dist(c2) < 1e-3
+                    && (r1 - r2).abs() < 1e-3
+                    && sw1.signum() == sw2.signum()
+                    && total.abs() < TAU - 1e-4
+                {
+                    Some(Seg2::Arc {
+                        center: c1,
+                        radius: r1,
+                        start: st1,
+                        sweep: total,
+                    })
                 } else {
                     None
                 }
@@ -883,7 +1070,11 @@ fn merge_continuous_loop(lp: &Loop2) -> Loop2 {
         }
     }
     let out = Loop2 { segs };
-    if out.is_closed(1e-3) { out } else { lp.clone() }
+    if out.is_closed(1e-3) {
+        out
+    } else {
+        lp.clone()
+    }
 }
 
 /// Replace convex corner arcs (`sweep > 0`) whose radius is `<= inward_dist + 1e-3` with sharp
@@ -911,7 +1102,9 @@ fn sharpen_collapsing_arcs(lp: &Loop2, inward_dist: f64) -> Loop2 {
             if prev == next {
                 break;
             }
-            if let (Some(Seg2::Line { a: p0, b: p1 }), Some(Seg2::Line { a: q0, b: q1 })) = (segs.get(prev).copied(), segs.get(next).copied()) {
+            if let (Some(Seg2::Line { a: p0, b: p1 }), Some(Seg2::Line { a: q0, b: q1 })) =
+                (segs.get(prev).copied(), segs.get(next).copied())
+            {
                 if let (Some(d1), Some(d2)) = ((p1 - p0).normalized(), (q1 - q0).normalized()) {
                     let den = d1.cross(d2);
                     if den.abs() > 1e-6 {
@@ -937,10 +1130,21 @@ fn sharpen_collapsing_arcs(lp: &Loop2, inward_dist: f64) -> Loop2 {
 /// Offset a closed CCW `Loop2` inward by `inward_dist` using exact analytical `offset_loop`,
 /// returning `None` if an arc collapses or the offset fails.
 pub(super) fn exact_ccw_loop2_offset(lp: &Loop2, inward_dist: f64) -> Option<Region2> {
-    let prepared = if inward_dist > 0.0 { sharpen_collapsing_arcs(lp, inward_dist) } else { lp.clone() };
+    let prepared = if inward_dist > 0.0 {
+        sharpen_collapsing_arcs(lp, inward_dist)
+    } else {
+        lp.clone()
+    };
     let out = dilate_ccw_loop(&prepared, -inward_dist)?;
     let out = merge_continuous_loop(&out);
-    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 { Some(Region2 { outer: out, holes: Vec::new() }) } else { None }
+    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 {
+        Some(Region2 {
+            outer: out,
+            holes: Vec::new(),
+        })
+    } else {
+        None
+    }
 }
 
 /// Restrict `seg` to parameter sub-interval `[ts, te]` within `[0, 1]`.
@@ -954,13 +1158,31 @@ fn sub_seg(seg: &Seg2, ts: f64, te: f64) -> Option<Seg2> {
             let p1 = a.lerp(b, te);
             (p0.dist(p1) > 1e-5).then_some(Seg2::Line { a: p0, b: p1 })
         }
-        Seg2::Arc { center, radius, start, sweep } => {
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
             let new_sweep = sweep * (te - ts);
-            (new_sweep.abs() * radius > 1e-5).then_some(Seg2::Arc { center, radius, start: start + sweep * ts, sweep: new_sweep })
+            (new_sweep.abs() * radius > 1e-5).then_some(Seg2::Arc {
+                center,
+                radius,
+                start: start + sweep * ts,
+                sweep: new_sweep,
+            })
         }
         _ => {
-            let s1 = if te < 1.0 - 1e-6 { seg.split_at(te).0 } else { *seg };
-            let s2 = if ts > 1e-6 { s1.split_at(ts / te).1 } else { s1 };
+            let s1 = if te < 1.0 - 1e-6 {
+                seg.split_at(te).0
+            } else {
+                *seg
+            };
+            let s2 = if ts > 1e-6 {
+                s1.split_at(ts / te).1
+            } else {
+                s1
+            };
             (s2.length() > 1e-5).then_some(s2)
         }
     }
@@ -978,12 +1200,25 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
         return None;
     }
     if clean.segs.len() == 1 {
-        if let Seg2::Arc { center, radius, start, sweep } = clean.segs[0] {
+        if let Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } = clean.segs[0]
+        {
             let new_r = if sweep > 0.0 { radius + r } else { radius - r };
             if new_r <= 1e-4 {
                 return None;
             }
-            return Some(Loop2 { segs: vec![Seg2::Arc { center, radius: new_r, start, sweep }] });
+            return Some(Loop2 {
+                segs: vec![Seg2::Arc {
+                    center,
+                    radius: new_r,
+                    start,
+                    sweep,
+                }],
+            });
         }
         return None;
     }
@@ -995,14 +1230,27 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
             Seg2::Line { a, b } => {
                 let dir = (b - a).normalized()?;
                 let out_n = Vec2::new(dir.y, -dir.x);
-                shifted.push(Seg2::Line { a: a + out_n * r, b: b + out_n * r });
+                shifted.push(Seg2::Line {
+                    a: a + out_n * r,
+                    b: b + out_n * r,
+                });
             }
-            Seg2::Arc { center, radius, start, sweep } => {
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 let new_r = if sweep > 0.0 { radius + r } else { radius - r };
                 if new_r <= 1e-4 {
                     return None;
                 }
-                shifted.push(Seg2::Arc { center, radius: new_r, start, sweep });
+                shifted.push(Seg2::Arc {
+                    center,
+                    radius: new_r,
+                    start,
+                    sweep,
+                });
             }
             _ => return None,
         }
@@ -1026,10 +1274,16 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
         if cross > 1e-4 {
             let sweep = n1.cross(n2).atan2(n1.dot(n2)).rem_euclid(TAU);
             if sweep > 1e-4 && sweep < std::f64::consts::PI + 1e-3 {
-                corner_arcs[i] = Some(Seg2::Arc { center: v, radius: r, start: n1.y.atan2(n1.x), sweep });
+                corner_arcs[i] = Some(Seg2::Arc {
+                    center: v,
+                    radius: r,
+                    start: n1.y.atan2(n1.x),
+                    sweep,
+                });
             }
         } else if cross < -1e-4 {
-            let (Some(c1), Some(c2)) = (offset_seg_signed(orig1, -r), offset_seg_signed(orig2, -r)) else {
+            let (Some(c1), Some(c2)) = (offset_seg_signed(orig1, -r), offset_seg_signed(orig2, -r))
+            else {
                 return None;
             };
             let hint_dir = (n1 + n2).normalized().unwrap_or(n1);
@@ -1080,13 +1334,27 @@ pub(super) fn dilate_ccw_loop(lp: &Loop2, r: f64) -> Option<Loop2> {
     }
 
     let out = merge_continuous_loop(&Loop2 { segs: out_segs });
-    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 { Some(out) } else { None }
+    if !out.segs.is_empty() && out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Compute a tangent fillet `Seg2::Arc` of exact radius `r` on `side` (`+1.0` = left of CCW loop,
 /// `-1.0` = right) between `s1` and `s2`, returning `(t1_on_s1, t2_on_s2, arc)`.
-fn solve_fillet_between(s1: &Seg2, s2: &Seg2, r: f64, side: f64, hint_pt: Vec2, max_dist: f64) -> Option<(f64, f64, Seg2)> {
-    let (c1, c2) = (offset_seg_signed(s1, side * r)?, offset_seg_signed(s2, side * r)?);
+fn solve_fillet_between(
+    s1: &Seg2,
+    s2: &Seg2,
+    r: f64,
+    side: f64,
+    hint_pt: Vec2,
+    max_dist: f64,
+) -> Option<(f64, f64, Seg2)> {
+    let (c1, c2) = (
+        offset_seg_signed(s1, side * r)?,
+        offset_seg_signed(s2, side * r)?,
+    );
     let candidates = intersect_offset_curves(c1, c2);
     let mut best: Option<(f64, (f64, f64, Seg2))> = None;
     for center in candidates {
@@ -1101,7 +1369,10 @@ fn solve_fillet_between(s1: &Seg2, s2: &Seg2, r: f64, side: f64, hint_pt: Vec2, 
         }
         let p1 = s1.point_at(t1);
         let p2 = s2.point_at(t2);
-        if (p1.dist(center) - r).abs() >= 1.5e-2 || (p2.dist(center) - r).abs() >= 1.5e-2 || p1.dist(p2) <= 1e-4 {
+        if (p1.dist(center) - r).abs() >= 1.5e-2
+            || (p2.dist(center) - r).abs() >= 1.5e-2
+            || p1.dist(p2) <= 1e-4
+        {
             continue;
         }
         let a_start = (p1 - center).y.atan2((p1 - center).x);
@@ -1122,8 +1393,15 @@ fn solve_fillet_between(s1: &Seg2, s2: &Seg2, r: f64, side: f64, hint_pt: Vec2, 
         if s1_keep.length() <= 1e-3 || s2_keep.length() <= 1e-3 {
             continue;
         }
-        let arc = Seg2::Arc { center, radius: r, start: a_start, sweep };
-        if s1_keep.end_tangent().dot(arc.start_tangent()) < 0.98 || arc.end_tangent().dot(s2_keep.start_tangent()) < 0.98 {
+        let arc = Seg2::Arc {
+            center,
+            radius: r,
+            start: a_start,
+            sweep,
+        };
+        if s1_keep.end_tangent().dot(arc.start_tangent()) < 0.98
+            || arc.end_tangent().dot(s2_keep.start_tangent()) < 0.98
+        {
             continue;
         }
         if best.as_ref().is_none_or(|(bd, _)| d_hint < *bd) {
@@ -1146,7 +1424,11 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
         return clean;
     }
     let sharpened = merge_continuous_loop(&sharpen_collapsing_arcs(&clean, max_radius));
-    let mut segs = if sharpened.segs.len() >= 2 && sharpened.is_closed(1e-2) { sharpened.segs } else { clean.segs.clone() };
+    let mut segs = if sharpened.segs.len() >= 2 && sharpened.is_closed(1e-2) {
+        sharpened.segs
+    } else {
+        clean.segs.clone()
+    };
 
     let mut failed_pts: Vec<Vec2> = Vec::new();
     let max_iter = segs.len().saturating_mul(6).max(32);
@@ -1160,7 +1442,8 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
         let bridge_idx = if len >= 3 {
             (0..len)
                 .filter(|&b| {
-                    if !matches!(segs[b], Seg2::Line { .. }) || segs[b].length() > max_radius * 4.0 {
+                    if !matches!(segs[b], Seg2::Line { .. }) || segs[b].length() > max_radius * 4.0
+                    {
                         return false;
                     }
                     let prev = (b + len - 1) % len;
@@ -1170,7 +1453,10 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
                     }
                     let v1 = segs[prev].end();
                     let v2 = segs[b].end();
-                    if failed_pts.iter().any(|p| p.dist(v1) < 1e-3 || p.dist(v2) < 1e-3) {
+                    if failed_pts
+                        .iter()
+                        .any(|p| p.dist(v1) < 1e-3 || p.dist(v2) < 1e-3)
+                    {
                         return false;
                     }
                     let c1 = segs[prev].end_tangent().cross(segs[b].start_tangent());
@@ -1208,8 +1494,10 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
                 if r < 0.05 {
                     break;
                 }
-                let f12 = solve_fillet_between(&s1, &s2, r, side, s1.end() + hint_dir12 * r, r * 5.0);
-                let f23 = solve_fillet_between(&s2, &s3, r, side, s2.end() + hint_dir23 * r, r * 5.0);
+                let f12 =
+                    solve_fillet_between(&s1, &s2, r, side, s1.end() + hint_dir12 * r, r * 5.0);
+                let f23 =
+                    solve_fillet_between(&s2, &s3, r, side, s2.end() + hint_dir23 * r, r * 5.0);
                 if let (Some((t1_a, t2_a, arc_a)), Some((t1_b, t2_b, arc_b))) = (f12, f23) {
                     if t2_a + 1e-3 < t1_b {
                         if let Some(s2_mid) = sub_seg(&s2, t2_a, t1_b) {
@@ -1223,7 +1511,9 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
                 }
                 let hint_13 = mid_s2 + n2 * r;
                 let max_d = r * 6.0 + s2.length();
-                if let Some((t1_13, t2_13, arc_13)) = solve_fillet_between(&s1, &s3, r, side, hint_13, max_d) {
+                if let Some((t1_13, t2_13, arc_13)) =
+                    solve_fillet_between(&s1, &s3, r, side, hint_13, max_d)
+                {
                     let (s1_keep, _) = s1.split_at(t1_13);
                     let (_, s3_keep) = s3.split_at(t2_13);
                     segs.splice(0..=2, [s1_keep, arc_13, s3_keep]);
@@ -1239,7 +1529,14 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
                     if r_single < 0.05 {
                         break;
                     }
-                    if let Some((t1, t2, arc)) = solve_fillet_between(&s1, &s2, r_single, side, s1.end() + hint_dir12 * r_single, r_single * 5.0) {
+                    if let Some((t1, t2, arc)) = solve_fillet_between(
+                        &s1,
+                        &s2,
+                        r_single,
+                        side,
+                        s1.end() + hint_dir12 * r_single,
+                        r_single * 5.0,
+                    ) {
                         let (s1_keep, _) = s1.split_at(t1);
                         let (_, s2_keep) = s2.split_at(t2);
                         segs.splice(0..=1, [s1_keep, arc, s2_keep]);
@@ -1261,7 +1558,8 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
             let s_a = &segs[k];
             let s_b = &segs[(k + 1) % len];
             let v = s_a.end();
-            s_a.end_tangent().cross(s_b.start_tangent()).abs() > 0.05 && !failed_pts.iter().any(|p| p.dist(v) < 1e-3)
+            s_a.end_tangent().cross(s_b.start_tangent()).abs() > 0.05
+                && !failed_pts.iter().any(|p| p.dist(v) < 1e-3)
         });
         let Some(idx) = sharp_idx else {
             break;
@@ -1283,7 +1581,9 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
             if r < 0.05 {
                 break;
             }
-            if let Some((t1, t2, arc)) = solve_fillet_between(&s1, &s2, r, side, s1.end() + hint_dir12 * r, r * 5.0) {
+            if let Some((t1, t2, arc)) =
+                solve_fillet_between(&s1, &s2, r, side, s1.end() + hint_dir12 * r, r * 5.0)
+            {
                 let (s1_keep, _) = s1.split_at(t1);
                 let (_, s2_keep) = s2.split_at(t2);
                 segs.splice(0..=1, [s1_keep, arc, s2_keep]);
@@ -1299,7 +1599,11 @@ fn fillet_loop_corners(lp: &Loop2, max_radius: f64) -> Loop2 {
     }
 
     let out = merge_continuous_loop(&Loop2 { segs });
-    if out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 { out } else { clean }
+    if out.is_closed(1e-2) && loop2_signed_area(&out) > 1e-2 {
+        out
+    } else {
+        clean
+    }
 }
 
 /// Apply corner fillets to a `Region2`.
@@ -1307,23 +1611,47 @@ fn fillet_region_corners(region: &Region2, corner_radius: f64) -> Region2 {
     let clean_outer = merge_continuous_loop(&region.outer);
     let clean_holes: Vec<Loop2> = region.holes.iter().map(merge_continuous_loop).collect();
     if corner_radius <= 0.05 {
-        return Region2 { outer: clean_outer, holes: clean_holes };
+        return Region2 {
+            outer: clean_outer,
+            holes: clean_holes,
+        };
     }
     let candidate = Region2 {
         outer: fillet_loop_corners(&clean_outer, corner_radius),
-        holes: clean_holes.iter().map(|h| fillet_loop_corners(h, corner_radius)).collect(),
+        holes: clean_holes
+            .iter()
+            .map(|h| fillet_loop_corners(h, corner_radius))
+            .collect(),
     };
-    if candidate.area().abs() > 1e-2 { candidate } else { Region2 { outer: clean_outer, holes: clean_holes } }
+    if candidate.area().abs() > 1e-2 {
+        candidate
+    } else {
+        Region2 {
+            outer: clean_outer,
+            holes: clean_holes,
+        }
+    }
 }
 
 /// Build the 2D pocket regions on `plane` for `face_idx`, including radial structural bridging
 /// ribs around bosses/holes and corner filleting.
-pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, face_idx: usize, plane: &Plane, config: &LightenConfig) -> Result<Vec<Region2>, String> {
+pub(super) fn build_pocket_regions(
+    body: &Body,
+    order: &Order,
+    record: &Brep,
+    face_idx: usize,
+    plane: &Plane,
+    config: &LightenConfig,
+) -> Result<Vec<Region2>, String> {
     let exact_loops = extract_exact_face_loop2s(body, order, record, face_idx, plane);
     let (outer_loop, inner_holes) = if let Some((ref outer_lp, ref hole_lps)) = exact_loops {
-        let outer_pts = outer_lp.polyline(0.05).to_vec();
-        let hole_pts: Vec<Vec<Vec2>> = hole_lps.iter().map(|h| h.polyline(0.05).to_vec()).collect();
-        if outer_pts.len() >= 3 { (outer_pts, hole_pts) } else { extract_face_loops(record, face_idx, plane)? }
+        let outer_pts = outer_lp.polyline(0.05);
+        let hole_pts: Vec<Vec<Vec2>> = hole_lps.iter().map(|h| h.polyline(0.05)).collect();
+        if outer_pts.len() >= 3 {
+            (outer_pts, hole_pts)
+        } else {
+            extract_face_loops(record, face_idx, plane)?
+        }
     } else {
         extract_face_loops(record, face_idx, plane)?
     };
@@ -1335,9 +1663,13 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
         .ok_or_else(|| "wall_offset too large: pocket outer boundary collapsed".to_string())?;
 
     let outer_center = poly_centroid(&outer_loop);
-    let outer_max_r = outer_loop.iter().map(|p| p.dist(outer_center)).fold(0.0f64, f64::max);
+    let outer_max_r = outer_loop
+        .iter()
+        .map(|p| p.dist(outer_center))
+        .fold(0.0f64, f64::max);
 
-    let mut hole_loops_ccw: Vec<Vec<Vec2>> = Vec::with_capacity(inner_holes.len() + config.island_faces.len());
+    let mut hole_loops_ccw: Vec<Vec<Vec2>> =
+        Vec::with_capacity(inner_holes.len() + config.island_faces.len());
     for hole_cw in &inner_holes {
         let mut hole_ccw = hole_cw.clone();
         hole_ccw.reverse();
@@ -1352,7 +1684,10 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
         }
     }
 
-    let exact_holes_ccw: Vec<Loop2> = exact_loops.as_ref().map(|(_, hs)| hs.iter().map(|h| h.reversed()).collect()).unwrap_or_default();
+    let exact_holes_ccw: Vec<Loop2> = exact_loops
+        .as_ref()
+        .map(|(_, hs)| hs.iter().map(Loop2Ext::reversed).collect())
+        .unwrap_or_default();
 
     let mut keepouts: Vec<Region2> = Vec::new();
     let mut hub_center: Option<Vec2> = None;
@@ -1368,8 +1703,12 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
             keepouts.push(ko);
         }
         let center = poly_centroid(loop_ccw);
-        let r = loop_ccw.iter().map(|p| p.dist(center)).fold(0.0f64, f64::max);
-        let is_central_hub = center.dist(outer_center) <= (outer_max_r * 0.35).max(config.wall_offset * 2.0);
+        let r = loop_ccw
+            .iter()
+            .map(|p| p.dist(center))
+            .fold(0.0f64, f64::max);
+        let is_central_hub =
+            center.dist(outer_center) <= (outer_max_r * 0.35).max(config.wall_offset * 2.0);
         if is_central_hub {
             if r > hub_r {
                 hub_r = r;
@@ -1385,7 +1724,9 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
     for (boss_center, boss_r) in bosses {
         let dir = if boss_count == 1 && hub_center.is_none() {
             let edge_pt = closest_point_on_poly(boss_center, &outer_loop);
-            (edge_pt - boss_center).normalized().or_else(|| (boss_center - anchor).normalized())
+            (edge_pt - boss_center)
+                .normalized()
+                .or_else(|| (boss_center - anchor).normalized())
         } else {
             (boss_center - anchor).normalized()
         };
@@ -1398,7 +1739,8 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
         let edge_pt = closest_point_on_poly(boss_center, &outer_loop);
         let d_edge = edge_pt.dist(boss_center);
         let gap_outer = d_edge - collar_r - config.wall_offset;
-        let bridge_to_edge = gap_outer < 3.0 * config.corner_radius.max(config.wall_offset).max(10.0);
+        let bridge_to_edge =
+            gap_outer < 3.0 * config.corner_radius.max(config.wall_offset).max(10.0);
 
         let p_start = if hub_center.is_some() {
             anchor + dir * (hub_r * 0.5).max(0.0)
@@ -1409,26 +1751,45 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
         };
         let p_end = boss_center;
 
-        let spoke_pts = [p_start - perp * web_hw, p_end - perp * web_hw, p_end + perp * web_hw, p_start + perp * web_hw];
-        keepouts.push(Region2 { outer: Loop2::polygon(&spoke_pts), holes: Vec::new() });
+        let spoke_pts = [
+            p_start - perp * web_hw,
+            p_end - perp * web_hw,
+            p_end + perp * web_hw,
+            p_start + perp * web_hw,
+        ];
+        keepouts.push(Region2 {
+            outer: Loop2::polygon(&spoke_pts),
+            holes: Vec::new(),
+        });
 
         if bridge_to_edge {
             let out_dir = (edge_pt - boss_center).normalized().unwrap_or(dir);
             let out_perp = Vec2::new(-out_dir.y, out_dir.x);
             let p_edge_end = boss_center + out_dir * (d_edge + config.wall_offset * 2.0);
-            let bridge_pts =
-                [boss_center - out_perp * web_hw, p_edge_end - out_perp * web_hw, p_edge_end + out_perp * web_hw, boss_center + out_perp * web_hw];
-            keepouts.push(Region2 { outer: Loop2::polygon(&bridge_pts), holes: Vec::new() });
+            let bridge_pts = [
+                boss_center - out_perp * web_hw,
+                p_edge_end - out_perp * web_hw,
+                p_edge_end + out_perp * web_hw,
+                boss_center + out_perp * web_hw,
+            ];
+            keepouts.push(Region2 {
+                outer: Loop2::polygon(&bridge_pts),
+                holes: Vec::new(),
+            });
         }
     }
 
     let raw_regions = if keepouts.is_empty() {
         vec![inset_outer]
     } else {
-        crate::prism::planar_regions_boolean(&[inset_outer], &keepouts, BooleanOp::Subtract, 1e-4).map_err(|e| e.to_string())?
+        crate::prism::planar_regions_boolean(&[inset_outer], &keepouts, BooleanOp::Subtract, 1e-4)
+            .map_err(|e| e.to_string())?
     };
 
-    let filtered_regions: Vec<Region2> = raw_regions.into_iter().filter(|r| r.area().abs() > 1e-2).collect();
+    let filtered_regions: Vec<Region2> = raw_regions
+        .into_iter()
+        .filter(|r| r.area().abs() > 1e-2)
+        .collect();
     let pocket_regions: Vec<Region2> = filtered_regions
         .into_iter()
         .map(|r| fillet_region_corners(&r, config.corner_radius))
@@ -1436,14 +1797,20 @@ pub(super) fn build_pocket_regions(body: &Body, order: &Order, record: &Brep, fa
         .collect();
 
     if pocket_regions.is_empty() {
-        return Err("no valid pocket regions remain after wall_offset, ribs, and boss keep-outs".into());
+        return Err(
+            "no valid pocket regions remain after wall_offset, ribs, and boss keep-outs".into(),
+        );
     }
 
     Ok(pocket_regions)
 }
 
 /// Resolve the pocket cut depth (mm) for `depth_spec` below `plane`.
-pub fn resolve_cut_depth(record: &Brep, plane: &Plane, depth_spec: PocketDepthSpec) -> Result<f64, String> {
+pub fn resolve_cut_depth(
+    record: &Brep,
+    plane: &Plane,
+    depth_spec: PocketDepthSpec,
+) -> Result<f64, String> {
     let b_size = body_size(record).max(1.0);
     let n = plane.normal();
     match depth_spec {
@@ -1497,7 +1864,7 @@ fn edge_midpoint(pts: &[Vec3]) -> Vec3 {
 pub(super) fn min_pocket_arc_radius(regions: &[Region2]) -> Option<f64> {
     regions
         .iter()
-        .flat_map(|r| r.loops())
+        .flat_map(Region2::loops)
         .flat_map(|lp| lp.segs.iter())
         .filter_map(|s| match *s {
             Seg2::Arc { radius, .. } => Some(radius),
@@ -1514,7 +1881,12 @@ fn dist_to_seg2(p: Vec2, seg: &Seg2) -> f64 {
 
 /// Minimum distance from 2D point `p` to any boundary segment of `regions`.
 fn dist_to_pocket_boundary(p: Vec2, regions: &[Region2]) -> f64 {
-    regions.iter().flat_map(|r| r.loops()).flat_map(|l| l.segs.iter()).map(|s| dist_to_seg2(p, s)).fold(f64::MAX, f64::min)
+    regions
+        .iter()
+        .flat_map(Region2::loops)
+        .flat_map(|l| l.segs.iter())
+        .map(|s| dist_to_seg2(p, s))
+        .fold(f64::MAX, f64::min)
 }
 
 /// Top (`TopEdges`) and bottom (`BottomEdges`) pocket perimeter edge picks tracked from the cut.
@@ -1548,7 +1920,10 @@ pub(super) fn collect_tracked_pocket_edges(
             continue;
         }
         let h_all_top = pts.iter().all(|p| (*p - plane.origin).dot(n).abs() <= 0.25);
-        let h_all_bottom = !is_through && pts.iter().all(|p| ((*p - plane.origin).dot(n) + cut_depth).abs() <= 0.25);
+        let h_all_bottom = !is_through
+            && pts
+                .iter()
+                .all(|p| ((*p - plane.origin).dot(n) + cut_depth).abs() <= 0.25);
         let m = edge_midpoint(&pts);
         let lp = plane.to_local(m);
         let d_bound = dist_to_pocket_boundary(lp, regions);
@@ -1576,7 +1951,10 @@ pub(super) fn select_fillet_edges(tracked: &TrackedPocketEdges, loc: FilletLocat
 }
 
 /// Select tracked edge picks according to a `ChamferLocation`.
-pub(super) fn select_chamfer_edges(tracked: &TrackedPocketEdges, loc: ChamferLocation) -> Vec<Vec3> {
+pub(super) fn select_chamfer_edges(
+    tracked: &TrackedPocketEdges,
+    loc: ChamferLocation,
+) -> Vec<Vec3> {
     let mut pts = Vec::new();
     if matches!(loc, ChamferLocation::Top | ChamferLocation::All) {
         pts.extend_from_slice(&tracked.top_edges);
@@ -1681,7 +2059,10 @@ pub(super) fn top_bevel_params(
         return None;
     }
     let dilated_outer = dilate_ccw_loop(&region.outer, s)?;
-    let dilated = Region2 { outer: dilated_outer, holes: region.holes.clone() };
+    let dilated = Region2 {
+        outer: dilated_outer,
+        holes: region.holes.clone(),
+    };
     let bevel_h = s + 0.02;
     let taper = std::f64::consts::FRAC_PI_4;
     Some((dilated, bevel_h, taper))
@@ -1705,12 +2086,14 @@ pub(super) fn bottom_bevel_params(
     };
     let flare_outer = if draft_shrink > 1e-4 {
         exact_ccw_loop2_offset(&region.outer, draft_shrink)
-            .map(|r| r.outer)
-            .unwrap_or_else(|| region.outer.clone())
+            .map_or_else(|| region.outer.clone(), |r| r.outer)
     } else {
         region.outer.clone()
     };
-    let flare_region = Region2 { outer: flare_outer, holes: region.holes.clone() };
+    let flare_region = Region2 {
+        outer: flare_outer,
+        holes: region.holes.clone(),
+    };
     let start = -(cut_depth - s);
     let end = -cut_depth;
     let taper = std::f64::consts::FRAC_PI_4;
@@ -1736,12 +2119,10 @@ pub(super) fn primary_fillet_radius(
     fillet_r
 }
 
-pub(super) fn fallback_fillet_radius(
-    fillet_r: f64,
-    min_arc_r: Option<f64>,
-    cut_depth: f64,
-) -> f64 {
-    min_arc_r.map_or(fillet_r * 0.65, |mr| (mr * 0.65).min(cut_depth * 0.45).max(0.1))
+pub(super) fn fallback_fillet_radius(fillet_r: f64, min_arc_r: Option<f64>, cut_depth: f64) -> f64 {
+    min_arc_r.map_or(fillet_r * 0.65, |mr| {
+        (mr * 0.65).min(cut_depth * 0.45).max(0.1)
+    })
 }
 
 pub(super) fn can_retry_fillet(
