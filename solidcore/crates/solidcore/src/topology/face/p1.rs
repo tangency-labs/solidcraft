@@ -30,6 +30,13 @@
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
 //! Deviations:
+//! - **A seam move needs a closed direction.** `move_seam` drops a crossed or near-miss
+//!   seam the caller's face properties report in a direction the surface is not
+//!   periodic in (`Surface::is_periodic` over its natural UV domain, `HasSeamProblem`'s
+//!   own test). Upstream splits the surface there and joins the open ends, so the face's
+//!   surface no longer passes through its edges (11.8 away on `vase_rev.smb`), and the
+//!   seam split that follows merges interval ends onto edge points up to 4.19 away,
+//!   growing the vertex tolerances to match (#21368).
 //! - **Shrink keeps exact trims and ends on knots (the fork's, not upstream).**
 //!   `shrink_geometry` keeps the face's trim curves where its surface's trim keeps the
 //!   surface's parameterization (WR-700, the fork's tangency-labs/smlib@6f811b8), and
@@ -2248,6 +2255,14 @@ pub fn move_seam_notified<O: LoopObject>(
             has_near_misses(k, crv_class_v, &objects)?,
         )
     };
+    // not upstream: a seam exists only where the surface closes on itself, so a seam
+    // problem the caller's face properties report in a direction the surface does not
+    // close in is no seam problem (upstream splits and rejoins the open ends there, gluing
+    // edges the surface no longer passes through; UB-138's trigger)
+    let closed_u = !(crosses_u || near_miss_u) || surface0.is_periodic(k, &uv_domain, Sp::U)?;
+    let closed_v = !(crosses_v || near_miss_v) || surface0.is_periodic(k, &uv_domain, Sp::V)?;
+    let (crosses_u, near_miss_u) = (crosses_u && closed_u, near_miss_u && closed_u);
+    let (crosses_v, near_miss_v) = (crosses_v && closed_v, near_miss_v && closed_v);
     let fix_seam_both = (crosses_u || near_miss_u) && (crosses_v || near_miss_v);
 
     for ii in 0..2usize {
