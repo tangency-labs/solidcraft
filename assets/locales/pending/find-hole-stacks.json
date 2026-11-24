@@ -1,5 +1,26 @@
 {
   "en": {
     "cmd.inspect.hole_stacks": "Find Hole Stacks"
+  },
+  "ar": {
+    "cmd.inspect.hole_stacks": "البحث عن الثقوب المتحاذية"
+  },
+  "he": {
+    "cmd.inspect.hole_stacks": "חיפוש חורים מיושרים"
+  },
+  "ja": {
+    "cmd.inspect.hole_stacks": "整列する穴を検索"
+  },
+  "vi": {
+    "cmd.inspect.hole_stacks": "Tìm các lỗ thẳng hàng"
+  },
+  "zh": {
+    "cmd.inspect.hole_stacks": "查找对齐孔"
+  },
+  "de": {
+    "cmd.inspect.hole_stacks": "Fluchtende Bohrungen finden"
+  },
+  "ko": {
+    "cmd.inspect.hole_stacks": "정렬된 구멍 찾기"
   }
 }
