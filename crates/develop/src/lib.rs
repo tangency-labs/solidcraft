@@ -20,10 +20,12 @@
 #![forbid(unsafe_code)]
 
 pub use solidcore_ops::develop::Bent;
+pub use solidcore_ops::develop::ContourRefusal;
 pub use solidcore_ops::develop::Fold;
 pub use solidcore_ops::develop::crossings;
 pub use solidcore_ops::develop::curve_through;
 pub use solidcore_ops::develop::hermite;
+pub use solidcore_ops::develop::offset_contour;
 pub use solidcore_ops::query::Query;
 pub use solidcore_record::develop::Anchor;
 pub use solidcore_record::develop::Bend;

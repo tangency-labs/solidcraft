@@ -25,7 +25,7 @@ use solidcore_record::develop::{Bend, Development, Lap, Mismatch, Rigid2, Rigid3
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    JointRefusal, PanelRefusal, Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS,
+    ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS,
 };
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
@@ -68,6 +68,23 @@ pub fn crossings(a: &[Seg2], b: &[Seg2]) -> Vec<(usize, f64, usize, f64, Vec2)> 
         .into_iter()
         .map(|(ia, u, ib, v, p)| (ia, u, ib, v, record_vec2(p)))
         .collect()
+}
+
+/// The surfaces of a contour flange's profile `segs`, `depth` into the material from them
+/// ([`solidcore::develop::offset_contour`]): each line shifted and each arc's radius changed,
+/// meeting again at every corner; the material lies right of the travel, or left when `flip`.
+/// Corners turning less than `smooth` radians meet on the common normal.
+///
+/// # Errors
+/// The kernel's [`ContourRefusal`]: why the shifted profile does not hold together.
+pub fn offset_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    k::offset_contour(&cv::segs(segs), depth, thickness, flip, smooth).map(|s| cv::record_segs(&s))
 }
 
 /// A curve through `points` in order ([`solidcore::develop::curve_through`]): a line where they
@@ -419,5 +436,55 @@ pub mod hermite {
     #[must_use]
     pub fn cubic(p0: Vec2, d0: Vec2, p3: Vec2, d3: Vec2, h: f64) -> Seg2 {
         record_seg2(&k::cubic(vec2(p0), vec2(d0), vec2(p3), vec2(d3), h))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A contour's surfaces come back as record segments: an L of two lines shifted 1 with the
+    /// material on the right meets at (9, 1); lines that turn back are the kernel's refusal.
+    #[test]
+    fn a_contour_offset_comes_back_as_record_segments() {
+        let at = |x: f64, y: f64| Vec2 { x, y };
+        let ell = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: at(10.0, 10.0),
+            },
+        ];
+        let out = offset_contour(&ell, 1.0, 2.0, false, 1e-6);
+        assert_eq!(
+            out,
+            Ok(vec![
+                Seg2::Line {
+                    a: at(0.0, 1.0),
+                    b: at(9.0, 1.0)
+                },
+                Seg2::Line {
+                    a: at(9.0, 1.0),
+                    b: at(9.0, 10.0)
+                },
+            ])
+        );
+        let back = [
+            Seg2::Line {
+                a: Vec2::ZERO,
+                b: at(10.0, 0.0),
+            },
+            Seg2::Line {
+                a: at(10.0, 0.0),
+                b: Vec2::ZERO,
+            },
+        ];
+        assert_eq!(
+            offset_contour(&back, 1.0, 2.0, false, 1e-6),
+            Err(ContourRefusal::TurnsBack)
+        );
     }
 }
