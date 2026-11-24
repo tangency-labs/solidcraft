@@ -591,23 +591,20 @@ fn build(
                     for (side, &q) in end.contacts.iter().enumerate() {
                         let face = rd.uses.get(side)?.face;
                         let made = corner_vertex.get(ei)?.iter().find(|(f, _, _)| *f == face);
-                        let nv = match made {
-                            Some(&(_, nv, at)) => {
-                                if !same_point(at, q, rd.round.radius()) {
-                                    return None;
-                                }
-                                nv
+                        let nv = if let Some(&(_, nv, at)) = made {
+                            if !same_point(at, q, rd.round.radius()) {
+                                return None;
                             }
-                            None => {
-                                let nv = u32::try_from(vertices.len()).ok()?;
-                                vertices.push(r::Vertex {
-                                    point: q,
-                                    tolerance: made_tolerance,
-                                });
-                                vertex_source.push(None);
-                                corner_vertex.get_mut(ei)?.push((face, nv, q));
-                                nv
-                            }
+                            nv
+                        } else {
+                            let nv = u32::try_from(vertices.len()).ok()?;
+                            vertices.push(r::Vertex {
+                                point: q,
+                                tolerance: made_tolerance,
+                            });
+                            vertex_source.push(None);
+                            corner_vertex.get_mut(ei)?.push((face, nv, q));
+                            nv
                         };
                         *end_vertex.get_mut(ri)?.get_mut(which)?.get_mut(side)? = nv;
                     }
@@ -745,17 +742,14 @@ fn build(
             };
             let mut out: Vec<OrientedEdge> = Vec::with_capacity(old.len());
             for u in old {
-                let edge = match round_of.get(u.edge as usize).copied().flatten() {
-                    Some(ri) => {
-                        let rd = rounds.get(ri)?;
-                        let side = rd.uses.iter().position(|x| x.face == fi)?;
-                        touched = true;
-                        *contact_edge.get(ri)?.get(side)?
-                    }
-                    None => {
-                        touched |= !cut.get(u.edge as usize)?.is_empty();
-                        new_edge_of.get(u.edge as usize).copied().flatten()?
-                    }
+                let edge = if let Some(ri) = round_of.get(u.edge as usize).copied().flatten() {
+                    let rd = rounds.get(ri)?;
+                    let side = rd.uses.iter().position(|x| x.face == fi)?;
+                    touched = true;
+                    *contact_edge.get(ri)?.get(side)?
+                } else {
+                    touched |= !cut.get(u.edge as usize)?.is_empty();
+                    new_edge_of.get(u.edge as usize).copied().flatten()?
                 };
                 out.push(OrientedEdge {
                     edge,
@@ -1011,7 +1005,6 @@ fn replane(
     changed: &[bool],
     tolerance: f64,
 ) -> Option<()> {
-    let mut domain = face.domain;
     // per use: its curve and form, interval, vertices and their points, changed, loop
     type Use = (
         k::Curve,
@@ -1022,6 +1015,7 @@ fn replane(
         bool,
         usize,
     );
+    let mut domain = face.domain;
     let mut all: Vec<Use> = Vec::new();
     for (li, l) in face.loops.iter_mut().enumerate() {
         let Loop::Edges { edges: uses } = l else {
