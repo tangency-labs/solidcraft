@@ -64,6 +64,7 @@
 //!   overwrites the value; no caller uses it).
 //! - The `SM_DEBUG_CODE` trace output is not ported.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::matrix::Matrix;
@@ -163,8 +164,11 @@ pub trait EvalNFunctions {
         _intervals: Option<&ExtentNd>,
         _periodicities: Option<&[bool]>,
     ) -> Result<()> {
-        Err(SolidError::geom_stage_failed(
+        Err(SolidError::geom(
             "geom::local_solve_nd::EvalNFunctions::set_intervals",
+            GeomFailure::Defect {
+                why: "an equation set says has_intervals() but does not implement set_intervals; every kernel equation set that wants intervals implements it",
+            },
         ))
     }
 
@@ -230,7 +234,7 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         if delta.abs() < EFF_ZERO {
             return Err(SolidError::geom(
                 OP,
-                crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                GeomFailure::ZeroDifferenceStep {
                     parameter: jj,
                     at: base_param,
                 },
@@ -933,7 +937,7 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(SolidError::geom_stage_failed("test"))
+            Err(SolidError::geom("test", GeomFailure::StageFailed))
         }
     }
 
@@ -1162,10 +1166,7 @@ mod tests {
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
-        assert_eq!(
-            e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::StageFailed)
-        );
+        assert!(matches!(e.geom_failure(), Some(GeomFailure::Defect { .. })));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
@@ -1196,7 +1197,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::ZeroDifferenceStep {
+            Some(&GeomFailure::ZeroDifferenceStep {
                 parameter: 0,
                 at: 0.5
             })

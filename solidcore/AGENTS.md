@@ -63,7 +63,8 @@ request that names it. Check all three, and build on the existing work rather th
 - [docs/offset-and-shell.md](docs/offset-and-shell.md): offsets of the definition, folds and the
   largest wall, the offset construction, shell and thicken.
 - [docs/failure-codes-and-reproduction.md](docs/failure-codes-and-reproduction.md): a failure's
-  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design).
+  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design),
+  and how to convert a failure site to a named cause, a refusal or a defect (§6).
 - [docs/coordinating.md](docs/coordinating.md): if you lead other agents: how to understand the
   problem, search for related work, split it into briefs and inspect what comes back.
 
@@ -98,7 +99,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - No `unwrap`/`expect`/`panic!`/`todo!`/unchecked `[i]` indexing (denied by lints; tests
   are exempt). Use `.get()`, iterators, `?` and `SolidError`.
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
-  results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
+  results (use `Vec`, `BTreeMap`, or sort), randomness only from a
+  generator the call makes itself from the kernel's seed (`Kernel::seeded_rng`).
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
 - Must build for `wasm32-unknown-unknown`: no filesystem or `std::time`, and no threads in
   library code for now (§4c).
@@ -200,7 +202,7 @@ wasm32-unknown-unknown`; and, for kernel changes, the goldens of every unit you 
 (`cargo run --profile goldens -p goldens -- --unit <id> --goldens`). Every case your change
 moves is fixed, or blessed with the justification §1 asks for.
 
-**Finish:** bring the branch up to date with the latest `origin/main` (rebase is preferred; merging `main` in is fine; never force-push over someone else's history), re-verify, put the
+**Finish:** bring the branch up to date with the latest `origin/main` (merging `main` in or rebasing are both fine; merging costs less CI, see the root `CONTRIBUTING.md`; never force-push over someone else's history), re-verify, put the
 goldens summary lines in the description, and mark the PR ready. CI is the merge gate.
 
 **Records are files, never appended.** Every finding and upstream issue is its own new file
@@ -237,7 +239,10 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
   unchanged bit for bit, or the cases that change and why the new result is right).
 - **Retire the existing flags.** The `UpstreamFixes` fields that exist are left from the port.
   Turning one on by default, deleting its off path and the solidcore-only `WR-` patches made to
-  it, is welcome work: a few flags per PR, each with the cases whose results change.
+  it, is welcome work: a few flags per PR, each with the cases whose results change. Each flag
+  is its own file, `crates/solidcore/src/kernel/fixes/<flag>.md` (its doc): retiring it deletes
+  that file, so flag PRs share no line. SolidCraft runs every flag on: a broken fix is fixed or
+  removed here, never held off in SolidCraft.
 - **Record upstream defects, don't hide them.** When solidcore is more correct than the C++ for
   a case, record the C++ defect as a confirmed `plan/upstream-issues/` entry, and bless the
   goldens your fix moves with their justification (§1). Never loosen a tolerance.

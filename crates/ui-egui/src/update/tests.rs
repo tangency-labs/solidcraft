@@ -356,6 +356,25 @@ fn a_new_launch_checks_even_when_the_last_check_was_today() {
     assert!(h.app.updater.rx.is_none() && h.app.updater.status == Status::Idle);
 }
 
+/// The window froze for good when the check's thread asked for a repaint while a frame read egui's
+/// context inside its own read of it (the tab strip's `ctx.viewport_id()` inside `ctx.data`): the
+/// inner read waited on the repaint, which waited on the outer read (#21091). No frame nests them.
+#[test]
+fn the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let (release, nested) = egui::Context::record_nested_locks(|| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.updater.feed = Some(feed);
+        h.frame();
+        wait_for_check(&mut h);
+        h.frames(3);
+        h.app.updater.release.as_ref().map(|r| r.version().to_string())
+    });
+    assert_eq!(release, Some(version), "the check ran");
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
 #[test]
 fn turning_off_automatic_checks_stops_the_launch_check() {
     let dir = scratch();
@@ -370,7 +389,12 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
 
 /// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
 fn update_policy(on: bool) -> crate::policy::Policy {
-    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on), ..Default::default() }, ..Default::default() }
+    crate::policy::Policy::from_json(&format!(r#"{{"CheckForUpdates": {}}}"#, u8::from(on)))
+}
+
+/// The person's own `check_updates`, as the preferences file keeps it under a policy.
+fn saved_check_updates(app: &SolveApp) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(&app.prefs()).ok()?["preferences"]["check_updates"].as_bool()
 }
 
 #[test]
@@ -390,7 +414,8 @@ fn an_organizations_policy_turns_update_checks_off_whatever_the_preference_says(
     check_now(&mut h.app, &ctx);
     h.frames(3);
     assert!(h.app.updater.rx.is_none() && h.app.updater.release.is_none());
-    assert!(h.app.preferences.check_updates, "the person's own choice is kept for when the policy goes");
+    assert!(!h.app.preferences.check_updates, "the policy's value is in force");
+    assert_eq!(saved_check_updates(&h.app), Some(true), "the person's own choice is kept for when the policy goes");
 }
 
 #[test]
@@ -404,7 +429,7 @@ fn an_organizations_policy_keeps_update_checks_on_whatever_the_preference_says()
     h.frame();
     wait_for_check(&mut h);
     assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
-    assert!(!h.app.preferences.check_updates);
+    assert_eq!(saved_check_updates(&h.app), Some(false), "the person's own choice is kept");
 }
 
 #[test]
@@ -421,7 +446,11 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         h.app.updater.feed = Some(feed);
         h.app.policy = update_policy(on);
         let reply = h.call("ui.prefs", json!({"open":"General"}));
-        assert_eq!(reply["result"]["policy"], json!({"locked": ["check_updates"], "check_updates": on}), "{reply}");
+        assert_eq!(
+            reply["result"]["policy"],
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            "{reply}"
+        );
         assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
         crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
         let tree = h.output.accesskit_update.as_ref().unwrap();
@@ -437,10 +466,12 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         assert_eq!(refused["ok"], json!(false), "{refused}");
         assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
         assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
-        assert_eq!(h.app.preferences.check_updates, !on);
+        assert_eq!(h.app.preferences.check_updates, on, "the policy's value stays in force");
+        assert_eq!(saved_check_updates(&h.app), Some(!on));
         // Restore page defaults leaves it too: the person's choice outlives the policy.
         assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
-        assert_eq!(h.app.preferences.check_updates, !on, "policy {on}: defaults keep the stored choice");
+        assert_eq!(h.app.preferences.check_updates, on);
+        assert_eq!(saved_check_updates(&h.app), Some(!on), "policy {on}: defaults keep the stored choice");
     }
     // Without a policy the reply names none, and the setting changes as before.
     let mut h = crate::scenario::Harness::new();
@@ -604,15 +635,17 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frame();
     wait_for_check(&mut h);
     h.frames(2);
-    // An accent pill reading "Update to <version>", left of the Settings/Help/Report cluster.
+    // The transient Update pill follows the saved End items, rather than preceding Assistant.
     let label = format!("Update to {version}");
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let version_rect = crate::scenario::rect_of("titlebar:version").unwrap();
+    assert!((pill.left() - version_rect.right() - crate::ui_kit::app_bar_layout::application::GAP).abs() < 0.5);
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
-    assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
+    let shifted_report = crate::scenario::rect_of("titlebar:report").unwrap();
+    assert_eq!(shifted_report.size(), report.size(), "adding a transient keeps the Report control's size");
+    assert!(!shifted_report.intersects(pill), "End-stack neighbours move aside for the update pill");
     assert!(!h.app.updater.open, "no window pops up by itself");
     assert!(crate::scenario::rect_of("update:window").is_none());
     // Clicking it opens the Update window (not a modal: the bar stays usable).
@@ -628,36 +661,117 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
 }
 
-/// The first frame after an update is found must reserve room before placing community
-/// links. A later frame cannot repair a layout whose registry is cleared each frame (#18688).
+/// #18688: the first update offer and the community links have distinct hit
+/// regions in the measured application-bar layout, including at narrower widths.
 #[test]
-fn update_notice_and_community_links_have_separate_title_bar_slots() {
+fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.preferences.show_donate_button = true;
+    h.app.preferences.show_discord_button = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-    h.call("ui.resize", json!({"width":1500,"height":720}));
+    h.call("ui.resize", json!({"width":1920,"height":720}));
     assert!(crate::scenario::rect_of("titlebar:update").is_none());
 
     h.app.updater.release = Some(Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap());
     assert!(offered(&h.app).is_some());
+    // Check the first actual update-offer frame; the registry is reset each frame.
     h.frame();
-    let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("missing {name}"));
-    let (donate, discord, update) = (rect("titlebar:kofi"), rect("titlebar:discord"), rect("titlebar:update"));
-    assert!(donate.right() + 2.0 <= discord.left(), "Donate and Discord overlap: {donate:?} {discord:?}");
-    assert!(discord.right() + 2.0 <= update.left(), "Discord and Update overlap: {discord:?} {update:?}");
-    assert!(rect("tab:design:0").right() <= donate.left(), "document tabs reach the notifications");
-    assert!(update.right() < rect("titlebar:assistant").left(), "Update remains beside the assistant");
 
-    // The named links may drop away in a narrow bar; anything that remains has its own space.
-    for width in [1200.0, 1000.0, 850.0] {
-        h.call("ui.resize", json!({"width":width,"height":720}));
-        let Some(update) = crate::scenario::rect_of("titlebar:update") else { continue };
-        for id in ["titlebar:kofi", "titlebar:discord"] {
-            if let Some(link) = crate::scenario::rect_of(id) {
-                assert!(!link.intersects(update), "at {width}: {id} {link:?} overlaps Update {update:?}");
+    for width in [1920.0, 1500.0, 1200.0, 1000.0, 850.0] {
+        if width != 1920.0 {
+            h.call("ui.resize", json!({"width":width,"height":720}));
+        }
+        let rect = crate::scenario::rect_of;
+        if width == 1920.0 {
+            assert!(rect("titlebar:update").is_some(), "wide title bar has a visible update offer");
+        }
+        let visible: Vec<_> = [
+            "titlebar:kofi", "titlebar:discord", "titlebar:update",
+            "titlebar:report", "titlebar:version", "titlebar:assistant",
+        ]
+        .into_iter()
+        .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
+        .collect();
+        for (i, (a, ra)) in visible.iter().enumerate() {
+            for (b, rb) in visible.iter().skip(i + 1) {
+                assert!(!ra.intersects(*rb), "{width}: {a} overlaps {b}: {ra:?}, {rb:?}");
+            }
+        }
+        if let Some(tab) = rect("tab:design:0") {
+            for (id, bounds) in &visible {
+                assert!(!tab.intersects(*bounds), "{width}: document tab overlaps {id}: {tab:?}, {bounds:?}");
             }
         }
     }
+}
+
+fn windows_update_offer(notes: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the offer must not fetch anything")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("do not install in this test")));
+    h.app.updater.release = Some(Release::parse(json!({"tag_name":"v999.0.0","body":notes,"assets":[]}).to_string().as_bytes()).unwrap());
+    h.app.updater.open = true;
+    h
+}
+
+#[test]
+fn russian_update_actions_fit_when_the_window_is_narrow() {
+    let notes = "- Confirm the full footer stays visible even with a long list of release notes.\n".repeat(28);
+    for (width, action) in [(449, "cancel"), (220, "apply")] {
+        let mut h = windows_update_offer(&notes);
+        h.app.preferences.language = "ru".into();
+        h.call("ui.resize", json!({"width":width,"height":365}));
+        h.frames(3);
+        let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+        let window = crate::scenario::rect_of("update:window").unwrap();
+        let screen = h.ctx.content_rect();
+        assert!(screen.contains_rect(footer) && window.contains_rect(footer), "{width}: footer {footer:?} is visible in {window:?}");
+        for (key, label) in
+            [("dialog:ok", "Установить (закроет SolidCraft)"), ("dialog:apply", "Пропустить эту версию"), ("dialog:cancel", "Напомнить позже")]
+        {
+            let target = crate::scenario::rect_of(key).unwrap();
+            assert!(footer.contains_rect(target), "{width}: {label} target {target:?} in {footer:?}");
+            let paint = h.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => Some((shape.clip_rect, text.visual_bounding_rect())),
+                _ => None,
+            });
+            let (clip, label_rect) = paint.unwrap_or_else(|| panic!("{width}: {label} is painted"));
+            assert!(clip.contains_rect(label_rect) && footer.contains_rect(label_rect), "{width}: {label} {label_rect:?} clipped to {clip:?}");
+        }
+        let point = crate::scenario::rect_of(&format!("dialog:{action}")).unwrap().center();
+        h.call("ui.click", json!({"x":point.x,"y":point.y}));
+        assert!(!h.app.updater.open);
+        if action == "apply" {
+            assert_eq!(h.app.preferences.update.skipped, "999.0.0");
+        } else {
+            assert!(h.app.preferences.update.remind_after > 0.0);
+            assert!(h.app.preferences.update.skipped.is_empty());
+        }
+    }
+}
+
+#[test]
+fn release_note_pr_numbers_are_painted_once_and_keep_their_link() {
+    let target = "https://github.com/tangency-labs/solidcraft/pull/16906";
+    let mut h = windows_update_offer(&format!("- Faster rebuilds by somebody in {target}."));
+    h.frames(3);
+    let mut labels = h.shapes.iter().filter_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.job.text.contains("#16906") => Some(&text.galley.job),
+        _ => None,
+    });
+    let label = labels.next().expect("the release note shows its PR number");
+    assert!(labels.next().is_none(), "the PR number is painted only once");
+    assert_eq!(label.text, "#16906");
+    assert!(label.sections.iter().all(|section| section.format.color == Tokens::get().accent), "the link uses the theme accent");
+    let [x, y] = h.widget("#16906").expect("the visible PR number is a native link");
+    h.call("ui.click", json!({"x":x,"y":y}));
+    assert_eq!(h.take_opened(), [target]);
 }
 
 #[test]
@@ -671,24 +785,29 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     let wide = crate::scenario::rect_of("titlebar:update").unwrap();
     let label = format!("Update to {version}");
     assert!(h.widget(&label).is_some());
-    // Narrower and narrower: the pill never grows, never reaches Report a bug, and its label gives
+    // Narrower and narrower: the pill never grows or overlaps Report a bug, and its label gives
     // way (to "Update", then the icon alone) before the document tabs run out of room.
     let mut last = wide.width();
     let mut shortened = false;
     for width in [1000.0, 800.0, 700.0, 600.0, 520.0, 440.0] {
         h.call("ui.resize", json!({"width": width, "height": 600}));
         h.frames(3);
-        let report = crate::scenario::rect_of("titlebar:report").unwrap();
+        // Report a bug itself may now sit behind the More menu in a very narrow bar.
+        let report = crate::scenario::rect_of("titlebar:report");
         // Icon alone, it keeps the full text for screen readers.
         let pill = crate::scenario::rect_of("titlebar:update").filter(|_| h.widget(&label).is_some() || h.widget("Update").is_some());
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
-            assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            if let Some(report) = report {
+                // Saved-list End order puts the transient after Report, so check separation in either direction.
+                assert!(!p.intersects(report), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            }
             last = p.width();
         }
         shortened |= pill.is_none_or(|p| p.width() < wide.width());
         if width == 1000.0 {
-            assert!(h.widget("Update").is_some() && h.widget(&label).is_none(), "the short label keeps room for the tabs");
+            // The bar now gives parts up only when they do not fit: at 1000 the full label still has room.
+            assert!(h.widget(&label).is_some(), "the full label still fits at 1000");
         }
     }
     assert!(shortened, "the long label gives way in a narrow bar");

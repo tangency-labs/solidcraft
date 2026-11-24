@@ -11,8 +11,8 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::linalg;
 
 use super::{
-    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian,
-    joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    Assembly, Held, JointKind, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, bounded_step, build, close_within,
+    jacobian, joint_values, largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -46,6 +46,9 @@ pub struct Reached {
     /// Short of the target: the closing joint of a loop that stopped it (the chain alone, the
     /// loop left open, gets closer).
     pub stopped_by_loop: Option<u64>,
+    /// How many times it placed the chain and its loops to measure the misses: the work it took,
+    /// out of the solver's budget for one solve (`MAX_LOOP_WORK`).
+    pub work: usize,
 }
 
 /// How much a loop's gap (mm) outweighs a miss of the target (mm) in a step: enough to keep the
@@ -57,15 +60,79 @@ const MAX_REACH_STEPS: usize = 200;
 const STEP_ANGLE: f64 = 10.0;
 const STEP_SHARE: f64 = 0.1;
 
+/// How hard [`approach`] tries for the nearest pose.
+#[derive(Clone, Copy)]
+struct Effort {
+    steps: usize,
+    /// Damped tries of a step before it gives up.
+    tries: usize,
+    /// A step that moves no value by more than this share of its cap ends it (0: none does).
+    /// Measured on the values, not on how much closer the step gets: where the target can't be
+    /// reached the miss is flat about its least, so a step that still gets a value well short of
+    /// where it settles gains next to nothing (a hinge half a degree off, a slider beside one held
+    /// at its limit a few hundredths of a mm short).
+    settle: f64,
+    /// A step that gets nowhere is tried once more, kicked off where it stands.
+    kick: bool,
+}
+
+/// The nearest pose there is.
+const THOROUGH: Effort = Effort { steps: MAX_REACH_STEPS, tries: usize::MAX, settle: 0.0, kick: true };
+/// Enough for one frame of a drag, which the next frame goes on from. A loop that has run into a
+/// limit can get no closer, and proving that took each frame up to 300 ms (every damped try of a
+/// step closes the loops again). The few tries start from the damping the frame before ended with
+/// ([`FrameCarry`]): started over at every frame, a pose that needs more damping than three tries
+/// reach (a hinge whose pointer is more than twice as far from its axis as the point grabbed)
+/// took no step until the part trailed the pointer by a whole capped step.
+const FRAME: Effort = Effort { steps: 16, tries: 3, settle: 1e-4, kick: true };
+
+/// The damping a reach starts with.
+const START_DAMPING: f64 = 1e-3;
+/// The most damping a frame hands on to the next: more, and a frame's few tries could not come
+/// back from it.
+const MOST_CARRIED_DAMPING: f64 = 1e6;
+
+/// What a drag carries from one frame's reach to the next ([`reach_frame`]): the damping the
+/// frame ended with, so the next frame's few tries start where they are likely to step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameCarry {
+    damping: f64,
+}
+
+impl Default for FrameCarry {
+    /// What a drag's first frame starts with: the damping any reach starts with.
+    fn default() -> Self {
+        FrameCarry { damping: START_DAMPING }
+    }
+}
+
 /// Move the values of the joints on `r.occurrence`'s chain (those in `r.joints`, when given) so
 /// its point gets to `r.to`, or as close as the limits and closed loops let it: the nearest pose,
 /// found from where it is (it stays on the mechanism's branch). Values a motion link sets move
 /// through the start of their link chain; the other values of the loops they are in follow. An
 /// error says why nothing can move.
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
+    reach_with(doc, st, r, None)
+}
+
+/// [`reach`] for one frame of a drag: as near as a frame's [`FRAME`] effort gets, without working
+/// out what stopped it short (`Reached::limits`, `Reached::stopped_by_loop`). A pointer off a
+/// slider's line misses on every frame, and a frame only shows where the part got to. `carry` is
+/// the drag's, from frame to frame (a new drag starts with its default).
+pub fn reach_frame(doc: &Document, st: &ModelState, r: &Reach, carry: &mut FrameCarry) -> Result<Reached, String> {
+    reach_with(doc, st, r, Some(carry))
+}
+
+/// [`reach`] (no `frame`: the nearest pose there is, with what stopped it short) or
+/// [`reach_frame`] (a frame's effort from what the drag carries, nothing explained).
+fn reach_with(doc: &Document, st: &ModelState, r: &Reach, frame: Option<&mut FrameCarry>) -> Result<Reached, String> {
+    let active = doc.active_assembly();
+    let doc = &*active;
+    let explain = frame.is_none();
     let asm = &doc.assembly;
     let vals = joint_values(asm);
-    let built = build(doc, st, &vals, &mut Solution::default());
+    let held_contents = doc.rigid_group_joints();
+    let built = build(doc, st, &held_contents, &vals, &mut Solution::default());
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());
@@ -183,12 +250,28 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let mut x = x0.clone();
     let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>().sqrt();
     let before = f(&x0).map_or(f64::INFINITY, |r| miss(&r));
-    let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, &values(a), &values(b)), mt, &mut x, &bounds, &cap, tol, loose_gap(scale))
-        .ok_or("a closed loop on its chain is open and can't close (joint.list shows its conflict)")?;
+    let effort = if explain { THOROUGH } else { FRAME };
+    let mut damping = frame.as_ref().map_or(START_DAMPING, |carry| carry.damping);
+    let res = approach(
+        &mut f,
+        &|a, b| stride(asm, &vals, &vars, &paced, &values(a), &values(b)),
+        mt,
+        &mut x,
+        &bounds,
+        &cap,
+        tol,
+        loose_gap(scale),
+        effort,
+        &mut damping,
+    )
+    .ok_or("a closed loop on its chain is open and can't close (joint.list shows its conflict)")?;
+    if let Some(carry) = frame {
+        carry.damping = if damping.is_finite() { damping.clamp(1e-9, MOST_CARRIED_DAMPING) } else { START_DAMPING };
+    }
     let mut out = Reached::default();
     let point_miss = res.iter().take(3).map(|v| v * v).sum::<f64>().sqrt();
     let turn_miss = (res.iter().skip(3).take(mt - 3).map(|v| v * v).sum::<f64>().sqrt() / scale).to_degrees();
-    if point_miss > REACH_TOL || turn_miss > REACH_TOL {
+    if explain && (point_miss > REACH_TOL || turn_miss > REACH_TOL) {
         // The limits it rests on: the target pulls the value past them (−Jᵀr over the target's
         // rows, ignoring pulls at right angles to the miss: under a millionth of the value's own
         // reach times the miss).
@@ -256,13 +339,14 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
             let (mut xo, bo, co) =
                 (start.get(..k).unwrap_or_default().to_vec(), raw_bounds.get(..k).unwrap_or_default(), cap.get(..k).unwrap_or_default());
             // The loops left open, nothing to pace.
-            if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale))
+            if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale), THOROUGH, &mut { START_DAMPING })
                 && miss(&ro) < miss(&res) - REACH_TOL.max(1e-9 * miss(&res))
             {
                 out.stopped_by_loop = Some(*first);
             }
         }
     }
+    out.work = spent.get();
     // The stored values that changed, when that got it closer (by more than the solver's noise:
     // a held part doesn't creep).
     let gained = before - miss(&res) > 1e-7;
@@ -348,6 +432,17 @@ impl Quat {
             [a0, wrap(PI, b0), wrap(a0 + r10.atan2(-r00), c0)]
         }
     }
+}
+
+/// A ball joint's yaw, pitch and roll (radians) for a rotation vector in A's frame.
+/// Choose the equivalent Z-Y-Z branch nearest `near`, preserving its yaw at either Euler
+/// singularity. Non-finite inputs or a turn that cannot be represented return `None`.
+pub fn ball_values_from_rotation_vector(turn: Vec3, near: [f64; 3]) -> Option<[f64; 3]> {
+    if !turn.is_finite() || !near.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let values = Quat::exp([turn.x, turn.y, turn.z]).to_zyz(near);
+    values.iter().all(|v| v.is_finite()).then_some(values)
 }
 
 /// How far (radians) a ball joint turns from the (yaw, pitch, roll) `a` to `b`: near pitch 0 a
@@ -478,8 +573,8 @@ fn stride(asm: &Assembly, vals: &Values, vars: &[(u64, usize)], paced: &[((u64, 
 
 /// Levenberg-Marquardt that stays on the loops: move `x` (within `bounds`, at most `cap` per value
 /// and a step of every value `stride` measures, links included, a step) to bring the first `mt` values of `f` (the target's misses) toward zero, the rest (the
-/// loops' weighted gaps) at zero. Each step is solved over all the rows, values on a limit the
-/// step pushes past held, then put back on the loops (`close_within` on their gaps) and taken
+/// loops' weighted gaps) at zero. Each step is solved over all the rows, values the step would
+/// take past a limit held there (`bounded_step`), then put back on the loops (`close_within` on their gaps) and taken
 /// when it gets closer. It ends at the target, or as close as the limits and loops let it get.
 /// Returns `f` there, or `None` when the loops don't close at the start (within `loose`).
 fn approach(
@@ -491,6 +586,8 @@ fn approach(
     cap: &[f64],
     tol: f64,
     loose: f64,
+    effort: Effort,
+    damping: &mut f64,
 ) -> Option<Vec<f64>> {
     let n = x.len();
     let miss = |r: &[f64]| r.iter().take(mt).map(|v| v * v).sum::<f64>();
@@ -505,11 +602,13 @@ fn approach(
         close_within(&mut |y| f(y).map(|r| r.get(mt..).unwrap_or_default().to_vec()), x, bounds, loop_tol, loose * LOOP_WEIGHT).is_some()
     };
     let mut r = f(x)?;
-    let (mut lambda, mut kicked) = (1e-3, false);
-    for _ in 0..MAX_REACH_STEPS {
+    // The damping it starts with, and hands back as it ends (a drag's next frame goes on from it).
+    let (mut lambda, mut kicked) = (*damping, false);
+    for _ in 0..effort.steps {
         if largest(r.get(..mt).unwrap_or_default()) <= tol {
             break;
         }
+        let from = x.clone();
         let m = r.len();
         let Some(jac) = jacobian(f, x, m) else { break };
         // The normal equations JᵀJ δ = −Jᵀr, and the target rows' share of the diagonal (the
@@ -536,32 +635,16 @@ fn approach(
                 jtj.set(p, q, jtj.get(q, p));
             }
         }
-        let mut stepped = false;
-        while lambda < 1e12 && !stepped {
-            let mut held = vec![false; n];
-            // Solved, then again with the values held that it pushes past their limits.
-            for _ in 0..=n {
-                let mut a = jtj.clone();
-                let mut b = g.clone();
-                for p in 0..n {
-                    a.add(p, p, lambda * (1.0 + diag.get(p).copied().unwrap_or(0.0)));
-                    if held.get(p).copied().unwrap_or(false) {
-                        for q in 0..n {
-                            a.set(p, q, if p == q { 1.0 } else { 0.0 });
-                            a.set(q, p, if p == q { 1.0 } else { 0.0 });
-                        }
-                        if let Some(bp) = b.get_mut(p) {
-                            *bp = 0.0;
-                        }
-                    }
-                }
-                let Some(d) = linalg::solve(a, b) else { break };
-                let past: Vec<bool> =
-                    x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (*dv > 0.0 && *v >= *hi) || (*dv < 0.0 && *v <= *lo)).collect();
-                if past.iter().zip(&held).any(|(p, h)| *p && !*h) {
-                    held = held.iter().zip(&past).map(|(h, p)| *h || *p).collect();
-                    continue;
-                }
+        let (mut stepped, mut tries) = (false, 0);
+        while lambda < 1e12 && !stepped && tries < effort.tries {
+            tries += 1;
+            // Solved with the values the step would take past their limits held there (and let go
+            // where moving back inside does better), as the loops are solved (`bounded_step`).
+            let mut a = jtj.clone();
+            for p in 0..n {
+                a.add(p, p, lambda * (1.0 + diag.get(p).copied().unwrap_or(0.0)));
+            }
+            if let Some(d) = bounded_step(&a, &g, x, bounds) {
                 let full: Vec<f64> = x.iter().zip(&d).map(|(v, dv)| v + dv).collect();
                 let over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
                 let mut next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv / over).max(*lo).min(*hi)).collect();
@@ -578,16 +661,20 @@ fn approach(
                     lambda = if over > 1.0 { (lambda * over).min(1e6) } else { (lambda / 3.0).max(1e-9) };
                     stepped = true;
                 }
-                break;
             }
             if !stepped {
                 lambda *= 4.0;
             }
         }
+        // A small step ends it only once its damping is modest: a step kept small by damping a
+        // frame carried from being stuck at a limit is not the frame being close.
+        if stepped && lambda < 1.0 && x.iter().zip(&from).zip(cap).all(|((v, w), c)| (v - w).abs() <= effort.settle * c) {
+            break;
+        }
         if !stepped {
             // Where nothing changes the misses to first order but they aren't least (the target
             // straight across a pivot from the point), a small kick off it gets closer, once.
-            if kicked {
+            if kicked || !effort.kick {
                 break;
             }
             kicked = true;
@@ -613,6 +700,7 @@ fn approach(
             }
         }
     }
+    *damping = lambda;
     Some(r)
 }
 
@@ -650,6 +738,34 @@ mod tests {
         // turn is as far either way.
         assert!((ball_turn_between([0.0; 3], tilted) - 0.05).abs() < 1e-9, "{tilted:?}");
         assert!((ball_turn_between([0.3, 0.4, -1.2], [-2.0, -0.5, 0.7]) - ball_turn_between([-2.0, -0.5, 0.7], [0.3, 0.4, -1.2])).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ball_rotation_vectors_keep_the_near_branch_and_refuse_non_finite_values() {
+        for degrees in [
+            [90.0_f64, 0.0, 0.0],
+            [-90.0, 90.0, 90.0],
+            [0.0, 90.0, 0.0],
+            [20.0, -40.0, 10.0],
+            [450.0, 30.0, -390.0],
+            [450.0, 0.0, -360.0],
+            [35.0, 180.0, -25.0],
+        ] {
+            let near = degrees.map(f64::to_radians);
+            let mut q = Quat::zyz(near).0;
+            if q[0] < 0.0 {
+                q = q.map(|v| -v);
+            }
+            let [w, x, y, z] = q;
+            let sine = x.hypot(y).hypot(z);
+            let scale = if sine < 1e-12 { 2.0 } else { 2.0 * sine.atan2(w) / sine };
+            let values = ball_values_from_rotation_vector(Vec3::new(x, y, z) * scale, near).unwrap();
+            assert!(values.iter().zip(near).all(|(a, b)| (a - b).abs() < 1e-9), "{degrees:?}: {values:?}");
+        }
+        for turn in [Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(0.0, f64::INFINITY, 0.0), Vec3::new(f64::MAX, 0.0, 0.0)] {
+            assert!(ball_values_from_rotation_vector(turn, [0.0; 3]).is_none());
+        }
+        assert!(ball_values_from_rotation_vector(Vec3::ZERO, [f64::NAN, 0.0, 0.0]).is_none());
     }
 
     /// Exercise the IK callback itself: removing sharing at this call site must fail even if

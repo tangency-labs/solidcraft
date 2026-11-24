@@ -49,46 +49,154 @@ struct Group {
 }
 
 /// The arena: the meshes' vertices and indices, and where each mesh is (by its address, the
-/// meshes held so their addresses stay theirs).
-struct Arena {
+/// meshes held so their addresses stay theirs). Its buffers have room past what they hold: a
+/// mesh a later scene adds (a part opened, a level of detail made) is written into the room,
+/// and the meshes already there are not uploaded again. Every arena made over the same buffers
+/// takes room from one shared mark, so two never write to the same bytes.
+pub(super) struct Arena {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
+    /// The buffers' sizes (bytes: vertices, indices).
+    room: [u64; 2],
+    /// Bytes of each buffer taken by any arena over them (the rest is free).
+    taken: Arc<std::sync::Mutex<[u64; 2]>>,
     spans: HashMap<usize, (Arc<SharedTris>, Span)>,
 }
 
+/// Bytes of a mesh in the arena: vertices, indices.
+fn mesh_bytes(m: &SharedTris) -> [u64; 2] {
+    [m.vertices.len() as u64, m.indices.len() as u64 * 4]
+}
+
 impl Arena {
-    /// `meshes` in one vertex and one index buffer; `None` when they do not fit.
-    fn new(device: &wgpu::Device, meshes: &[Arc<SharedTris>]) -> Option<Arena> {
-        let (mut vertices, mut indices) = (Vec::new(), Vec::new());
-        let mut spans = HashMap::with_capacity(meshes.len());
+    /// An arena holding `meshes` (each once; a mesh with no triangles, or one too large for a
+    /// buffer, is left to be drawn on its own), with the bytes it uploaded. `before`'s buffers
+    /// are kept when the meshes it lacks fit in their room and the meshes it held but no longer
+    /// draws take no more than the meshes drawn (they are let go when the buffers are made
+    /// again). New buffers have room for half as many again. Meshes beyond what one buffer
+    /// holds are left out (drawn on their own). `None` when there is nothing to hold or the
+    /// device refused the buffers.
+    pub(super) fn holding(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        meshes: &[Arc<SharedTris>],
+        before: Option<&Arc<Arena>>,
+    ) -> Option<(Arc<Arena>, u64)> {
+        let limit = device.limits().max_buffer_size;
+        let mut seen = std::collections::HashSet::with_capacity(meshes.len());
+        let mut wanted: Vec<&Arc<SharedTris>> = Vec::with_capacity(meshes.len());
+        let mut need = [0u64; 2];
         for m in meshes {
-            let key = Arc::as_ptr(m) as usize;
-            if spans.contains_key(&key) {
+            let [v, i] = mesh_bytes(m);
+            if v == 0 || i == 0 || !seen.insert(Arc::as_ptr(m) as usize) {
                 continue;
             }
-            let span = Span {
-                first_index: u32::try_from(indices.len() / 4).ok()?,
-                count: u32::try_from(m.indices.len()).ok()?,
-                base_vertex: i32::try_from(vertices.len() / super::SHARED_SIZE).ok()?,
-            };
-            vertices.extend_from_slice(&m.vertices);
-            indices.extend(m.indices.iter().flat_map(|i| i.to_le_bytes()));
-            spans.insert(key, (m.clone(), span));
+            if need[0] + v > limit || need[1] + i > limit {
+                continue;
+            }
+            need = [need[0] + v, need[1] + i];
+            wanted.push(m);
         }
-        let limit = device.limits().max_buffer_size;
-        if vertices.is_empty() || vertices.len() as u64 > limit || indices.len() as u64 > limit {
+        if wanted.is_empty() {
             return None;
         }
-        Some(Arena {
-            vertices: super::buffer_init(device, "sc_indirect_vertices", &vertices, wgpu::BufferUsages::VERTEX)?,
-            indices: super::buffer_init(device, "sc_indirect_indices", &indices, wgpu::BufferUsages::INDEX)?,
+        if let Some(before) = before {
+            let lacking: Vec<&Arc<SharedTris>> = wanted.iter().copied().filter(|m| before.span(m).is_none()).collect();
+            if lacking.is_empty() && before.spans.len() == wanted.len() {
+                return Some((before.clone(), 0));
+            }
+            if let Some(grown) = before.with(queue, &wanted, &lacking, need) {
+                return Some(grown);
+            }
+        }
+        Arena::new(device, &wanted, need, limit)
+    }
+
+    /// `before`'s buffers holding `wanted`, the `lacking` ones written into their room; `None`
+    /// when they do not fit there or the buffers would hold more no longer drawn than drawn.
+    fn with(&self, queue: &wgpu::Queue, wanted: &[&Arc<SharedTris>], lacking: &[&Arc<SharedTris>], need: [u64; 2]) -> Option<(Arc<Arena>, u64)> {
+        let add = lacking.iter().fold([0u64; 2], |a, m| {
+            let [v, i] = mesh_bytes(m);
+            [a[0] + v, a[1] + i]
+        });
+        let mut taken = self.taken.lock().ok()?;
+        let at = *taken;
+        let after = [at[0] + add[0], at[1] + add[1]];
+        if after[0] > self.room[0] || after[1] > self.room[1] || after[0] > 2 * need[0] || after[1] > 2 * need[1] {
+            return None;
+        }
+        let first_index = u32::try_from(at[1] / 4).ok()?;
+        let base_vertex = i32::try_from(at[0] / super::SHARED_SIZE as u64).ok()?;
+        let (vertices, indices, placed) = pack(lacking, first_index, base_vertex)?;
+        if !vertices.is_empty() {
+            queue.write_buffer(&self.vertices, at[0], &vertices);
+            queue.write_buffer(&self.indices, at[1], &indices);
+        }
+        *taken = after;
+        drop(taken);
+        let mut spans = HashMap::with_capacity(wanted.len());
+        for m in wanted {
+            let key = Arc::as_ptr(m) as usize;
+            if let Some(span) = self.span(m).or_else(|| placed.get(&key).copied()) {
+                spans.insert(key, (Arc::clone(m), span));
+            }
+        }
+        let arena = Arena { vertices: self.vertices.clone(), indices: self.indices.clone(), room: self.room, taken: self.taken.clone(), spans };
+        Some((Arc::new(arena), add[0] + add[1]))
+    }
+
+    /// New buffers holding `wanted` (`need` bytes), with room for half as many again (within
+    /// `limit`).
+    fn new(device: &wgpu::Device, wanted: &[&Arc<SharedTris>], need: [u64; 2], limit: u64) -> Option<(Arc<Arena>, u64)> {
+        let (mut vertices, mut indices, placed) = pack(wanted, 0, 0)?;
+        let room = need.map(|n| (n.saturating_add(n / 2)).min(limit).max(n).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT));
+        vertices.resize(usize::try_from(room[0]).ok()?, 0);
+        indices.resize(usize::try_from(room[1]).ok()?, 0);
+        let spans =
+            wanted.iter().filter_map(|m| placed.get(&(Arc::as_ptr(m) as usize)).map(|s| (Arc::as_ptr(m) as usize, (Arc::clone(m), *s)))).collect();
+        let arena = Arena {
+            vertices: super::buffer_init(device, "sc_indirect_vertices", &vertices, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)?,
+            indices: super::buffer_init(device, "sc_indirect_indices", &indices, wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST)?,
+            room,
+            taken: Arc::new(std::sync::Mutex::new(need)),
             spans,
-        })
+        };
+        Some((Arc::new(arena), need[0] + need[1]))
     }
 
     fn span(&self, mesh: &Arc<SharedTris>) -> Option<Span> {
         self.spans.get(&(Arc::as_ptr(mesh) as usize)).filter(|(m, _)| Arc::ptr_eq(m, mesh)).map(|(_, s)| *s)
     }
+
+    /// Where `mesh` is drawn from, when the arena holds it: its buffers, and its span.
+    pub(super) fn place(&self, mesh: &Arc<SharedTris>) -> Option<super::SharedGpu> {
+        let span = self.span(mesh)?;
+        Some(super::SharedGpu::InArena {
+            vertices: self.vertices.clone(),
+            indices: self.indices.clone(),
+            first_index: span.first_index,
+            count: span.count,
+            base_vertex: span.base_vertex,
+        })
+    }
+}
+
+/// `meshes` one after another (vertices, indices) and each one's span, the first starting at
+/// `first_index` and `base_vertex`.
+fn pack(meshes: &[&Arc<SharedTris>], first_index: u32, base_vertex: i32) -> Option<(Vec<u8>, Vec<u8>, HashMap<usize, Span>)> {
+    let (mut vertices, mut indices) = (Vec::new(), Vec::new());
+    let mut spans = HashMap::with_capacity(meshes.len());
+    for m in meshes {
+        let span = Span {
+            first_index: first_index.checked_add(u32::try_from(indices.len() / 4).ok()?)?,
+            count: u32::try_from(m.indices.len()).ok()?,
+            base_vertex: base_vertex.checked_add(i32::try_from(vertices.len() / super::SHARED_SIZE).ok()?)?,
+        };
+        vertices.extend_from_slice(&m.vertices);
+        indices.extend(m.indices.iter().flat_map(|i| i.to_le_bytes()));
+        spans.insert(Arc::as_ptr(m) as usize, span);
+    }
+    Some((vertices, indices, spans))
 }
 
 /// The instanced draws of a scene drawn indirectly.
@@ -103,29 +211,22 @@ pub(super) struct Indirect {
     triangles: Vec<u64>,
     /// Which of the scene's instanced draws are drawn here (the others on their own).
     batched: Vec<bool>,
+    /// The GPU culls the placements ([`super::gpu_cull`]): `args` and `instances` are its, and
+    /// `triangles` are what it last reported, so a group is drawn even when they say none.
+    on_gpu: bool,
 }
 
 impl Indirect {
-    /// The scene's instanced `draws` drawn indirectly, taking `before`'s arena when it holds
-    /// every mesh they draw (a scene rebuilt for a colour or visibility change uploads none).
-    /// `None` when none can be.
-    pub(super) fn new(device: &wgpu::Device, draws: &[InstancedDraw], before: Option<&Indirect>) -> Option<Indirect> {
+    /// The scene's instanced `draws` drawn indirectly from `arena`: those whose every level it
+    /// holds ([`Arena::holding`]). `None` when none can be.
+    pub(super) fn new(device: &wgpu::Device, draws: &[InstancedDraw], arena: Arc<Arena>) -> Option<Indirect> {
         let mut batched = vec![false; draws.len()];
-        let mut meshes = Vec::new();
         for (i, d) in draws.iter().enumerate() {
-            if d.levels.iter().all(|l| matches!(*l.tris, super::SharedGpu::Indexed { .. })) && !d.levels.is_empty() {
-                batched[i] = true;
-                meshes.extend(d.levels.iter().map(|l| l.src.clone()));
-            }
+            batched[i] = !d.levels.is_empty() && d.levels.iter().all(|l| arena.span(&l.src).is_some());
         }
-        if meshes.is_empty() {
+        if !batched.contains(&true) {
             return None;
         }
-        let reused = before.map(|b| b.arena.clone()).filter(|a| meshes.iter().all(|m| a.span(m).is_some()));
-        let arena = match reused {
-            Some(arena) => arena,
-            None => Arc::new(Arena::new(device, &meshes)?),
-        };
         // Entries grouped by what a pass draws them with; within a group, in the scene's order
         // (see-through placements are sorted back to front within each mesh, as before).
         let key = |d: &InstancedDraw, flat: bool| (look_order(d.look), flat, d.closed);
@@ -147,7 +248,7 @@ impl Indirect {
         let entries: Vec<Entry> = entries.into_iter().map(|(_, e)| e).collect();
         // Until the first cull (and in a scene never culled: a moving layer, the product
         // preview), every placement is drawn in full, as each mesh's own draws were.
-        let mut out = Indirect { arena, entries, groups, args: None, instances: None, triangles: Vec::new(), batched };
+        let mut out = Indirect { arena, entries, groups, args: None, instances: None, triangles: Vec::new(), batched, on_gpu: false };
         let (instances, args) = out.contents(draws);
         out.args = Some(super::buffer_init(device, "sc_indirect_args", &args, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST)?);
         if !instances.is_empty() {
@@ -155,6 +256,42 @@ impl Indirect {
             out.instances = Some((super::buffer_init(device, "sc_indirect_instances", &instances, usage)?, instances.len() as u64));
         }
         Some(out)
+    }
+
+    /// Each entry: its draw, level, index count, first index and base vertex, in the order of the
+    /// arguments (grouped by look, opaque first).
+    pub(super) fn entry_list(&self) -> Vec<(usize, usize, u32, u32, i32)> {
+        self.entries.iter().map(|e| (e.draw, e.level, e.span.count, e.span.first_index, e.span.base_vertex)).collect()
+    }
+
+    /// Draw from the arguments (from 0) and placements a GPU cull fills ([`super::gpu_cull`]).
+    pub(super) fn cull_on_gpu(&mut self, args: wgpu::Buffer, instances: wgpu::Buffer, size: u64) {
+        self.args = Some(args);
+        self.instances = Some((instances, size));
+        self.on_gpu = true;
+    }
+
+    /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
+    pub(super) fn culls_on_gpu(&self) -> bool {
+        self.on_gpu
+    }
+
+    /// The buffer the placements are drawn from.
+    pub(super) fn instances(&self) -> Option<wgpu::Buffer> {
+        self.instances.as_ref().map(|(b, _)| b.clone())
+    }
+
+    /// The placements each entry drew (a GPU cull's, read back): each group's triangles.
+    pub(super) fn counted(&mut self, counts: &[u32]) {
+        self.triangles = vec![0; self.groups.len()];
+        for (n, (e, count)) in self.entries.iter().zip(counts).enumerate() {
+            let n = u32::try_from(n).unwrap_or(u32::MAX);
+            if let Some(g) = self.groups.iter().position(|g| (g.first..g.first + g.len).contains(&n))
+                && let Some(t) = self.triangles.get_mut(g)
+            {
+                *t += u64::from(e.span.count / 3) * u64::from(*count);
+            }
+        }
     }
 
     /// Whether the scene's instanced draw `i` is drawn here.
@@ -201,8 +338,10 @@ impl Indirect {
         (instances, args)
     }
 
-    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]).
+    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]): the CPU
+    /// culled this frame, so it draws from these again (`on_gpu` off).
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, draws: &[InstancedDraw]) {
+        self.on_gpu = false;
         let (instances, args) = self.contents(draws);
         if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
@@ -242,7 +381,7 @@ impl Indirect {
         let (Some((instances, _)), Some(args)) = (&self.instances, &self.args) else { return };
         let mut bound = false;
         for (g, triangles) in self.groups.iter().zip(&self.triangles).filter(|(g, _)| g.look == look && (g.closed || !closed_only)) {
-            if *triangles == 0 {
+            if *triangles == 0 && !self.on_gpu {
                 continue;
             }
             if !bound {

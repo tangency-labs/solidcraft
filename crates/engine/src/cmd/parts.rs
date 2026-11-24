@@ -18,13 +18,17 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, vec3};
-use crate::schema::parts::{InsertedPart, PartFamily, PartsInsertParams, PartsLibrary, PartsLibraryParams, PartsResizeParams, ResizedPart};
+use crate::schema::parts::{
+    BoreOrigin, BorePick, BorePickKind, BoreSeat, InsertedPart, PartFamily, PartsInsertParams, PartsLibrary, PartsLibraryParams, PartsResizeParams,
+    PartsSeats, PartsSeatsParams, ResizedPart,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const LIBRARY_CONTRACT: TypedContract<PartsLibraryParams> = TypedContract::new();
 const INSERT_CONTRACT: TypedContract<PartsInsertParams> = TypedContract::new();
 const RESIZE_CONTRACT: TypedContract<PartsResizeParams> = TypedContract::new();
+const SEATS_CONTRACT: TypedContract<PartsSeatsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parts.library", "Standard Parts", crate::checked!("parts.library", library))
@@ -33,13 +37,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIBRARY_CONTRACT)
         .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?, material?"),
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
@@ -53,10 +57,17 @@ pub static COMMANDS: &[CommandSpec] = &[
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
-         with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         with point); material?: physical material (default \"Steel\"); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
-    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
+    CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
+        .icon("fastener")
+        .noundo()
+        .read_only()
+        .contract(&SEATS_CONTRACT)
+        .output(output_schema_for::<PartsSeats>)
+        .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
@@ -570,6 +581,17 @@ fn size_with_length(family: &str, size: &str, len: f64) -> String {
     }
 }
 
+/// A metric size as the head tables write it (`M6`, `M1.6`), from any form `clearance` takes:
+/// `6`, `m6`, `M6.0`, `M6x1`. A size that is not a number is returned as written (trimmed, without
+/// the pitch), so the error can name it.
+fn metric_size_key(size: &str) -> String {
+    let nominal = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    match nominal.trim_start_matches(['M', 'm']).parse::<f64>() {
+        Ok(d) if d.is_finite() && d > 0.0 => format!("M{d}"),
+        _ => nominal.to_string(),
+    }
+}
+
 fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
@@ -583,16 +605,38 @@ pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<
         s if s.eq_ignore_ascii_case("ISO 4762") || s.eq_ignore_ascii_case("socket_head_cap_screw") => ("ISO 4762", &SHCS),
         s if s.eq_ignore_ascii_case("ISO 7380-1") || s.eq_ignore_ascii_case("button_head_cap_screw") => ("ISO 7380-1", &BHCS),
         other => {
-            return Err(format!("no head standard `{}`: ISO 4762 (socket head) or ISO 7380-1 (button head)", super::features::brief(other)));
+            return Err(format!(
+                "no head standard `{}`: ISO 4762 (socket head), ISO 7380-1 (button head) or ISO 10642 (countersunk head)",
+                super::features::brief(other)
+            ));
         }
     };
-    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let size = metric_size_key(size);
     let (first, last) = (table.first().map_or("", |r| r.0), table.last().map_or("", |r| r.0));
     table
         .iter()
-        .find(|r| r.0.eq_ignore_ascii_case(size))
+        .find(|r| r.0.eq_ignore_ascii_case(&size))
         .map(|r| (r.1, r.2))
-        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(size)))
+        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(&size)))
+}
+
+/// The head a countersink seats, for `solid.hole`'s `head`: the theoretical head diameter dk of
+/// a metric countersunk screw (ISO 10642 socket countersunk head, or the family name `parts.insert`
+/// takes), the 90° cone's width at the top plane. The size is written as `clearance` takes it.
+/// `None` for a standard that is not a countersunk head; the error names a size the table lacks.
+pub(crate) fn countersunk_head(standard: &str, size: &str) -> Option<std::result::Result<f64, String>> {
+    let s = standard.trim();
+    if !(s.eq_ignore_ascii_case("ISO 10642") || s.eq_ignore_ascii_case("countersunk_socket_screw")) {
+        return None;
+    }
+    let size = metric_size_key(size);
+    let (first, last) = (CSK.first().map_or("", |r| r.0), CSK.last().map_or("", |r| r.0));
+    Some(
+        CSK.iter()
+            .find(|r| r.0.eq_ignore_ascii_case(&size))
+            .map(|r| r.1)
+            .ok_or_else(|| format!("no ISO 10642 head for `{}`: {first} to {last}", super::features::brief(&size))),
+    )
 }
 
 fn default_length(d: f64) -> f64 {
@@ -1090,7 +1134,8 @@ fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1105,34 +1150,13 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
     let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-    let mut holes: Vec<(Vec3, u64)> = Vec::new();
-    let mut seats: Vec<(u64, HoleWall)> = Vec::new();
-    // Picks on a flat face, off every hole: the point and the face's outward normal (world).
-    let mut faces: Vec<Option<Vec3>> = Vec::new();
-    for a in hole_picks(p, cmd)? {
+    let mut seats = Vec::new();
+    for (i, a) in hole_picks(p, cmd)?.into_iter().enumerate() {
         let found = hole_wall(s, a);
-        let face = if found.is_none() { outward_normal(s, a) } else { None };
+        let flat = if found.is_none() { outward_normal(s, a) } else { None };
         let wall = found.unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true, radius: 0.0 });
         let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
-        // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
-        // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
-        // open end: seated at a blind hole's floor it would stand on its head in the material.
-        match seats.iter().position(|(h, w)| *h == host && w.same_hole(&wall)) {
-            Some(i) => {
-                if !seats.get(i).is_some_and(|(_, w)| w.open)
-                    && wall.open
-                    && let (Some(seat), Some(hole)) = (seats.get_mut(i), holes.get_mut(i))
-                {
-                    *hole = (wall.at, host);
-                    seat.1 = wall;
-                }
-            }
-            None => {
-                holes.push((wall.at, host));
-                seats.push((host, wall));
-                faces.push(face);
-            }
-        }
+        add_seat(&mut seats, i, host, wall, flat);
     }
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
@@ -1140,6 +1164,16 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
     build(s, &sh, None)?;
+    let material_name = str_(p, "material").unwrap_or("Steel");
+    let canonical = s.doc.material_name(material_name).ok_or_else(|| bad(cmd, format!("unknown material `{material_name}` (see material.list)")))?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
+            s.doc_mut().materials.remove(&name);
+        } else {
+            s.doc_mut().materials.insert(name, canonical.clone());
+        }
+    }
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
@@ -1155,12 +1189,12 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // The part's −z (its shank) mates with the seat's outward z; flipped, its +z does.
     let part_z = if flip { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
-    if !holes.is_empty() {
+    if !seats.is_empty() {
         // The first hole has the placement the component came with; each further hole places the
         // same part again. All are made before any is seated, while each is still at the part's
         // own origin, where the joint below takes the part's seating point to be.
         let mut occurrences = vec![occ];
-        for _ in 1..holes.len() {
+        for _ in 1..seats.len() {
             occurrences.push(
                 run(s, "occurrence.copy", json!({"component": comp}))?["occurrence"]
                     .as_u64()
@@ -1168,7 +1202,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             );
         }
         let mut joints = Vec::new();
-        for (i, (((a, h), o), face)) in holes.into_iter().zip(&occurrences).zip(faces).enumerate() {
+        for (i, ((_, h, wall, face), o)) in seats.into_iter().zip(&occurrences).enumerate() {
             // Seat it: its axis on the hole's, its seating plane on the hole's face, the shank
             // going into the hole (the joint mates the part's −z with the face's outward z).
             let seat = if i == 0 { format!("{name} seat") } else { format!("{name} seat {}", i + 1) };
@@ -1179,17 +1213,11 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             // signed: a clearance hole is wider than the shank and the cone goes deeper, a tap
             // drill is narrower and the cone goes higher. With no bore known, there is no move.
             let at_rim = match sh {
-                Shape::Screw { d, head: Head::Countersunk { k, .. }, .. } => {
-                    let clearance = seats.get(i).map_or(0.0, |(_, w)| if w.radius > 0.0 { w.radius - d / 2.0 } else { 0.0 });
-                    [0.0, 0.0, -k + clearance]
-                }
+                Shape::Screw { d, head: Head::Countersunk { k, .. }, .. } => [0.0, 0.0, -k - wall.shank_offset(Some(d))],
                 _ => [0.0, 0.0, 0.0],
             };
             // On a flat face: seated at the picked point, its z the face's outward normal.
-            let host = match face {
-                Some(n) => json!({"occurrence": h, "point": [a.x, a.y, a.z], "z": [n.x, n.y, n.z]}),
-                None => json!({"occurrence": h, "circle": a}),
-            };
+            let host = wall.origin(h, face);
             let j = run(s, "joint.create", json!({"type": "rigid", "a": host, "b": {"occurrence": o, "point": at_rim, "z": part_z}, "name": seat}))?;
             joints.push(j["joint"].as_u64().ok_or_else(|| bad(cmd, "the joint has no id"))?);
         }
@@ -1291,6 +1319,17 @@ struct HoleWall {
 }
 
 impl HoleWall {
+    fn origin(&self, occurrence: u64, flat: Option<Vec3>) -> Value {
+        match flat {
+            Some(n) => json!({"occurrence": occurrence, "point": self.at, "z": n}),
+            None => json!({"occurrence": occurrence, "circle": self.at}),
+        }
+    }
+
+    fn shank_offset(&self, diameter: Option<f64>) -> f64 {
+        diameter.filter(|_| self.radius > 0.0).map_or(0.0, |d| d / 2.0 - self.radius)
+    }
+
     /// The two picks seat on one hole: at one point, or on one axis line with walls that meet.
     /// Two blind holes drilled towards each other from opposite faces share an axis, but solid
     /// material between their walls keeps them two holes.
@@ -1310,7 +1349,7 @@ impl HoleWall {
 }
 
 /// The wall of the hole at `a`, a little in from the picked rim, and whether that rim is an open
-/// end of the hole: just past it along the axis is not the body's material.
+/// end of the hole: the centre of its rim lies in free space.
 fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
@@ -1324,26 +1363,121 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        let axis: Vec3 = c.axis * 1.0;
-                        // The end of the wall nearer the pick, and a point on the axis just past it.
-                        let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
-                        let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
-                        let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
-                        let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
-                        return Some(HoleWall {
-                            at: q,
-                            seat: c.axis_point + axis * along,
-                            axis: Some(axis),
-                            ends: Some(ends),
-                            open,
-                            radius: c.radius,
-                        });
+                        return Some(wall_from_cylinder(&b.body, c, q));
                     }
                 }
             }
         }
     }
     None
+}
+
+/// Keep the first pick's position in the batch. Prefer an open end over a blind floor.
+fn add_seat<K: PartialEq, T>(seats: &mut Vec<(usize, K, HoleWall, T)>, index: usize, key: K, wall: HoleWall, details: T) {
+    if let Some((_, _, prior, extra)) = seats.iter_mut().find(|(_, k, w, _)| *k == key && w.same_hole(&wall)) {
+        if !prior.open && wall.open {
+            *prior = wall;
+            *extra = details;
+        }
+    } else {
+        seats.push((index, key, wall, details));
+    }
+}
+
+fn wall_from_cylinder(body: &solidcraft_kernel::Body, c: solidcraft_kernel::CylinderFace, q: Vec3) -> HoleWall {
+    let axis = Vec3::from(c.axis);
+    let along = (q - c.axis_point).dot(axis);
+    let end = if along - c.start < c.end - along { c.start } else { c.end };
+    // At an open rim the centre lies in free space; at a blind floor it lies on the face.
+    let rim_center = c.axis_point + axis * end;
+    HoleWall {
+        at: q,
+        seat: c.axis_point + axis * along,
+        axis: Some(axis),
+        ends: Some([c.axis_point + axis * c.start, c.axis_point + axis * c.end]),
+        open: matches!(body.classify_point(rim_center), Ok(solidcraft_kernel::PointClass::Outside)),
+        radius: c.radius,
+    }
+}
+
+/// A structured pick identifies the surface and placement, including coincident copies.
+fn picked_wall(body: &solidcraft_doc::ModelBody, pick: &BorePick) -> Option<(HoleWall, usize)> {
+    let tol = body.display_tol().max(1e-6);
+    let faces: Vec<usize> = match pick.kind {
+        BorePickKind::Face => vec![pick.index],
+        BorePickKind::Edge => {
+            let rim = solidcraft_kernel::edge_circle(&body.body, pick.index)?;
+            let v = pick.point.0 - rim.center;
+            if v.dot(rim.axis).abs() > tol || (v.len() - rim.radius).abs() > tol {
+                return None;
+            }
+            body.body.record().edges.get(pick.index)?.uses.iter().map(|u| u.face as usize).collect()
+        }
+    };
+    for face in faces {
+        let Some(c) = solidcraft_kernel::cylinder_between_rims(&body.body, face).filter(|c| c.internal) else { continue };
+        let Some(on) = body.body.point_lies_on_face(face, pick.point.0, tol).ok().flatten() else { continue };
+        let along = (on - c.axis_point).dot(c.axis);
+        // A point just inside the wall makes a rim pick unambiguous for the circle joint.
+        let inset = (c.end - c.start).min(1.0) * 0.1;
+        let q = on + c.axis * (along.clamp(c.start + inset, c.end - inset) - along);
+        return Some((wall_from_cylinder(&body.body, c, q), face));
+    }
+    None
+}
+
+fn resolve_seats(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parts.seats";
+    let args: PartsSeatsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if args.picks.is_empty() || args.picks.len() > MAX_HOLES {
+        return Err(bad(cmd, "`picks` takes 1 to 1000 bore wall or rim picks"));
+    }
+    if args.countersunk_shank_diameter.is_some_and(|d| !d.is_finite() || d <= 0.0) {
+        return Err(bad(cmd, "`countersunk_shank_diameter` must be positive"));
+    }
+    let world = s.world_state()?;
+    let st = s.model.state();
+    let placed = s.placed_document();
+    let placements = placed.body_frames_with_source(&st);
+    let mut distinct = Vec::new();
+    for (i, pick) in args.picks.iter().enumerate() {
+        let body = world.body(&pick.body).ok_or_else(|| bad(cmd, format!("no body `{}`", pick.body)))?;
+        let (wall, face) = picked_wall(body, pick).ok_or_else(|| bad(cmd, format!("pick {} must be on a bore wall or its rim", i + 1)))?;
+        add_seat(&mut distinct, i, &pick.body, wall, face);
+    }
+    let mut seats = Vec::new();
+    for (pick_index, body, wall, face) in distinct {
+        let (_, source, component, path, _) =
+            placements.iter().find(|(name, ..)| name == body).ok_or_else(|| bad(cmd, "the picked placement is missing"))?;
+        let source_body = st.body(source).ok_or_else(|| bad(cmd, "the picked bore body is missing"))?;
+        let circle = solidcraft_doc::naming::face_names(source_body)
+            .get(face)
+            .filter(|n| !n.is_empty())
+            .cloned()
+            .ok_or_else(|| bad(cmd, "the bore needs a named cylindrical wall"))?;
+        let inv = placed
+            .path_transform(*component, path)
+            .and_then(|m| solidcraft_doc::mat_inverse(&m))
+            .ok_or_else(|| bad(cmd, "invalid bore placement"))?;
+        let mut snap =
+            solidcraft_doc::joints::Snap::CircleCenter { pick: solidcraft_doc::apply_point(&inv, wall.at), face: Some(circle), end: None, x: None };
+        solidcraft_doc::joints::pin_end(&placed, &st, *component, &mut snap);
+        let solidcraft_doc::joints::Snap::CircleCenter { face: Some(circle), end: Some(end), .. } = snap else {
+            return Err(bad(cmd, "the bore needs a named end face"));
+        };
+        let origin = BoreOrigin { body: source.clone(), occurrence: path.last().copied().unwrap_or(0), path: path.clone(), circle, end };
+        let resolved = super::joints::origin_param(s, Some(&reply(cmd, &origin)?), cmd)?;
+        let m = placed.origin_world(&st, &resolved)?;
+        seats.push(BoreSeat {
+            pick_index,
+            origin,
+            point: [m[3][0], m[3][1], m[3][2]],
+            normal: [m[2][0], m[2][1], m[2][2]],
+            x_dir: [m[0][0], m[0][1], m[0][2]],
+            shank_offset: wall.shank_offset(args.countersunk_shank_diameter),
+        });
+    }
+    reply(cmd, PartsSeats { seats, param_warnings: Vec::new() })
 }
 
 fn shape_len(sh: &Shape) -> Option<f64> {
@@ -1362,7 +1496,8 @@ fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
-    s.accept_computed(computed);
+    computed.sketching_view = computed.active_sketch.and(s.sketching_view);
+    s.accept_computed(computed)?;
     Ok(result)
 }
 
@@ -1396,6 +1531,10 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let active = s.active_component;
     run(s, "component.activate", json!({"component": comp}))?;
     build(s, &sh, body_name.as_deref())?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        s.doc_mut().materials.entry(name).or_insert_with(|| "Steel".to_string());
+    }
     let added = s.doc.marker.unwrap_or(position).saturating_sub(position);
     // Keep the rollback boundary among the surviving features. If it was inside the
     // part's feature block, leave the same number of replacement features active.
@@ -1424,6 +1563,8 @@ mod tests {
     use solidcraft_geom::prelude::*;
 
     use crate::Session;
+    use crate::params::vec3;
+    use solidcore_record::Vec3;
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         match s.execute(id, &p) {
@@ -1441,6 +1582,101 @@ mod tests {
             .filter(|b| s.doc.model_body_component(b) == comp)
             .fold(solidcraft_geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh().bounds()));
         (b.min, b.max)
+    }
+
+    #[test]
+    fn bore_seats_choose_the_open_end_and_return_a_reusable_origin() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":19.9}));
+        let st = s.model.state();
+        let b = &st.body("Block").unwrap().body;
+        let rim_pick = |z: f64| {
+            let (index, rim) = (0..b.record().edges.len())
+                .find_map(|i| {
+                    let rim = solidcraft_kernel::edge_circle(b, i)?;
+                    ((rim.center.z - z).abs() < 1e-6).then_some((i, rim))
+                })
+                .unwrap();
+            json!({"body":"Block", "type":"edge", "index":index, "point":rim.start})
+        };
+        let (floor, rim) = (rim_pick(0.1), rim_pick(20.0));
+        let before = s.doc.clone();
+        let r = run(&mut s, "parts.seats", json!({"picks":[floor, rim], "countersunk_shank_diameter":6.0}));
+        assert_eq!(before, s.doc);
+        let seats = r["seats"].as_array().unwrap();
+        assert_eq!(seats.len(), 1);
+        let seat = &seats[0];
+        assert_eq!(seat["pick_index"], 0);
+        assert!(vec3(&seat["point"]).unwrap().dist(Vec3::new(20., 15., 20.)) < 1e-6, "{seat}");
+        assert!(vec3(&seat["normal"]).unwrap().dist(Vec3::Z) < 1e-6, "{seat}");
+        assert!((seat["shank_offset"].as_f64().unwrap() + 0.2).abs() < 1e-6);
+        let origin = super::super::joints::origin_param(&s, Some(&seat["origin"]), "joint.create").unwrap();
+        let frame = s.doc.origin_world(&st, &origin).unwrap();
+        assert_eq!(seat["point"], json!(&frame[3][..3]));
+        assert_eq!(seat["x_dir"], json!(&frame[0][..3]));
+    }
+
+    #[test]
+    fn a_bore_pick_uses_uncaptured_placements_without_capturing_them() {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Plate"}));
+        let occurrence = component["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4}));
+        run(
+            &mut s,
+            "occurrence.move",
+            json!({
+                "occurrence": occurrence, "capture": false, "move_grounded": true,
+                "to_matrix": [0,0,1,100, 0,1,0,0, -1,0,0,-100]
+            }),
+        );
+        let edges = run(&mut s, "model.edges", json!({"body": "Block"}));
+        let rim = edges["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|edge| edge["name"].as_str().unwrap().contains("bore") && (vec3(&edge["mid"]).unwrap().x - 120.0).abs() < 1e-8)
+            .unwrap();
+        let picks = json!({"picks":[{"type":"edge", "body":"Block", "index":rim["index"], "point":rim["mid"]}]});
+        let doc = s.doc.clone();
+        let moves = s.pending_moves.clone();
+        let pending = run(&mut s, "parts.seats", picks.clone());
+        assert_eq!(s.doc, doc);
+        assert_eq!(s.pending_moves, moves);
+        assert!(s.pending_moves.contains_key(&occurrence));
+        let seat = &pending["seats"][0];
+        assert!(vec3(&seat["point"]).unwrap().dist(Vec3::new(120., 15., -120.)) < 1e-8, "{seat}");
+        assert!(vec3(&seat["normal"]).unwrap().dist(Vec3::X) < 1e-8, "{seat}");
+        assert_eq!(seat["origin"]["path"], json!([occurrence]));
+        run(&mut s, "component.capture_position", json!({}));
+        assert_eq!(pending, run(&mut s, "parts.seats", picks), "capturing preserves the selected end and the whole world frame");
+    }
+
+    #[test]
+    fn bore_seats_reject_flat_faces_and_exterior_cylinders() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":10}));
+        let st = s.model.state();
+        let b = &st.body("Block").unwrap().body;
+        let face = (0..b.face_count())
+            .find(|&face| {
+                matches!(solidcraft_kernel::face_surface(b, face),
+            Some(solidcraft_kernel::FaceSurface::Plane { normal, .. }) if normal.z > 0.99)
+            })
+            .unwrap();
+        let err = s.execute("parts.seats", &json!({"picks":[{"body":"Block", "type":"face", "index":face, "point":[23.2,15.,20.]}]})).unwrap_err();
+        assert!(err.to_string().contains("bore wall"), "{err}");
+
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":5, "height":12,"body_name":"Boss"}));
+        let st = s.model.state();
+        let b = &st.body("Boss").unwrap().body;
+        let face = (0..b.face_count()).find(|&f| solidcraft_kernel::cylinder_between_rims(b, f).is_some()).unwrap();
+        let err = s.execute("parts.seats", &json!({"picks":[{"body":"Boss", "type":"face", "index":face, "point":[5.,0.,1.]}]})).unwrap_err();
+        assert!(err.to_string().contains("bore wall"), "{err}");
     }
 
     #[test]
@@ -1768,6 +2004,23 @@ mod tests {
     /// screws, with a 90° cone sunk below its seating plane: the top of the head is level with
     /// the face, and the length counts the head.
     #[test]
+    fn head_sizes_are_read_in_every_form_clearance_takes() {
+        // `clearance` reads `6`, `m6`, `M6.0` and `M6x1` as M6 (clearance_diameter); `head` must too.
+        for size in ["M6", "6", "m6", "M6.0", " M6x1 ", "6X1"] {
+            assert_eq!(
+                super::countersunk_head("ISO 10642", size).unwrap().unwrap(),
+                super::countersunk_head("ISO 10642", "M6").unwrap().unwrap(),
+                "{size}"
+            );
+            assert_eq!(super::cap_screw_head("ISO 4762", size).unwrap(), super::cap_screw_head("ISO 4762", "M6").unwrap(), "{size}");
+        }
+        assert_eq!(super::cap_screw_head("ISO 4762", "3.0").unwrap(), super::cap_screw_head("ISO 4762", "M3").unwrap());
+        // Still refused, and named as written: a size the table lacks, or not a size at all.
+        assert!(super::countersunk_head("ISO 10642", "2").unwrap().unwrap_err().contains("`M2`"));
+        assert!(super::cap_screw_head("ISO 4762", "big").unwrap_err().contains("`big`"));
+    }
+
+    #[test]
     fn a_countersunk_head_is_a_cone_sunk_below_the_seating_plane() {
         let l = run(&mut Session::default(), "parts.library", json!({"family": "countersunk_socket_screw"}));
         let row = |size: &str| l["sizes"].as_array().and_then(|a| a.iter().find(|x| x["size"] == size)).cloned().unwrap_or_default();
@@ -2020,6 +2273,26 @@ mod tests {
         assert!((lo.z + 13.0).abs() < 1e-6 && (hi.z + 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
+    /// #16688: a pick on the outer edge of a counterbore's floor seats the screw at the floor end
+    /// of the counterbore's wall, head down into the plate. `flip` turns it the right way up: the
+    /// head in the counterbore, the shank down the bore.
+    #[test]
+    fn flip_rights_a_screw_picked_at_a_counterbore_floor() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "type": "counterbore", "diameter": 6.6, "cb_diameter": 11, "cb_depth": 6.4}));
+        // The counterbore's floor is at z = 3.6; its outer edge is 5.5 mm from the axis.
+        let seat = |flip: bool| json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [25.5, 15, 3.6], "flip": flip});
+        let r = run(&mut s, "parts.insert", seat(false));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        run(&mut s, "edit.undo", json!({}));
+        let r = run(&mut s, "parts.insert", seat(true));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, 1.0]]), "{r}");
+        // The 6 mm head on the floor, inside the counterbore; the 20 mm shank down through the bore.
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((lo.z + 16.4).abs() < 1e-6 && (hi.z - 9.6).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
     /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a
     /// part placed at a point against `direction`; the reply reports the direction chosen.
     #[test]
@@ -2103,8 +2376,8 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
         let blind = [(8.0, 8.0), (32.0, 8.0), (32.0, 22.0)];
-        for (x, y) in blind {
-            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": 10}));
+        for ((x, y), depth) in blind.into_iter().zip([19.9, 10.0, 10.0]) {
+            run(&mut s, "solid.hole", json!({"position": [x, y, 20], "diameter": 3.4, "depth": depth}));
         }
         let through = (8.0, 22.0);
         run(&mut s, "solid.hole", json!({"position": [through.0, through.1, 20], "diameter": 3.4}));
@@ -2112,7 +2385,7 @@ mod tests {
         // its rim, then its floor; the third at its rim only; the through hole at both rims.
         let rim = |(x, y): (f64, f64), z: f64| json!([x + 1.7, y, z]);
         let at = vec![
-            rim(blind[0], 10.0),
+            rim(blind[0], 0.1),
             rim(blind[0], 20.0),
             rim(blind[1], 20.0),
             rim(blind[1], 10.0),
@@ -2293,5 +2566,43 @@ mod tests {
         assert_eq!(s.undo.len(), crate::MAX_UNDO);
         assert_eq!(s.undo.first().map(|step| step.label.as_str()), Some("Earlier step 1"));
         assert_eq!(s.undo.last().map(|step| step.label.as_str()), Some("Change Part Size"));
+    }
+
+    #[test]
+    fn inserted_fastener_defaults_to_steel_and_accepts_custom_material() {
+        let mut s = Session::default();
+        let part = run(&mut s, "parts.fastener", json!({"family":"socket_head_cap_screw","size":"M5","length":16}));
+        let Some(comp) = part["component"].as_u64() else { panic!("component id missing") };
+        let Some(body_name) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()) else {
+            panic!("part body missing")
+        };
+        assert_eq!(s.doc.body_material(&body_name), "Steel");
+        assert!((s.doc.density(&body_name) - 7.85).abs() < 1e-6);
+
+        // BOM reports Steel
+        let bom = run(&mut s, "assembly.bom", json!({"mass": true}));
+        let Some(rows) = bom["rows"].as_array() else { panic!("rows missing") };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["material"], "Steel");
+        let Some(mass) = rows[0]["mass_g"].as_f64() else { panic!("mass_g missing") };
+        assert!(mass > 4.0 && mass < 5.0, "M5x16 steel screw mass should be ~4.42g, got {mass}");
+
+        // Insert with explicit material (Brass)
+        let brass_part = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","material":"Brass"}));
+        let Some(brass_comp) = brass_part["component"].as_u64() else { panic!("brass component missing") };
+        let Some(brass_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("brass body missing")
+        };
+        assert_eq!(s.doc.body_material(&brass_body), "Brass");
+
+        // Resizing preserves material
+        run(&mut s, "parts.resize", json!({"component": brass_comp, "size": "M10"}));
+        let Some(resized_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("resized body missing")
+        };
+        assert_eq!(s.doc.body_material(&resized_body), "Brass");
+
+        // Unknown material error
+        assert!(s.execute("parts.insert", &json!({"family":"hex_nut","size":"M6","material":"Vibranium"})).is_err());
     }
 }
