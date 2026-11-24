@@ -10,7 +10,9 @@ shader compiler. That covers older Intel graphics, PCs without a graphics driver
 ## Start in safe mode
 
 Safe mode starts with default settings (your own settings stay as they are, for the next normal
-start), skips the "Recover unsaved design?" offer and draws with the software renderer.
+start), skips the "Recover unsaved design?" offer and draws with the software renderer, without
+anti-aliasing: the software renderer draws every sample on the processor. It still autosaves, and
+the next normal start offers what it kept.
 
 - Windows: run `solidcraft.exe --safe-mode` from a terminal in the install folder, or add
   ` --safe-mode` to the end of a shortcut's *Target*.
@@ -167,6 +169,18 @@ Only a crash after SolidCraft started loading a graphics API counts, and only ag
 the platform supports (never Metal or Direct3D 12 on Linux). A start that stops earlier, such as one
 missing a system library the window needs, blames no API.
 
+If the graphics driver stops responding while SolidCraft is open (the window stays white or
+black and every click takes a second), SolidCraft notices after a few seconds, closes, and
+starts again on the next graphics API: Vulkan, then Direct3D 12, then OpenGL, then the software
+renderer. Later starts keep the new one, as the Graphics API choice below (the software
+renderer is kept as `"backend": "cpu"` in `graphics.json`); choose **Automatic** there to go
+back. The restart doesn't keep a `WGPU_BACKEND` override, which would start the API that hung
+again. The unsaved changes of every open design are offered for recovery; a design whose
+changes couldn't be kept (no recovery folder, or writing it failed) is named in the new window
+instead. A graphics card that is only slow, and still finishes each frame, doesn't count. The
+software renderer draws without anti-aliasing unless you chose a level in Preferences ›
+Graphics.
+
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps
 the Windows order above. **Vulkan** enables GPU path tracing when the graphics device
@@ -181,7 +195,8 @@ A newly selected API gets one guarded startup attempt. If the app stops before i
 frame is presented, the next normal launch restores the previous choice. A handled
 startup failure restores it before retrying. A failure to save the guard uses software
 rendering for that launch. The guard does not detect a blank image or a hang after the
-first frame; normal device-loss recovery still applies.
+first frame; on Windows the hang check above handles a hang, and device-loss recovery
+still applies.
 
 Safe mode uses the software renderer without consuming a pending API choice. An explicit
 launch override still takes precedence and is shown in Graphics. Changing the API in
@@ -211,9 +226,12 @@ land above what they point at.
 
 When the graphics driver stops responding, the system resets it (on Windows, "Display driver
 stopped responding and has recovered"), and the graphics device SolidCraft draws with is gone
-for good: the window can't draw anything more. SolidCraft then closes, keeps your unsaved
-changes for recovery as it does after a crash, and starts again; the new window says what
-happened, with what the graphics driver reported, and offers the changes back. The old window
+for good: the window can't draw anything more. On Linux that is when the driver reports the
+device lost (Vulkan's `VK_ERROR_DEVICE_LOST`), as after a GPU reset or, with some drivers, after
+waking from sleep. SolidCraft then closes, writes the unsaved changes of every open design for
+recovery, and starts again; the new window says what happened, with what the graphics driver
+reported, and offers the changes back. A design whose changes couldn't be written (no recovery
+folder, or the write failed) is named there instead. The old window
 closes on its own; SolidCraft doesn't wait for the driver to release it. If the device is reset
 again within ten minutes of that restart, the next start uses software rendering, which doesn't
 depend on the graphics driver. Updating the graphics driver from the GPU maker usually stops the
