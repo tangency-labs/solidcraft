@@ -1120,6 +1120,64 @@ fn two_flat_faces_read_the_distance_between_them() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// The material surface and the pocket floor already name real faces. Their depth can be placed
+/// on a full section. It keeps its paper position through save, reopen, a change to the depth and undo.
+#[test]
+fn a_pocket_depth_can_be_placed_on_a_full_section() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "3 mm", "unit": "mm"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 10, "corner": [55, 20, "10 mm - depth"], "operation": "cut"}));
+    run(&mut s, "drawing.create", json!({"template": "iso-a3-part"}));
+    let (drawing, sheet) = {
+        let d = s.drawing("test").unwrap();
+        (d.id, ids::encode(d.sheets[0].id))
+    };
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+    let section = run(
+        &mut s,
+        "drawing.view.section",
+        json!({"parent": top["view"], "line": {"kind": "full", "points": [[-10, 30], [110, 30]], "arrows": "left"}, "place": {"at": [270, 220]}}),
+    );
+    let position = [330.0, 221.0];
+    let added = run(
+        &mut s,
+        ADD,
+        json!({
+            "view": section["view"],
+            "kind": {"faces": {"a": [70, 30, 7], "b": [45, 30, 10], "direction": "vertical"}},
+            "text_to_mm": position,
+        }),
+    );
+    let dimension = &added["dimension"];
+    let mut opened = reopened(&mut s, drawing, "section-depth.sc");
+    let check = |session: &mut Session, value, text| {
+        let read = run(session, INSPECT, json!({"dimension": dimension}));
+        reads(&read, value, text);
+        assert!(read["exact"] == true && read["foreshortened"] == false, "{read}");
+        assert!(box_centre(&read).dist(Vec2::from(position)) < 1e-9, "{read}");
+        assert_eq!(read["record"]["kind"], added["record"]["kind"], "{read}");
+    };
+    check(&mut s, 3.0, "3.00");
+    check(&mut opened, 3.0, "3.00");
+    for (command, params, value, text) in
+        [("parameters.change", json!({"name": "depth", "expression": "4 mm"}), 4.0, "4.00"), ("edit.undo", json!({}), 3.0, "3.00")]
+    {
+        run(&mut opened, "drawing.close", json!({}));
+        run(&mut opened, command, params);
+        run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+        check(&mut opened, value, text);
+    }
+    let folder = crate::tests::Folder::new("section-depth-pdf");
+    let path = folder.path("section-depth.pdf");
+    let exported = run(&mut opened, "drawing.export", json!({"sheet": sheet, "format": "pdf", "path": path}));
+    assert!(
+        exported["dimensions"].as_array().unwrap().iter().any(|d| d["dimension"] == *dimension && d["view"] == section["view"] && d["drawn"] == true),
+        "{exported}"
+    );
+    assert!(std::fs::read(path).unwrap().starts_with(b"%PDF-"));
+}
+
 /// A dimension says its feature failed, with why, and that it is suppressed: the words a script reads.
 #[test]
 fn a_dimension_says_its_feature_failed_or_is_suppressed() {

@@ -12,10 +12,12 @@ mod native;
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeOptions {
     pub stack_bytes: usize,
+    /// How long a long job (an entry with `"job": true`) may run.
+    pub job_deadline_ms: u64,
 }
 impl Default for RuntimeOptions {
     fn default() -> Self {
-        Self { stack_bytes: 512 * 1024 }
+        Self { stack_bytes: 512 * 1024, job_deadline_ms: craft_plugin::JOB_DEADLINE_SECONDS * 1000 }
     }
 }
 
@@ -53,7 +55,9 @@ pub fn run_with_options<H: PluginHost + 'static>(
 ) -> (H, Result<Value>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run(host, manifest, component, entry, params, options)
+        let ran = native::run(host, manifest, component, entry, params, options);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -73,7 +77,9 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 ) -> (H, Result<String>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::dialog_fields(host, manifest, component, entry, values, ceilings)
+        let ran = native::dialog_fields(host, manifest, component, entry, values, ceilings);
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -85,8 +91,8 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
-/// and exports the entry interface of its world (`command-plugin`, or `importer-plugin` for an
-/// importer). The error names what is wrong; `plugin check` adds how to fix it.
+/// and exports the interfaces of its world (`command-plugin`, `panel-plugin`, or
+/// `importer-plugin`). The error names what is wrong; `plugin check` adds how to fix it.
 pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
@@ -129,11 +135,48 @@ pub fn run_import<H: PluginHost + 'static>(
 ) -> (H, Result<Imported>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default())
+        let ran = native::run_import(host, manifest, component, entry, options, request, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         let _ = (manifest, component, entry, options, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Read and validate a panel plugin's static declarations with command and file authority disabled.
+/// The caller retains the host on failure as well as success.
+pub fn describe_ui<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8]) -> (H, Result<craft_plugin::ui::Declarations>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::ui::describe(host, manifest, component, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// Deliver a validated panel action and execute its declared entry in one ordinary command transaction.
+/// `params` obeys the entry's usual command schema; the typed event is delivered separately.
+pub fn run_ui_event<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    params: &Value,
+    event: &craft_plugin::ui::UiEvent,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_call(host, manifest, component, entry, params, Some(event), RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, params, event);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
@@ -145,7 +188,9 @@ pub fn run_import<H: PluginHost + 'static>(
 pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
-        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+        let ran = native::run_export(host, manifest, component, slot, options, RuntimeOptions::default());
+        let _ = native::optimize_in_background();
+        ran
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
