@@ -4350,6 +4350,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        timeline::tick_feature_checks(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();

@@ -276,6 +276,12 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// The OS window of a popped-out panel whose row opened the menu: only that window draws it
+    /// (#19364). `None`: the window the app is drawn in.
+    window: Option<egui::ViewportId>,
+    /// A pick in a popped-out panel's menu, run once the frame's panel windows are drawn and the
+    /// panel layout is back with the app (#19364).
+    deferred: Option<(Item, Pos2)>,
     /// What the browser did with the last right-click (#20011): `Taken` when the browser opened
     /// its own menu, so the app opens none of its own under it.
     pub browser_menu: BrowserMenu,
@@ -2952,7 +2958,53 @@ fn open_target(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.flick = false;
     app.menu.opener = None;
     app.menu.shown = false;
+    app.menu.window = None;
     app.viewport.context_menu = Some(at);
+}
+
+/// Open a menu a row of a popped-out panel asked for, in that panel's own OS window (#19364).
+pub(crate) fn open_in_window(app: &mut SolveApp, window: egui::ViewportId, at: Pos2, target: Target) {
+    open_for(app, at, target);
+    if app.viewport.context_menu == Some(at) {
+        app.menu.window = Some(window);
+    }
+}
+
+/// Draw the open menu in a popped-out panel's OS window when one of its rows opened it (#19364).
+/// True when it is that window's menu.
+pub(crate) fn show_in_window(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    if app.viewport.context_menu.is_none() {
+        return false;
+    }
+    if app.menu.window != Some(ctx.viewport_id()) {
+        close_on_input_elsewhere(app, ctx);
+        return false;
+    }
+    show_menu(app, ctx);
+    true
+}
+
+/// Another window draws the open menu: a click or Esc in this one closes it, as a click outside
+/// the menu does in its own window.
+fn close_on_input_elsewhere(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape)) {
+        close(app);
+    }
+}
+
+/// Run what was picked in a popped-out panel's menu (#19364). Its window is drawn while the app
+/// has lent out its panel layout, which commands such as Find in Timeline need to reveal a panel.
+pub(crate) fn run_deferred(app: &mut SolveApp) {
+    if let Some((item, at)) = app.menu.deferred.take() {
+        run_item(app, &item, at);
+    }
+}
+
+/// Close a popped-out panel's menu whose window was not drawn this frame: it closed or docked again.
+pub(crate) fn close_unshown_window(app: &mut SolveApp, drawn: &[egui::ViewportId]) {
+    if app.menu.window.is_some_and(|window| !drawn.contains(&window)) {
+        close(app);
+    }
 }
 
 /// Open a menu for a target (the radial ring only for the viewport).
@@ -2982,6 +3034,7 @@ pub fn close(app: &mut SolveApp) {
     app.viewport.context_menu = None;
     app.menu.flick = false;
     app.menu.opener = None;
+    app.menu.window = None;
 }
 
 /// Open the menu at a point for automation: the pointer moves there first so what is under it
@@ -3280,6 +3333,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);
     crate::quick_menu::watch(app, ctx);
+    if app.viewport.context_menu.is_none() {
+        return;
+    }
+    if app.menu.window.is_some_and(|window| window != ctx.viewport_id()) {
+        // A popped-out panel's window draws its menu (`show_in_window`).
+        close_on_input_elsewhere(app, ctx);
+        return;
+    }
+    show_menu(app, ctx);
+}
+
+/// Draw the open menu in `ctx`'s window and act on its picks and on clicks outside it.
+fn show_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
@@ -3433,8 +3499,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         close(app);
     }
     if let Some(item) = picked {
+        let popped_out = app.menu.window.is_some();
         close(app);
-        run_item(app, &item, at);
+        if popped_out {
+            app.menu.deferred = Some((item, at));
+        } else {
+            run_item(app, &item, at);
+        }
     }
 }
 
