@@ -29,7 +29,6 @@ use solidcore::Kernel;
 /// The fixes SolidCraft's core turns on at this case (`crates/smlib/src/core.rs` `fixes()`),
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
-    "revolve_analytic_profile_faces",
     "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",

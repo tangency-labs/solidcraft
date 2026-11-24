@@ -248,17 +248,11 @@ fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Resul
     // `CloseLoopGaps` — including `reconcile_shell_tangent_rails` — runs on the default
     // path before `do_extended_offset` merges the shell (WR-578, the split flags are the
     // only path since #2981).
-    // 1. Default surface representations (`SmBSplineSurface` revolved wall and
-    //    `SmOffsetSurface` over the B-spline top-rim round).
-    let k_bspline = Kernel::default();
-    check_quarter_torus_seam_case(k_bspline)?;
-
-    // 2. Analytic wall and round (`revolve_analytic_profile_faces` produces `SmCone`
-    //    for the cylindrical wall, and the exact round classes produce `SmTorus`
-    //    for the circular top-rim round).
-    let mut k_analytic = Kernel::default();
-    k_analytic.fixes.revolve_analytic_profile_faces = true;
-    check_quarter_torus_seam_case(k_analytic)
+    // Default surface representations: the revolved wall's `SmCone` (the only path
+    // since tangency-labs/solidcraft#14425) and the exact `SmTorus` of the circular
+    // top-rim round (the only path since the exact round classes retired, #18913).
+    // The analytic-flag kernel this test also ran is now the same kernel.
+    check_quarter_torus_seam_case(Kernel::default())
 }
 
 #[test]
@@ -347,7 +341,6 @@ fn shelled_ring_floor_grazing_its_round_ends_the_seam_at_the_floor() -> solidcor
 
     let mut k = Kernel::default();
     // the round a torus, the walls cylinders, as a STEP part's are
-    k.fixes.revolve_analytic_profile_faces = true;
     let floor = -5.996_f64;
     let inset = (36.0 - floor * floor).sqrt();
     let p = |x: f64, z: f64| Point3::new(x, 0.0, z);
