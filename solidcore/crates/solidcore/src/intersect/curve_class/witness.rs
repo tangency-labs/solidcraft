@@ -223,8 +223,8 @@ fn line_circle(
     // the line crosses the circle's plane at one point x. A point of the line within tol
     // of the circle is within tol of the plane, so within tol / |dn| of x along the line,
     // and x then lies within tol + tol / |dn| of the circle in the plane: farther than
-    // that the line is apart. x within tol of the circle is the crossing; in between, a
-    // shallow line may pass within tol of the circle away from x, undecided here
+    // that the line is apart. In between, a shallow line may pass within tol of the
+    // circle away from x, undecided here. x within tol of the circle is a crossing
     let x = point + direction * ((origin - point).dot(normal) / dn);
     let off = ((x - origin).length() - radius).abs();
     if !off.is_finite() {
@@ -235,6 +235,29 @@ fn line_circle(
     }
     if off > tol {
         return Meet::Undecided;
+    }
+    // every point within tol of the circle lies in the window of half-width tol / |dn|
+    // about x, and projects into the plane within tol of the circle. In the plane, take t
+    // along the line's projection from x, the centre's foot at t = f and its distance dd
+    // from the projected line: the points within tol of the circle have |t - f| in
+    // [a, b], a = sqrt((r - tol)^2 - dd^2), two intervals mirrored about f, x in one. If
+    // the window reaches the other, the line may meet the circle a second time there,
+    // undecided here; otherwise x is the one place it meets
+    let across = direction - normal * dn;
+    let along = across.length();
+    if along > 0.0 {
+        let u = across * (1.0 / along);
+        let window = tol / dn.abs() * along;
+        let f = (origin - x).dot(u);
+        let dd_sq = (x - origin).dot(x - origin) - f * f;
+        let inner = radius - tol;
+        let a_sq = inner * inner - dd_sq;
+        if !(window.is_finite() && a_sq.is_finite()) {
+            return Meet::Undecided;
+        }
+        if inner > 0.0 && a_sq > 0.0 && f.abs() + a_sq.sqrt() <= window {
+            return Meet::Undecided;
+        }
     }
     project(vec![x])
 }
@@ -888,6 +911,35 @@ mod tests {
             panic!("decided");
         };
         assert!(ps.is_empty());
+    }
+
+    #[test]
+    fn a_shallow_line_meeting_the_circle_twice_within_its_window_is_undecided() {
+        // the second delta review's case: the line leaves the unit circle at (1, 0, 0)
+        // along the chord to (cos 4e-3, sin 4e-3, 0), rising 8e-7 over it, so dn is about
+        // 2e-4. It crosses the plane on the circle, and comes back within 8e-7 of the
+        // circle 4e-3 away: x alone would hide that second contact
+        let e = Carrier::Circle {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            x: Point3::new(1.0, 0.0, 0.0),
+            y: Point3::new(0.0, 1.0, 0.0),
+            normal: Point3::new(0.0, 0.0, 1.0),
+            radius: 1.0,
+        };
+        let stretch = [
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.01f64.cos(), 0.01f64.sin(), 0.0),
+        ];
+        let t = 4e-3f64;
+        let k = line([1.0, 0.0, 0.0], [t.cos() - 1.0, t.sin(), 8e-7]);
+        assert!(matches!(meet(e, k, stretch, TOL, SIN), Meet::Undecided));
+        // steeper (dn about 0.24), the same chord is far outside the window: the crossing
+        let k = line([1.0, 0.0, 0.0], [t.cos() - 1.0, t.sin(), 1e-3]);
+        let Meet::Points(ps) = meet(e, k, stretch, TOL, SIN) else {
+            panic!("decided");
+        };
+        assert_eq!(ps.len(), 1);
+        assert!((ps[0] - Point3::new(1.0, 0.0, 0.0)).length() <= 1e-12);
     }
 
     #[test]
