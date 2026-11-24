@@ -6,10 +6,10 @@
 //! (first, then) pairs, and the part's own edges of both together. Where a round fails, the
 //! session's error info names it: a nonzero code and a comment.
 //!
-//! With `fillet_refuse_overlapping_bands` and the offsets extended from the base and continued
-//! as themselves (once two flags, now the only path, #18921; the least set under which it
-//! shows; any one of them off and the
-//! round builds), the arc's round followed by the front edge's fails in the rollover
+//! With the bands' overlap check and the offsets extended from the base and continued as
+//! themselves (once three flags, now the only path, #18921; the least set under which it shows;
+//! any one of them off and the round builds), the arc's round followed by the front edge's fails
+//! in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
 //! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
 //!
@@ -42,11 +42,10 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, vertex, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// The default kernel with the three fixes under which the rollover failure shows.
+/// The default kernel: the three once-flagged fixes under which the rollover failure shows are
+/// now its only path.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_refuse_overlapping_bands = true;
-    k
+    Kernel::default()
 }
 
 const X0: f64 = 41.0 + 1.0 / 6.0;

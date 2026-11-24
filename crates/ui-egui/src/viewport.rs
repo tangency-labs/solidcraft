@@ -5098,7 +5098,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Wireframe draws no faces, so nothing hides an edge or a vertex. `slack` is the body's own:
     // what counts as lying on the face in front depends on how coarsely that body is meshed.
     let wireframe = app.ui.visual_style == 2;
-    let hidden_edges = app.ui.visual_style == 3 && app.preferences.select_hidden_edges;
+    let hidden_edges = app.preferences.select_hidden_edges;
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
@@ -9262,7 +9262,8 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
     {
         let shown_ms = crate::now_ms() - at;
-        if shown_ms < STATUS_TOAST_MS {
+        let sticky = app.status_sticky_at == Some(at);
+        if sticky || shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
             // A JSON save refused for its binary data offers to save the design as a container.
             let save_sc = app.status_save_sc && !undo;
@@ -9279,7 +9280,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
-                countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
+                countdown: (!sticky).then(|| (countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
                 card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
@@ -9316,12 +9317,15 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
                     app.status = None;
                     app.status_undo = false;
                     app.status_save_sc = false;
+                    app.status_sticky_at = None;
                 }
             }
             // One frame when it is due to go, not a frame every half second while it shows.
-            let left_ms = STATUS_TOAST_MS - shown_ms;
-            let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
-            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            if !sticky {
+                let left_ms = STATUS_TOAST_MS - shown_ms;
+                let left_ms = if (0.0..=STATUS_TOAST_MS).contains(&left_ms) { left_ms } else { STATUS_TOAST_MS };
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left_ms / 1000.0 + 0.01));
+            }
         } else {
             app.status = None;
         }
@@ -10523,8 +10527,9 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         };
         if i == 0 {
             painter.circle(sp, 3.5, Color32::from_rgb(240, 200, 60), Stroke::new(1.0, t.body_edge));
-        } else if virtual_corners.binary_search(&i).is_ok() {
-            // A virtual sharp corner: an open square, it is not on any drawn curve.
+        } else if virtual_corners.binary_search(&i).is_ok() || p.construction {
+            // A virtual sharp corner: an open square, it is not on any drawn curve. A construction
+            // point (#18448) is one too: it is reference geometry, not a point to use.
             painter.rect_stroke(Rect::from_center_size(sp, vec2(6.0, 6.0)), 0.0, Stroke::new(1.2, c), egui::StrokeKind::Middle);
         } else {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
@@ -10558,8 +10563,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
-    // Sketch status, unless the status bar shows it (#7243).
-    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
+    // Sketch status, unless the status bar shows it (#7243). In the free corner of the view, not under the floating ribbon.
+    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive() && !crate::status_bar::shown(app)) {
         let status = if !ss.report.shown_ok() {
             solidcraft_ui_text::tr("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {

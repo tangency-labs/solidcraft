@@ -639,7 +639,6 @@ crates/engine/src/mesh_lines/coincide.rs:disk dot
 crates/engine/src/mesh_lines/coincide.rs:within dot
 crates/engine/src/mesh_lines/meshes.rs:Scene::triangle_count triangles
 crates/engine/src/mesh_lines/meshes.rs:buffer_bytes triangles
-crates/engine/src/mesh_lines/meshes.rs:prepare triangles
 crates/engine/src/mesh_lines/meshes.rs:rigid cross,dot
 crates/engine/src/mesh_lines/projection.rs:View::project dot
 crates/engine/src/mesh_lines/projection.rs:merge_lines dot
