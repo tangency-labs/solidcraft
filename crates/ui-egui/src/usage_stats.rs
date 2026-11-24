@@ -13,7 +13,7 @@
 //!   `SOLIDCRAFT_NO_TELEMETRY=1` ([`ENV_OFF`]), or the organization's `UsageStatistics` policy
 //!   (`policy`). Off, nothing is counted, kept or sent, and what was kept is deleted.
 //! - **Nothing before the notice.** Nothing is counted until the notice that says so has been
-//!   displayed ([`Store::notice_shown`]); it stays, at every start, until dismissed.
+//!   answered with OK ([`Store::notice_ok`]); until then the counter doesn't run at all.
 //! - **Sending** happens in the background through the host's HTTP ([`crate::Services::usage_http`]):
 //!   a finished day is posted once, to [`ENDPOINT`] only. The window never waits on it. A day
 //!   that could not be sent is kept for at most [`KEEP_DAYS`] days, and the app tries again once
@@ -134,13 +134,12 @@ pub struct Day {
 pub struct Store {
     /// Random, made on first use and by Reset ID; never derived from the computer.
     pub install_id: String,
-    /// The notice that usage statistics are on has been displayed: from then on they are counted
-    /// (unless turned off). Until then nothing is.
-    pub notice_shown: bool,
-    /// The person closed the notice (Dismiss, ×) or opened Settings from it: it isn't shown again.
-    /// Until then it shows at every start. (0.46.0 had no such answer, and its notice went by
-    /// itself after 30 seconds, so its installations see the notice once more.)
-    pub notice_dismissed: bool,
+    /// The person chose OK on the notice (or switched sharing on in Preferences › Privacy): only
+    /// from then on is anything counted or sent. Until then the notice shows at every start.
+    /// (0.46 kept `notice_shown` and `notice_dismissed` instead, which recorded only that its
+    /// notice had shown or been closed; they are not read, so those installations see the new
+    /// notice and count nothing until OK.)
+    pub notice_ok: bool,
     /// Days counted and not sent yet, by `YYYY-MM-DD` (UTC).
     pub days: BTreeMap<String, Day>,
     /// Earlier installation ids whose reports the server is still to delete (Delete my data).
@@ -187,6 +186,8 @@ pub struct UsageStats {
     pub(crate) hosted: bool,
     /// Preferences › Privacy shows the next report.
     pub show_report: bool,
+    /// The notice was closed with its × this run: it shows again at the next start.
+    notice_hidden: bool,
     /// [`ENV_OFF`] said off when the app started.
     pub env_off: bool,
     /// The minute (since 1970) of the last input counted.
@@ -256,7 +257,7 @@ pub fn off(app: &SolveApp) -> Option<Off> {
 
 /// Usage statistics are on and the person has been told: count and send.
 pub fn active(app: &SolveApp) -> bool {
-    app.usage.hosted && off(app).is_none() && app.usage.store.notice_shown
+    app.usage.hosted && off(app).is_none() && app.usage.store.notice_ok
 }
 
 /// A new random installation id (a version 4 UUID). None when the system has no randomness.
@@ -437,10 +438,9 @@ pub fn tick_at(app: &mut SolveApp, unix: i64, now: f64, input: bool) {
     forget(app, now);
     let counted = solidcraft_engine::usage::take();
     if !on {
-        if off(app).is_some() {
-            app.usage.store.days.clear();
-            app.usage.sending = None;
-        }
+        // Off, or no OK yet: nothing is kept to send later.
+        app.usage.store.days.clear();
+        app.usage.sending = None;
         return;
     }
     if app.usage.store.install_id.is_empty() {
@@ -624,22 +624,27 @@ fn done(status: u16) -> bool {
 /// What the notice's buttons do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoticeAction {
-    /// Preferences › Privacy opens, where the switch is; the notice has done its job.
+    /// Sharing is fine: counting starts now.
+    Ok,
+    /// Preferences › Privacy opens, where the switch is. No answer: the notice stays.
     Settings,
-    /// Closed for good (the × does the same).
-    Dismiss,
+    /// The ×: hidden until the next start, still no answer, nothing counted.
+    Close,
 }
 
-/// The notice was displayed: counting runs from now on (unless turned off).
-pub fn notice_displayed(app: &mut SolveApp) {
-    app.usage.store.notice_shown = true;
+/// The person agreed to sharing (OK on the notice, or the switch turned on in Preferences ›
+/// Privacy): counting starts.
+pub fn agree(app: &mut SolveApp) {
+    app.usage.store.notice_ok = true;
+    app.preferences.usage_statistics = true;
 }
 
-/// A button of the notice was pressed: either way it is not shown again.
+/// A button of the notice was pressed.
 pub fn act(app: &mut SolveApp, action: NoticeAction) {
-    app.usage.store.notice_dismissed = true;
-    if action == NoticeAction::Settings {
-        crate::prefs::open_at(app, crate::prefs::PAGE_PRIVACY);
+    match action {
+        NoticeAction::Ok => agree(app),
+        NoticeAction::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_PRIVACY),
+        NoticeAction::Close => app.usage.notice_hidden = true,
     }
 }
 
@@ -649,30 +654,28 @@ pub fn notice_toast(app: &mut SolveApp, ui: &egui::Ui, free: egui::Rect) -> Opti
         return None;
     }
     use crate::ui_kit::toast::Action;
-    const ACTIONS: [NoticeAction; 2] = [NoticeAction::Dismiss, NoticeAction::Settings];
-    let labels = [app.tr("usage.dismiss").to_string(), app.tr("usage.settings").to_string()];
+    const ACTIONS: [NoticeAction; 2] = [NoticeAction::Settings, NoticeAction::Ok];
+    let labels = [app.tr("usage.settings").to_string(), app.tr("usage.ok").to_string()];
     let actions = [(labels[0].as_str(), Action::Secondary), (labels[1].as_str(), Action::Primary)];
-    // No countdown: it stays until Dismiss or Settings.
+    // No countdown: it stays until OK, or until sharing is turned off.
     let extras = crate::ui_kit::toast::Extras { close: Some("toast:usage_stats:close"), ..Default::default() };
     let text = app.tr("usage.notice").to_string();
     let toast = crate::viewport::paint_toast_ext(ui, free, text, crate::ui_kit::toast::Lead::Dot(false), &actions, extras)?;
-    notice_displayed(app);
     crate::scenario::publish_rect("toast:usage_stats", toast.rect);
     for (index, button) in toast.buttons.iter().enumerate() {
         crate::scenario::publish_rect(&format!("toast:usage_stats:button:{index}"), *button);
     }
-    let action = if toast.closed { Some(NoticeAction::Dismiss) } else { toast.clicked.and_then(|i| ACTIONS.get(i).copied()) };
+    let action = if toast.closed { Some(NoticeAction::Close) } else { toast.clicked.and_then(|i| ACTIONS.get(i).copied()) };
     if let Some(action) = action {
         act(app, action);
     }
     Some(toast.rect)
 }
 
-/// Whether the notice shows: at every start until it is dismissed or Settings is opened from it.
-/// It never goes by itself. Never while statistics are off (by the person, the organization or the
-/// environment).
+/// Whether the notice shows: at every start until the person chooses OK, or turns sharing off
+/// (in Preferences, by policy or by the environment). Closed with ×, it is back at the next start.
 pub fn notice_pending(app: &SolveApp) -> bool {
-    app.usage.hosted && off(app).is_none() && !app.usage.store.notice_dismissed
+    app.usage.hosted && off(app).is_none() && !app.usage.store.notice_ok && !app.usage.notice_hidden
 }
 
 #[cfg(test)]

@@ -301,6 +301,86 @@ fn tilted_non_circular_loop_with_many_curves_is_a_profile() {
 }
 
 #[test]
+fn planar_loop_of_over_two_thousand_segments_is_a_profile() {
+    // #19464: 11 curves of 9 fit points round a circle of R 50 in y = 0, 24 segments a span.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let (curves, fit, per_span) = (11usize, 9usize, 24usize);
+    let steps = curves * (fit - 1) * per_span;
+    let at = |k: usize| {
+        let t = 2.0 * std::f64::consts::PI * (k % steps) as f64 / steps as f64;
+        Vec3 { x: 50.0 * t.cos(), y: 0.0, z: 50.0 * t.sin() }
+    };
+    let per_curve = (fit - 1) * per_span;
+    for c in 0..curves {
+        let pts: Vec<Vec3> = (0..=per_curve).map(|s| at(c * per_curve + s)).collect();
+        sk.wires.push(wire(&format!("w{c}"), &pts));
+    }
+    assert!(sk.wires.iter().map(|w| w.pts.len() - 1).sum::<usize>() > 2000);
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    let expected = std::f64::consts::PI * 2500.0;
+    assert!((ps[0].area - expected).abs() < 0.01 * expected, "area {}", ps[0].area);
+}
+
+#[test]
+fn closed_triangle_survives_many_short_wires_elsewhere() {
+    // #19464 review: 100 short wires at z = 100 push the node count past `MAX_NODES`; the
+    // triangle in z = 0 is still a profile.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        let x = 10.0 + 3.0 * i as f64;
+        sk.wires.push(wire(&format!("s{i}"), &[v(x, 0.0, 100.0), v(x + 1.0, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
+fn closed_triangle_survives_many_wires_joined_to_it() {
+    // #19464 review: 100 wires from the triangle's corner (0,0,0) to points at z = 100 make one
+    // chain with over 100 key points; thinning dropped (0,1,0) and the z = 0 plane was lost.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        sk.wires.push(wire(&format!("s{i}"), &[v(0.0, 0.0, 0.0), v(10.0 + 3.0 * i as f64, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
+fn a_loop_after_a_long_open_wire_still_spans_its_plane() {
+    // A helix of 40 points comes first: the planes its own points span are more than the planes
+    // budget. A closed triangle wire after it, in a plane of its own, is still found, as the
+    // curves' key points span planes before every other point does.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let helix: Vec<Vec3> = (0..40)
+        .map(|i| {
+            let t = f64::from(i) * 0.3;
+            Vec3 { x: 10.0 * t.cos(), y: 10.0 * t.sin(), z: 2.0 * t }
+        })
+        .collect();
+    sk.wires.push(wire("helix", &helix));
+    let a = Vec3 { x: 50.0, y: 0.0, z: 30.0 };
+    sk.wires.push(wire("tri", &[a, Vec3 { x: 60.0, y: 0.0, z: 30.0 }, Vec3 { x: 55.0, y: 8.0, z: 30.0 }, a]));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert!(
+        ps.iter().any(|p| p.outer_curves == ["tri"] && (p.area - 40.0).abs() < 1e-6),
+        "the triangle (area 40): {:?}",
+        ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();

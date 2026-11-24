@@ -17,9 +17,15 @@ use crate::SolveApp;
 pub(crate) fn snapshot(app: &mut SolveApp) -> Value {
     let revision = app.session.design_revision();
     let document_id = app.session.document_id.clone();
-    let busy = app.preview.busy;
-    let error = app.preview.error.clone();
-    let pose = app.preview.pose(revision).map(|pose| {
+    let (busy, error, pose) = if crate::joint_drag::active(app) {
+        let (pose, error) = crate::joint_drag::pose_snapshot(app, revision).unwrap_or((None, None));
+        (false, error.map(str::to_owned), pose)
+    } else {
+        let busy = app.preview.busy;
+        let error = app.preview.error.clone();
+        (busy, error, app.preview.pose(revision))
+    };
+    let pose = pose.map(|pose| {
         json!({
             "source": pose.source,
             "generation": pose.generation,
