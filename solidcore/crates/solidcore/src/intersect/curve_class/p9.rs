@@ -365,7 +365,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     let reach = self.source_reach_in(k, &*geometry, working)?;
                     self.set_source_reach(reach);
                 }
-                self.edge_solutions(
+                let (mut solutions, tolerance) = self.edge_solutions(
                     k,
                     &*geometry,
                     working,
@@ -374,7 +374,30 @@ impl<O: ClassObject> CurveClassification<O> {
                     edge,
                     options,
                     &mut source_cache,
-                )?
+                )?;
+                // not upstream (WR-647, #18064): a face/face curve's tangency range at an
+                // end vertex of the edge is the one contact at that vertex
+                if self.tangency_partner().is_some() {
+                    for solution in &mut solutions {
+                        // the witness only ever adds evidence: where it cannot run, the
+                        // classifier's own range stands; a cancellation stops the work
+                        match super::witness::tangency_point(
+                            k,
+                            &*geometry,
+                            self,
+                            working,
+                            source_handle,
+                            edge,
+                            solution,
+                            tolerance,
+                        ) {
+                            Ok(Some(point)) => *solution = point,
+                            Err(err) if err.is_cancelled() => return Err(err),
+                            Ok(None) | Err(_) => {}
+                        }
+                    }
+                }
+                (solutions, tolerance)
             };
             if !solutions.is_empty() {
                 // the insertion's surf/surf/surf refinement may edit the source curve

@@ -48,11 +48,14 @@ use crate::blend::fillet_corner::p1::{
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_exact::{classify_exact_blend, BlendQuadric, BlendSpine, QuadricKind};
-use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId, FilletVertexType};
+use crate::blend::fillet_geom::p1::{
+    FilletBrep, FilletEdgeType, FilletGeomId, FilletSolverId, FilletVertexType,
+};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, FilletSetUp, SolverFailure};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
@@ -65,7 +68,7 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
-use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
+use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 pub mod ball;
 pub mod chamfer;
@@ -75,11 +78,136 @@ pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
 pub mod rollover;
+pub mod separate_ends;
 pub mod setback;
 pub mod swept;
 
 const OP_CLASSIFY: &str = "blend::blend_corner::classify";
 const OP_EXACT: &str = "blend::blend_corner::exact_mitre_curve";
+
+// The typed failures of the blend corner and its Swept turn and End (`swept`, `end`), each
+// with the status of the `NER` or `SE` it replaces.
+
+/// A defect of `op` where something the kernel built or just checked is missing (`why`),
+/// with the `SM_ERR_NULL_POINTER` status of the `NER` it replaces.
+#[track_caller]
+fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// The [`Failure`] of `failure` at `entity` where there is one.
+#[track_caller]
+fn located(op: &'static str, failure: BlendFailure, entity: Option<EntityRef>) -> Failure {
+    let failure = Failure::new(op, failure);
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+}
+
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), about `entity` where the check reads one, with the
+/// default status of `input` ([`CornerInput::upstream_status`]). The entry points are
+/// public and take a caller's corner.
+#[track_caller]
+fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+    located(
+        op,
+        BlendFailure::CornerInputInvalid { input, entity },
+        entity,
+    )
+    .into_error()
+}
+
+/// [`bad_input`] with status `status`, where the site reports `input` otherwise than its
+/// default.
+#[track_caller]
+fn bad_input_with(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+    status: i32,
+) -> SolidError {
+    located(
+        op,
+        BlendFailure::CornerInputInvalid { input, entity },
+        entity,
+    )
+    .with_status(status)
+    .into_error()
+}
+
+/// Invalid input to `op`: a link of the caller's fillet structures that the corner reads is
+/// not there (`part`), about `entity` where the check reads one; status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+    located(op, BlendFailure::FilletSetUpInvalid(part), entity).into_error()
+}
+
+/// Invalid input to `op`: the caller's fillet solver set-up lacks what the corner reads
+/// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
+/// the cause's, `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+    located(op, BlendFailure::Solver(cause), entity).into_error()
+}
+
+/// A face of the caller's body that the corner reads, `face`, has no surface: the caller's
+/// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
+
+/// An edge use of the caller's body or fillet B-rep, `edgeuse`, has no edge: the caller's
+/// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    SolidError::blend_at(
+        op,
+        BlendFailure::EdgeUseWithoutEdge,
+        EntityRef::Edgeuse(edgeuse),
+    )
+}
+
+/// An edge of the caller's body, `edge`, has no curve: the caller's input,
+/// [`BlendFailure::EdgeWithoutCurve`] at the edge, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_without_curve(op: &'static str, edge: EdgeId) -> SolidError {
+    SolidError::blend_at(op, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge))
+}
+
+/// An edge use of the caller's body, `edgeuse`, has no face: the caller's input,
+/// [`SolverFailure::EdgeUseWithoutFace`] at the edge use, status `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn edge_use_without_face(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+    solver_input(
+        op,
+        SolverFailure::EdgeUseWithoutFace,
+        Some(EntityRef::Edgeuse(edgeuse)),
+    )
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
+}
+
+/// [`unbuildable`] with status `status`, where the site reports `step` otherwise.
+#[track_caller]
+fn unbuildable_with(op: &'static str, step: CornerStep, status: i32) -> SolidError {
+    Failure::new(op, BlendFailure::CornerUnbuildable(step))
+        .with_status(status)
+        .into_error()
+}
 
 /// `SmBlendCornerEvent`: the corner events the blend corner builds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -97,7 +225,7 @@ pub enum BlendCornerEvent {
         /// The two pieces of the original rim that meet at this contact.
         rim: [EdgeId; 2],
         /// The common cliff face bounded by both pieces.
-        cliff: crate::topology::FaceId,
+        cliff: FaceId,
     },
     /// `SM_BCE_BALL` (the fork's 79d4763): three rounds of one radius and convexity, the
     /// common ball's sphere between them ([`ball`]).
@@ -278,8 +406,9 @@ impl BlendCorner {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without a vertex (`NER`) or for a ring edge use without
-/// an edge; those of the continuity, concavity and tangency tests.
+/// [`BlendFailure::NoVertexGiven`] without a vertex (`NER`),
+/// [`BlendFailure::EdgeUseWithoutEdge`] for a ring edge use without an edge (status
+/// `SM_ERR_NULL_POINTER`); those of the continuity, concavity and tangency tests.
 pub fn classify(
     k: &Kernel,
     b: &mut Brep,
@@ -291,15 +420,9 @@ pub fn classify(
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
     let vertex =
-        vertex.ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the corner's vertex"))?;
-    if solver_eus.len() != 2 || (all_eus.len() != 3 && all_eus.len() != 4) {
+        vertex.ok_or_else(|| SolidError::blend(OP_CLASSIFY, BlendFailure::NoVertexGiven))?;
+    let (&[eu1_, eu2_], 3 | 4) = (solver_eus, all_eus.len()) else {
         return Ok(out);
-    }
-    let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
-        return Err(SolidError::blend_missing(
-            OP_CLASSIFY,
-            "the corner's two blended edge uses",
-        ));
     };
     // a Join: the blends continue each other, or, at a face corner of the other
     // convexity, meet at 5 degrees or less (they blend there: no mitre so thin)
@@ -400,8 +523,8 @@ pub fn join_tolerance_deg(size: f64, tol: f64, tangency_tol_deg: f64) -> f64 {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for a ring edge use without an edge; those of the tangency
-/// tests.
+/// [`BlendFailure::EdgeUseWithoutEdge`] for a ring edge use without an edge (status
+/// `SM_ERR_NULL_POINTER`); those of the tangency tests.
 fn side_edges_tangent(
     k: &Kernel,
     b: &mut Brep,
@@ -420,9 +543,7 @@ fn side_edges_tangent(
         if blended.contains(&e) {
             continue;
         }
-        let e = e.ok_or_else(|| {
-            SolidError::blend_missing(OP_CLASSIFY, "an unblended edge use's edge")
-        })?;
+        let e = e.ok_or_else(|| edge_use_without_edge(OP_CLASSIFY, eu))?;
         if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
             return Ok(false);
         }
@@ -465,7 +586,10 @@ fn foot_on_surface(
         let d = surface.evaluate(k, uv, 1, 1, flags)?;
         let at = |i: usize, j: usize| {
             d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
-                SolidError::blend_missing(OP_EXACT, "a derivative of the surface's evaluation")
+                missing_defect(
+                    OP_EXACT,
+                    "the surface's evaluation to first order returned fewer derivatives than asked",
+                )
             })
         };
         let r = point - at(0, 0)?;
@@ -530,6 +654,110 @@ fn rational_span(
     })
 }
 
+/// One round of [`exact_mitre_curve`] at the rails' crossing X: its fillet geometry, the
+/// ball's centre at X, the spine's unit direction and the round's radius.
+struct MitreRound {
+    geom: FilletGeomId,
+    centre: Point3,
+    axis: Vec3,
+    radius: f64,
+}
+
+/// The round of [`exact_mitre_curve`] that the mitre's edge use `eu` spans, at the rails'
+/// crossing `x`: a constant circular round on a straight spine (a cylinder) whose offsets
+/// meet at X within `tol`. `None` where it is not one.
+///
+/// # Errors
+///
+/// [`FilletSetUp::EdgeUseGeom`] where `eu` spans no fillet geometry,
+/// [`SolverFailure::FilletGeomWithoutSolver`] where that has no solver,
+/// [`FilletSetUp::RailEndVertexUse`] without its vertex use at X,
+/// [`FilletSetUp::RailOffsetSurface`] without an offset surface and
+/// [`SolverFailure::FilletGeomWithoutCenterLine`] without a centre line (the caller's
+/// fillet B-rep, status `SM_ERR_NULL_POINTER`); those of the classification and the
+/// evaluations.
+fn mitre_round(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &FilletBrep,
+    solvers: &mut dyn MitreSolvers,
+    x: VertexId,
+    eu: EdgeuseId,
+    tol: f64,
+) -> Result<Option<MitreRound>> {
+    let g = pseudo.fillet_edgeuse(eu)?.fillet_geom().ok_or_else(|| {
+        bad_setup(
+            OP_EXACT,
+            FilletSetUp::EdgeUseGeom,
+            Some(EntityRef::Edgeuse(eu)),
+        )
+    })?;
+    let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(|| {
+        solver_input(
+            OP_EXACT,
+            SolverFailure::FilletGeomWithoutSolver { fillet_geom: g },
+            None,
+        )
+    })?;
+    let vu = pseudo
+        .vu_at_rail_end(x, Some(g), None, None)?
+        .ok_or_else(|| {
+            bad_setup(
+                OP_EXACT,
+                FilletSetUp::RailEndVertexUse,
+                Some(EntityRef::Vertex(x)),
+            )
+        })?;
+    let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
+    let ops = solvers.ops(solver_id)?;
+    let blend = classify_exact_blend(&mut *ops, k, target, &tsect)?;
+    // Open gap: a round on a circular spine (a torus) has no exact mitre here yet; the
+    // mitre is then the rounds' certified SSI curve
+    let circular =
+        ops.solver().fsg.as_ref().is_some_and(|f| {
+            f.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular
+        });
+    if blend.spine != BlendSpine::Line || !circular {
+        return Ok(None);
+    }
+    let solver = ops.solver();
+    let mut on = [Point3::default(); 2];
+    for ((kk, side), slot) in [SrfIndex::First, SrfIndex::Second]
+        .into_iter()
+        .enumerate()
+        .zip(&mut on)
+    {
+        let offset = pseudo
+            .geom(g)?
+            .offset_surface(kk, Some(solver))?
+            .ok_or_else(|| bad_setup(OP_EXACT, FilletSetUp::RailOffsetSurface, None))?;
+        *slot = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
+    }
+    let [on0, on1] = on;
+    if on0.distance(on1) > tol {
+        return Ok(None);
+    }
+    let spine = pseudo.geom(g)?.center_line_curve().ok_or_else(|| {
+        solver_input(
+            OP_EXACT,
+            SolverFailure::FilletGeomWithoutCenterLine { fillet_geom: g },
+            None,
+        )
+    })?;
+    let Some((_, dir)) = spine.is_line(10, tol)? else {
+        return Ok(None);
+    };
+    let Ok(dir) = dir.unitize() else {
+        return Ok(None);
+    };
+    Ok(Some(MitreRound {
+        geom: g,
+        centre: on0,
+        axis: dir,
+        radius: blend.radius,
+    }))
+}
+
 /// `SmBlendCorner::ExactMitreCurve`: the mitre `mitre` between the rails' crossing X and
 /// the side vertex S of `corner` (a Mitre turn) as the rounds' exact plane section, where
 /// they are two cylinders of one radius r whose axes meet (at C) and the plane they are
@@ -547,9 +775,15 @@ fn rational_span(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for missing topology or geometry the fork dereferences
-/// (`NER`); those of the evaluations, the classification, the drop and the curve
-/// construction.
+/// A [`BlendFailure::FilletSetUpInvalid`] cause where the mitre has no two vertices, no
+/// primary edge use or mate, the side vertex is not classified to a side edge use or that
+/// has no radial edge use, or the crossing is not classified to a face; those of the rounds
+/// (`mitre_round`); [`BlendFailure::FaceHasNoSurface`],
+/// [`SolverFailure::EdgeUseWithoutFace`], [`BlendFailure::EdgeUseWithoutEdge`],
+/// [`BlendFailure::EdgeWithoutCurve`] and [`SolverFailure::FilletGeomWithoutSurface`] for
+/// the body's faces, side edge and the rounds' surfaces (each the caller's input, status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`); those of the evaluations, the classification,
+/// the drop and the curve construction.
 #[allow(clippy::too_many_lines)] // one fork routine
 pub fn exact_mitre_curve(
     k: &Kernel,
@@ -559,14 +793,15 @@ pub fn exact_mitre_curve(
     mitre: EdgeId,
     solvers: &mut dyn MitreSolvers,
 ) -> Result<bool> {
-    let nul = || {
-        SolidError::blend_missing(
+    let no_ends = || {
+        bad_setup(
             OP_EXACT,
-            "topology or geometry the mitre curve is built from",
+            FilletSetUp::EdgeVertices,
+            Some(EntityRef::Edge(mitre)),
         )
     };
-    let start = edge::vertex(pseudo.brep(), mitre)?.ok_or_else(nul)?;
-    let end = edge::other_vertex(pseudo.brep(), mitre, Some(start))?.ok_or_else(nul)?;
+    let start = edge::vertex(pseudo.brep(), mitre)?.ok_or_else(no_ends)?;
+    let end = edge::other_vertex(pseudo.brep(), mitre, Some(start))?.ok_or_else(no_ends)?;
     let from_s = pseudo.fillet_vertex(start)?.vertex_type == FilletVertexType::RailXEdgeuse;
     let (s, x) = if from_s { (start, end) } else { (end, start) };
     {
@@ -580,73 +815,36 @@ pub fn exact_mitre_curve(
             return Ok(false);
         }
     }
-    let prim = eu1::primary_edgeuse(pseudo.brep(), mitre)?.ok_or_else(nul)?;
-    let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(nul)?;
+    let prim = eu1::primary_edgeuse(pseudo.brep(), mitre)?.ok_or_else(|| {
+        bad_setup(
+            OP_EXACT,
+            FilletSetUp::PrimaryEdgeUse,
+            Some(EntityRef::Edge(mitre)),
+        )
+    })?;
+    let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(|| {
+        bad_setup(
+            OP_EXACT,
+            FilletSetUp::PrimaryEdgeUseMate,
+            Some(EntityRef::Edgeuse(prim)),
+        )
+    })?;
     let eus = [prim, mate];
     let tol = corner.approx_tol_3d;
 
     // both rounds constant circular ones on straight spines (cylinders), of one radius; the
     // balls' centres at X and the spines' directions
-    let mut centre = [Point3::default(); 2];
-    let mut axis = [Vec3::default(); 2];
-    let mut radius = [0.0_f64; 2];
-    let mut geoms = [None; 2];
-    for ii in 0..2 {
-        let eu = eus.get(ii).copied().ok_or_else(nul)?;
-        let g = pseudo.fillet_edgeuse(eu)?.fillet_geom().ok_or_else(nul)?;
-        if let Some(slot) = geoms.get_mut(ii) {
-            *slot = Some(g);
-        }
-        let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(nul)?;
-        let vu = pseudo
-            .vu_at_rail_end(x, Some(g), None, None)?
-            .ok_or_else(nul)?;
-        let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
-        let ops = solvers.ops(solver_id)?;
-        let blend = classify_exact_blend(&mut *ops, k, target, &tsect)?;
-        // Open gap: a round on a circular spine (a torus) has no exact mitre here yet; the
-        // mitre is then the rounds' certified SSI curve
-        let circular = ops.solver().fsg.as_ref().is_some_and(|f| {
-            f.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular
-        });
-        if blend.spine != BlendSpine::Line || !circular {
-            return Ok(false);
-        }
-        let solver = ops.solver();
-        let mut on = [Point3::default(); 2];
-        for (kk, side) in [SrfIndex::First, SrfIndex::Second].into_iter().enumerate() {
-            let offset = pseudo
-                .geom(g)?
-                .offset_surface(kk, Some(solver))?
-                .ok_or_else(nul)?;
-            let p = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
-            if let Some(slot) = on.get_mut(kk) {
-                *slot = p;
-            }
-        }
-        let [on0, on1] = on;
-        if on0.distance(on1) > tol {
-            return Ok(false);
-        }
-        let spine = pseudo.geom(g)?.center_line_curve().ok_or_else(nul)?;
-        let Some((_, dir)) = spine.is_line(10, tol)? else {
-            return Ok(false);
-        };
-        let Ok(dir) = dir.unitize() else {
-            return Ok(false);
-        };
-        if let (Some(c), Some(a), Some(r)) =
-            (centre.get_mut(ii), axis.get_mut(ii), radius.get_mut(ii))
-        {
-            *c = on0;
-            *a = dir;
-            *r = blend.radius;
-        }
-    }
-    let [geom0, geom1] = geoms;
-    let geoms = [geom0.ok_or_else(nul)?, geom1.ok_or_else(nul)?];
+    let Some(round0) = mitre_round(k, target, pseudo, solvers, x, prim, tol)? else {
+        return Ok(false);
+    };
+    let Some(round1) = mitre_round(k, target, pseudo, solvers, x, mate, tol)? else {
+        return Ok(false);
+    };
+    let geoms = [round0.geom, round1.geom];
+    let centre = [round0.centre, round1.centre];
+    let axis = [round0.axis, round1.axis];
     // Open gap: two cylinders of unequal radii meet in a quartic, not a plane conic
-    let [r0, r1] = radius;
+    let [r0, r1] = [round0.radius, round1.radius];
     let dr = r0;
     if (r1 - dr).abs() > tol || dr <= tol {
         return Ok(false);
@@ -674,29 +872,49 @@ pub fn exact_mitre_curve(
     let Some(EntityRef::Edgeuse(side_eu)) =
         pseudo.fillet_vertex(s)?.point_classification().object()
     else {
-        return Err(nul());
+        return Err(bad_setup(
+            OP_EXACT,
+            FilletSetUp::PointClassEdgeUse,
+            Some(EntityRef::Vertex(s)),
+        ));
     };
-    let side_radial = eu1::radial(target, side_eu)?.ok_or_else(nul)?;
-    let walls = [eu1::face(target, side_eu)?, eu1::face(target, side_radial)?];
+    let side_radial = eu1::radial(target, side_eu)?.ok_or_else(|| {
+        bad_setup(
+            OP_EXACT,
+            FilletSetUp::RadialEdgeUse,
+            Some(EntityRef::Edgeuse(side_eu)),
+        )
+    })?;
+    let walls = [
+        (side_eu, eu1::face(target, side_eu)?),
+        (side_radial, eu1::face(target, side_radial)?),
+    ];
     let Some(EntityRef::Face(common)) = pseudo.fillet_vertex(x)?.point_classification().object()
     else {
-        return Err(nul());
+        return Err(bad_setup(
+            OP_EXACT,
+            FilletSetUp::PointClassFace,
+            Some(EntityRef::Vertex(x)),
+        ));
     };
     let plane_of = |f| -> Result<BlendQuadric> {
-        let surface = face2::surface(target, f)?.ok_or_else(nul)?;
+        let surface =
+            face2::surface(target, f)?.ok_or_else(|| face_without_surface(OP_EXACT, f))?;
         BlendQuadric::from_surface(k, surface, face2::uv_domain(target, f)?.mid(), tol)
     };
     let common_plane = plane_of(common)?;
     let mut wall_planes = [BlendQuadric::default(), BlendQuadric::default()];
-    for (slot, wall) in wall_planes.iter_mut().zip(walls) {
-        let wall = wall.ok_or_else(nul)?;
+    for (slot, (wall_eu, wall)) in wall_planes.iter_mut().zip(walls) {
+        let wall = wall.ok_or_else(|| edge_use_without_face(OP_EXACT, wall_eu))?;
         *slot = plane_of(wall)?;
         if slot.kind != QuadricKind::Plane {
             return Ok(false);
         }
     }
-    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
-    let side_curve = edge::curve(target, side_edge)?.ok_or_else(nul)?;
+    let side_edge =
+        eu1::edge(target, side_eu)?.ok_or_else(|| edge_use_without_edge(OP_EXACT, side_eu))?;
+    let side_curve =
+        edge::curve(target, side_edge)?.ok_or_else(|| edge_without_curve(OP_EXACT, side_edge))?;
     if common_plane.kind != QuadricKind::Plane {
         return Ok(false);
     }
@@ -708,12 +926,7 @@ pub fn exact_mitre_curve(
     };
     let x_pnt = foot(c, &common_plane);
     let mut on_edge = [Point3::default(); 2];
-    for ii in 0..2 {
-        let (Some(wall), Some(a), Some(slot)) =
-            (wall_planes.get(ii), axis.get(ii), on_edge.get_mut(ii))
-        else {
-            return Err(nul());
-        };
+    for ((wall, a), slot) in wall_planes.iter().zip(&axis).zip(&mut on_edge) {
         // the rail on wall ii, Q + s a, meets the edge's line, P + t e
         let q = foot(c, wall);
         let qp = q - edge_pt;
@@ -774,17 +987,21 @@ pub fn exact_mitre_curve(
     }
     let um = u - a * (u.dot(m) / am);
     let wm = w - a * (w.dot(m) / am);
-    let xs = [1.0, 1.0, dt.cos()];
-    let ys = [0.0, (0.5 * dt).tan(), dt.sin()];
+    // the arc's control points (x, y in U, W) and weights, from X; reversed from S, as the
+    // curve runs as the edge does
+    let mut arc = [
+        (1.0, 0.0, 1.0),
+        (1.0, (0.5 * dt).tan(), (0.5 * dt).cos()),
+        (dt.cos(), dt.sin(), 1.0),
+    ];
+    if from_s {
+        arc.reverse();
+    }
     let mut points = Vec::new();
     let mut weights = Vec::new();
-    for jj in 0..3_usize {
-        let kk = if from_s { 2 - jj } else { jj }; // the curve runs as the edge does
-        let (Some(&px), Some(&py)) = (xs.get(kk), ys.get(kk)) else {
-            return Err(nul());
-        };
+    for (px, py, weight) in arc {
         points.push(c + (um * px + wm * py) * dr);
-        weights.push(if kk == 1 { (0.5 * dt).cos() } else { 1.0 });
+        weights.push(weight);
     }
     let curve = rational_span(
         3,
@@ -800,27 +1017,28 @@ pub fn exact_mitre_curve(
     // Its UV curves on the two rounds, exact: the rational cubic with denominator W(s) (c s
     // + d), read off the round's own parameters at s = 0, 1/2, 1, held where the round's
     // surface at it is the mitre at s = 1/4, 3/4, 1/8, 7/8 (to 1e-12 of the size)
-    let ws = [
-        weights.first().copied().ok_or_else(nul)?,
-        weights.get(1).copied().ok_or_else(nul)?,
-        weights.get(2).copied().ok_or_else(nul)?,
-    ];
+    let ws = arc.map(|(_, _, weight)| weight);
     let size = 1.0 + x_pnt.max_dimension() + dr;
     let mut uvs: [Option<BSplineCurve>; 2] = [None, None];
     for (ii, &g) in geoms.iter().enumerate() {
         let surface = pseudo
             .geom(g)?
             .fillet_surface(None)?
-            .ok_or_else(nul)?
+            .ok_or_else(|| {
+                solver_input(
+                    OP_EXACT,
+                    SolverFailure::FilletGeomWithoutSurface { fillet_geom: g },
+                    None,
+                )
+            })?
             .clone();
         // a start for the feet: the round's own (fitted) drop of the mitre
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         let dropped = surface
             .drop_curve::<NoObject>(k, &domain, &curve, &curve_ivl, tol, false, None, true)?;
-        if dropped.uv_curves.len() != 1 || dropped.max_drop_to_surf > tol {
+        let ([drop], false) = (dropped.uv_curves.as_slice(), dropped.max_drop_to_surf > tol) else {
             return Ok(false); // not on that round: its certified intersection
-        }
-        let drop = dropped.uv_curves.first().ok_or_else(nul)?;
+        };
         let at_s = [0.0, 0.5, 1.0, 0.25, 0.75, 0.125, 0.875];
         let mut uv_at = [Point2::default(); 7];
         let mut on = [Point3::default(); 7];
@@ -874,12 +1092,7 @@ pub fn exact_mitre_curve(
             let along_c = bernstein_product_21(n, l);
             let across_c = bernstein_product_21(ws, num);
             let mut uv_points = Vec::new();
-            for j in 0..4 {
-                let (Some(&dj), Some(&aj), Some(&cj)) =
-                    (den.get(j), along_c.get(j), across_c.get(j))
-                else {
-                    return Err(nul());
-                };
+            for ((&dj, &aj), &cj) in den.iter().zip(&along_c).zip(&across_c) {
                 let da = aj / dj;
                 let dc = cj / dj;
                 uv_points.push(if across == 1 {
@@ -897,13 +1110,12 @@ pub fn exact_mitre_curve(
                 [curve_ivl.min(), curve_ivl.max()],
             )?;
             let mut holds = true;
-            for (kk, &s_at) in at_s.iter().enumerate() {
+            for (&s_at, &want) in at_s.iter().zip(&on) {
                 if !holds {
                     break;
                 }
                 let w_pt = try_uv.evaluate_point(try_uv.natural_interval().evaluate(s_at))?;
                 let on_round = surface.evaluate_point(k, Point2::new(w_pt.x, w_pt.y))?;
-                let want = on.get(kk).copied().ok_or_else(nul)?;
                 holds = on_round.distance(want) <= 1e-12 * size;
             }
             if holds {
@@ -946,23 +1158,19 @@ pub fn exact_mitre_curve(
 mod tests {
     use super::*;
 
-    /// A classification without a vertex is a typed `Missing` failure, with the null-pointer
-    /// status the bare status had.
+    /// A classification without a vertex is the caller's input, no vertex given, with the
+    /// null-pointer status the bare status had.
     #[test]
-    fn a_corner_without_a_vertex_is_a_typed_missing_failure() {
+    fn a_corner_without_a_vertex_is_no_vertex_given() {
         let mut k = Kernel::default();
         let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
             .unwrap();
         let err = classify(&k, &mut b, None, &[], &[], 1.0, 1.0).unwrap_err();
-        assert_eq!(
-            err.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the corner's vertex"
-            ))
-        );
+        assert_eq!(err.blend_failure(), Some(&BlendFailure::NoVertexGiven));
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
             crate::error::upstream_status(&err),
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            Some(SM_ERR_NULL_POINTER)
         );
     }
 

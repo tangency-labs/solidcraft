@@ -1549,6 +1549,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1786,6 +1787,16 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
         let Ok(mut v) = serde_json::to_value(&f.kind) else { continue };
         if replace_body_name(&mut v, &old, name, false, 0) {
             match serde_json::from_value(v) {
@@ -1859,7 +1870,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }

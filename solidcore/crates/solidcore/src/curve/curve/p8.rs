@@ -141,7 +141,8 @@ use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
 use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{native_failure, Result, SolidError};
+use crate::error::curve::CurveFailure;
+use crate::error::{native_failure, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
@@ -351,6 +352,7 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
                 // solution stays where upstream puts it.
+                k.work_counters.add_contact_stretch_certification();
                 let Some(within) = native_failure(curves_stay_within(
                     k,
                     end_curve,
@@ -740,11 +742,28 @@ fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Opti
     memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
 }
 
+/// Why a cache in this module's slots has a tree with a top node: the slots are crate
+/// private and filled only by [`build_cache`], whose build sets the tree, with its top
+/// node, whenever it succeeds.
+const BUILT_CACHE_HAS_TREE: &str = "the curve's cache, filled only by build_cache, has a \
+     tree with its top node: the build sets both whenever it succeeds";
+
+/// The kernel's defect for a built cache without its tree or top node, with the `NER`
+/// status upstream reports.
+fn built_cache_defect() -> SolidError {
+    Failure::new(
+        OP_GCI,
+        CurveFailure::Defect {
+            why: BUILT_CACHE_HAS_TREE,
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache
-        .tree()
-        .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the curve cache's tree"))
+    cache.tree().ok_or_else(built_cache_defect)
 }
 
 /// `GetOrCreateObjectCache` for a curve (`NER` on failure). `zone_tol_3d` is the zone
@@ -767,7 +786,9 @@ fn build_cache<O: SolutionObject>(
     ) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::curve_missing(OP_GCI, "the curve's cache")),
+        Err(e) => Err(Failure::new(OP_GCI, CurveFailure::CacheNotBuilt)
+            .caused_by(e)
+            .into_error()),
     }
 }
 
@@ -1100,23 +1121,17 @@ impl Curve {
         // get target curves' caches (kept in the caller's slots, see
         // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
         // caller resolved one
-        if cache1_slot.is_none() {
-            *cache1_slot = Some(build_cache(k, self, h_this, zone_tols[0])?);
-        }
-        if !same_curve && cache2_slot.is_none() {
-            *cache2_slot = Some(build_cache(k, other, h_other, zone_tols[1])?);
-        }
-        let cache1 = cache1_slot
-            .as_mut()
-            .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the first curve's cache"))?;
+        let cache1 = match cache1_slot {
+            Some(c) => c,
+            slot @ None => slot.insert(build_cache(k, self, h_this, zone_tols[0])?),
+        };
         let mut cache2_own = if same_curve {
             None
         } else {
-            Some(
-                cache2_slot
-                    .as_mut()
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "the second curve's cache"))?,
-            )
+            Some(match cache2_slot {
+                Some(c) => c,
+                slot @ None => slot.insert(build_cache(k, other, h_other, zone_tols[1])?),
+            })
         };
 
         // get curve spatial decomposition trees from each cache
@@ -1125,13 +1140,8 @@ impl Curve {
             let tree2 = cache_tree(cache2_own.as_deref().unwrap_or(cache1))?;
 
             // no work - topNode bounding boxes are disjoint
-            let root1 =
-                tree1.node(tree1.top_node().ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "the first tree's top node")
-                })?)?;
-            let root2 = tree2.node(tree2.top_node().ok_or_else(|| {
-                SolidError::curve_missing(OP_GCI, "the second tree's top node")
-            })?)?;
+            let root1 = tree1.node(tree1.top_node().ok_or_else(built_cache_defect)?)?;
+            let root2 = tree2.node(tree2.top_node().ok_or_else(built_cache_defect)?)?;
             let mut bbox = root1.bbox;
             bbox.expand_absolute(dist_tol);
             if bbox.are_disjoint(&root2.bbox, 0.0) {
@@ -2190,11 +2200,11 @@ impl Curve {
 
                 // Ok, one sol is much better than the other. Check the distances at
                 // both solutions and at the midpoint.
-                let curve_a = named
-                    .curve_of(sol_a.objects[0])
-                    .ok_or_else(|| SolidError::curve_missing(OP_GCI, "a solution's first curve"))?;
+                let curve_a = named.curve_of(sol_a.objects[0]).ok_or_else(|| {
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 0 })
+                })?;
                 let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
-                    SolidError::curve_missing(OP_GCI, "a solution's second curve")
+                    SolidError::curve(OP_GCI, CurveFailure::SolutionWithoutCurve { object: 1 })
                 })?;
                 // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
                 // 8311f8e)

@@ -2968,6 +2968,13 @@ pub fn face_intersect_breps_cached(
             uv2: &uv_curves2,
             edited: false,
         };
+        // (WR-647) each classification names the other face, whose surface with the
+        // classifying face's neighbours across an edge decides a tangency on that edge
+        cc1.set_tangency_partner(Some(IntersectObject::Topology(
+            EntityRef::Face(other),
+            other_side,
+        )));
+        cc2.set_tangency_partner(Some(IntersectObject::Topology(EntityRef::Face(f), false)));
         qf2::curve_on_classify_mut_with_seams(
             k,
             f,
@@ -2991,6 +2998,8 @@ pub fn face_intersect_breps_cached(
             true,
             face_seams[1],
         )?;
+        cc1.set_tangency_partner(None);
+        cc2.set_tangency_partner(None);
 
         let extract = ExtractOptions {
             uv_curves1: true,

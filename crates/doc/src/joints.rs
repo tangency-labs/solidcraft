@@ -798,6 +798,11 @@ pub struct Joint {
 }
 
 impl Joint {
+    /// Whether either side of the joint refers to one of these occurrences.
+    pub fn uses_any_occurrence(&self, occurrences: &BTreeSet<u64>) -> bool {
+        !occurrences.is_empty() && self.a.occurrences().chain(self.b.occurrences()).any(|o| occurrences.contains(&o))
+    }
+
     /// Whether its values start where its parts are when it is made or changed, so B moves no
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
@@ -817,11 +822,15 @@ impl Joint {
     }
 }
 
-/// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
-/// the angle and each value (angles or lengths as the joint's values are). A number typed in
-/// place of one drops it.
+/// Expressions a joint's numbers follow (over the design's parameters): the lateral offsets, the
+/// axial offset (lengths), the angle and each value (angles or lengths as the joint's values are).
+/// A number typed in place of one drops it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointExprs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -837,7 +846,12 @@ pub struct JointExprs {
 
 impl JointExprs {
     pub fn is_empty(&self) -> bool {
-        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none) && self.limits.iter().all(|l| l == &[None, None])
+        self.offset_x.is_none()
+            && self.offset_y.is_none()
+            && self.offset.is_none()
+            && self.angle.is_none()
+            && self.values.iter().all(Option::is_none)
+            && self.limits.iter().all(|l| l == &[None, None])
     }
 
     /// The expressions the minimum and maximum of value `i`'s limits follow.
@@ -902,14 +916,23 @@ impl<'a> Params<'a> {
     }
 }
 
-/// A joint's offset, angle and values worked out from its expressions (those without one keep
-/// their numbers), or why one can't be: an unknown name, a wrong unit, or a number too large.
-pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
+/// A joint's lateral offsets, axial offset, angle and values worked out from its expressions
+/// (those without one keep their numbers), or why one can't be: an unknown name, a wrong unit, or
+/// a number too large.
+pub fn expressed(params: &Params, j: &Joint) -> Result<([f64; 2], f64, f64, Vec<f64>)> {
     let eval = |e: &str, kind: crate::expr::Kind, what: &str| -> Result<f64> {
         let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {what} `{e}`: {err}", j.name)))?;
         if v.is_finite() && v.abs() < MAX_EXPR_VALUE { Ok(v) } else { Err(DocError::Invalid(format!("joint {}: {what} `{e}` gives {v}", j.name))) }
     };
     let x = &j.exprs;
+    let offset_x = match &x.offset_x {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_x")?,
+        None => j.offset_xy[0],
+    };
+    let offset_y = match &x.offset_y {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_y")?,
+        None => j.offset_xy[1],
+    };
     let offset = match &x.offset {
         Some(e) => eval(e, crate::expr::Kind::Length, "offset")?,
         None => j.offset,
@@ -931,7 +954,7 @@ pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
             *slot = v;
         }
     }
-    Ok((offset, angle, values))
+    Ok(([offset_x, offset_y], offset, angle, values))
 }
 
 /// A joint's limits worked out from their expressions (an end without one keeps its number), or
@@ -1177,6 +1200,8 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &self.joints {
             let x = &j.exprs;
+            out.extend(x.offset_x.as_deref().map(|e| (j.id, "offset_x".to_string(), e)));
+            out.extend(x.offset_y.as_deref().map(|e| (j.id, "offset_y".to_string(), e)));
             out.extend(x.offset.as_deref().map(|e| (j.id, "offset".to_string(), e)));
             out.extend(x.angle.as_deref().map(|e| (j.id, "angle".to_string(), e)));
             for (i, e) in x.values.iter().enumerate() {
@@ -1217,6 +1242,8 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &mut self.joints {
             let x = &mut j.exprs;
+            out.extend(x.offset_x.as_mut());
+            out.extend(x.offset_y.as_mut());
             out.extend(x.offset.as_mut());
             out.extend(x.angle.as_mut());
             out.extend(x.values.iter_mut().flatten());
@@ -2920,6 +2947,8 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
+    let active = doc.active_assembly();
+    let doc = &*active;
     let asm = &doc.assembly;
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
@@ -3222,10 +3251,13 @@ impl Document {
             }
         }
         let parents: BTreeMap<u64, u64> = self.occurrences.iter().map(|o| (o.id, o.parent)).collect();
+        let inactive = self.inactive_pattern_occurrences();
         let (mut occurrence_at, mut first_of) = (std::collections::HashMap::new(), std::collections::HashMap::new());
         for (i, o) in self.occurrences.iter().enumerate() {
             occurrence_at.entry(o.id).or_insert(i);
-            first_of.entry(o.component).or_insert(i);
+            if !inactive.contains(&o.id) {
+                first_of.entry(o.component).or_insert(i);
+            }
         }
         // Outer occurrences first: each one is stored in its parent's frame as this loop has left
         // it, so a parent the solution also moves must be moved before the parts inside it. In id
@@ -3244,7 +3276,7 @@ impl Document {
         for (_, occ, world) in order {
             let occ = &occ;
             let parent = parents.get(occ).copied().unwrap_or(0);
-            // Through the transforms as this loop has left them, as `component_transform` reads.
+            // Through the active parent transforms as this loop has left them, as the solver read them.
             let occurrences = &self.occurrences;
             let pw = if parent == 0 {
                 IDENTITY
@@ -3701,6 +3733,52 @@ mod tests {
             assert!(close(&at, &w), "component {component}: at x {:.3}, wanted {:.3}", at[3][0], w[3][0]);
         }
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    #[test]
+    fn a_solution_places_children_in_their_active_parents_frame() {
+        let mut doc = Document::default();
+        let parent = doc.add_component(Some("Parent"), 0).unwrap();
+        let original = doc.occurrence_of(parent).unwrap().id;
+        let inactive = doc.add_occurrence(parent, 0, shift(20.0, 0.0, 0.0)).unwrap();
+        let replacement = doc.add_occurrence(parent, 0, shift(4.0, 0.0, 0.0)).unwrap();
+        let child = doc.add_component(Some("Child"), parent).unwrap();
+        let child = doc.occurrence_of(child).unwrap().id;
+        let pattern = doc
+            .add_feature(
+                FeatureKind::Pattern {
+                    features: Vec::new(),
+                    pattern: crate::PatternKind::Rectangular {
+                        dir1: crate::Dir(Vec3::X),
+                        count1: "2".into(),
+                        spacing1: "20".into(),
+                        dir2: None,
+                        count2: None,
+                        spacing2: None,
+                        alignment: Default::default(),
+                        alignment2: Default::default(),
+                        reversed: false,
+                        reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
+                    },
+                    bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: vec![parent],
+                    occurrences: vec![inactive],
+                },
+                Some("Copies"),
+            )
+            .unwrap();
+        doc.feature_mut(pattern).unwrap().suppressed = true;
+        doc.remove_occurrences(&BTreeSet::from([original]));
+        let target = shift(12.0, 0.0, 0.0);
+        assert!(doc.apply_joint_solution(&Solution { world: BTreeMap::from([(child, target)]), ..Solution::default() }));
+        assert_eq!(doc.path_placement(&[replacement, child]).unwrap().1, target);
     }
 
     #[test]
