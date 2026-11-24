@@ -2,7 +2,7 @@
 //! meets the design's shown bodies, decided on their exact faces, edges and vertices
 //! (`Body::fire_ray`), never on a display mesh. The running app answers `view.pick` itself
 //! (its pixels need its camera and pick index) and never reaches this command.
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -29,7 +29,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("view.pick", "Pick by R
          clouds?: bool (pick visible point-cloud points too; default: only when cloud_radius or point_px is given), \
          cloud_radius?: mm (default 1.0, 0 disables point-cloud picks on rays) → frame: \"rays\", \
          hits: one per ray, null where it meets nothing, else for a body {pixel (the ray, echoed as the app echoes it), body, face, point, normal, depth} with edge or vertex (record index) where \
-         the ray passes through one and occurrence, occurrence_name, component for a placed part's body, or for a point cloud {pixel, body: null, face: null, cloud, cloud_name, point_index, point, depth, distance_mm}; decided on exact geometry, the same \
+         the ray passes through one and occurrence, occurrence_name, component for a placed part's body, or for a point cloud {pixel, body: null, face: null, cloud, cloud_name, point_index, point, depth, distance_mm}; warnings?: [string] (bodies skipped when ray casting fails on them); decided on exact geometry, the same \
          answer headless as with the app. pixels, frame, width, height, edges, edge_px, point_px, include_ghosted: answered only by the running app",
     )];
 
@@ -73,9 +73,29 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let comps = component_names(s);
     let names: BTreeMap<u64, &str> = s.doc.components.iter().map(|c| (c.id, c.name.as_str())).collect();
     let shown: Vec<_> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
+    // Exact bounds for cheap ray-AABB culling; `None` when bounds are unavailable or non-finite
+    // so a body with unknown bounds is never skipped before `fire_ray` is tried.
+    let bounds: Vec<Option<solidcraft_geom::Aabb3>> = shown
+        .iter()
+        .map(|b| {
+            let bb = b.body.exact_bounds().ok()?;
+            if bb.is_empty() || !(bb.min.is_finite() && bb.max.is_finite()) {
+                return None;
+            }
+            let tol = b.body.record().tolerance;
+            let pad = (bb.diagonal() * 1e-6).max(if tol.is_finite() && tol > 0.0 { tol * 10.0 } else { 0.0 }).max(1e-4);
+            if !pad.is_finite() {
+                return None;
+            }
+            let inflated = bb.inflated(pad);
+            (inflated.min.is_finite() && inflated.max.is_finite()).then_some(inflated)
+        })
+        .collect();
     let clouds: Vec<_> = if clouds_on && cloud_radius > 0.0 { crate::view::shown_point_clouds(s).collect() } else { Vec::new() };
     let cloud_indexes: Vec<Option<solidcraft_geom::PointCloudIndex>> =
         clouds.iter().map(|c| (inputs.len() > 1 && c.len() > 512).then(|| solidcraft_geom::PointCloudIndex::new(c.points.values()))).collect();
+    let mut warned: BTreeSet<&str> = BTreeSet::new();
+    let mut warnings: Vec<String> = Vec::new();
     let mut hits = Vec::with_capacity(inputs.len());
     for (raw, o, d) in inputs {
         let mut found: Vec<Value> = Vec::new();
@@ -83,8 +103,19 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
         // What hides a cloud point: the nearest body crossing the section keeps. A crossing the
         // section cuts away shows nothing, so it hides nothing.
         let mut cover: Option<f64> = None;
-        for b in &shown {
-            let hit = b.body.fire_ray(o, d).map_err(|e| bad(ID, format!("body {}: {e}", b.name)))?;
+        for (b, bb) in shown.iter().zip(&bounds) {
+            if bb.is_some_and(|box3| !ray_meets_box(o, d, &box3)) {
+                continue;
+            }
+            let hit = match b.body.fire_ray(o, d) {
+                Ok(hit) => hit,
+                Err(e) => {
+                    if warned.insert(b.name.as_str()) {
+                        warnings.push(format!("body {}: {e}", b.name));
+                    }
+                    continue;
+                }
+            };
             let Some(h) = hit else { continue };
             let mut j = json!({
                 "pixel": raw,
@@ -115,7 +146,15 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
                 let shown_from = if s.section.is_empty() {
                     Some(h.depth)
                 } else {
-                    kept_material_from(&b.body, o, d, h.depth, &s.section).map_err(|e| bad(ID, format!("body {}: {e}", b.name)))?
+                    match kept_material_from(&b.body, o, d, h.depth, &s.section) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            if warned.insert(b.name.as_str()) {
+                                warnings.push(format!("body {}: {e}", b.name));
+                            }
+                            None
+                        }
+                    }
                 };
                 if let Some(t) = shown_from {
                     cover = Some(cover.map_or(t, |c: f64| c.min(t)));
@@ -161,7 +200,38 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
             (false, None) => found.into_iter().next().unwrap_or(Value::Null),
         });
     }
-    Ok(json!({"frame": "rays", "hits": hits}))
+    let mut out = json!({"frame": "rays", "hits": hits});
+    if !warnings.is_empty() {
+        out["warnings"] = json!(warnings);
+    }
+    Ok(out)
+}
+
+/// Whether the forward ray from `o` along `d` (`t >= 0`) meets the finite box `b` (slab test).
+/// Conservative on numeric edge cases (returns `true` if any slab endpoint is NaN).
+fn ray_meets_box(o: Vec3, d: Vec3, b: &solidcraft_geom::Aabb3) -> bool {
+    if b.is_empty() {
+        return false;
+    }
+    let (mut t_lo, mut t_hi) = (0.0f64, f64::INFINITY);
+    for (oo, dd, lo, hi) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
+        if dd == 0.0 || !dd.is_finite() {
+            if !(lo..=hi).contains(&oo) {
+                return false;
+            }
+            continue;
+        }
+        let (a, c) = ((lo - oo) / dd, (hi - oo) / dd);
+        if a.is_nan() || c.is_nan() {
+            return true;
+        }
+        t_lo = t_lo.max(a.min(c));
+        t_hi = t_hi.min(a.max(c));
+        if t_lo > t_hi {
+            return false;
+        }
+    }
+    t_lo <= t_hi
 }
 
 /// How far past a crossing the next ray starts, so it does not meet the same face again.
@@ -557,5 +627,134 @@ mod tests {
         s.doc_mut().point_clouds[0].filters.push(Filter { property: "part".into(), keep: Keep::Values { values: vec![2] } });
         let r = run(&mut s, "view.pick", json!({"rays": [ray], "cloud_radius": 1.0}));
         assert_eq!(r["hits"][0]["point_index"], 2, "{r}");
+    }
+
+    /// Build a body whose portable B-rep record is structurally valid but refused by
+    /// `solidcore-ops`, so `Body::fire_ray` fails with "no solidcore form".
+    fn body_without_solidcore_form(a: solidcore_record::Vec3, b: solidcore_record::Vec3) -> solidcraft_kernel::Body {
+        let base = solidcraft_kernel::box_solid(a, b).unwrap();
+        let bytes = solidcraft_kernel::encode_native_body(&base).unwrap();
+        let mut saved = solidcore_record::native::decode(&bytes).unwrap();
+        // Edge tolerances up to 1000 mm pass portable record validation, while solidcore-ops
+        // caps edge tolerance at 1.0 mm, leaving this body without a solidcore form.
+        saved.solid.edges[0].tolerance = 2.0;
+        let edited = solidcore_record::native::encode(&saved).unwrap();
+        let body = solidcraft_kernel::decode_native_body(&edited).unwrap();
+        let center = (a + b) * 0.5;
+        let err = body
+            .fire_ray(solidcore_record::Vec3::new(center.x, center.y, a.z.max(b.z) + 20.0), solidcore_record::Vec3::new(0.0, 0.0, -1.0))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no solidcore form"), "expected no solidcore form error, got: {err}");
+        body
+    }
+
+    /// One visible body whose `Body::fire_ray` fails must not abort `view.pick`: rays hitting
+    /// healthy bodies still succeed with a deduplicated warning per skipped body, and rays that
+    /// miss all bodies return `null`.
+    #[test]
+    fn unpickable_body_is_skipped_with_deduplicated_warning_and_miss_returns_null() {
+        use std::sync::Arc;
+
+        use solidcore_record::Vec3;
+
+        use crate::schema::view_pick::ViewPickResult;
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "GoodBox"}));
+
+        // Place an unpickable body directly in front of GoodBox so rays aimed at GoodBox pass
+        // through its bounding box and exercise `fire_ray` failure handling.
+        let broken = body_without_solidcore_form(Vec3::new(0.0, 0.0, 15.0), Vec3::new(10.0, 10.0, 25.0));
+        let last = s.model.results.last_mut().expect("box feature result");
+        let mut next = (*last.state).clone();
+        next.bodies.push(solidcraft_doc::ModelBody::new("BrokenBox".into(), broken, last.id));
+        last.state = Arc::new(next);
+
+        // A single ray through BrokenBox into GoodBox hits GoodBox and warns once about BrokenBox.
+        let r = run(&mut s, "view.pick", json!({"rays": [{"origin": [5, 5, 50], "dir": [0, 0, -1]}]}));
+        assert_eq!(r["frame"], "rays");
+        assert_eq!(r["hits"][0]["body"], "GoodBox", "{r}");
+        let [px, py, pz] = xyz(&r["hits"][0]["point"]);
+        assert!((px - 5.0).abs() < 1e-9 && (py - 5.0).abs() < 1e-9 && (pz - 10.0).abs() < 1e-9, "{r}");
+        let parsed: ViewPickResult = serde_json::from_value(r.clone()).expect("result matches schema");
+        assert_eq!(parsed.warnings.len(), 1, "{r}");
+        assert!(parsed.warnings[0].contains("BrokenBox"), "{r}");
+        assert!(parsed.warnings[0].contains("no solidcore form"), "{r}");
+
+        // Multiple rays passing through BrokenBox do not duplicate its warning, and a ray
+        // missing every body returns `null`.
+        let r = run(
+            &mut s,
+            "view.pick",
+            json!({
+                "rays": [
+                    {"origin": [3, 3, 50], "dir": [0, 0, -1]},
+                    {"origin": [5, 5, 50], "dir": [0, 0, -1]},
+                    {"origin": [7, 7, 50], "dir": [0, 0, -1]},
+                    {"origin": [1e5, 1e5, 1e5], "dir": [0, 0, -1]},
+                ]
+            }),
+        );
+        let parsed: ViewPickResult = serde_json::from_value(r.clone()).expect("result matches schema");
+        assert_eq!(parsed.hits.len(), 4, "{r}");
+        for (i, hit) in parsed.hits.iter().take(3).enumerate() {
+            assert_eq!(hit["body"], "GoodBox", "ray {i}: {r}");
+        }
+        assert_eq!(parsed.hits[3], Value::Null, "{r}");
+        assert_eq!(parsed.warnings.len(), 1, "warning must be deduplicated per body: {r}");
+        assert!(parsed.warnings[0].contains("BrokenBox"), "{r}");
+
+        // `all: true` also returns the healthy body's hit without aborting.
+        let r = run(&mut s, "view.pick", json!({"rays": [{"origin": [5, 5, 50], "dir": [0, 0, -1]}], "all": true}));
+        let list = r["hits"][0].as_array().cloned().unwrap_or_default();
+        assert_eq!(list.len(), 1, "{r}");
+        assert_eq!(list[0]["body"], "GoodBox", "{r}");
+        let parsed: ViewPickResult = serde_json::from_value(r.clone()).expect("result matches schema");
+        assert_eq!(parsed.warnings.len(), 1, "{r}");
+
+        // A call with only a ray that misses all bodies returns `null`, never an error.
+        let r = run(&mut s, "view.pick", json!({"rays": [{"origin": [1e5, 1e5, 1e5], "dir": [0, 0, -1]}]}));
+        assert_eq!(r["hits"][0], Value::Null, "{r}");
+        let _: ViewPickResult = serde_json::from_value(r).expect("result matches schema");
+    }
+
+    /// Healthy calls omit `warnings` completely, and AABB culling preserves hits from inside a
+    /// box while rejecting boxes behind or beside the ray.
+    #[test]
+    fn healthy_pick_omits_warnings_and_ray_aabb_culling_handles_edge_cases() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::Aabb3;
+
+        use crate::schema::view_pick::ViewPickResult;
+
+        let b = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(10.0, 10.0, 10.0) };
+        assert!(super::ray_meets_box(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0), &b));
+        assert!(super::ray_meets_box(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -7.0), &b));
+        assert!(super::ray_meets_box(Vec3::new(5.0, 5.0, 5.0), Vec3::new(1.0, 0.0, 0.0), &b));
+        assert!(super::ray_meets_box(Vec3::new(-10.0, -10.0, 5.0), Vec3::new(1.0, 1.0, 0.0), &b));
+        assert!(!super::ray_meets_box(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, 1.0), &b));
+        assert!(!super::ray_meets_box(Vec3::new(25.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0), &b));
+        assert!(!super::ray_meets_box(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0), &Aabb3::EMPTY));
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Box"}));
+        let r = run(
+            &mut s,
+            "view.pick",
+            json!({
+                "rays": [
+                    {"origin": [5, 5, 50], "dir": [0, 0, -1]},
+                    {"origin": [5, 5, 50], "dir": [0, 0, 1]},
+                    {"origin": [5, 5, 5], "dir": [1, 0, 0]},
+                ]
+            }),
+        );
+        assert!(r.get("warnings").is_none(), "healthy calls must omit `warnings`: {r}");
+        assert_eq!(r["hits"][0]["body"], "Box", "{r}");
+        assert_eq!(r["hits"][1], Value::Null, "box behind ray must miss: {r}");
+        assert_eq!(r["hits"][2]["body"], "Box", "ray starting inside box must still hit exit face: {r}");
+        let parsed: ViewPickResult = serde_json::from_value(r).expect("result matches schema");
+        assert!(parsed.warnings.is_empty());
     }
 }
