@@ -929,6 +929,10 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 pub(crate) fn refresh(app: &mut SolveApp) {
     solidcraft_engine::plugin::sync_panels(&mut app.session);
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
+    // The Model tab's Plugins group reads them again only once they change (`plugin_slots::invalidate`
+    // or a discovery scan that finds other packages): reading them hashes each plugin's component,
+    // and reading them every frame made the Model tab crawl with a large plugin (#21594).
+    app.plugin_menu.loaded = true;
 }
 
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).

@@ -2512,6 +2512,31 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The Model tab's Plugins group reads the installed plugins once, not on every frame: each
+    /// read hashes every plugin's whole component, which took about 500 ms a frame with a 55 MB
+    /// plugin (#21594). A change to the plugins that the app makes reads them again.
+    #[test]
+    fn the_model_tab_reads_the_installed_plugins_once_until_they_change() {
+        let root = package("model-tab");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.ui.tab = "MODEL".into();
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        crate::plugin_slots::invalidate(&mut h.app);
+        h.frames(2);
+        let names = |h: &crate::scenario::Harness| h.app.plugin_menu.listed.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&h), ["Boxes"], "the Model tab lists the installed plugin");
+        // Mark the list: a frame that reads the plugins again replaces it.
+        h.app.plugin_menu.listed[0].name = "read once".into();
+        h.frames(3);
+        assert_eq!(names(&h), ["read once"], "drawing the Model tab again reads no plugin");
+        // An install, a removal or a grant change invalidates the plugins.
+        crate::plugin_slots::invalidate(&mut h.app);
+        h.frames(2);
+        assert_eq!(names(&h), ["Boxes"], "a change to the plugins reads them again");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn the_plugins_menu_opens_from_the_ribbon_group_and_its_entry_opens_the_dialog() {
         let root = package("menu");
