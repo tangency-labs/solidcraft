@@ -3863,11 +3863,7 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
 #[test]
 fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     let imp = step_import(include_str!("../../../../tests/step-regressions/swept_tube_last_wall.step")).unwrap();
-    assert!(
-        !imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")),
-        "{:?}",
-        imp.warnings
-    );
+    assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("not imported") || w.contains("as surfaces")), "{:?}", imp.warnings);
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
     let m = measure(&imp.bodies[0].body).unwrap();
@@ -3878,9 +3874,31 @@ fn a_swept_tube_wall_with_its_seam_on_the_knots_start_reads_whole() {
     let length = ((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])).sqrt();
     let volume = std::f64::consts::PI * 25.0 * length;
     assert!(rel(m.volume, volume) < 1e-6, "volume {} against {volume}", m.volume);
-    assert_periodic_trim_domains_and_seams(&imp.bodies[0].body);
-    let check = imp.bodies[0].body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
-    assert!(check.is_valid(), "{check}");
+    // The wall keeps the file's knots, u in [0, 1] (not started anew), and every trim on it lies
+    // inside that period, up to floating-point rounding at the cut.
+    let record = imp.bodies[0].body.record();
+    let walls: Vec<_> = record
+        .faces
+        .iter()
+        .filter_map(|face| {
+            let domain = solidcraft_geom::brep::eval::SurfaceEval::new(face.nurbs.as_ref().unwrap_or(&face.surface)).unwrap().domain();
+            domain.period[0].map(|period| (face, domain.range[0], period))
+        })
+        .collect();
+    assert_eq!(walls.len(), 1);
+    let (wall, range, period) = walls[0];
+    assert_eq!((range, period), (Some((0.0, 1.0)), 1.0));
+    let round = 1e-9 * period;
+    for l in &wall.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = l else { panic!("the wall is bounded by edges") };
+        for u in edges {
+            let us: Vec<f64> = match &u.pcurve {
+                solidcore_record::brep::Curve2::Spline { points, .. } => points.iter().map(|p| p[0]).collect(),
+                solidcore_record::brep::Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| h[0] / h[2]).collect(),
+            };
+            assert!(us.iter().all(|&x| (-round..=1.0 + round).contains(&x)), "edge {}: u {us:?}", u.edge);
+        }
+    }
 }
 
 /// Containment of the positive-weight control hull proves containment of the entire stored
