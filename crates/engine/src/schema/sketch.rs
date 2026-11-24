@@ -586,7 +586,7 @@ two_operands! {
     /// Make two curves, a curve and a sketch axis, or a curve's end point and another curve,
     /// tangent. Two different curves are needed.
     TangentParams,
-    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge, or the end point of a line or an arc (such as `l1.end`): that end then lies on the other curve, and its curve is tangent there (`constraints` lists both). A line and a circle or an arc are joined the same way, at the line's end nearest the curve.",
+    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge, or the end point of a line or an arc (such as `l1.end`): that end then lies on the other curve, and its curve is tangent there (`constraints` lists both). A line and a circle or an arc are joined the same way, at the line's end nearest the curve, when that end is already close to the curve.",
     b: "The other curve or end point, as `a`.",
     what: "a curve id, or x / y for a sketch axis"
 }

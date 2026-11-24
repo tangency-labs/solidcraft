@@ -1680,7 +1680,7 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     // current deduplication only in this hostile-size fixture, preserving the
     // original validation work at both sides of the production limit.
     for i in 0..703 {
-        sk.constraints.push(Constraint { id: format!("budget_h{i}"), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+        sk.constraints.push(Constraint { id: format!("budget_h{i}"), kind: K::Horizontal { l: line }, param: None, driven: false, text: None, old_join: false });
     }
     sk.add_constraint(K::Radius { c: a, value: 5.0 }, None).unwrap();
     sk.add_constraint(K::Radius { c: b, value: 5.0 }, None).unwrap();
@@ -1694,7 +1694,7 @@ fn sheet_sketch_validation_preserves_the_slot_work_allowance() {
     let before = d.clone();
     let e = d
         .edit_sheet_sketch(&crate::Document::default(), 41, |sketch| {
-            sketch.constraints.push(Constraint { id: "budget_h703".into(), kind: K::Horizontal { l: line }, param: None, driven: false, text: None });
+            sketch.constraints.push(Constraint { id: "budget_h703".into(), kind: K::Horizontal { l: line }, param: None, driven: false, text: None, old_join: false });
             assert_eq!(sketch.constraints.len(), 707);
             assert_eq!(4 * sketch.constraints.len().pow(2) + sketch.constraints.len() - 1, 2_000_102);
             Ok(())

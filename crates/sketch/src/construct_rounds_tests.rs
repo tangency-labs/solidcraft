@@ -665,7 +665,7 @@ fn a_dimensioned_radius_is_seeded() {
 fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
     let base = || tangent_chain(&mut Lcg(21), 0.5, 2.0).unwrap();
     let raw = |sk: &mut Sketch, kind: ConstraintKind| {
-        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
+        sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None, old_join: false })
     };
     let cases: Vec<Box<dyn Fn(&mut Sketch)>> = vec![
         Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: 1, l: 999 })),

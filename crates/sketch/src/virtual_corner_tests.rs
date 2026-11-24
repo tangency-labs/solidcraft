@@ -66,6 +66,7 @@ fn curve_centres_and_spline_interior_points_are_used_and_invalid_incidence_is_sa
             param: None,
             driven: false,
             text: None,
+            old_join: false,
         });
     }
     assert!(sk.virtual_corners().is_empty());

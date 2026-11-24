@@ -1466,6 +1466,61 @@ fn translation(t: Vec3) -> crate::Mat {
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]]
 }
 
+/// #14343: a Tangent between a line and a circle is read at the line's end when that end is close
+/// to the circle: the end lies on the circle and the line touches it there. A design saved before
+/// that change keeps the plain tangency (the infinite line touches the circle and the line's end
+/// does not move onto it). The pending format change marks every Tangent of an older design
+/// `old_join`, so the tangency is read as it was; a Tangent made now leaves it off.
+#[test]
+fn a_design_saved_before_the_tangent_join_change_keeps_its_plain_tangency() {
+    use solidcraft_geom::Vec2Geom;
+    // A circle of radius 5 and a line tangent to it, its end a little short of the touch point.
+    let mut sk = Sketch::new();
+    let centre = sk.add_point(Vec2::ZERO, None).unwrap();
+    let circle = sk.add_circle(Vec2::ZERO, 5.0, Some(centre), Some("c")).unwrap();
+    let end = sk.add_point(Vec2::new(5.0, 0.5), None).unwrap();
+    let far = sk.add_point(Vec2::new(5.0, 8.0), None).unwrap();
+    let line = sk.add_line_pts(end, far, Some("l")).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: centre }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: circle, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: line, b: circle }, None).unwrap();
+    let mut doc = Document::new("tangent");
+    let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Sketch1")).unwrap();
+    // Where the sketch solved the line's end: the end nearest the circle.
+    let end_of = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        let state = model.state();
+        let solved = state.sketch(id).unwrap();
+        let sk = &solved.sketch;
+        let line = sk.curve_index("l").unwrap();
+        let circle = sk.curve_index("c").unwrap();
+        let (a, b) = sk.curves[line].kind.ends().unwrap();
+        let (pa, pb) = (sk.points[a].pos, sk.points[b].pos);
+        if sk.round_distance(circle, pa).unwrap().abs() < sk.round_distance(circle, pb).unwrap().abs() { pa } else { pb }
+    };
+
+    // The design as it is saved now: the Tangent joins the line's end to the circle, so the end
+    // lies on it.
+    let now = end_of(&doc);
+    assert!((now.dist(Vec2::ZERO) - 5.0).abs() < 1e-6, "the line's end does not lie on the circle: {now:?}");
+
+    // The design as an older build saved it: format 63, the one before the tangent change
+    // (`format/pending/tangent-old-join.rs`), and no list of the changes it has, so the change is
+    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
+    let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+    saved["format"] = serde_json::json!(crate::format::format_string(63));
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
+    // The Tangent is marked, so the tangency is the plain one and the line's end stays where it
+    // was saved.
+    let FeatureKind::Sketch { sketch, .. } = &older.features[0].kind else { panic!("a sketch") };
+    assert!(sketch.constraints.iter().any(|c| c.old_join), "the Tangent of the older design is not marked");
+    let old = end_of(&older);
+    assert!(old.dist(Vec2::new(5.0, 0.5)) < 1e-6, "the line's end moved: {old:?}");
+    assert!(old.dist(Vec2::ZERO) > 5.0, "the line's end lies on the circle: {old:?}");
+}
+
 /// The seven datum items parse their names without regard to case, and a datum key is strict:
 /// canonical non-zero decimal occurrence ids, at most 64 of them, at most 2048 characters. The
 /// root keeps its own controls, so nothing that names the design's origin parses as a datum.

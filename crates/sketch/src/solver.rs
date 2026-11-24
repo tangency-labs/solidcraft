@@ -19,7 +19,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
 use crate::linalg::{Mat, determined_vars, solve as lin_solve};
-use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
+use crate::model::{Constraint, ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
 use crate::union_find::{find, union};
@@ -936,13 +936,16 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
     crate::curves::point_along(&State { sk, lay: &lay, x: &[] }.segs(c), at).filter(|p| p.x.is_finite() && p.y.is_finite())
 }
 
-/// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
-/// touch point (better conditioned than the distance form when an end point is on the curve).
+/// One residual block: implicit arc radius equality, a user constraint, a tangency at a known
+/// touch point (better conditioned than the distance form when an end point is on the curve), or
+/// the join of a line's end to the circle it is close to (#14343): the end lies on the circle and
+/// the line touches it there.
 enum Block<'a> {
     Closure { a: usize, b: usize },
     Arc { c: usize, a: usize, b: usize },
     User(usize, &'a ConstraintKind),
     TangentAt(usize, &'a ConstraintKind, usize),
+    TangentJoin(usize, &'a ConstraintKind, usize),
 }
 
 fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
@@ -951,6 +954,7 @@ fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
         Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
         Block::User(i, k) => Block::User(*i, k),
         Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
+        Block::TangentJoin(i, k, p) => Block::TangentJoin(*i, k, *p),
     }
 }
 
@@ -991,6 +995,22 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
                 out.push(u.cross(v) / (u.len() + v.len()).max(1e-12));
             }
         }
+        Block::TangentJoin(_, k, p) => {
+            let ConstraintKind::Tangent { a, b } = **k else { return };
+            let pt = s.p(*p);
+            if !(s.is_line(a) || s.is_line(b)) {
+                residuals(s, k, out);
+                return;
+            }
+            let (l, c) = if s.is_line(a) { (a, b) } else { (b, a) };
+            let (p0, p1) = s.line(l);
+            let (cc, r) = s.round(c);
+            let d = p1 - p0;
+            // The end lies on the curve.
+            out.push(pt.dist(cc) - r);
+            // The radius to it is perpendicular to the line.
+            out.push((pt - cc).dot(d) / d.len().max(1e-12));
+        }
     }
 }
 
@@ -1027,6 +1047,54 @@ pub(crate) fn touch_point(sk: &Sketch, k: &ConstraintKind, on_curve: &[(usize, u
         return Some(*p);
     }
     contact_through_coincident(sk, a, b, &ea, &eb, on_curve)
+}
+
+/// How far (mm) the end of a line may be from a circle for the tangency between them to be read
+/// at that end (#14343): the end is close to the circle, and the join brings it onto it.
+pub const JOIN_TOL: f64 = 1.0;
+
+/// The end of the line of a Tangent between it and a circle that is close to it: the tangency
+/// is read there (#14343), so the end lies on the circle and the line touches it there. The end
+/// nearest the circle, and only when it is close to it (within [`JOIN_TOL`]). `None` when the
+/// two are not a line and a circle, when the line is an axis, or when the Tangent is the old
+/// plain one (`old_join`): a design saved before that change keeps its tangency as it was.
+fn join_point(sk: &Sketch, c: &Constraint) -> Option<usize> {
+    if c.old_join {
+        return None;
+    }
+    let ConstraintKind::Tangent { a, b } = c.kind else { return None };
+    let circle = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. }));
+    let line = |c: usize| sk.curves.get(c).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. }) && !c.infinite);
+    let (line, curve) = if line(a) && circle(b) {
+        (a, b)
+    } else if circle(a) && line(b) {
+        (b, a)
+    } else {
+        return None;
+    };
+    let (start, end) = sk.curves[line].kind.ends()?;
+    let mut best: Option<(usize, f64)> = None;
+    for p in [start, end] {
+        let Some(pos) = sk.point(p) else { continue };
+        let Some(d) = sk.round_distance(curve, pos) else { continue };
+        let gap = d.abs();
+        if gap <= JOIN_TOL && best.is_none_or(|(_, closer)| gap < closer) {
+            best = Some((p, gap));
+        }
+    }
+    best.map(|(p, _)| p)
+}
+
+/// The block a constraint stands for: a tangency read at a known touch point, the join at the
+/// line's end that is close to the circle (#14343), or the plain tangency.
+fn block_of<'a>(sk: &'a Sketch, ci: usize, c: &'a Constraint, on_curve: &[(usize, usize)]) -> Block<'a> {
+    match touch_point(sk, &c.kind, on_curve) {
+        Some(p) => Block::TangentAt(ci, &c.kind, p),
+        None => match join_point(sk, c) {
+            Some(p) => Block::TangentJoin(ci, &c.kind, p),
+            None => Block::User(ci, &c.kind),
+        },
+    }
 }
 
 /// Whether curve `c` is a straight line.
@@ -1189,6 +1257,10 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
         },
         Block::TangentAt(_, k, p) => match **k {
             ConstraintKind::Tangent { a, b } if freeform(a) || freeform(b) => vec![P(*p), C(a), C(b)],
+            ConstraintKind::Tangent { a, b } => [P(*p)].into_iter().chain(tangent(a, b)).collect(),
+            _ => vec![P(*p)],
+        },
+        Block::TangentJoin(_, k, p) => match **k {
             ConstraintKind::Tangent { a, b } => [P(*p)].into_iter().chain(tangent(a, b)).collect(),
             _ => vec![P(*p)],
         },
@@ -2453,10 +2525,7 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
         if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
             continue;
         }
-        raw.push(match touch_point(sk, &c.kind, on_curve) {
-            Some(p) => Block::TangentAt(i, &c.kind, p),
-            None => Block::User(i, &c.kind),
-        });
+        raw.push(block_of(sk, i, c, on_curve));
     }
     let mut blocks: Vec<(Block, Vec<usize>)> = Vec::with_capacity(raw.len());
     let mut reads_constant = Vec::with_capacity(raw.len());
@@ -2830,7 +2899,7 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
     for (b, _) in sub {
         // A tangency at a point the two curves share (or a line's end held on the round) is a
         // block of its own; its round keeps its side of the line all the same.
-        let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _)) = b else { continue };
+        let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _) | Block::TangentJoin(ci, kind, _)) = b else { continue };
         match **kind {
             ConstraintKind::Coincident { p, q } => joins.push((p, q)),
             ConstraintKind::Distance { p, q, value } => {
@@ -2987,7 +3056,7 @@ fn senses(before: &State, now: &State, sub: &[(Block, Vec<usize>)], reach: f64) 
     let pairs: Vec<(usize, usize, bool, usize)> = sub
         .iter()
         .filter_map(|(b, _)| {
-            let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _)) = b else { return None };
+            let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _) | Block::TangentJoin(ci, kind, _)) = b else { return None };
             let (l, m, square) = match **kind {
                 ConstraintKind::Parallel { a, b } => (a, b, false),
                 ConstraintKind::Perpendicular { a, b } => (a, b, true),
@@ -3137,7 +3206,7 @@ fn arc_senses(sk: &Sketch, pos: &dyn Fn(usize) -> Vec2) -> Vec<ArcSense> {
     let mut out: Vec<ArcSense> = Vec::new();
     for (ci, c) in sk.constraints.iter().enumerate().filter(|(_, c)| !c.driven) {
         let ConstraintKind::Tangent { a, b } = c.kind else { continue };
-        let Some(p) = touch_point(sk, &c.kind, &on_curve) else { continue };
+        let Some(p) = touch_point(sk, &c.kind, &on_curve).or_else(|| join_point(sk, c)) else { continue };
         let (arc, line) = if arc(a) && line(b) {
             (a, b)
         } else if arc(b) && line(a) {
@@ -3632,7 +3701,8 @@ fn solve_inner(
         max_residual = max_residual.max(max_abs(r));
         for (row, v) in r.iter().enumerate() {
             if !(v.abs() < ACCEPT)
-                && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _), _)) = owner.get(row).and_then(|bi| blocks.get(*bi))
+                && let Some((Block::User(ci, _) | Block::TangentAt(ci, _, _) | Block::TangentJoin(ci, _, _), _)) =
+                    owner.get(row).and_then(|bi| blocks.get(*bi))
                 && let Some(c) = sk.constraints.get(*ci)
                 && !failing.contains(&c.id)
             {
@@ -3657,7 +3727,7 @@ fn solve_inner(
         // curve has collapsed to a point holds trivially and is a degenerate answer: it fails.
         let now = State { sk, lay: &lay, x: &x };
         for (b, _) in &sub {
-            let (Block::User(ci, k) | Block::TangentAt(ci, k, _)) = b else { continue };
+            let (Block::User(ci, k) | Block::TangentAt(ci, k, _) | Block::TangentJoin(ci, k, _)) = b else { continue };
             // An angle requires two directions. A nearly collapsed line can satisfy its
             // horizontal/vertical residual within tolerance while pointing anywhere, so
             // the angle alone must not turn that degenerate pose into a solved sketch.
@@ -3687,7 +3757,7 @@ fn solve_inner(
             let ConstraintKind::Tangent { a: ta, b: tb } = **k else { continue };
             let Some(c) = sk.constraints.get(*ci) else { continue };
             let mut touch_free = Vec::new();
-            if matches!(b, Block::TangentAt(..)) {
+            if matches!(b, Block::TangentAt(..) | Block::TangentJoin(..)) {
                 residuals(&now, k, &mut touch_free);
             }
             let collapsed = [ta, tb].iter().any(|&cv| !now.is_line(cv) && !now.is_freeform(cv) && now.radius_of(cv) < ACCEPT);
@@ -4005,6 +4075,7 @@ mod typed_dimension_tests {
             param: None,
             driven: false,
             text: None,
+            old_join: false,
         });
         let rep = solve(&mut sk);
         assert!(rep.ok(), "{rep:?}");

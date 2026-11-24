@@ -292,7 +292,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::tangent)
         .contract(&TANGENT_CONTRACT)
         .output(output_schema_for::<TangentResult>)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); a line and a circle or an arc are joined the same way, at the line's end nearest the curve, whichever of the two is picked first; in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); a line and a circle or an arc are joined the same way, at the line's end nearest the curve, whichever of the two is picked first, when that end is already close to the curve; in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -3094,6 +3094,7 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
             param: None,
             driven: false,
             text: None,
+            old_join: false,
         }));
         let ok = solve_with(&mut trial, &h, None, Analysis::StatusOnly, None).ok();
         trial.constraints.retain(|c| c.id != TEMP);
@@ -3531,9 +3532,10 @@ fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
 /// The operands of a Tangent between a line and a round curve, with the line's end nearest the
 /// curve in place of the line (#14343): that end then lies on the curve (point on curve) and the
 /// line touches it there, so the two curves close an area that can be extruded. The tangency held
-/// for the infinite line only, and the gap it left at the line's end kept the area open. `None`
-/// when the operands are not a line and a round curve, when the line is an axis, or when the two
-/// are already joined at that end.
+/// for the infinite line only, and the gap it left at the line's end kept the area open. The end
+/// must already be close to the curve: the join is not forced on a line whose end is far from it.
+/// `None` when the operands are not a line and a round curve, when the line is an axis, when the
+/// end is not close to the curve, or when the two are already joined at that end.
 fn tangent_joint_operands(sk: &Sketch, p: &Value) -> Option<Value> {
     let id = |key: &str| p.get(key).and_then(Value::as_str);
     let a = sk.curve_index(id("a")?)?;
@@ -3549,6 +3551,11 @@ fn tangent_joint_operands(sk: &Sketch, p: &Value) -> Option<Value> {
     };
     let (start, end) = sk.curves[line].kind.ends()?;
     let near = if curve_distance(sk, curve, sk.points[start].pos) <= curve_distance(sk, curve, sk.points[end].pos) { start } else { end };
+    // The end must already be close to the curve: the join is not forced on a line whose end is
+    // far from it (#14343). The tangency then keeps the plain form, as it was before.
+    if curve_distance(sk, curve, sk.points[near].pos) > solidcraft_sketch::JOIN_TOL {
+        return None;
+    }
     // The end must end this line alone: another curve ending there is not this tangent's end.
     let owners = sk.curves.iter().enumerate().filter(|(i, cu)| *i != curve && cu.kind.ends().is_some_and(|(s, e)| s == near || e == near)).count();
     if owners != 1 {
@@ -3563,9 +3570,9 @@ fn tangent_joint_operands(sk: &Sketch, p: &Value) -> Option<Value> {
     Some(joint)
 }
 
-/// The distance from a point to a curve, over the curve's own polyline.
+/// The distance from a point to a round curve (a circle or an arc), in mm.
 fn curve_distance(sk: &Sketch, c: usize, p: Vec2) -> f64 {
-    solidcraft_sketch::polyline_signed_dist(&sk.polyline(c), p).abs()
+    sk.round_distance(c, p).map_or(f64::INFINITY, |d| d.abs())
 }
 
 /// The point a Tangent operand names when it names no curve and no sketch axis (#12092). `x` and

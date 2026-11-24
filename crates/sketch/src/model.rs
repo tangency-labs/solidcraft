@@ -783,6 +783,14 @@ pub struct Constraint {
     /// (see [`crate::dim_frame`]); None for the default place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<Vec2>,
+    /// For a Tangent between a line and a circle or an arc: the tangency keeps the plain form
+    /// (the infinite line touches the curve and the line's end does not move), as it was before
+    /// #14343. Set on the Tangents of a design saved before that change (the format change
+    /// `format/pending/tangent-old-join.rs` marks them), so they open as they were saved; a
+    /// Tangent made now leaves it off and joins the line's end to the curve when the end is close
+    /// to it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub old_join: bool,
 }
 
 /// How a sketch is shown and drawn in (the Sketch Palette options kept with the sketch). Every
@@ -1151,7 +1159,7 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
-        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, text: None });
+        self.constraints.push(Constraint { id: id.clone(), kind, param, driven: false, text: None, old_join: false });
         Ok(id)
     }
 
@@ -1978,6 +1986,27 @@ impl Sketch {
     pub fn center(&self, ci: usize) -> Option<Vec2> {
         match self.curves.get(ci)?.kind {
             CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => self.point(c),
+            _ => None,
+        }
+    }
+
+    /// How far the point `p` is from the round curve `ci` (a circle or an arc), in mm: the
+    /// distance to its circle, or to the nearer of the arc's ends when the point is off the
+    /// arc's sweep. `None` when the curve is not round.
+    pub fn round_distance(&self, ci: usize, p: Vec2) -> Option<f64> {
+        let Some(curve) = self.curves.get(ci) else { return None };
+        let Some(centre) = self.center(ci) else { return None };
+        let Some(radius) = self.radius(ci) else { return None };
+        match curve.kind {
+            CurveKind::Circle { .. } => Some((p - centre).len() - radius),
+            CurveKind::Arc { a, b, .. } => {
+                let (Some(pa), Some(pb)) = (self.point(a), self.point(b)) else { return None };
+                // The arc runs from its first end to its second one, counter-clockwise.
+                let start = (pa - centre).angle();
+                let sweep = ((pb - centre).angle() - start).rem_euclid(std::f64::consts::TAU);
+                let off = ((p - centre).angle() - start).rem_euclid(std::f64::consts::TAU);
+                if off <= sweep { Some((p - centre).len() - radius) } else { Some(p.dist(pa).min(p.dist(pb))) }
+            }
             _ => None,
         }
     }
