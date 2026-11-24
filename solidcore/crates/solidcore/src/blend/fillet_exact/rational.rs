@@ -479,7 +479,20 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
         };
         normal.cross(seed).unitize()?
     } else {
-        cross.unitize()?
+        cross
+            .length_and_unit()
+            .ok_or_else(|| {
+                SolidError::blend(
+                    OP,
+                    BlendFailure::SectionNotConic {
+                        reason: SectionShape::NoQuadraticForm,
+                        quadratic_scale: 0.0,
+                        discriminant: None,
+                        centered_value: None,
+                    },
+                )
+            })?
+            .1
     };
     let v = normal.cross(u).unitize()?;
     let (s, t) = (axis.dot(v), axis.dot(normal));
