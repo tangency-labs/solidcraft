@@ -40,6 +40,7 @@ can run it.
 | Zero point of DXF view exports | `DxfOrigin` | `REG_SZ` | `target` (the point the camera looks at) or `origin` (the model's origin): where File, Export Current View as DXF puts the drawing's 0,0. SolidCraft 0.48 or later. |
 | Mesh export format | `MeshExportFormat` | `REG_SZ` | `stl`, `3mf` or `3mf-tagged` (3MF with face tags): the format File, Save As Mesh and Send to Slicer write; Export STL and Export 3MF open the dialog with it too. SolidCraft 0.48 or later. |
 | Mesh export quality | `MeshExportQuality` | `REG_SZ` | `standard`, `fine` or `finest`: how closely a saved mesh follows curved faces. SolidCraft 0.48 or later. |
+| Slicer | `Slicer` | `REG_SZ` | `prusa`, `bambu`, `orca`, `cura`, `superslicer`, `creality`, `elegoo`, `anycubic`, `ideamaker`, `lychee`, `qidi`, `chitubox`, `creatware`, `slic3r` or `easyprint` (EasyPrint, in the browser): the slicer File, Send to Slicer uses, which people cannot change; when it is not installed, Send to Slicer says no slicer was found. Open in EasyPrint uses it too. SolidCraft 0.48 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 

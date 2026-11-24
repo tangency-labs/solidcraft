@@ -62,6 +62,24 @@ const MESH_QUALITIES: &[&str] = &["standard", "fine", "finest"];
 const DXF_ORIGINS: &[&str] = &["target", "origin"];
 /// `Layout`: the workspace layouts (Preferences › Interface › Panel style).
 const LAYOUTS: &[&str] = &["floating", "compact"];
+/// `Slicer`: the slicer Send to Slicer uses, a known slicer or EasyPrint (in the engine's order).
+const SLICERS: &[&str] = &[
+    "prusa",
+    "bambu",
+    "orca",
+    "cura",
+    "superslicer",
+    "creality",
+    "elegoo",
+    "anycubic",
+    "ideamaker",
+    "lychee",
+    "qidi",
+    "chitubox",
+    "creatware",
+    "slic3r",
+    "easyprint",
+];
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
 /// name, and what the value may be.
@@ -91,6 +109,7 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "RibbonLabels", pref: "ribbon_labels", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+    Lock { policy: "Slicer", pref: "send_slicer", kind: Kind::Choice(SLICERS) },
     Lock { policy: "StatusBar", pref: "status_bar", kind: Kind::Switch },
 ];
 
@@ -254,6 +273,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "ribbon_labels" => Setting::Switch(p.ribbon_labels),
         "save_mesh_format" => Setting::Text(p.save_mesh_format.clone()),
         "save_mesh_quality" => Setting::Text(p.save_mesh_quality.clone()),
+        "send_slicer" => Setting::Text(p.send_slicer.clone()),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
         "status_bar" => Setting::Switch(p.status_bar),
@@ -286,6 +306,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("ribbon_labels", Setting::Switch(on)) => p.ribbon_labels = *on,
         ("save_mesh_format", Setting::Text(text)) => p.save_mesh_format.clone_from(text),
         ("save_mesh_quality", Setting::Text(text)) => p.save_mesh_quality.clone_from(text),
+        ("send_slicer", Setting::Text(text)) => p.send_slicer.clone_from(text),
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
         ("status_bar", Setting::Switch(on)) => p.status_bar = *on,
@@ -1034,6 +1055,39 @@ mod tests {
         assert!(h.widget("Set by your organization").is_some());
         // A layout none of the choices is no policy.
         assert!(Policy::from_json(r#"{"Layout": "docked"}"#).locked().is_empty());
+    }
+
+    #[test]
+    fn the_slicer_is_set_by_the_policy_from_send_to_slicer_and_open_in_easyprint() {
+        use serde_json::json;
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.preferences.send_slicer = "prusa".into();
+        h.app.policy = Policy::from_json(r#"{"Slicer": " Orca "}"#);
+        h.frame();
+        assert_eq!(h.app.preferences.send_slicer, "orca");
+        assert_eq!(saved(&h.app)["send_slicer"], json!("prusa"), "the slicer is saved as the person chose it");
+        let refused = h.call("ui.prefs", json!({"send_slicer": "cura"}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        // Send to Slicer and Open in EasyPrint both start on the organization's slicer, greyed out and
+        // noted; it stays when it is not installed, and sending keeps the person's own choice.
+        let _language = solidcraft_ui_text::scope("en");
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        for id in ["file.send_to_slicer", "file.open_in_easyprint"] {
+            h.app.dialog = None;
+            h.app.start(id);
+            h.frames(3);
+            let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("{id}: no dialog") };
+            assert_eq!(k.slicer, "orca", "{id}");
+            assert!(h.widget("Set by your organization").is_some(), "{id}: the dialog says who set the slicer");
+        }
+        assert_eq!(saved(&h.app)["send_slicer"], json!("prusa"));
+        // A slicer none of the choices is no policy, and the choices are the engine's slicers and EasyPrint.
+        assert!(Policy::from_json(r#"{"Slicer": "custom"}"#).locked().is_empty());
+        let known: Vec<_> = solidcraft_engine::slicers::ids().chain(["easyprint"]).collect();
+        assert_eq!(SLICERS, known.as_slice());
     }
 
     #[test]

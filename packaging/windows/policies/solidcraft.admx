@@ -300,5 +300,88 @@
         </enum>
       </elements>
     </policy>
+    <policy name="Slicer" class="Both" displayName="$(string.Slicer)" explainText="$(string.Slicer_Explain)" presentation="$(presentation.Slicer)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <elements>
+        <enum id="Slicer" valueName="Slicer" required="true">
+          <item displayName="$(string.Slicer_prusa)">
+            <value>
+              <string>prusa</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_bambu)">
+            <value>
+              <string>bambu</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_orca)">
+            <value>
+              <string>orca</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_cura)">
+            <value>
+              <string>cura</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_superslicer)">
+            <value>
+              <string>superslicer</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_creality)">
+            <value>
+              <string>creality</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_elegoo)">
+            <value>
+              <string>elegoo</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_anycubic)">
+            <value>
+              <string>anycubic</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_ideamaker)">
+            <value>
+              <string>ideamaker</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_lychee)">
+            <value>
+              <string>lychee</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_qidi)">
+            <value>
+              <string>qidi</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_chitubox)">
+            <value>
+              <string>chitubox</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_creatware)">
+            <value>
+              <string>creatware</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_slic3r)">
+            <value>
+              <string>slic3r</string>
+            </value>
+          </item>
+          <item displayName="$(string.Slicer_easyprint)">
+            <value>
+              <string>easyprint</string>
+            </value>
+          </item>
+        </enum>
+      </elements>
+    </policy>
   </policies>
 </policyDefinitions>

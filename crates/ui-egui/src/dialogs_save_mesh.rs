@@ -50,7 +50,7 @@ pub struct SaveMesh {
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
     pub(crate) quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
-    slicer: String,
+    pub(crate) slicer: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
     /// Send to Slicer: the bodies and the print faces the Print face input last showed, to tell
@@ -137,6 +137,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let p = &app.preferences;
     let format = FORMATS.iter().position(|f| f.1 == p.save_mesh_format).unwrap_or(0);
     let slicer = match id {
+        // The organization's slicer stays, from Open in EasyPrint too.
+        _ if open && app.policy.locks("send_slicer") => p.send_slicer.clone(),
         "file.open_in_easyprint" => EASYPRINT.into(),
         _ if open => p.send_slicer.clone(),
         _ => String::new(),
@@ -415,7 +417,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         app.slicer_menu.refresh(&app.preferences.custom_slicers);
         let entries = app.slicer_menu.entries();
         let easyprint = crate::easyprint_ui::available(app);
-        k.slicer = if easyprint && k.slicer == EASYPRINT {
+        k.slicer = if app.policy.locks("send_slicer") {
+            // The organization's slicer, the install of it when there is one, never another in its place.
+            let base = app.preferences.send_slicer.clone();
+            app.slicer_menu
+                .key_for(&base)
+                .or_else(|| entries.iter().find(|e| !e.user && e.slicer.base_id() == base).map(|e| e.key.clone()))
+                .unwrap_or(base)
+        } else if easyprint && k.slicer == EASYPRINT {
             EASYPRINT.into()
         } else {
             app.slicer_menu
@@ -434,7 +443,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
             }
         }
         let choosing = app.file_picker_busy();
-        ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
+        let locked = app.policy.locks("send_slicer");
+        crate::policy::row(ui, locked, |ui| ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k)));
     });
     false
 }
@@ -613,7 +623,9 @@ pub fn button(k: &SaveMesh) -> &'static str {
 pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), String> {
     let (_, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
     if k.open {
-        app.preferences.send_slicer = k.slicer.clone();
+        if !app.policy.locks("send_slicer") {
+            app.preferences.send_slicer = k.slicer.clone();
+        }
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
         } else {

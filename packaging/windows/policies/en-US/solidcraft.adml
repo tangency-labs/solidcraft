@@ -222,6 +222,29 @@ Disabled or Not configured: each person chooses in Preferences.
 In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
       <string id="Layout_floating">Floating</string>
       <string id="Layout_compact">Compact</string>
+      <string id="Slicer">Slicer</string>
+      <string id="Slicer_Explain">The slicer File, Send to Slicer sends a design to.
+
+Enabled: Send to Slicer uses the slicer chosen here, and people cannot choose another. When it is not installed, Send to Slicer says that no slicer was found; Open in EasyPrint also uses the slicer chosen here.
+
+Disabled or Not configured: each person chooses in the Send to Slicer dialog.
+
+In the Send to Slicer dialog the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="Slicer_prusa">PrusaSlicer</string>
+      <string id="Slicer_bambu">Bambu Studio</string>
+      <string id="Slicer_orca">OrcaSlicer</string>
+      <string id="Slicer_cura">UltiMaker Cura</string>
+      <string id="Slicer_superslicer">SuperSlicer</string>
+      <string id="Slicer_creality">Creality Print</string>
+      <string id="Slicer_elegoo">ElegooSlicer</string>
+      <string id="Slicer_anycubic">AnycubicSlicerNext</string>
+      <string id="Slicer_ideamaker">ideaMaker</string>
+      <string id="Slicer_lychee">Lychee Slicer</string>
+      <string id="Slicer_qidi">QIDI Studio</string>
+      <string id="Slicer_chitubox">CHITUBOX</string>
+      <string id="Slicer_creatware">CreatWare</string>
+      <string id="Slicer_slic3r">Slic3r</string>
+      <string id="Slicer_easyprint">EasyPrint (Printables, in the browser)</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -266,6 +289,9 @@ In Preferences the setting shows as set by the organization. The person's own ch
       </presentation>
       <presentation id="Layout">
         <dropdownList refId="Layout" noSort="true" defaultItem="0">Layout:</dropdownList>
+      </presentation>
+      <presentation id="Slicer">
+        <dropdownList refId="Slicer" noSort="true" defaultItem="0">Slicer:</dropdownList>
       </presentation>
     </presentationTable>
   </resources>
