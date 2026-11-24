@@ -492,7 +492,7 @@ index) and, for the bends, a linetype that the file defines.
 | `BEND_NOTES` | 8 grey | continuous | the note beside each bend line, only with `"bend_notes": true` |
 | `POCKET_…` | 3 green | continuous | pockets, a layer for each depth (see below) |
 | `PERFORATION` | 3 green | continuous | the holes of a perforation field |
-| `HARDWARE` | 8 grey | continuous | the note beside each press-in hardware hole, `M3 nut` or `M4 stud 10 mm`, as high as `note_height`; not with `"layers": "single"` |
+| `HARDWARE` | 8 grey | continuous | the note beside each press-in hardware hole, `M3 nut` or `M4 stud 10 mm`, as high as `note_height`; only with `"hardware_notes": true`, and not with `"layers": "single"` |
 
 `OUTLINE`, `CUT`, `BEND_UP` and `BEND_DOWN` are always in the layer table, the others when the
 sheet has something for them. The inner contours (`CUT`, `TEXT`) are written before the outline,
@@ -519,6 +519,11 @@ high (`"note_height"` changes that), centred half a height beside the middle of 
 parallel to it and readable from below or from the right. A bend that cut-outs split has a note
 for each piece. Notes are off by default, because a program that cuts or marks every layer would
 mark them.
+
+The file for a shop is the sheet and its mounting holes: press-in hardware is not in it, and the
+holes are plain circles. `"hardware_notes": true` adds a note beside each hardware hole on
+`HARDWARE` (`M3 nut`), as high as `note_height`; in the app, the flat pattern window has a Hardware
+notes tickbox for it when the sheet has hardware. Like the bend notes it is off by default.
 
 For a program that cuts every line it is given, `"bend_lines": false` leaves the bend lines out
 (`BEND_UP` and `BEND_DOWN` are then empty), and `"layers": "single"` writes every entity on layer

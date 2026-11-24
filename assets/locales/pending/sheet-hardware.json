@@ -7,6 +7,7 @@
     "ui.hardware_kind_standoff": "دعامة",
     "ui.hardware_kind_stud": "مسمار",
     "ui.hardware_limits": "ثقب التركيب {hole} مم. سماكة الصفيحة لا تقل عن {sheet} مم. المركز على بعد {edge} مم على الأقل من حافة أو ثنية.",
+    "ui.hardware_notes": "ملاحظات عناصر التثبيت",
     "ui.hardware_place": "وجه أو نقاط رسم",
     "ui.hardware_thread": "اللولب",
     "ui.hardware_title": "عناصر التثبيت بالكبس"
@@ -19,6 +20,7 @@
     "ui.hardware_kind_standoff": "Abstandshalter",
     "ui.hardware_kind_stud": "Bolzen",
     "ui.hardware_limits": "Montageloch {hole} mm. Blech mindestens {sheet} mm dick. Mitte mindestens {edge} mm von einer Kante oder Biegung entfernt.",
+    "ui.hardware_notes": "Hinweise zu Einpresselementen",
     "ui.hardware_place": "Fläche oder Skizzenpunkte",
     "ui.hardware_thread": "Gewinde",
     "ui.hardware_title": "EINPRESSELEMENT"
@@ -31,6 +33,7 @@
     "ui.hardware_kind_standoff": "Standoff",
     "ui.hardware_kind_stud": "Stud",
     "ui.hardware_limits": "Mounting hole {hole} mm. Sheet at least {sheet} mm thick. Center at least {edge} mm from an edge or bend.",
+    "ui.hardware_notes": "Hardware notes",
     "ui.hardware_place": "Face or sketch points",
     "ui.hardware_thread": "Thread",
     "ui.hardware_title": "PRESS-IN HARDWARE"
@@ -46,6 +49,7 @@
     "ui.hardware_kind_standoff": "דיסטנס",
     "ui.hardware_kind_stud": "פין",
     "ui.hardware_limits": "חור הרכבה {hole} מ״מ. עובי הפח לפחות {sheet} מ״מ. המרכז במרחק של {edge} מ״מ לפחות מקצה או מכיפוף.",
+    "ui.hardware_notes": "הערות חומרה",
     "ui.hardware_place": "פן או נקודות סקיצה",
     "ui.hardware_thread": "הברגה",
     "ui.hardware_title": "חומרת הצמדה בלחיצה"
@@ -58,6 +62,7 @@
     "ui.hardware_kind_standoff": "スタンドオフ",
     "ui.hardware_kind_stud": "スタッド",
     "ui.hardware_limits": "取り付け穴 {hole} mm。板厚は {sheet} mm 以上。中心は端または曲げから {edge} mm 以上。",
+    "ui.hardware_notes": "ハードウェアの注記",
     "ui.hardware_place": "面またはスケッチ点",
     "ui.hardware_thread": "ねじ",
     "ui.hardware_title": "圧入ハードウェア"
@@ -70,6 +75,7 @@
     "ui.hardware_kind_standoff": "스탠드오프",
     "ui.hardware_kind_stud": "스터드",
     "ui.hardware_limits": "장착 구멍 {hole} mm. 판 두께 {sheet} mm 이상. 중심은 가장자리나 굽힘에서 {edge} mm 이상.",
+    "ui.hardware_notes": "하드웨어 주석",
     "ui.hardware_place": "면 또는 스케치 점",
     "ui.hardware_thread": "나사산",
     "ui.hardware_title": "압입 하드웨어"
@@ -82,6 +88,7 @@
     "ui.hardware_kind_standoff": "Trụ đỡ",
     "ui.hardware_kind_stud": "Chốt",
     "ui.hardware_limits": "Lỗ lắp {hole} mm. Tấm dày ít nhất {sheet} mm. Tâm cách mép hoặc đường uốn ít nhất {edge} mm.",
+    "ui.hardware_notes": "Ghi chú phụ kiện",
     "ui.hardware_place": "Mặt hoặc điểm phác thảo",
     "ui.hardware_thread": "Ren",
     "ui.hardware_title": "PHỤ KIỆN ÉP CHẶT"
@@ -94,6 +101,7 @@
     "ui.hardware_kind_standoff": "压铆隔离柱",
     "ui.hardware_kind_stud": "压铆螺柱",
     "ui.hardware_limits": "安装孔 {hole} mm。板厚至少 {sheet} mm。中心距边或折弯至少 {edge} mm。",
+    "ui.hardware_notes": "五金件标注",
     "ui.hardware_place": "面或草图点",
     "ui.hardware_thread": "螺纹",
     "ui.hardware_title": "压铆件"

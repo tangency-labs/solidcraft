@@ -225,12 +225,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
+             hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
-             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION and HARDWARE (with layers: roles, a note beside each press-in hardware hole, `M3 nut`, as high as note_height); inner contours come before the outline",
+             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth), PERFORATION and HARDWARE (only with hardware_notes: true and layers: roles); inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
         .noundo()
@@ -1554,7 +1555,8 @@ pub struct DxfOptions {
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
     /// The height (mm) of the note beside each press-in hardware hole, on layer HARDWARE (#17752);
-    /// none: no notes. Asked for when layers go by role, as the note has a layer of its own.
+    /// none: no notes, the default, so a file for a shop has the sheet and its holes only. Only
+    /// with layers by role, as the note has a layer of its own.
     pub hardware_notes: Option<f64>,
 }
 
@@ -1861,8 +1863,13 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         None => false,
         Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
-    // Press-in hardware is noted beside its hole on a layer of its own: with the layers by role.
-    let hardware_notes = (!one_layer).then_some(height);
+    // Press-in hardware is noted beside its hole only when asked, and on a layer of its own: with
+    // the layers by role.
+    let hardware_notes = match p.get("hardware_notes").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => (!one_layer).then_some(height),
+        Some(_) => return Err(bad(cmd, "`hardware_notes` must be true or false")),
+    };
     Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer, hardware_notes })
 }
 

@@ -1789,17 +1789,20 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
 }
 
-/// #17752: each press-in hardware hole is named in the DXF by a note beside it on layer HARDWARE
-/// (`M3 nut`, a stud's length after it), 3 mm high, level with the hole and just clear of its rim;
-/// layers on a single layer leave the notes out, and a sheet with no hardware has no such layer.
+/// #17752: with `hardware_notes`, each press-in hardware hole is named in the DXF by a note beside
+/// it on layer HARDWARE (`M3 nut`, a stud's length after it), 3 mm high, level with the hole and
+/// just clear of its rim; layers on a single layer leave the notes out, and a sheet with no
+/// hardware has no such layer. Without the option there are no notes and no layer.
 #[test]
 fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
     let mut s = plate_with(&[]);
-    assert!(!layer_table(&export(&mut s, json!({}))).contains_key("HARDWARE"), "no hardware, no layer");
+    assert!(!layer_table(&export(&mut s, json!({"hardware_notes": true}))).contains_key("HARDWARE"), "no hardware, no layer");
     run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
     run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
     run(&mut s, "solid.hole", json!({"position": [50, 10, 2.5], "diameter": 3}));
-    let dxf = export(&mut s, json!({}));
+    let unasked = export(&mut s, json!({}));
+    assert!(!layer_table(&unasked).contains_key("HARDWARE") && entities(&unasked).iter().all(|e| e.0 != "TEXT"), "notes are asked for");
+    let dxf = export(&mut s, json!({"hardware_notes": true}));
     let all = entities(&dxf);
     let notes: Vec<&Entity> = all.iter().filter(|e| e.0 == "TEXT").collect();
     assert!(notes.iter().all(|e| layer_of(e) == "HARDWARE"), "{notes:?}");
@@ -1816,9 +1819,9 @@ fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
         assert!(beside, "{} is beside no hole: {at:?} {circles:?}", encoded_text(note));
     }
     // The note's height is the caller's, as a bend note's is.
-    let tall = entities(&export(&mut s, json!({"note_height": 5})));
+    let tall = entities(&export(&mut s, json!({"hardware_notes": true, "note_height": 5})));
     assert!(tall.iter().filter(|e| e.0 == "TEXT").all(|e| note_layout(e).0 == 5.0));
     // On a single layer a note would sit with the cut contours: none.
-    let single = export(&mut s, json!({"layers": "single"}));
+    let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
     assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
 }

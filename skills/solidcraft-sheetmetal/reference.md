@@ -79,8 +79,9 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
 - `sheet.flat_pattern` lists each hardware hole under `hardware`: `kind`, `thread`, `length` (null for a
   nut), `part`, `position` (the hole's centre in the flat) and `hole_diameter`. The key is left out when
   the sheet has none, and a hole a later cut took away is not listed.
-- `sheet.export_dxf` puts a note beside each hardware hole, `M3 nut` or `M4 stud 10 mm`, on layer
-  `HARDWARE` (as high as `note_height`), with `layers: roles`; `layers: single` leaves the notes out.
+- `sheet.export_dxf` is the sheet and its mounting holes only: the hardware is not in the file. With
+  `hardware_notes: true` it also puts a note beside each hardware hole, `M3 nut` or `M4 stud 10 mm`, on
+  layer `HARDWARE` (as high as `note_height`), with `layers: roles`; `layers: single` leaves the notes out.
 - In the app: the Press-in Hardware button of the Sheet Metal tab opens a window with the kind, the thread
   (only the sizes the table has for the kind), a stud's or standoff's length and the place picked on a
   face or at sketch points. It shows the table's numbers, the preview's refusal and its warnings. Edit
@@ -93,9 +94,9 @@ name. When you omit `name`, the command returns the last bend's feature ID and n
   `bend_zones`, `perforations`, `hardware`, `bores` (holes drilled along a panel into its rim) and the unfolded
   body.
 - `sheet.export_dxf`: `body?`, `path?`, `curves?` (`exact`|`arcs`), `text?` (`cut`|`etch`),
-  `bend_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
+  `bend_notes?`, `hardware_notes?`, `note_height?`, `bend_lines?`, `layers?` (`roles`|`single`), `per_body?`.
   Layers: `OUTLINE`, `CUT`, `TEXT`/`ETCH`, `BEND_UP`/`BEND_DOWN`, `BEND_NOTES`,
-  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE`.
+  `POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM`, `PERFORATION`, `HARDWARE` (only with `hardware_notes`).
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.

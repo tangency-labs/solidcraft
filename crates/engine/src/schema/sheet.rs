@@ -1168,11 +1168,16 @@ pub struct ExportDxfParams {
     /// it, but a value out of range is refused either way.
     #[serde(default)]
     pub note_height: Option<DxfNoteHeight>,
+    /// A note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as
+    /// `note_height`; not with `layers: single`. Default: false, so the file for a shop is the
+    /// sheet and its mounting holes only.
+    #[serde(default)]
+    pub hardware_notes: Option<bool>,
     /// The bend lines on layers BEND_UP and BEND_DOWN. Default: true; false leaves them out, for
     /// a cutter that would cut them.
     #[serde(default)]
     pub bend_lines: Option<bool>,
-    /// roles: the layer for each role, with a note beside each press-in hardware hole on layer HARDWARE.
+    /// roles: the layer for each role (and, with `hardware_notes`, layer HARDWARE).
     /// single: every entity on layer 0, with no hardware notes. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,

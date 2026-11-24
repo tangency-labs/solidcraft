@@ -199,6 +199,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>)>,
                 status: Option<String>,
+                /// Export DXF also writes a note beside each press-in hardware hole (#17752). Off:
+                /// the file has the sheet and its mounting holes only.
+                hardware_notes: bool,
             },
         }
     }
@@ -288,7 +291,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Sm::Hardware { kind: 0, thread: "M3".into(), length: crate::dialogs::length_default(&app.session, "10") },
             vec![SelInput::new("ui.hardware_place", HOLE_FACES, true)],
         ),
-        "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.flat_pattern" => (
+            Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
+            vec![SelInput::new("Body (last if none)", BODIES, false)],
+        ),
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -704,7 +710,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::FlatPattern { data, key, status } => {
+        Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
@@ -766,9 +772,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             ));
                         });
                     }
+                    // Only a sheet with press-in hardware has notes to ask for.
+                    if v["hardware"].as_array().is_some_and(|h| !h.is_empty()) {
+                        crate::ui_kit::options(ui, "sheet_flat_options", &mut [("ui.hardware_notes", &mut *hardware_notes)]);
+                    }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
+                            *status = Some(export_flat_with(app, v["body"].as_str().unwrap_or(""), "dxf", *hardware_notes));
                         }
                     });
                     ui.vertical(|ui| {
@@ -818,12 +828,22 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
 }
 
 fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
+    export_flat_with(app, body, extension, false)
+}
+
+/// `hardware_notes` asks the DXF for the note beside each press-in hardware hole; the bend table
+/// has none.
+fn export_flat_with(app: &mut SolveApp, body: &str, extension: &str, hardware_notes: bool) -> String {
     let name = format!("{}-{body}.{extension}", app.session.doc.name);
     let body = body.to_string();
     let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
-            match app.run(command, json!({"body": body, "path": path})) {
+            let mut params = json!({"body": body, "path": path});
+            if hardware_notes && command == "sheet.export_dxf" {
+                params["hardware_notes"] = json!(true);
+            }
+            match app.run(command, params) {
                 Ok(_) => {
                     app.set_status(format!("Exported {path}"), false);
                     format!("Saved {path}")
