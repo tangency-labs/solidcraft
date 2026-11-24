@@ -80,6 +80,17 @@ pub static COMMANDS: &[CommandSpec] = &[
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
         )),
+    CommandSpec::new("file.revert_saved", "Revert to Saved", crate::checked!("file.revert_saved", revert_saved))
+        .any_part()
+        .icon("open")
+        .noundo()
+        .contract(&REVERT_SAVED_CONTRACT)
+        .output(output_schema_for::<OpenResult>)
+        .params(concat!(
+            "→ reads the active design again from the file it was opened or saved as, as File > Revert to Saved does, and answers as doc.open does. ",
+            "It never asks: unsaved changes are lost, and the history with them. ",
+            "A design with no file yet, and a file that is gone or unreadable, are refused and leave the design as it is",
+        )),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("import")
@@ -179,7 +190,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -231,10 +242,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
         .params(concat!(
             "path; ",
-            "mesh_prefix?; ",
-            "effort? (default 1000); ",
-            "velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; ",
+            "mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); ",
+            "effort? (default 1000), ",
+            "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
             "docs/urdf.md",
+        )),
+    CommandSpec::new("file.export_urdf_options", "Export URDF with Options", crate::checked!("file.export_urdf_options", export_urdf_options_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_URDF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
+        .params(concat!(
+            "path; ",
+            "mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); ",
+            "effort? (default 1000), ",
+            "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
+            "called from a script or MCP it exports as file.export_urdf does; in the app it opens the export's options (mesh prefix, limits, mimic, where the meshes go) first; docs/urdf.md",
         )),
     CommandSpec::new("file.export_sdf", "Export SDF Model", crate::checked!("file.export_sdf", export_sdf_cmd))
         .icon("export")
@@ -349,6 +372,16 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     let reply = NewDesignResult { name: name.to_string(), document_id: None, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
+}
+
+const REVERT_SAVED_CONTRACT: TypedContract<crate::schema::file::RevertSavedParams> = TypedContract::new();
+
+/// File > Revert to Saved without the question (#16629): the design's file is read again through
+/// [`open`], so a file only an importer plugin reads, a bad path and a missing file answer as
+/// `doc.open` answers, and the design stays as it was when the file cannot be read.
+fn revert_saved(s: &mut Session, _p: &Value) -> Result<Value> {
+    let path = s.path.clone().ok_or_else(|| bad("file.revert_saved", "the design has no file to go back to yet; save it first"))?;
+    open(s, &json!({"path": path}))
 }
 
 const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContract::new();
@@ -3162,6 +3195,11 @@ fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     export_urdf(s, cmd, path_arg(p, cmd)?, p)
 }
 
+fn export_urdf_options_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_urdf_options";
+    export_urdf(s, cmd, path_arg(p, cmd)?, p)
+}
+
 fn export_sdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_sdf";
     export_sdf(s, cmd, path_arg(p, cmd)?, p)
@@ -3531,6 +3569,60 @@ fn held_warning(name: &str) -> String {
     format!("`{name}` was moved but the move is not captured: exported where its joints place it")
 }
 
+/// Where the meshes go for a URDF in `dir` so that `mesh_prefix` finds them: the folder, and the
+/// start of their file names. A `package://<name>/` path is taken from the package when the URDF
+/// is in it (`<name>/` or `<name>/urdf/`), else from the URDF's folder. `None`: the prefix is a
+/// web or other address, with no folder on this computer.
+fn mesh_place(prefix: &str, dir: &std::path::Path) -> Option<(std::path::PathBuf, String)> {
+    let split = |text: &str| match text.rsplit_once('/') {
+        Some(("", start)) => ("/".to_string(), start.to_string()),
+        Some((folder, start)) => (folder.to_string(), start.to_string()),
+        None => (String::new(), text.to_string()),
+    };
+    if let Some(rest) = prefix.strip_prefix("package://") {
+        let (package, inner) = rest.split_once('/').unwrap_or((rest, ""));
+        let named = |d: &std::path::Path| d.file_name().is_some_and(|n| n == package);
+        let root = match dir.parent() {
+            Some(parent) if dir.file_name().is_some_and(|n| n == "urdf") && named(parent) => parent,
+            _ => dir,
+        };
+        let (folder, start) = split(inner);
+        return Some((root.join(folder), start));
+    }
+    if let Some(rest) = prefix.strip_prefix("file://") {
+        // A URL: `%20` is a space, and `/C:/robot` is the Windows folder `C:/robot`.
+        let rest = percent_decoded(rest)?;
+        let drive = |t: &str| t.as_bytes().get(2) == Some(&b':') && t.as_bytes().get(1).is_some_and(u8::is_ascii_alphabetic);
+        let rest = if rest.starts_with('/') && drive(&rest) { rest.get(1..)?.to_string() } else { rest };
+        let (folder, start) = split(&rest);
+        return Some((std::path::PathBuf::from(folder), start));
+    }
+    if prefix.contains("://") {
+        return None;
+    }
+    let (folder, start) = split(prefix);
+    Some((dir.join(folder), start))
+}
+
+/// `text` with each `%XX` turned back into its byte; `None` when that is not UTF-8 or a `%` is
+/// not followed by two hex digits.
+fn percent_decoded(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        if b == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(b);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
 /// anything is written; the meshes go first and the `.urdf` last.
 fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
@@ -3538,15 +3630,28 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => Ok(None),
         Some(_) => num(p, k).filter(|x| *x > 0.0).map(Some).ok_or_else(|| bad(cmd, format!("`{k}` must be a positive number"))),
     };
+    let flag = |k: &str, default: bool| match p.get(k) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, format!("`{k}` must be true or false"))),
+    };
     // `io::urdf` refuses a prefix XML cannot hold.
     let mesh_prefix = str_(p, "mesh_prefix").unwrap_or("").to_string();
-    let mut options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")?, decals: Vec::new() };
+    let mut options = solidcraft_io::UrdfOptions {
+        mesh_prefix,
+        effort: positive("effort")?,
+        velocity: positive("velocity")?,
+        mimic: flag("mimic", false)?,
+        decals: Vec::new(),
+    };
     // The pictures shown on the model are written only when asked for, so an export made the
     // usual way writes what it always has.
     let images = match p.get("images") {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`images` must be true or false"))?,
     };
+    // true: the meshes where `mesh_prefix` points. Off by default, as before: every mesh next to
+    // the `.urdf` whatever the prefix says.
+    let place_meshes = flag("place_meshes", false)?;
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // Occurrences where they are shown, uncaptured moves included, except those the joint solver
@@ -3562,10 +3667,23 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     pkg.warnings.extend(decal_warnings);
     pkg.warnings.extend(held.iter().map(|name| held_warning(name)));
     let dir = file.parent().unwrap_or(std::path::Path::new(""));
-    let mut targets: Vec<(String, &[u8])> = pkg.meshes.iter().map(|(n, b)| (dir.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
+    let (folder, name_start) = match mesh_place(&options.mesh_prefix, dir) {
+        _ if !place_meshes => (dir.to_path_buf(), String::new()),
+        Some(place) => place,
+        None => {
+            pkg.warnings.push(format!("`mesh_prefix` {} is not a place on this computer: the meshes are next to the URDF", options.mesh_prefix));
+            (dir.to_path_buf(), String::new())
+        }
+    };
+    let mut targets: Vec<(String, &[u8])> =
+        pkg.meshes.iter().map(|(n, b)| (folder.join(format!("{name_start}{n}")).to_string_lossy().to_string(), b.as_slice())).collect();
     targets.push((path.to_string(), pkg.xml.as_bytes()));
     for (t, _) in &targets {
         solidcraft_io::vfs::check(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
+    }
+    if folder != dir && !pkg.meshes.is_empty() {
+        let at = folder.to_string_lossy();
+        solidcraft_io::vfs::create_dir_all(&at).map_err(|e| EngineError::Other(format!("{at}: {e}")))?;
     }
     let mut written: Vec<String> = Vec::new();
     for (t, bytes) in &targets {
@@ -3778,6 +3896,33 @@ mod tests {
         };
         assert!(has_thumbnail(&mut s, "part.3mf"));
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
+
+    /// File > Revert to Saved without a dialog (#16629): the design is read again from its file,
+    /// changes since the last save are gone, and a design with no file or a file that is gone is
+    /// refused with the design left as it was.
+    #[test]
+    fn revert_saved_reads_the_design_again_from_its_file() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-revert-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        let refused = s.execute("file.revert_saved", &json!({})).unwrap_err().to_string();
+        assert!(refused.contains("no file"), "{refused}");
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let saved = s.doc.features.len();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        assert!(s.doc.features.len() > saved && s.is_dirty());
+        s.execute("file.revert_saved", &json!({})).unwrap();
+        assert_eq!((s.doc.features.len(), s.is_dirty(), s.path.as_deref()), (saved, false, Some(path.as_str())), "the unsaved box is gone");
+        // The file goes away: refused, and the design keeps what it has.
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        let before = s.doc.features.len();
+        std::fs::remove_file(&path).unwrap();
+        assert!(s.execute("file.revert_saved", &json!({})).is_err());
+        assert_eq!(s.doc.features.len(), before, "a failed revert keeps the design");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.

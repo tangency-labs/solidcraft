@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.component_physical_override": "Mass Override",
+    "Mass override": "Mass override"
+  },
+  "ar": {
+    "cmd.component_physical_override": "تجاوز الكتلة",
+    "Mass override": "تجاوز الكتلة"
+  },
+  "he": {
+    "cmd.component_physical_override": "עקיפת מסה",
+    "Mass override": "עקיפת מסה"
+  },
+  "ja": {
+    "cmd.component_physical_override": "質量の上書き",
+    "Mass override": "質量の上書き"
+  },
+  "vi": {
+    "cmd.component_physical_override": "Ghi đè khối lượng",
+    "Mass override": "Ghi đè khối lượng"
+  },
+  "zh": {
+    "cmd.component_physical_override": "质量覆盖",
+    "Mass override": "质量覆盖"
+  }
+}

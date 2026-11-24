@@ -57,10 +57,12 @@ use the same container reader/writer; JSON export and Save As remain available.
 
 ## Provisional saved display
 
-Experimental engine saves with `preview: true` can include `cache/preview.json` and
+Saves with `preview: true` can include `cache/preview.json` and
 `cache/preview.bin` when the evaluated
-world display meshes are already warm. Ordinary saves omit this redundant display data
-to avoid extra save work; it is separate from the native B-rep cache below. Saving never triangulates a cold body for this
+world display meshes are already warm. The window's Save and Save As ask for it, so a file
+browser can show the model in 3D (Quick Look on macOS, #19328); other engine saves omit this
+redundant display data unless they ask. `cache/preview.bin` is stored Deflate-compressed. It is
+separate from the native B-rep cache below. Saving never triangulates a cold body for this
 cache. Pending occurrence moves, active sketch edits, feature errors and oversized
 previews omit it. The cache is bounded to 8 MiB, 1,024 bodies and 100,000 triangles;
 its manifest is at most 64 KiB. Body names/colours and contiguous binary mesh slices
