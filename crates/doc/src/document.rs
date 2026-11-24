@@ -4067,6 +4067,10 @@ pub struct NamedSelection {
     pub name: String,
     #[serde(default)]
     pub items: Vec<serde_json::Value>,
+    /// The name was made by SolidCraft ("Selection3 – 4 faces"), so it follows an update; a
+    /// name the user typed or renamed to stays, whatever it looks like.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated: bool,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a

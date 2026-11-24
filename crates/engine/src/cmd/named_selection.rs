@@ -87,44 +87,79 @@ fn items_of(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Value>> {
     if items.len() > MAX_ITEMS {
         return Err(bad(cmd, format!("a named selection holds at most {MAX_ITEMS} items")));
     }
-    Ok(with_face_names(s, items))
+    let items = items.into_iter().map(|it| completed(s, it, cmd)).collect::<Result<Vec<_>>>()?;
+    Ok(with_references(s, items))
 }
 
-/// Each face and edge kept with its persistent name (what made it, see `naming`), so applying
-/// finds the same face after an edit renumbers the body's faces rather than whichever face now
-/// has the saved index.
-fn with_face_names(s: &Session, items: Vec<Value>) -> Vec<Value> {
+/// A face or edge given by only its index or only a point, completed as `select.set` would pick
+/// it, so it can be named below; anything else as given.
+fn completed(s: &Session, it: Value, cmd: &str) -> Result<Value> {
+    let partial = matches!(it.get("type").and_then(Value::as_str), Some("face" | "edge")) && (it.get("index").is_none() || it.get("point").is_none());
+    if !partial {
+        return Ok(it);
+    }
+    let sel = super::edit::selection_item(s, it).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(sel).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// Each body, face and edge kept with the feature that made its body (`made_by`), so applying
+/// does not select another body given the name after this one was deleted; each face and edge
+/// of a solid also keeps its persistent name (what made it, see `naming`), so applying finds the
+/// same face after an edit renumbers the body's faces rather than whichever face now has the
+/// saved index.
+fn with_references(s: &Session, items: Vec<Value>) -> Vec<Value> {
     let Ok(state) = s.world_state() else { return items };
     items
         .into_iter()
         .map(|mut it| {
             let kind = it.get("type").and_then(Value::as_str).unwrap_or_default();
+            let body_key = match kind {
+                "body" => "name",
+                "face" | "edge" => "body",
+                _ => return it,
+            };
+            let Some(b) = it.get(body_key).and_then(Value::as_str).and_then(|b| state.body(b)) else { return it };
             let index = it.get("index").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok());
-            let body = it.get("body").and_then(Value::as_str).and_then(|b| state.body(b));
-            let name = match (kind, index, body) {
-                _ if it.get("point").is_none() || it.get("name").is_some() => None,
-                ("face", Some(i), Some(b)) => solidcraft_doc::naming::face_names(b).get(i).cloned(),
-                ("edge", Some(i), Some(b)) => solidcraft_doc::naming::edge_names(b).get(i).cloned(),
+            let name = match (kind, index) {
+                _ if b.body.is_mesh() || it.get("point").is_none() || it.get("name").is_some() => None,
+                ("face", Some(i)) => solidcraft_doc::naming::face_names(b).get(i).cloned(),
+                ("edge", Some(i)) => solidcraft_doc::naming::edge_names(b).get(i).cloned(),
                 _ => None,
             };
-            if let (Some(name), Some(o)) = (name, it.as_object_mut()) {
-                o.insert("name".into(), Value::String(name));
+            if let Some(o) = it.as_object_mut() {
+                o.insert("made_by".into(), Value::from(b.feature));
+                if let Some(name) = name {
+                    o.insert("name".into(), Value::String(name));
+                }
             }
             it
         })
         .collect()
 }
 
-/// The item to select for a saved one: a named face or edge found again by its name near its
-/// saved point, on the body it was saved on (`None`: it is gone, or no longer one face or edge);
-/// anything else as saved.
-fn found(state: &solidcraft_doc::ModelState, it: Value) -> Option<Value> {
-    let kind = it.get("type").and_then(Value::as_str).unwrap_or_default();
-    let Some(name) = it.get("name").and_then(Value::as_str).filter(|_| kind == "face" || kind == "edge") else {
-        return Some(it);
+/// The item to select for a saved one (`None`: it is gone). A body, face or edge whose body name
+/// now belongs to a body another feature made is gone. A named face or edge is found again by
+/// its name near its saved point; one of a solid with no name has nothing to be found by, and is
+/// gone too. A face or edge of a mesh body, and anything else, is selected as saved.
+fn found(state: &solidcraft_doc::ModelState, mut it: Value) -> Option<Value> {
+    let kind = it.get("type").and_then(Value::as_str).unwrap_or_default().to_string();
+    let body_key = match kind.as_str() {
+        "body" => "name",
+        "face" | "edge" => "body",
+        _ => return Some(it),
     };
-    let body_name = it.get("body").and_then(Value::as_str)?;
-    let b = state.body(body_name)?;
+    let made_by = it.as_object_mut().and_then(|o| o.remove("made_by"));
+    let body_name = it.get(body_key).and_then(Value::as_str)?.to_string();
+    let b = state.body(&body_name)?;
+    if made_by.is_some_and(|f| f.as_u64() != Some(b.feature)) {
+        return None;
+    }
+    if kind == "body" {
+        return Some(it);
+    }
+    let Some(name) = it.get("name").and_then(Value::as_str) else {
+        return b.body.is_mesh().then_some(it);
+    };
     let near: solidcore_record::Vec3 = serde_json::from_value(it.get("point")?.clone()).ok()?;
     if kind == "face" {
         let (index, point) = solidcraft_doc::naming::face_on_body(b, name, near)?;
@@ -198,17 +233,17 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "too many named selections"));
     }
     let taken = |n: &str| s.doc.named_selections.iter().any(|x| x.name == n);
-    let name = match p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+    let (name, generated) = match p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
         Some(n) if n.chars().count() > MAX_NAME_CHARS => return Err(bad(cmd, "`name` is too long")),
         Some(n) if taken(n) => return Err(bad(cmd, format!("another named selection is called `{n}`"))),
-        Some(n) => n.to_string(),
+        Some(n) => (n.to_string(), false),
         None => {
             let what = summary(s, &items);
-            (s.doc.named_selections.len() + 1..).map(|k| default_name(k, &what)).find(|n| !taken(n)).unwrap_or_default()
+            ((s.doc.named_selections.len() + 1..).map(|k| default_name(k, &what)).find(|n| !taken(n)).unwrap_or_default(), true)
         }
     };
     let count = items.len();
-    s.doc_mut().named_selections.push(solidcraft_doc::NamedSelection { name: name.clone(), items });
+    s.doc_mut().named_selections.push(solidcraft_doc::NamedSelection { name: name.clone(), items, generated });
     reply(cmd, SelectionSaved { selection: name, count, param_warnings: Vec::new() })
 }
 
@@ -237,12 +272,12 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
     let i = index_of(s, &name, cmd)?;
     let items = items_of(s, p, cmd)?;
     let count = items.len();
-    // A default name says what the selection holds, so it follows the update (keeping its
-    // number) unless another selection already has the new name. Only a name that is exactly
-    // the default for what it held is one: a typed "Selection7 – Mounting holes" stays.
-    let held = s.doc.named_selections.get(i).map(|x| summary(s, &x.items)).unwrap_or_default();
+    // A name SolidCraft made says what the selection holds, so it follows the update (keeping
+    // its number) unless another selection already has the new name. A name the user typed
+    // stays, even one in the same shape ("Selection7 – 2 faces").
+    let generated = s.doc.named_selections.get(i).is_some_and(|x| x.generated);
     let renamed = default_number(&name)
-        .filter(|k| default_name(*k, &held) == name)
+        .filter(|_| generated)
         .map(|k| default_name(k, &summary(s, &items)))
         .filter(|n| !s.doc.named_selections.iter().enumerate().any(|(j, x)| j != i && x.name == *n));
     let name = renamed.unwrap_or(name);
@@ -269,6 +304,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(x) = s.doc_mut().named_selections.get_mut(i) {
         x.name = name.clone();
+        x.generated = false;
     }
     reply(cmd, SelectionRenamed { selection: name, param_warnings: Vec::new() })
 }

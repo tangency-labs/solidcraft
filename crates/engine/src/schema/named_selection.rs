@@ -115,6 +115,9 @@ pub struct SelectionEntry {
     pub name: String,
     /// Its items, as `select.set` takes them.
     pub items: Vec<Value>,
+    /// Whether SolidCraft made the name (then it follows an update); left out when not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated: bool,
 }
 
 /// What `named_selection.list` returns.

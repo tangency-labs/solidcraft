@@ -124,3 +124,84 @@ fn saved_faces_follow_edits_and_bodies_follow_renames() {
     let updated = run(&mut s, "named_selection.update", json!({"selection": "Selection7 – Top", "items": [{"type": "body", "name": "Housing"}]}));
     assert_eq!(updated["selection"], "Selection7 – Top");
 }
+
+/// A name typed in the exact shape of a default name ("Selection7 – 2 faces", saved holding two
+/// faces) is still the user's: an update keeps it. A name SolidCraft made follows the update, and
+/// stops following once the user renames the selection.
+#[test]
+fn a_typed_name_that_looks_like_a_default_stays_on_update() {
+    let mut s = Session::default();
+    parts(&mut s);
+    let faces = json!([{"type": "face", "body": "Board", "index": 0}, {"type": "face", "body": "Board", "index": 1}]);
+    run(&mut s, "named_selection.save", json!({"name": "Selection7 – 2 faces", "items": faces}));
+    let body = json!([{"type": "body", "name": "Board"}]);
+    assert_eq!(
+        run(&mut s, "named_selection.update", json!({"selection": "Selection7 – 2 faces", "items": body}))["selection"],
+        "Selection7 – 2 faces"
+    );
+    assert!(!s.doc.named_selections[0].generated);
+    let made = run(&mut s, "named_selection.save", json!({"items": faces}))["selection"].as_str().unwrap().to_string();
+    assert!(s.doc.named_selections[1].generated, "{made}");
+    let followed = run(&mut s, "named_selection.update", json!({"selection": made, "items": body}))["selection"].as_str().unwrap().to_string();
+    assert!(followed.ends_with("– 1 body"), "{followed}");
+    run(&mut s, "named_selection.rename", json!({"selection": followed, "name": "Selection2 – 1 body!"}));
+    run(&mut s, "named_selection.rename", json!({"selection": "Selection2 – 1 body!", "name": followed}));
+    assert_eq!(run(&mut s, "named_selection.update", json!({"selection": followed, "items": faces}))["selection"], followed, "renamed by the user");
+}
+
+/// A face or edge given by only its index or only a point is completed and named when saved, so
+/// after a fillet renumbers the body's faces the same ones are selected again.
+#[test]
+fn partial_face_and_edge_picks_follow_edits() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "point": [5.0, 5.0, 0.0]}]}));
+    let Some(Sel::Face { index: bottom, .. }) = s.selection.first().cloned() else { panic!("{:?}", s.selection) };
+    let items = json!([
+        {"type": "face", "body": "Block", "point": [5.0, 5.0, 10.0]},
+        {"type": "face", "body": "Block", "index": bottom},
+        {"type": "edge", "body": "Block", "point": [5.0, 0.0, 10.0]}
+    ]);
+    run(&mut s, "named_selection.save", json!({"name": "Picks", "items": items}));
+    let names: Vec<Option<String>> = s.doc.named_selections[0].items.iter().map(|it| it["name"].as_str().map(str::to_string)).collect();
+    assert!(names.iter().all(Option::is_some), "each pick keeps its name: {names:?}");
+    let edges: Vec<Value> = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().map(|[x, y]| json!([x, y, 5.0])).collect();
+    run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 1.0, "body": "Block"}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Picks"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(3), Some(0)), "{applied}");
+    let st = s.world_state().unwrap();
+    let b = st.body("Block").unwrap();
+    let (faces, edge_names) = (solidcraft_doc::naming::face_names(b), solidcraft_doc::naming::edge_names(b));
+    let now: Vec<Option<String>> = s
+        .selection
+        .iter()
+        .map(|x| match x {
+            Sel::Face { index, .. } => faces.get(*index).cloned(),
+            Sel::Edge { index, .. } => edge_names.get(*index).cloned(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(now, names, "the same faces and edge after the fillet");
+    assert!(s.execute("named_selection.save", &json!({"items": [{"type": "face", "body": "Block", "index": 999}]})).is_err(), "no such face");
+}
+
+/// A saved body that is deleted (the feature that made it removed from the timeline), its name
+/// then given to another body: applying skips it rather than selecting the other body.
+#[test]
+fn a_deleted_body_is_not_replaced_by_one_given_its_name() {
+    let mut s = Session::default();
+    parts(&mut s);
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [60, 0, 0], "body_name": "Spare"}));
+    let items = json!([{"type": "body", "name": "Board"}, {"type": "face", "body": "Board", "point": [20.0, 35.0, 2.0]}]);
+    run(&mut s, "named_selection.save", json!({"name": "Board", "items": items}));
+    let made_by = s.world_state().unwrap().body("Board").unwrap().feature;
+    run(&mut s, "timeline.delete", json!({"feature": made_by.to_string()}));
+    run(&mut s, "body.rename", json!({"body": "Spare", "name": "Board"}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Board"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(0), Some(2)), "{applied} {:?}", s.selection);
+    // Undo brings the body back, and with it the selection.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let applied = run(&mut s, "named_selection.apply", json!({"selection": "Board"}));
+    assert_eq!((applied["selected"].as_u64(), applied["skipped"].as_u64()), (Some(2), Some(0)), "{applied}");
+}
