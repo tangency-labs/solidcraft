@@ -66,6 +66,7 @@ mod dialogs_hole;
 pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
+pub mod dialogs_midsurface;
 pub mod dialogs_motion;
 pub mod dialogs_move;
 pub mod dialogs_part_size;

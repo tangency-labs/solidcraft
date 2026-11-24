@@ -182,7 +182,7 @@ dark  = "#85554a"
 # Construct/Inspect and shared file/edit utilities retain the base blue in every workspace.
 [icon-accents]
 surface = [
-  "boundary", "blend_surface", "offset_surface", "patch", "reverse_normal",
+  "boundary", "blend_surface", "midsurface", "offset_surface", "patch", "reverse_normal",
   "ruled", "stitch", "thicken", "unstitch", "untrim",
 ]
 sketch = [

@@ -67,6 +67,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_surface::Surf::Extrude { .. } => "surface.extrude",
             crate::dialogs_surface::Surf::Revolve { .. } => "surface.revolve",
             crate::dialogs_surface::Surf::Sweep(_) => "surface.sweep",
+            crate::dialogs_surface::Surf::Midsurface(_) => "surface.midsurface",
             crate::dialogs_surface::Surf::Loft { .. } => "surface.loft",
             crate::dialogs_surface::Surf::Blend { .. } => "surface.blend",
             crate::dialogs_surface::Surf::Boundary { .. } => "surface.boundary",
@@ -1472,6 +1473,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
+        Kind::Surface(crate::dialogs_surface::Surf::Midsurface(o)) => enter |= crate::dialogs_midsurface::rows(app, ui, o, &d.inputs),
         Kind::Surface(k) => {
             enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
             // Extend's Distance drops a kept plane or face (one the dialog couldn't pick), so

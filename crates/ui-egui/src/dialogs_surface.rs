@@ -76,6 +76,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 axis: Option<Value>,
             },
             Sweep(crate::dialogs_sweep::SweepOpts),
+            /// The solid's proposed wall pairs, the limit and the options (#11439).
+            Midsurface(crate::dialogs_midsurface::MidOpts),
             /// `rail_fit`: how the guide rails reshape the sections (an index into the sweep dialog's
             /// rail fits).
             Loft {
@@ -135,6 +137,7 @@ impl Surf {
             Surf::Extrude { .. } => "SURFACE EXTRUDE",
             Surf::Revolve { .. } => "SURFACE REVOLVE",
             Surf::Sweep(_) => "SURFACE SWEEP",
+            Surf::Midsurface(_) => "MIDSURFACE",
             Surf::Loft { .. } => "SURFACE LOFT",
             Surf::Blend { .. } => "BLEND SURFACE",
             Surf::Boundary { .. } => "BOUNDARY SURFACE",
@@ -270,6 +273,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true), rail, rail2]
         }
+        Surf::Midsurface(_) => crate::dialogs_midsurface::inputs(),
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
         Surf::Patch { .. } => {
@@ -310,6 +314,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "surface.revolve" => Surf::Revolve { angle: "360 deg".into(), symmetric: false, axis: None },
         "surface.sweep" => Surf::Sweep(crate::dialogs_sweep::SweepOpts::default()),
         "surface.loft" => Surf::Loft { rail_fit: 0 },
+        "surface.midsurface" => Surf::Midsurface(crate::dialogs_midsurface::MidOpts::default()),
         "surface.blend" => Surf::Blend { continuity: [Continuity::G1; 2], bulge: [0.0, 0.0], stitch: false },
         "surface.boundary" => Surf::Boundary { continuity: Continuity::G1, join: false },
         "surface.patch" => Surf::Patch { continuity: Continuity::G0 },
@@ -463,7 +468,8 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
         }
         Surf::Sweep(opts) => enter |= crate::dialogs_sweep::rows(ui, opts, "ss"),
         Surf::Loft { rail_fit } => crate::dialogs_sweep::rail_fit_row(ui, "sl", rail_fit),
-        Surf::SplitFace | Surf::Unstitch | Surf::ReverseNormal => {}
+        // Its rows ask the engine for the proposal: drawn by the dense dialog, which holds the app.
+        Surf::SplitFace | Surf::Unstitch | Surf::ReverseNormal | Surf::Midsurface(_) => {}
     }
     enter
 }
@@ -1044,6 +1050,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.untrim", p)
         }
+        Surf::Midsurface(o) => crate::dialogs_midsurface::command(o, inputs)?,
         Surf::SplitFace => {
             need(0, "the faces to split")?;
             need(1, "the splitting tool")?;
@@ -1093,6 +1100,11 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
     // Stored values the dialog shows no box for, sent back unchanged on OK.
     let mut kept = Map::new();
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
+        FeatureKind::SurfaceMidsurface { .. } => {
+            // The thinnest wall has no box: the options keep it, for Find Pairs and for OK.
+            let (o, ins) = crate::dialogs_midsurface::for_feature(kind)?;
+            return Some((Kind::Surface(Surf::Midsurface(o)), ins, kept));
+        }
         FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, .. } => {
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),

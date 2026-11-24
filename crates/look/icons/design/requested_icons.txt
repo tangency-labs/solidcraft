@@ -380,6 +380,7 @@ surface_extrude	false
 surface_fair	false
 surface_fillet	false
 surface_loft	false
+surface_midsurface	false
 surface_offset	false
 surface_patch	false
 surface_reverse_normal	false
