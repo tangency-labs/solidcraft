@@ -9,7 +9,7 @@
 //! the surface's (u, v) first: a point outside the surface domain is off the surface; a point
 //! inside it but outside the face's trim is off the face.
 
-use solidcore::eval::{Chart as KernelChart, Metric, SurfaceEval};
+use solidcore::eval::{Chart as KernelChart, GeodesicError, GeodesicSolver, Metric, SurfaceEval};
 use solidcore::Vec3 as EvalVec3;
 use solidcore_record::brep::{Brep, Surface as RecordSurface};
 use solidcore_record::Vec3 as RecordVec3;
@@ -27,6 +27,20 @@ pub enum Region {
     OffFace,
     /// Outside the surface's parameter domain.
     OffSurface,
+}
+
+/// The kernel's refusal of a geodesic, as an ops error: the operation and the kernel's reason.
+fn refusal(error: GeodesicError) -> Error {
+    Error::Refused {
+        operation: "geodesic",
+        reason: match error {
+            GeodesicError::Ambiguous => "the shortest geodesic is ambiguous",
+            GeodesicError::Singular => "the surface is singular on the geodesic",
+            GeodesicError::OffDomain => "the geodesic leaves the surface",
+            GeodesicError::NotConverged => "the geodesic did not converge",
+            GeodesicError::Unsupported => "the geodesic is not supported on this surface",
+        },
+    }
 }
 
 /// A chart on a body face.
@@ -166,6 +180,21 @@ impl<'a> SurfaceChart<'a> {
         } else {
             Region::OffFace
         }
+    }
+
+    /// The shortest path's length between two chart points, in millimetres: the surface's own
+    /// distance, measured by the kernel's geodesic solver.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a point outside the surface's domain; [`Error::Refused`] for a
+    /// path the kernel cannot find (singular, ambiguous, off the domain, or not converged).
+    pub fn distance(&self, a: [f64; 2], b: [f64; 2]) -> Result<f64> {
+        if !self.in_domain(a[0], a[1]) || !self.in_domain(b[0], b[1]) {
+            return Err(Error::Argument);
+        }
+        GeodesicSolver::new(&self.surface, self.tolerance)
+            .distance(self.step_uv(a[0], a[1]), self.step_uv(b[0], b[1]))
+            .map_err(refusal)
     }
 
     /// The chart coordinates of a face (u, v), by its point projected back onto the surface.

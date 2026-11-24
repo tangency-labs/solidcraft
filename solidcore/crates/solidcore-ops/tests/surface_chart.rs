@@ -10,8 +10,8 @@
 )] // test
 
 use solidcore_ops::face_surface::{Exact, FaceSurface};
-use solidcore_ops::make_cylinder;
 use solidcore_ops::surface_chart::{Region, SurfaceChart};
+use solidcore_ops::{make_cylinder, make_sphere};
 use solidcore_record::brep::{Brep, Surface};
 
 fn cylinder_face(record: &Brep) -> usize {
@@ -61,4 +61,40 @@ fn a_cylinder_chart_keeps_its_pick_and_reports_the_face() {
     assert!(!chart.in_domain(past[0], past[1]), "{past:?}");
     assert_eq!(chart.region(past[0], past[1]), Region::OffSurface);
     assert_eq!(chart.region(0.0, 1_000_000.0), Region::OffSurface);
+}
+
+fn sphere_face(record: &Brep) -> usize {
+    (0..record.faces.len())
+        .find(|&f| {
+            FaceSurface::of(record, f)
+                .is_ok_and(|s| matches!(s.exact(), Exact::Label(Surface::Sphere { .. })))
+        })
+        .expect("a sphere face")
+}
+
+#[test]
+fn a_quarter_of_a_great_circle_is_the_geodesic_distance() {
+    let radius = 5.0;
+    let body = make_sphere([0.0, 0.0, 0.0], radius).expect("a sphere");
+    let (record, _) = body.to_record().expect("a record");
+    let face = sphere_face(&record);
+    let on = FaceSurface::of(&record, face).expect("a face surface");
+    // The sphere is one face over a unit square: v = 1/2 is the equator, and a quarter of the
+    // u range is a quarter turn around it.
+    let start = on.point([0.0, 0.5]).expect("the start");
+    let chart = SurfaceChart::build(&record, face, start, 1e-6).expect("a chart");
+    let a = chart.chart().lower([0.0, 0.5]).expect("chart coordinates");
+    let b = chart.chart().lower([0.25, 0.5]).expect("chart coordinates");
+    let distance = chart.distance(a, b).expect("a geodesic");
+    let quarter_circle = std::f64::consts::FRAC_PI_2 * radius;
+    assert!(
+        (distance - quarter_circle).abs() <= 1e-6,
+        "{distance} vs {quarter_circle}"
+    );
+    // Past the sphere's v bound (a pole), however the chart is oriented.
+    let off = chart.chart().lower([0.0, 1e6]).expect("chart coordinates");
+    assert_eq!(
+        chart.distance(a, off).expect_err("off the surface"),
+        solidcore_ops::error::Error::Argument
+    );
 }
