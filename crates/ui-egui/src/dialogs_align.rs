@@ -163,7 +163,7 @@ pub(crate) fn options(ui: &mut egui::Ui, flip: &mut bool, rest: &mut [(&str, &mu
 /// frame: on another component than the bodies, or on one placed more than once.
 pub(crate) fn circle_frame(s: &Session, sel: &Sel, moved: &[String]) -> Option<Value> {
     let (body, point) = match sel {
-        Sel::Edge { body, index, point } if crate::dialogs::edge_circle(s, body, *index).is_some() => (body, point),
+        Sel::Edge { body, index, point } if is_circle(s, body, *index) => (body, point),
         Sel::Face { body, index, point } if is_cylinder(s, body, *index) => (body, point),
         _ => return None,
     };
@@ -176,6 +176,13 @@ fn face_frame(s: &Session, sel: &Sel, moved: &[String]) -> Option<Value> {
     let Sel::Face { body, index, point } = sel else { return None };
     crate::dialogs::planar_face(s, body, *index)?;
     frame_on(s, body, moved, json!({"face": pt(*point)}))
+}
+
+/// Whether edge `index` of `body` is a circle by its exact curve, whatever the display mesh draws.
+fn is_circle(s: &Session, body: &str, index: usize) -> bool {
+    use solidcraft_engine::kernel;
+    let st = crate::open_meshing::session_world(s);
+    st.body(body).is_some_and(|b| matches!(kernel::guard("align edge circle", || Ok(kernel::edge_circle(&b.body, index))), Ok(Some(_))))
 }
 
 fn is_cylinder(s: &Session, body: &str, index: usize) -> bool {
