@@ -36,7 +36,8 @@
 //! fold) is found. The forms are built in the patch's own frame and carry a running error
 //! bound (`bernstein::Bounded`) that the bound counts, so their rounding follows the
 //! patch's size, not its distance from the origin. The homogeneous normal carries a
-//! factor w, `A_u x A_v = w N'`, so `X = w X'`, `H = w H'`, `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
+//! factor w, `A_u x A_v = w N'`, so `X = w X'`, `H = w H'`,
+//! `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
 //! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
 //! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
 //! bicubic-by-septic net reaches degree 112 in Q, past the Bernstein forms' cap of 96, and
@@ -345,11 +346,13 @@ fn bounded_patch(patch: &Patch) -> (Bounded3, Option<Bounded>) {
 }
 
 /// The patch moved by minus `c`, the middle of its points' box: `P - c w` (`P - c` for a
-/// polynomial patch), each coefficient within `gamma(2)` of `|P| + |c| |w|`. The
+/// polynomial patch). Any `c` moves the net exactly to the same surface moved, and the
 /// regularity forms are the same polynomials in any frame (`A_u` and `A_v` do not change,
-/// nor the second forms `P_uu w - P w_uu`, ...); in the patch's own frame their rounding
-/// follows the patch's size, not its distance from the origin
-/// (`docs/definitions-and-certificates.md` §7, invariant 5).
+/// nor the second forms `P_uu w - P w_uu`, ...). Each coefficient is one fused
+/// multiply-add, rounded once on its own value, so the move costs `gamma(1)` of the moved
+/// net, and the forms' rounding follows the patch's size, not its distance from the
+/// origin (`docs/definitions-and-certificates.md` §7, invariant 5). A coefficient that
+/// overflows leaves an infinite bound, which certifies nothing.
 ///
 /// # Errors
 ///
@@ -377,7 +380,6 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
             }
         }
     }
-    let w_max = ws.iter().fold(0.0_f64, |m, &w| m.max(w));
     let moved = |c: &Bernstein2, k: usize| -> Result<Bounded> {
         let mid = match (lo.get(k), hi.get(k)) {
             (Some(&l), Some(&h)) => 0.5 * (l + h),
@@ -387,11 +389,16 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
             .coefficients()
             .iter()
             .zip(&ws)
-            .map(|(&x, &w)| x - mid * w)
+            .map(|(&x, &w)| (-mid).mul_add(w, x))
             .collect();
         let (du, dv) = c.degrees();
         let f = Bernstein2::new(du, dv, coefficients)?;
-        let err = gamma(2) * (c.max_abs_coefficient() + mid.abs() * w_max);
+        let size = f.max_abs_coefficient();
+        let err = if size.is_finite() {
+            gamma(1) * size
+        } else {
+            f64::INFINITY
+        };
         Ok(Bounded { f, err })
     };
     Ok((
@@ -1898,6 +1905,38 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// The regularity forms are built in the patch's own frame, so their counted rounding
+    /// follows the patch's size, not its distance from the origin: the quarter cylinder
+    /// (radius 10) moved 10^12 from the origin certifies as it does at the origin, regular
+    /// inset to 9.5 and outset, not certified inset by its radius (`Q = 0` everywhere), a
+    /// fold past it.
+    #[test]
+    fn a_cylinder_far_from_the_origin_is_certified_as_at_the_origin() {
+        let k = Kernel::default();
+        for (s, far) in [
+            (quarter_cylinder(), false),
+            (quarter_cylinder_at(1e12, -1e12), true),
+        ] {
+            for d in [-5.0, -9.0, -9.5, 5.0] {
+                assert_eq!(
+                    certify_regular(&k, &s, d, None).unwrap(),
+                    Regularity::Regular,
+                    "{d} {far}"
+                );
+            }
+            assert_eq!(
+                certify_regular(&k, &s, -10.0, None).unwrap(),
+                Regularity::NotCertified,
+                "{far}"
+            );
+            let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap()
+            else {
+                panic!("an inset past the radius folds ({far})");
+            };
+            assert!((largest - 10.0).abs() < 1e-3, "{largest} {far}");
+        }
     }
 
     /// The shell searches a face's least radius on the displaced side once
