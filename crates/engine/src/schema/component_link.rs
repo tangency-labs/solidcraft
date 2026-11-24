@@ -518,6 +518,20 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The reader a linked file comes through, as `component.links` lists it: what Update Links asks
+/// to read the file again.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkSource {
+    /// `step` for the built-in STEP reader, else an importer plugin's `plugin.entry`.
+    pub format: String,
+    /// The importer plugin's id; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The version of the plugin that read the file last; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
 /// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
 /// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
 /// `state` and a `reason`.
@@ -534,6 +548,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.
@@ -557,6 +575,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
@@ -574,6 +596,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,

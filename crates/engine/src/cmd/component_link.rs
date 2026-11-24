@@ -22,8 +22,8 @@ use super::design_link::{LinkState, absolute, link_presence, link_target, read_l
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams,
-    ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
+    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -939,6 +939,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             inherited_metadata: metadata,
             file_sha256: Some(read),
             step_names: None,
+            importer: None,
         },
     );
     s.refresh();
@@ -1226,7 +1227,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.relink";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
-    if link.step_names.is_some() {
+    if !link.is_design() {
         return Err(bad(cmd, "STEP sources cannot be relinked to a design; break the link and insert the new STEP file"));
     }
     if !matches!(s.doc.feature(link.feature), Some(f) if f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
@@ -1420,6 +1421,16 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
+/// What reads `link`'s file: the built-in STEP reader, an importer, or (for a design) nothing
+/// to name.
+fn link_source(link: &DesignLink) -> Option<LinkSource> {
+    match (&link.importer, &link.step_names) {
+        (Some(i), _) => Some(LinkSource { format: i.format.clone(), plugin: i.plugin.clone(), version: i.version.clone() }),
+        (None, Some(_)) => Some(LinkSource { format: "step".into(), plugin: None, version: None }),
+        (None, None) => None,
+    }
+}
+
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
@@ -1431,6 +1442,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
             let path = stored(s.path.as_deref(), &file);
             let shown = file.to_string_lossy().into_owned();
+            let importer = link_source(l);
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
@@ -1451,11 +1463,23 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         Some(why) => (Some(why.state), Some(why.reason)),
                         None => (None, None),
                     };
-                    LinkInfo::Looked { component: *c, configuration: l.configuration, name, path, file: shown, found, changed, state, reason }
+                    LinkInfo::Looked {
+                        component: *c,
+                        configuration: l.configuration,
+                        importer,
+                        name,
+                        path,
+                        file: shown,
+                        found,
+                        changed,
+                        state,
+                        reason,
+                    }
                 }
                 Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
                     component: *c,
                     configuration: l.configuration,
+                    importer,
                     name,
                     path,
                     file: shown,
@@ -1467,6 +1491,7 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                 Some(solidcraft_io::vfs::Remote::Device) => LinkInfo::Device {
                     component: *c,
                     configuration: l.configuration,
+                    importer,
                     name,
                     path,
                     file: shown,
