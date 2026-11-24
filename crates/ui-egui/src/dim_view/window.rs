@@ -351,8 +351,12 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         if r.has_focus() {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                         }
-                        if crate::expression_complete::complete(ui, &r, &mut e.expr) {
+                        let completed = crate::expression_complete::complete(ui, &r, &mut e.expr);
+                        if completed {
                             e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
+                        }
+                        if r.changed() || completed {
+                            e.create_variable = None;
                         }
                         let can_step = step(&e.expr, 1.0).is_some();
                         let tip = |id: &str| {
@@ -386,9 +390,10 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 } else {
                     ui.data_mut(|d| d.remove::<f32>(wheel));
                 }
-                if let Some(error) = &error {
+                if let Some(error) = e.create_variable.as_ref().map(|offer| &offer.error).or(error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                 }
+                let create = super::create_variable_button(ui, e.create_variable.as_ref());
                 // The user parameters the value names, each in its own field (#16319).
                 let row_state = parameter_fields(app, ui, id, width, e, &rows, row_error.is_some());
                 if !rows.is_empty() {
@@ -425,6 +430,14 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                     None
                 };
                 answer = answer.or(field);
+                if create {
+                    if let Some(offer) = e.create_variable.take() {
+                        e.expr = offer.definition;
+                        e.owned = true;
+                        e.typed = true;
+                        answer = Some(true);
+                    }
+                }
                 if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     answer = Some(false);
                     escaped = true;
@@ -440,6 +453,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
         && let Some(stepped) = step(&e.expr, by)
     {
         e.expr = stepped;
+        e.create_variable = None;
         // The whole new value is selected, so typing replaces it.
         select_all(ctx, id, e);
         ctx.request_repaint();

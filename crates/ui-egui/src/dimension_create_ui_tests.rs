@@ -2315,17 +2315,25 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
 }
 
-/// A bare name offered by the dimension editor's Create variable path gets the current
-/// dimension's value. It creates the named parameter atomically instead of submitting an
-/// unknown reference to parameters.change (#18721).
+/// #18721: mistyping an unknown parameter must preserve the error. A single explicit
+/// Create variable action then seeds the new parameter with the dimension's value, in
+/// one undo step; cancelling instead creates nothing.
 #[test]
-fn dimension_create_variable_seeds_its_current_value() {
-    // A new dimension: its value lives in the draft until Enter.
+fn dimension_create_variable_requires_an_explicit_click_after_the_error() {
+    // New dimension: entering an unknown name refuses it without modifying the sketch.
     let mut h = line([25., 0.]);
     place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
     let before = h.app.session.undo.len();
     type_value(&mut h, "breite");
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "unknown name must remain a correctable error");
+    assert!(h.app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("unknown parameter")), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("breite").is_none());
+    assert_eq!(h.app.session.undo.len(), before);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some(), "error offers Create variable");
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
     assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
     assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), before + 1);
@@ -2335,7 +2343,7 @@ fn dimension_create_variable_seeds_its_current_value() {
     assert!(sk.constraints.iter().any(|c| c.param.as_deref().and_then(|p| doc.param(p)).is_some_and(|p| p.expr == "breite")
         && c.kind.value().is_some_and(|v| (v - 25.0).abs() < 1e-6)));
 
-    // An already created dimension also keeps its size and changes its name in one step.
+    // Existing dimension: no implicit rename, and explicit click retains the old size.
     let mut h = line([30., 0.]);
     h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"30 mm"})).unwrap();
     h.settle();
@@ -2344,8 +2352,56 @@ fn dimension_create_variable_seeds_its_current_value() {
     h.settle();
     type_value(&mut h, "breite");
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "the typo must be refused");
+    assert!(h.app.session.doc.param("breite").is_none());
+    assert!(h.app.session.doc.param("d1").is_some());
+    assert_eq!(h.app.session.undo.len(), before);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some());
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
     assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
     assert!(h.app.session.doc.param("d1").is_none());
+    assert_eq!(h.app.session.doc.param("breite").map(|p| p.expr.as_str()), Some("30 mm"));
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    crate::dim_view::cancel();
+
+    // A typo cancelled without clicking the fix must not add a variable or undo step.
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "widht");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert!(h.app.session.doc.param("widht").is_none());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    assert!(h.app.session.doc.param("widht").is_none());
+    assert_eq!(h.app.session.undo.len(), before);
+    crate::dim_view::cancel();
+}
+
+/// The separate dimension window offers the same explicit fix after an unknown-name error.
+#[test]
+fn window_dimension_create_variable_is_opt_in() {
+    let mut h = windowed([30., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"30 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert!(h.app.session.doc.param("breite").is_none());
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some());
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
     assert_eq!(h.app.session.doc.param("breite").map(|p| p.expr.as_str()), Some("30 mm"));
     assert_eq!(h.app.session.undo.len(), before + 1);
     crate::dim_view::cancel();

@@ -91,6 +91,15 @@ struct Edit {
     /// A drawing's dimension or note, edited on its sheet with the same box: `expr` is its text
     /// and `param` what the box is headed. None: a sketch dimension's value.
     sheet: Option<SheetText>,
+    /// Only after a refused unknown name: a one-click, explicit variable definition.
+    create_variable: Option<VariableOffer>,
+}
+
+#[derive(Clone, Debug)]
+struct VariableOffer {
+    name: String,
+    definition: String,
+    error: String,
 }
 
 /// What on a drawing's sheet the inline editor's text belongs to.
@@ -301,6 +310,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -344,6 +354,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
@@ -606,6 +617,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     true
@@ -711,6 +723,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             driven,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
     true
@@ -739,6 +752,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             driven: None,
             params: Default::default(),
             sheet: Some(target),
+            create_variable: None,
         })
     });
 }
@@ -836,8 +850,8 @@ fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<ser
     result
 }
 
-/// A bare, unused name in a dimension's value box means "create a variable" (#18721).
-/// Seed it with the dimension's current expression, preserving its unit. The normal
+/// An unused bare name may be offered as an explicit Create variable fix (#18721).
+/// Enter must retain the original unknown-parameter error for mistyped names. The
 /// `name = expression` path then creates the named dimension in a single undo step.
 fn dimension_value_or_definition(
     doc: &solidcraft_engine::doc::Document,
@@ -888,6 +902,34 @@ fn with_parameters(app: &mut SolveApp, e: &Edit, changes: serde_json::Map<String
         app.session.undo.truncate(depth + 1);
     }
     result
+}
+
+/// Offer an explicit definition only after a free, bare name was refused by the
+/// original unknown-parameter check. Typos do not create variables on Enter.
+fn variable_offer(app: &SolveApp, e: &Edit, error: &str) -> Option<VariableOffer> {
+    if e.sheet.is_some() || !error.contains("unknown parameter") {
+        return None;
+    }
+    let name = e.expr.trim();
+    let quoted = format!("{}{}{}", char::from(96u8), name, char::from(96u8));
+    if !error.contains(&quoted) {
+        return None;
+    }
+    let source = e.draft.as_ref().map_or(app.session.doc.as_ref(), |draft| draft.preview_doc.as_ref());
+    let definition = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr, e.driven.as_ref().map(|_| e.expr.as_str()));
+    if definition == e.expr {
+        return None;
+    }
+    Some(VariableOffer { name: name.to_string(), definition, error: error.to_string() })
+}
+
+/// Same explicit action for the inline and floating window editors.
+fn create_variable_button(ui: &mut egui::Ui, offer: Option<&VariableOffer>) -> bool {
+    let Some(offer) = offer else { return false };
+    let label = solidcraft_ui_text::format("dialog.dimension_create_variable", &[("name", &offer.name)]);
+    let response = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal);
+    crate::scenario::publish_target("dim:create_variable", response.rect);
+    response.clicked()
 }
 
 /// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
@@ -1297,6 +1339,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             driven: None,
             params: Default::default(),
             sheet: None,
+            create_variable: None,
         })
     });
 }
@@ -1576,6 +1619,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     e.owned |= r.changed() || completed;
                     e.typed |= r.changed() || completed;
+                    if r.changed() || completed {
+                        e.create_variable = None;
+                    }
                     // Solved now, so the next frame draws the sketch at the new value from its start.
                     if (r.changed() || completed)
                         && let Some(draft) = e.draft.as_mut()
@@ -1583,9 +1629,10 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         let expr = e.expr.clone();
                         reevaluate(app, draft, &expr);
                     }
-                    if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
+                    if let Some(error) = e.create_variable.as_ref().map(|offer| &offer.error).or_else(|| e.draft.as_ref().and_then(|d| d.error.as_ref())) {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
+                    let create = create_variable_button(ui, e.create_variable.as_ref());
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if r.lost_focus() && enter {
                         done = Some(true);
@@ -1601,6 +1648,14 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         // Esc cancels the whole dimension, picks included.
                         escaped = true;
                     }
+                    if create && !escaped {
+                        if let Some(offer) = e.create_variable.take() {
+                            e.expr = offer.definition;
+                            e.owned = true;
+                            e.typed = true;
+                            done = Some(true);
+                        }
+                    }
                 });
             });
         },
@@ -1615,8 +1670,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
-            let source = e.draft.as_ref().map_or(app.session.doc.as_ref(), |draft| draft.preview_doc.as_ref());
-            let submitted = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr, e.driven.as_ref().map(|_| e.expr.as_str()));
+            // The first attempt submits exactly what was typed. Only the explicit
+            // Create variable button can substitute a definition after refusal.
+            let submitted = e.expr.clone();
             let result = if let Some(target) = e.sheet.clone() {
                 change_sheet_text(app, target, &e.expr)
             } else if let Some(draft) = &e.draft {
@@ -1636,8 +1692,9 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
             };
             match result {
                 Err(err) => {
+                    e.create_variable = variable_offer(app, &e, &err);
                     app.set_status(err, true);
-                    // The value is selected again, so typing replaces it.
+                    // Keep the refused expression until the person corrects or opts in.
                     EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, owned: false, ..e }));
                 }
                 Ok(_) if e.sheet.is_some() => {}
