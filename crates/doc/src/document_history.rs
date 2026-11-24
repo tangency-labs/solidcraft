@@ -744,12 +744,20 @@ mod tests {
             component: 0,
             anchor: None,
         });
-        // Full base64 is well over 400 bytes; a digest fits, so the live image is not charged again.
-        let tight = 400;
-        let snap = DocumentHistory::model_snapshot(&doc, tight).expect("the live canvas is stored once");
-        assert!(snap["canvases"][0]["data"].as_str().is_some_and(|s| s.len() > HEAVY_TEXT));
+        // The default document has grown past a fixed 400-byte cap; compare against digest cost.
+        let mut value = serde_json::to_value(&doc).expect("document serializes");
+        include_canvas_payloads(&doc, &mut value);
+        scrub_snapshot(&mut value);
+        assert!(value["canvases"][0]["data"].as_str().is_some_and(|s| s.len() > HEAVY_TEXT));
+        let mut unseen = HashSet::new();
+        let full = snapshot_cost(&value, &mut unseen);
+        let mut seen = shared_payloads(&value);
+        let digest_cost = snapshot_cost(&value, &mut seen);
+        assert!(full > digest_cost, "full base64 is charged once; a live copy is a digest");
+        assert!(DocumentHistory::model_snapshot(&doc, digest_cost).is_some(), "the live canvas is stored once");
+        assert!(DocumentHistory::model_snapshot(&doc, digest_cost.saturating_sub(1)).is_none());
         let mut history = DocumentHistory::fresh();
-        history.record_save_shared(Some(snap), SnapshotLimits { max_versions: 4, max_bytes: tight }, &shared_payloads_of(&doc));
+        history.record_save_shared(Some(value), SnapshotLimits { max_versions: 4, max_bytes: digest_cost }, &shared_payloads_of(&doc));
         assert!(history.entries[0].snapshot.is_some(), "the file already stores this image");
     }
 
