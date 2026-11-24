@@ -772,7 +772,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 });
             } else if let (Some(s), Some(split_id)) = (b.split, split_id) {
                 let ar = if labels {
-                    Rect::from_min_max(pos2(whole.left(), br.bottom() + 1.0), pos2(whole.right(), whole.top() + 54.0))
+                    Rect::from_min_max(pos2(whole.left(), br.bottom() + 1.0), pos2(whole.right(), whole.top() + 49.0))
                 } else {
                     Rect::from_min_max(pos2(br.right() + 1.0, whole.top()), whole.right_bottom())
                 };
@@ -800,10 +800,9 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     }
                 }
                 if labels {
-                    let title_y = ar.center().y;
                     let galley = button_galley(&painter, s.title, ar.width() - 16.0, t.text);
-                    painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
-                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
+                    painter.galley(pos2(ar.center().x - 4.0, label_top(whole, galley.size().y)), galley, t.text);
+                    dropdown_arrow(&painter, pos2(ar.right() - 6.0, ar.center().y), t.text_dim);
                 } else {
                     dropdown_arrow(&painter, ar.center(), t.text_dim);
                 }
