@@ -29,6 +29,7 @@
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
+//! | [`OffsetFailure::OffsetNotBuilt`]     | `SM_ERR` (`OffsetBrep`'s `SER(SM_ERR)`)   |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
 //! | [`OffsetFailure::PeriodicBranchAmbiguous`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
@@ -472,6 +473,11 @@ pub enum OffsetFailure {
         /// The base surface's class type (`GetType`).
         surface_type: i64,
     },
+    /// The solid offset (`DoSolidOffset`) failed: `OffsetBrep` answers its own `SM_ERR`
+    /// over it, keeping the offset's error as the cause. [`ErrorKind::Failed`], neither a
+    /// defect nor a refusal on its own: the kept cause decides
+    /// ([`crate::SolidError::is_defect`], [`crate::SolidError::is_refusal`]).
+    OffsetNotBuilt,
     /// In a local operation, the plane of `face` moves past where the surface of `side`, a
     /// face beside it across an edge, ends: the sphere's or the cylinder's extent along the
     /// plane's normal stops short of the new plane, so no extension of the side meets it.
@@ -841,6 +847,7 @@ impl OffsetFailure {
             | Self::VertexArcInPlane
             | Self::VertexArcMissesPlane { .. }
             | Self::FaceDomainUnresolved
+            | Self::OffsetNotBuilt
             | Self::ExtendedEdgeUntrimmed
             | Self::LaminaEdgeOtherSide
             | Self::TangentGapsAtConcaveEdge
@@ -991,6 +998,7 @@ impl OffsetFailure {
             | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
+            | Self::OffsetNotBuilt
             | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
@@ -1084,6 +1092,7 @@ impl OffsetFailure {
             | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
+            | Self::OffsetNotBuilt
             | Self::FaceHasNoFaceuse { .. }
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
@@ -1183,6 +1192,7 @@ impl OffsetFailure {
             | Self::ExtendedFaceCollapses { .. }
             | Self::FaceCloses { .. }
             | Self::FaceDomainUnresolved
+            | Self::OffsetNotBuilt
             | Self::FacesApart { .. }
             | Self::FacesMoveRefused { .. }
             | Self::Failed(_)
@@ -1308,6 +1318,7 @@ impl OffsetFailure {
             // neither a defect nor a refusal: the failure keeps the error of the step that
             // failed, which decides (`SolidError::is_defect`, `is_refusal`)
             Self::FaceDomainUnresolved
+            | Self::OffsetNotBuilt
             | Self::GapCornerBlendNotMade { .. }
             | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
@@ -1452,6 +1463,7 @@ impl core::fmt::Display for OffsetFailure {
                  is {largest})",
                 face.index()
             ),
+            Self::OffsetNotBuilt => f.write_str("the offset could not be built"),
             Self::NotCertified { face, distance } => write!(
                 f,
                 "the offset of face {} by {distance} is neither proved regular nor proved to \
@@ -2466,6 +2478,8 @@ mod tests {
                 false,
                 true,
             ),
+            // its class is its cause's
+            (O::OffsetNotBuilt, ErrorKind::Failed, false, false, false),
             (
                 O::PastSide {
                     face,
@@ -2749,6 +2763,7 @@ mod tests {
                 O::MoveCollapses { .. } => "MoveCollapses",
                 O::NotCertified { .. } => "NotCertified",
                 O::OffsetBaseKindUnsupported { .. } => "OffsetBaseKindUnsupported",
+                O::OffsetNotBuilt => "OffsetNotBuilt",
                 O::PastSide { .. } => "PastSide",
                 O::PeriodicBranchAmbiguous => "PeriodicBranchAmbiguous",
                 O::RailIntervalsDiffer { .. } => "RailIntervalsDiffer",

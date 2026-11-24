@@ -2802,7 +2802,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
         if error.is_unported_or_cancelled() {
             error
         } else {
-            SolidError::failed_after(OP_OFFSET, "the offset could not be built", error)
+            Failure::new(OP_OFFSET, OffsetFailure::OffsetNotBuilt)
+                .caused_by(error)
+                .into_error()
         }
     })
 }
@@ -5127,7 +5129,14 @@ mod tests {
                 entity: None,
             },
         ] {
-            assert_status(collapse_offset_status::<()>(Err(error)), SM_ERR);
+            let collapsed = collapse_offset_status::<()>(Err(error.clone()));
+            let failure = collapsed.as_ref().unwrap_err();
+            assert_eq!(
+                failure.offset_failure(),
+                Some(&OffsetFailure::OffsetNotBuilt)
+            );
+            assert_eq!(failure.cause(), Some(&error));
+            assert_status(collapsed, SM_ERR);
         }
         assert_eq!(collapse_offset_status(Ok(17)), Ok(17));
         assert_dependency(

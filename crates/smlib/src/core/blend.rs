@@ -615,7 +615,9 @@ mod tests {
         let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
         assert!(matches!(status(sweep(SweepFailure::FaceAlreadySwept)), Error::Status(1001)));
         assert!(matches!(status(sweep(SweepFailure::NullTarget)), Error::Status(1006)));
-        assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::Defect { why: "a face was not copied" })), Error::Status(1001)));
+        let place = SweepFailure::ProfileCurveStepFailed { step: solidcore::error::sweep::ProfileCurveStep::Place };
+        assert!(matches!(status(sweep(place)), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
     }

@@ -1019,7 +1019,9 @@ impl core::fmt::Display for Failure {
         // a reason that names no entity of its own is followed by the failure's
         let names_none = match &self.reason {
             Reason::Failed(_) | Reason::Topology(_) | Reason::Blend(_) => true,
-            Reason::Offset(o) => o.replaces_upstream_status(),
+            Reason::Offset(o) => {
+                o.replaces_upstream_status() || matches!(o, offset::OffsetFailure::OffsetNotBuilt)
+            }
             _ => false,
         };
         if let (true, Some(entity)) = (names_none, self.entity) {

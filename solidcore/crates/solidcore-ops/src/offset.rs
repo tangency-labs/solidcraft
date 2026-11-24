@@ -188,8 +188,12 @@ pub fn diagnostic(e: &SolidError) -> Diagnostic {
 /// refusal the kernel gives a reason for by that reason ([`offset_refused`]), its entity through
 /// `index`; one without by its kind ([`by_kind`]); `None` for any other error.
 fn typed(e: &SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> Option<Error> {
+    // `OffsetNotBuilt` (the shell's failure over a failed offset) is no refusal of its own:
+    // it goes by its class, as the phrase failure it replaced did
     if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
-        return Some(offset_refused(*o, e.entity(), index));
+        if *o != OffsetFailure::OffsetNotBuilt {
+            return Some(offset_refused(*o, e.entity(), index));
+        }
     }
     by_kind(e.kind())
 }
