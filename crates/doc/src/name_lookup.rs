@@ -326,9 +326,9 @@ fn recover_align_projected_edge(b: &ModelBody, saved_body: &str, name: &str, nea
 /// one of them, told apart by a number only: a revolve cut after another named both flanks of its
 /// groove `F6:side:l1#1` and `F6:side:l1#2`, where earlier and later builds name them
 /// `F6:side:l1` and `F6:side:l2` (#21293). A saved edge naming such a numbered side face is found
-/// at its saved point: the one exact edge within a pick's reach of it, where each
-/// numbered face is a side face the same feature swept from the same profile, and each other face
-/// is the saved face or a piece of it. No mesh or nearest-edge substitution decides this.
+/// at its saved point: the one exact edge within a pick's reach of it, where the numbered face
+/// is a side face the same feature swept from the same profile and the other face is the saved
+/// face or a piece of it. No mesh or nearest-edge substitution decides this.
 fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
     use crate::persistent_name::{Base, EdgeName, FaceName, Role, Suffix};
     if b.body.is_mesh() || !near.is_finite() {
@@ -341,7 +341,9 @@ fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Optio
     };
     let numbered = |f: &FaceName| side(f).is_some() && matches!(f.suffixes.as_slice(), [Suffix::Numbered(_)]);
     let [first, second] = read.faces.as_slice() else { return None };
-    if !numbered(first) && !numbered(second) {
+    // One face numbered: the other, named as saved, ties the edge down. A name whose faces are
+    // both numbered pieces (as 0.30.1 saved a revolve's) says nothing that tells the edge apart.
+    if numbered(first) == numbered(second) {
         return None;
     }
     let record = b.body.record();
