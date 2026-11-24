@@ -412,6 +412,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let selected_only = app.ui.constraint_glyphs_selected_only;
+    let mut toggle_selected_only = false;
     let mut linetype = None;
     let mut construction = false;
     let mut look = false;
@@ -516,6 +518,14 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             {
                 set = Some((key.to_string(), !shown(key)));
             }
+            if key == "show_constraints" {
+                toggle_selected_only = crate::ui_kit::checkbox_row(
+                    ui,
+                    "constraint_glyphs_selected_only",
+                    solidcraft_ui_text::tr("ui.palette_constraint_glyphs_selected_only"),
+                    selected_only,
+                );
+            }
         }
         construction = crate::ui_kit::checkbox_row(
             ui,
@@ -568,6 +578,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if toggle_selected_only {
+        app.ui.constraint_glyphs_selected_only = !selected_only;
     }
     if let Some((key, on)) = set {
         let mut params = serde_json::Map::new();
@@ -673,6 +686,21 @@ mod tests {
     /// Whether a placed image follows a frame in the sketch is the Canvas and Decal tools' own
     /// mode (#18405): it shows in the palette while either runs, not with other tools, and the
     /// choice is kept for the next image.
+    #[test]
+    fn selected_constraint_glyphs_are_a_palette_option() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert!(!h.app.ui.constraint_glyphs_selected_only);
+        let undo = h.app.session.undo.len();
+        for selected in [true, false] {
+            let at = crate::scenario::handle_at("sketch_palette:toggle:constraint_glyphs_selected_only").expect("palette option");
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_eq!(h.app.ui.constraint_glyphs_selected_only, selected);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+
     #[test]
     fn canvas_and_decal_show_their_frame_mode_in_the_palette() {
         let mut h = crate::scenario::Harness::new();

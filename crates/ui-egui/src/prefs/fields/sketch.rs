@@ -14,9 +14,6 @@ macro_rules! sketch_preferences {
             /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
             /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
             constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
-            /// Opt in to showing constraint glyphs only for selected sketch curves and points (#18817).
-            /// Conflicting constraints still show; off keeps all non-dimension glyphs visible as before.
-            constraint_glyphs_selected_only: bool = false, PAGE_SKETCH;
             /// The construction line tools as before #15066: the Construction/Normal switch under the
             /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
             /// default): those icons set the tools' line type.

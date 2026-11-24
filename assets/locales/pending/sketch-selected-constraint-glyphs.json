@@ -1,34 +1,26 @@
 {
   "en": {
-    "prefs.constraint_glyphs_selected_only": "Show constraint glyphs only for selected geometry",
-    "prefs.constraint_glyphs_selected_only_note": "Hide other constraint badges until you select a sketch point or curve. Constraints with errors stay visible."
+    "ui.palette_constraint_glyphs_selected_only": "Show constraint glyphs only for selected geometry"
   },
   "ar": {
-    "prefs.constraint_glyphs_selected_only": "إظهار رموز القيود للهندسة المحددة فقط",
-    "prefs.constraint_glyphs_selected_only_note": "إخفاء رموز القيود الأخرى حتى تحدد نقطة أو منحنى في الرسم. تظل القيود التي بها أخطاء ظاهرة."
+    "ui.palette_constraint_glyphs_selected_only": "إظهار رموز القيود للهندسة المحددة فقط"
   },
   "de": {
-    "prefs.constraint_glyphs_selected_only": "Zwangsbedingungssymbole nur für ausgewählte Geometrie anzeigen",
-    "prefs.constraint_glyphs_selected_only_note": "Andere Symbole ausblenden, bis ein Skizzenpunkt oder eine Kurve ausgewählt wird. Fehlerhafte Zwangsbedingungen bleiben sichtbar."
+    "ui.palette_constraint_glyphs_selected_only": "Zwangsbedingungssymbole nur für ausgewählte Geometrie anzeigen"
   },
   "he": {
-    "prefs.constraint_glyphs_selected_only": "הצגת סמלי אילוצים רק לגאומטריה שנבחרה",
-    "prefs.constraint_glyphs_selected_only_note": "הסתרת סמלי אילוצים אחרים עד לבחירת נקודה או עקומה בסקיצה. אילוצים שגויים ימשיכו להופיע."
+    "ui.palette_constraint_glyphs_selected_only": "הצגת סמלי אילוצים רק לגאומטריה שנבחרה"
   },
   "ja": {
-    "prefs.constraint_glyphs_selected_only": "選択した形状の拘束アイコンのみ表示",
-    "prefs.constraint_glyphs_selected_only_note": "スケッチの点や曲線を選択するまで、ほかの拘束アイコンを隠します。エラーのある拘束は表示されたままです。"
+    "ui.palette_constraint_glyphs_selected_only": "選択した形状の拘束アイコンのみ表示"
   },
   "ko": {
-    "prefs.constraint_glyphs_selected_only": "선택한 형상에 연결된 구속조건 아이콘만 표시",
-    "prefs.constraint_glyphs_selected_only_note": "스케치 점이나 곡선을 선택할 때까지 다른 구속조건 아이콘을 숨깁니다. 오류가 있는 구속조건은 계속 표시됩니다."
+    "ui.palette_constraint_glyphs_selected_only": "선택한 형상에 연결된 구속조건 아이콘만 표시"
   },
   "vi": {
-    "prefs.constraint_glyphs_selected_only": "Chỉ hiện biểu tượng ràng buộc của hình học đã chọn",
-    "prefs.constraint_glyphs_selected_only_note": "Ẩn các biểu tượng ràng buộc khác cho đến khi chọn điểm hoặc đường cong trong phác thảo. Ràng buộc lỗi vẫn hiển thị."
+    "ui.palette_constraint_glyphs_selected_only": "Chỉ hiện biểu tượng ràng buộc của hình học đã chọn"
   },
   "zh": {
-    "prefs.constraint_glyphs_selected_only": "只显示所选几何体的约束图标",
-    "prefs.constraint_glyphs_selected_only_note": "选中草图点或曲线之前隐藏其他约束图标。存在错误的约束仍会显示。"
+    "ui.palette_constraint_glyphs_selected_only": "只显示所选几何体的约束图标"
   }
 }

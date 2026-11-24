@@ -448,10 +448,6 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
-        // An optional uncluttered sketch: expose constraint badges for selected geometry
-        // while leaving error badges visible. All constraints remain unchanged in the model.
-        ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.constraint_glyphs_selected_only"), &mut app.preferences.constraint_glyphs_selected_only)
-            .on_hover_text(solidcraft_ui_text::tr("prefs.constraint_glyphs_selected_only_note"));
         // Larger constraint glyphs, readable at any zoom (#10794).
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
         ui_kit::settings_form(ui, label_width, |ui| {

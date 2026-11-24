@@ -2130,7 +2130,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in glyph_constraints(&ss.sketch) {
-        if app.preferences.constraint_glyphs_selected_only
+        if app.ui.constraint_glyphs_selected_only
             && !glyph_group_visible_when_selected(&ss.sketch, &c.id, &app.session.selection, picked.as_deref(), |id| ss.report.failing.contains(id))
         {
             continue;
@@ -2455,7 +2455,7 @@ mod glyph_zoom_tests {
         let point_constraint = ConstraintKind::Fix { p: other };
         assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
         assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
-        assert!(!crate::prefs::Prefs::default().constraint_glyphs_selected_only, "the old display remains the default");
+        assert!(!crate::UiState::default().constraint_glyphs_selected_only, "the old display remains the default");
     }
 
     /// A shared midpoint badge must remain visible if any represented constraint fails or

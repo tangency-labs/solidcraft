@@ -478,6 +478,9 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Show only constraints of selected geometry in the Sketch Palette (view-only).
+    #[serde(skip)]
+    pub constraint_glyphs_selected_only: bool,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -524,6 +527,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            constraint_glyphs_selected_only: false,
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),
