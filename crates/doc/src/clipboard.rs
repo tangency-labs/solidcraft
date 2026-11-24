@@ -482,7 +482,7 @@ impl crate::Feature {
             }
             K::FrameGusset { supports, .. } => {
                 for support in supports {
-                    remap_plane(&mut support.plane, ids, bodies, 0, occurrences, doc)?;
+                    remap_plane(&mut support.plane, ids, bodies, 0, remap_datum)?;
                 }
             }
             K::FramePlate { plane, .. }
