@@ -2045,9 +2045,9 @@ impl Sketch {
     /// distance to its circle, or to the nearer of the arc's ends when the point is off the
     /// arc's sweep. `None` when the curve is not round.
     pub fn round_distance(&self, ci: usize, p: Vec2) -> Option<f64> {
-        let Some(curve) = self.curves.get(ci) else { return None };
-        let Some(centre) = self.center(ci) else { return None };
-        let Some(radius) = self.radius(ci) else { return None };
+        let curve = self.curves.get(ci)?;
+        let centre = self.center(ci)?;
+        let radius = self.radius(ci)?;
         match curve.kind {
             CurveKind::Circle { .. } => Some((p - centre).len() - radius),
             CurveKind::Arc { a, b, .. } => {
