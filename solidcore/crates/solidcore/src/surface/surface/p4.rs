@@ -2629,4 +2629,59 @@ mod tests {
         assert!(curvature.abs() < 1e-12);
         assert!((tangent.length() - 1.0).abs() < 1e-12);
     }
+
+    /// The arch `(u, v, z(u))`, `z(u) = 2u(1 - u)`, as a B-spline over `[0, 1]^2`:
+    /// quadratic in `u` (control `x` 0, 1/2, 1 and `z` 0, 1, 0), linear in `v`. Its ends
+    /// `u = 0` and `u = 1` are interpolated exactly.
+    fn arch() -> Surface {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::CPoint;
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
+        let pw = vec![row(0.0, 0.0), row(0.5, 1.0), row(1.0, 0.0)];
+        Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                2,
+                1,
+                5,
+                3,
+                &pw,
+                &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    /// #20438: a target distance bounds a minimise. The arch's nearest points to
+    /// `(1/2, 1/2, -10)` are `sqrt(100.25)` away (closed
+    /// form: `f >= (u - 1/2)^2 + 100 + 20z = 100.25 + 39u(1 - u)` with `z = 2u(1 - u)`,
+    /// equality at `v = 1/2`, `u` 0 or 1): with a target of 10
+    /// (farther than the tolerance below them) nothing is reported, with 11 they are.
+    /// The new solver ignored the target and reported its point.
+    #[test]
+    fn a_target_distance_bounds_a_minimize() {
+        let k = &Kernel::default();
+        let s = arch();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let test = Point3::new(0.5, 0.5, -10.0);
+        let solve = |target: f64| {
+            s.global_point_solve::<NoObject>(
+                k,
+                None,
+                &dom,
+                SolverOperation::Minimize,
+                test,
+                1e-6,
+                Some(target),
+                SolutionRequested::Single,
+            )
+            .unwrap()
+        };
+        assert!(solve(10.0).is_empty(), "{:?}", solve(10.0).as_slice());
+        let near = solve(11.0);
+        assert_eq!(near.len(), 1, "{:?}", near.as_slice());
+        assert!((near.as_slice()[0].start.solution_value - 100.25_f64.sqrt()).abs() < 1e-9);
+    }
 }

@@ -734,11 +734,11 @@ mod review_geometry_tests {
     /// Which cases claim one, from their inputs and status: a global solve
     /// ([`Operation::Global`]) of an operation that [`witness::ranks`] points, that
     /// succeeded and returned a solution. Every request type claims the same optimum:
-    /// `SurfPtGlobalSolver` ignores both the request and the target distance
-    /// (`SurfacePointSolver::new` drops them) and returns its best solution with its
-    /// across-seam partners, so a nodes, all or find-ambiguities request is answered like
-    /// a single one. Local solves and single steps are not challenged here: what a local
-    /// solve's answer promises for each termination reason is not settled.
+    /// `SurfPtGlobalSolver` finds one candidate and returns it with its across-seam
+    /// partners, so a nodes, all or find-ambiguities request is answered like a single
+    /// one (#20438); a target distance only bounds that answer out. Local solves and
+    /// single steps are not challenged here: what a local solve's answer promises for
+    /// each termination reason is not settled.
     ///
     /// A successful solve with no solution claims nothing and is counted, not challenged.
     /// Every global solve that succeeds records whether the surface's out-of-bounds
