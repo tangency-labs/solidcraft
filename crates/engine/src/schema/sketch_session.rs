@@ -340,6 +340,10 @@ impl JsonSchema for InsidePlane {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CreateKeys {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     /// The plane to sketch on: XY, XZ or YZ (also Top, Front, Right), a construction plane's
     /// name or id, a picked planar face `{face: [x, y, z], body?, index?, path?, fixed?}`, or an
     /// explicit plane `{origin?, x_dir, y_dir}` in mm. Default: XY. On XY, the sketch's x and y
@@ -473,6 +477,8 @@ pub struct Activated {
 /// What `sketch.create` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
     /// The new sketch's feature id.
     pub sketch: u64,
     /// Its name.

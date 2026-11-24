@@ -23,6 +23,10 @@ use super::{
 use crate::eval::vec::VecExt;
 use crate::math::{Vec2, Vec3};
 
+/// How far apart (mm) two points of a zone may lie along the joint and still be straight across
+/// the bend from each other.
+const ACROSS_TOL: f64 = 1e-9;
+
 /// A developed sheet folded.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fold {
@@ -106,6 +110,13 @@ impl Bent {
     /// line, `depth` into the material.
     pub fn at(&self, along: f64, phi: f64, depth: f64) -> Vec3 {
         self.frame.point(self.wrap.at(along, phi, depth))
+    }
+
+    /// Whether the flat line from `a` to `b` runs straight across the bend: both at one length
+    /// along the joint (within [`ACROSS_TOL`]), so that it folds to an arc round the bend's axis.
+    #[must_use]
+    pub fn straight_across(&self, a: Vec2, b: Vec2) -> bool {
+        (self.wrapped(a).0 - self.wrapped(b).0).abs() <= ACROSS_TOL
     }
 
     /// A point of the flat zone as its length along the joint and the angle it lies round the

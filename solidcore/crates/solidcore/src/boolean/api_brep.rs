@@ -94,6 +94,7 @@
 //!   [`Brep::refresh_cached_topology`]; nothing else changes.
 
 use crate::boolean::merge::MergeOptions;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::kernel::Kernel;
@@ -376,7 +377,7 @@ pub(crate) fn coincidence_bound(
 /// id, an unported call, cancellation).
 ///
 /// **A gluing that fails leaves the operand as given.** The glue is all or nothing
-/// ([`glue_all_or_none`]): the operand, `k.rng` and `k.upstream_ub_passed` are saved before
+/// ([`glue_all_or_none`]): the operand and `k.upstream_ub_passed` are saved before
 /// the first pair, and any other failure of `GlueEdgesGeneral` restores them exactly, so the
 /// merge then runs as main does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
 /// first change to the topology (`b.remove_from_edge_list(del)`) and after it:
@@ -388,9 +389,8 @@ pub(crate) fn coincidence_bound(
 ///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
 ///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
 ///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
-///   `test_closure_split_region_attempt` (whose status is ignored, as upstream, and which
-///   may draw from `k.rng`), `is_spine` and
-///   `test_closure_split_region_edge`.
+///   `test_closure_split_region_attempt` (whose status is ignored, as upstream), `is_spine`
+///   and `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
 /// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
@@ -499,8 +499,8 @@ type GluePair = (
 );
 
 /// Runs `glue` on every pair, all or nothing ([`glue_self_touching_edges`]'s errors): the
-/// operand, `k.rng` and `k.upstream_ub_passed` are saved first, and when a pair fails they
-/// are all put back exactly, so the merge then runs as on main. An ordinary failure
+/// operand and `k.upstream_ub_passed` are saved first, and when a pair fails they
+/// are put back exactly, so the merge then runs as on main. An ordinary failure
 /// ([`crate::error::native_failure`]) returns 0; a port defect or a cancellation is returned.
 /// No snapshot ([`Brep::snapshot`]) means nothing is glued. Returns the number of pairs
 /// glued.
@@ -528,7 +528,7 @@ fn glue_all_or_none(
     let Ok(saved) = b.snapshot() else {
         return Ok(0);
     };
-    let (rng, ub) = (k.rng.clone(), k.upstream_ub_passed.clone());
+    let ub = k.upstream_ub_passed.clone();
     let mut state = ArenaNotifyState::with_attributes_of(b);
     let mut failure = None;
     for pair in pairs {
@@ -541,7 +541,6 @@ fn glue_all_or_none(
         // the snapshot holds the attributes too: the store moved out is dropped
         drop(state);
         b.restore(saved);
-        k.rng = rng;
         k.upstream_ub_passed = ub;
         // a port defect or a cancellation goes on; an ordinary failure merges as given
         crate::error::native_failure::<()>(Err(e))?;
@@ -619,7 +618,12 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| {
-        SolidError::entity_missing(OP_BOOLEAN, "the Boolean made no result B-rep")
+        SolidError::boolean_null_defect(
+            OP_BOOLEAN,
+            BooleanStage::Merge,
+            "the Boolean returned no result B-rep, though it leaves the result unset only \
+             for an extraction, which the operand checks refused before it ran",
+        )
     })?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
@@ -829,9 +833,11 @@ pub fn piecewise_merge(
     let result_id = merged?;
     if result_id != PrimitiveModel::MAIN {
         // PiecewiseMerge's result is its first operand
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP_PIECEWISE,
-            "the piecewise merge did not return its first operand",
+            BooleanStage::Tree,
+            "the piecewise merge returned another B-rep than its first operand, though it \
+             always merges into its first operand and returns it",
         ));
     }
     let mut other = model.take_brep(other_id)?;
@@ -1015,12 +1021,12 @@ mod tests {
             .unwrap()
     }
 
-    /// A gluing whose second pair fails after the first changed the operand and drew from
-    /// the kernel's rng: the operand, the rng and the upstream-UB list are put back exactly.
+    /// A gluing whose second pair fails after the first changed the operand and noted an
+    /// upstream UB: the operand and the upstream-UB list are put back exactly.
     /// An ordinary failure (`InvalidInput`) then lets the merge go on (0 glued); a failure
     /// that stands for no upstream status (`NotFound`, a stale id) is returned.
     #[test]
-    fn a_failed_gluing_restores_the_operand_and_the_rng() {
+    fn a_failed_gluing_restores_the_operand_and_the_ub_list() {
         use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
         let stale = SolidError::NotFound {
             operation: "test",
@@ -1032,7 +1038,7 @@ mod tests {
         ] {
             let mut k = Kernel::default();
             let mut b = unit_box(&mut k);
-            let (before, rng, ub) = (fingerprint(&b), k.rng.clone(), k.upstream_ub_passed.clone());
+            let (before, ub) = (fingerprint(&b), k.upstream_ub_passed.clone());
             let e = b.edge_list()[0];
             let pairs = [(e, e, OrientType::Same), (e, e, OrientType::Same)];
             let mut failure = Some(failure);
@@ -1041,7 +1047,6 @@ mod tests {
                 if first {
                     first = false;
                     b.edge_mut(e)?.tolerance = 7.0;
-                    let _ = k.rng.next_u64();
                     k.note_upstream_ub("test");
                     return Ok(());
                 }
@@ -1052,7 +1057,6 @@ mod tests {
                 assert_eq!(r.unwrap(), 0);
             }
             assert_eq!(fingerprint(&b), before);
-            assert_eq!(k.rng, rng);
             assert_eq!(k.upstream_ub_passed, ub);
         }
     }

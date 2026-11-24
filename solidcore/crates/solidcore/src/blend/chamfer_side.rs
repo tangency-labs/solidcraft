@@ -169,12 +169,14 @@ impl Ord for Piece {
 }
 
 /// One face of an edge as [`widest_wedge_bound`] encloses it: its trim curve, its surface's
-/// net, the range its uv is clamped to, and the sign that turns `S_u x S_v` outward.
+/// net, the range its uv is clamped to, the centre of the sphere its surface is (if it is
+/// one) and the sign that turns its normal outward.
 struct Side {
     trim: NurbsCurve,
     net: Nurbs,
     u: Ivl,
     v: Ivl,
+    centre: Option<Vec3>,
     sign: f64,
 }
 
@@ -197,7 +199,11 @@ fn clamped(x: Ivl, r: Ivl) -> Ivl {
 }
 
 impl Side {
-    /// `S_u x S_v` over the trim curve's points for every parameter in `t`, enclosed.
+    /// A normal of the face over the trim curve's points for every parameter in `t`,
+    /// enclosed: `S - c` on a sphere of centre `c`, else `S_u x S_v`. A sphere's net is its
+    /// definition exactly (a quadric's rational form), so `S - c` is its normal at every
+    /// point, of length its radius; `S_u x S_v` vanishes at its poles, where a piece's
+    /// cosine would be the whole line however far it is halved.
     fn normal_over(&self, t: Ivl) -> Result<V3<Ivl>> {
         let at = curve_derivs_over(&self.trim, t, 0, None)?;
         let p = at
@@ -205,8 +211,18 @@ impl Side {
             .copied()
             .ok_or_else(|| invalid("a trim curve has no point"))?;
         let (u, v) = (clamped(p.x, self.u), clamped(p.y, self.v));
-        let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 1, 0)?;
-        let n = cross(partials.at(1, 0), partials.at(0, 1));
+        let n = if let Some(c) = self.centre {
+            let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 0, 0)?;
+            let s = partials.at(0, 0);
+            V3 {
+                x: s.x - Ivl::from(c.x),
+                y: s.y - Ivl::from(c.y),
+                z: s.z - Ivl::from(c.z),
+            }
+        } else {
+            let partials = nurbs_partials_over_box(&self.net, u.lo, u.hi, v.lo, v.hi, 1, 0)?;
+            cross(partials.at(1, 0), partials.at(0, 1))
+        };
         let s = Ivl::from(self.sign);
         Ok(V3 {
             x: n.x * s,
@@ -240,6 +256,10 @@ fn side(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<Side> {
             _ => break,
         }
     }
+    let centre = match surface.kind() {
+        crate::surface::surface::SurfaceKind::Sphere(s) => Some(s.base().position().origin()),
+        _ => None,
+    };
     let net = as_b_spline(k, surface)?.ok_or_else(|| invalid("a face of the edge has no net"))?;
     let net = Nurbs::of(&net)?;
     let domain = rec.uv_domain;
@@ -265,6 +285,7 @@ fn side(k: &Kernel, b: &mut Brep, u: EdgeuseId, t: f64) -> Result<Side> {
         net,
         u,
         v,
+        centre,
         sign: 1.0,
     };
     let n = probe.normal_over(Ivl::from(t))?;

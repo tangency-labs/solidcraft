@@ -241,6 +241,27 @@ mod tests {
     }
 
     #[test]
+    fn window_icons_are_distinct_and_fit_their_slots_in_both_themes() {
+        for dark in [false, true] {
+            let look = Look { dark, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
+            for px in [11, 12, 14, 16, 24] {
+                let artwork_size = if px <= 12 { 12 } else { 25 };
+                let draw = |current| {
+                    let name = solidcraft_ui_kit::icons::window_icon(current);
+                    assert!(!resolve(name).placeholder);
+                    let icon = render(doc_for(name, artwork_size).unwrap(), look, px).unwrap();
+                    assert!(coverage(&icon) > 8);
+                    for (x, y) in [(0, 0), (0, px - 1), (px - 1, 0), (px - 1, px - 1)] {
+                        assert_eq!(icon.pixel(x, y).unwrap().alpha(), 0, "{name} at {px}px");
+                    }
+                    icon
+                };
+                assert_ne!(draw(true).data(), draw(false).data());
+            }
+        }
+    }
+
+    #[test]
     fn every_master_draws_something_at_every_size_in_both_themes() {
         for id in SET.master_ids() {
             for dark in [false, true] {

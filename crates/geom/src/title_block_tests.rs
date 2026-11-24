@@ -322,11 +322,11 @@ fn hostile_definitions_are_refused() {
     }
     // A 14 mm cell under a 12 mm label, a 2 mm wide cell, a symbol under a label filling its cell:
     // the projection cell is 14.475 mm high inside its lines, so a label of 11.475 leaves no room.
-    // Below 4.125 its value box is less than the smallest symbol's 7.35 mm, and the cell 17.925 mm
-    // wide holds a box less than its 15.4 mm.
-    let symbol = "a projection symbol's cell has room for its smallest size, 15.4 x 7.35 mm";
-    cases.push((with(&|b| b.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 4.125 + 1e-9 })), symbol));
-    cases.push((with(&|b| b.cells[11].rect_mm[0] = -17.925 + 1e-9), symbol));
+    // Above a 5.225 mm label its value box is less than the smallest symbol's 6.25 mm, and the cell
+    // 16.275 mm wide holds a box less than its 13.75 mm.
+    let symbol = "a projection symbol's cell has room for its smallest size, 13.75 x 6.25 mm";
+    cases.push((with(&|b| b.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 5.225 + 1e-9 })), symbol));
+    cases.push((with(&|b| b.cells[11].rect_mm[0] = -16.275 + 1e-9), symbol));
     cases.push((with(&label_cap(12.0)), "a cell has room for its value below its label"));
     cases.push((
         with(&|b| b.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 11.475 + 1e-9 })),
@@ -394,6 +394,8 @@ fn hostile_definitions_are_refused() {
         with(&value_cap(title_most - 1e-6)),
         with(&|b| b.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 4.125 - 1e-9 })),
         with(&|b| b.cells[11].rect_mm[0] = -17.925 - 1e-9),
+        with(&|b| b.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 5.225 - 1e-9 })),
+        with(&|b| b.cells[11].rect_mm[0] = -16.275 - 1e-9),
         with(&label_text("a".repeat(4096))),
         with(&|b| b.cells[0].label = None),
     ];
@@ -563,12 +565,12 @@ fn the_built_in_blocks_cells() {
 /// (410, 59), then the three lines across the whole block at y 44, 34 and 24, then the five up and
 /// down: x 289 and 348 between the second and third lines, 310 from the third line to the top, 380
 /// from the second line to the top, cells' edges joined where they meet, and 342 between the bottom
-/// and the first line. Each shared edge is drawn once, 22 records, and the projection symbol after
-/// them 11 more (its own test), and the scene takes them.
+/// and the first line. Each shared edge is drawn once, 22 records, and the scene takes them. The
+/// projection symbol is the drawing's to draw.
 #[test]
 fn the_built_in_blocks_lines_on_a3() {
     let sheet = iso(PaperSize::A3, Orientation::Landscape);
-    let group = default_block().layout(&sheet).unwrap().paper(7, Projection::Third);
+    let group = default_block().layout(&sheet).unwrap().paper(7);
     assert_eq!((group.object, group.kind), (7, ObjectKind::TitleBlock));
     let drawn: Vec<(Vec<[f64; 4]>, bool, f64)> = group
         .items
@@ -595,7 +597,7 @@ fn the_built_in_blocks_lines_on_a3() {
         line(380.0, 24.0, 380.0, 59.0),
     ];
     assert_eq!(drawn, expected);
-    assert_eq!(group.records(), 33);
+    assert_eq!(group.records(), 22);
     let size_mm = Vec2::new(420.0, 297.0);
     crate::paper::Scene::new(size_mm, vec![group]).validate().unwrap();
 }
@@ -612,7 +614,7 @@ fn edges_that_overlap_along_a_line_are_one_stroke() {
     block.cells[title].rect_mm[0] = -170.0;
     let layout = block.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap();
     let lines: Vec<[f64; 4]> = layout
-        .paper(1, Projection::Third)
+        .paper(1)
         .items
         .iter()
         .skip(1)
@@ -626,62 +628,13 @@ fn edges_that_overlap_along_a_line_are_one_stroke() {
     assert_eq!(lines, [[240.0, 24.0, 410.0, 24.0], [240.0, 10.0, 240.0, 24.0], [342.0, 10.0, 342.0, 24.0]]);
 }
 
-/// A stroke's pieces as numbers (a line's ends, an arc's centre, radius, start and sweep), whether
-/// it is closed, and its width.
-fn pieces(item: &Item) -> (Vec<Vec<f64>>, bool, f64) {
-    let piece = |seg: &Seg2| match *seg {
-        Seg2::Line { a, b } => vec![a.x, a.y, b.x, b.y],
-        Seg2::Arc { center, radius, start, sweep } => vec![center.x, center.y, radius, start, sweep],
-        _ => panic!("a symbol is lines and arcs"),
-    };
-    match item {
-        Item::Stroke { path, closed, width_mm, .. } => (path.iter().map(piece).collect(), *closed, *width_mm),
-        _ => panic!("a symbol is strokes"),
-    }
-}
-
-/// `a` and `b` the same pieces, each number within 1e-12 mm.
-fn same_pieces(a: &[(Vec<Vec<f64>>, bool, f64)], b: &[(Vec<Vec<f64>>, bool, f64)]) -> bool {
-    let numbers = |p: &(Vec<Vec<f64>>, bool, f64)| p.0.iter().flatten().copied().chain([p.2]).collect::<Vec<f64>>();
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(p, q)| {
-            let (x, y) = (numbers(p), numbers(q));
-            p.1 == q.1 && p.0.len() == q.0.len() && x.len() == y.len() && x.iter().zip(&y).all(|(m, n)| (m - n).abs() < 1e-12)
-        })
-}
-
-/// ISO 5456-2's symbols, 5 mm across the cone's small end, worked out by hand from figures A.1 and
-/// A.2: 21.5 mm wide on the lines' centres (two 10 mm views and the 1.5 mm gap, 3 x 0.5 mm), so from
-/// -10.75 to 10.75. The cone is 10 mm long from its 5 mm end on the left to its 10 mm end in both;
-/// the end view, circles 10 and 5 mm across, is on the right in first angle and on the left in
-/// third. Every line is 0.5 mm wide, and each outline is closed.
-#[test]
-fn the_projection_symbol_is_the_cone_and_its_end_view() {
-    use std::f64::consts::PI;
-    let cone = |x: f64| {
-        (vec![vec![x, -2.5, x + 10.0, -5.0], vec![x + 10.0, -5.0, x + 10.0, 5.0], vec![x + 10.0, 5.0, x, 2.5], vec![x, 2.5, x, -2.5]], true, 0.5)
-    };
-    let circle = |x: f64, r: f64| (vec![vec![x, 0.0, r, 0.0, PI], vec![x, 0.0, r, PI, PI]], true, 0.5);
-    let drawn = |projection| projection_symbol(projection, 5.0, Vec2::ZERO).map(|item| pieces(&item));
-    assert!(same_pieces(&drawn(Projection::First), &[cone(-10.75), circle(5.75, 5.0), circle(5.75, 2.5)]), "{:?}", drawn(Projection::First));
-    assert!(same_pieces(&drawn(Projection::Third), &[cone(0.75), circle(-5.75, 5.0), circle(-5.75, 2.5)]), "{:?}", drawn(Projection::Third));
-    // Anywhere else it is the same symbol moved there.
-    let moved = projection_symbol(Projection::First, 5.0, Vec2::new(100.0, 50.0)).map(|item| pieces(&item));
-    let expected = [cone(89.25), circle(105.75, 5.0), circle(105.75, 2.5)].map(|(mut path, closed, width)| {
-        path.iter_mut().for_each(|piece| piece[1] += 50.0);
-        path.iter_mut().filter(|piece| piece.len() == 4).for_each(|piece| piece[3] += 50.0);
-        (path, closed, width)
-    });
-    assert!(same_pieces(&moved, &expected), "{moved:?}");
-}
-
-/// A symbol cell takes the largest of table A.1's sizes whose symbol, 4.4 h by 2.1 h with its lines,
-/// fits its value box: each size at its exact room, and the size below it a hair short of it.
+/// A symbol cell takes the largest of table A.1's sizes whose symbol, 5.5 h by 2.5 h to its centre
+/// lines' ends, fits its value box: each size at its exact room, and the size below it a hair short of it.
 #[test]
 fn a_symbol_cell_takes_the_largest_size_that_fits() {
     let mut smaller = None;
     for h in SYMBOL_SIZES_MM {
-        let room = Vec2::new(4.4 * h, 2.1 * h);
+        let room = Vec2::new(5.5 * h, 2.5 * h);
         assert_eq!(symbol_size(room), Some(h));
         assert_eq!(symbol_size(room - Vec2::new(1e-9, 0.0)), smaller);
         assert_eq!(symbol_size(room - Vec2::new(0.0, 1e-9)), smaller);
@@ -692,27 +645,36 @@ fn a_symbol_cell_takes_the_largest_size_that_fits() {
 }
 
 /// The built-in block on A3: its projection cell's value box runs from (381.175, 45.175) to
-/// (408.65, 54.15), 27.475 by 8.975 mm, so it holds the 3.5 mm symbol (15.4 by 7.35 mm with its
-/// lines; 5 mm would be 10.5 mm high), centred. The lines are the same in either projection and
-/// only the symbol follows it. The block itself never fixes the angle: its cell says only that it
-/// holds the symbol, and an angle written into it is refused.
+/// (408.65, 54.15), 27.475 by 8.975 mm, so it holds the 3.5 mm symbol (19.25 by 8.75 mm to its
+/// centre lines' ends; 5 mm would be 27.5 by 12.5 mm). The block itself never fixes the angle: its
+/// cell says only that it holds the symbol, and an angle written into it is refused.
 #[test]
-fn the_built_in_block_draws_its_symbol_in_the_drawings_projection() {
+fn the_built_in_blocks_projection_cell_holds_the_3_5_mm_symbol() {
     let block = default_block();
     let layout = block.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap();
     let cell = cell_named(&block, &layout, "projection");
     assert!(near(cell.value_box, rect(381.175, 45.175, 408.65, 54.15)), "{:?}", cell.value_box);
     assert_eq!(cell.symbol_mm, Some(3.5));
     assert_eq!(layout.cells.iter().filter(|c| c.symbol_mm.is_some()).count(), 1);
-    let [first, third] = [Projection::First, Projection::Third].map(|projection| layout.paper(7, projection));
-    assert_eq!(first.items[..9], third.items[..9]);
-    assert_ne!(first.items[9..], third.items[9..]);
-    for (group, projection) in [(first, Projection::First), (third, Projection::Third)] {
-        assert_eq!(group.items[9..], projection_symbol(projection, 3.5, cell.value_box.center()));
-        crate::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]).validate().unwrap();
-    }
     assert_eq!(serde_json::to_value(&block.cells[11].kind).unwrap(), json!("projection_symbol"));
     for fixed in [json!("first_angle_symbol"), json!({"projection_symbol": "first"})] {
         assert!(serde_json::from_value::<CellKind>(fixed.clone()).is_err(), "{fixed}");
     }
+}
+
+/// Every definition valid before the symbol grew to 5.5 h by 2.5 h stays valid: a projection cell
+/// whose value box is exactly the old smallest room, 15.4 by 7.35 mm (the 3.5 mm symbol at 4.4 h by
+/// 2.1 h), validates and lays out, holding the 2.5 mm symbol.
+#[test]
+fn a_cell_with_the_old_smallest_room_still_holds_a_symbol() {
+    // The built-in block's projection cell cut to 17.925 mm wide under a 4.125 mm label.
+    let mut block = default_block();
+    block.cells[11].label = Some(Label { text: "Projection".into(), cap_mm: 4.125 });
+    block.cells[11].rect_mm[0] = -17.925;
+    block.validate().unwrap();
+    let layout = block.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap();
+    let cell = cell_named(&block, &layout, "projection");
+    let room = cell.value_box.size();
+    assert!((room.x - 15.4).abs() < 1e-9 && (room.y - 7.35).abs() < 1e-9, "{room:?}");
+    assert_eq!(cell.symbol_mm, Some(2.5));
 }
