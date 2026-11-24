@@ -217,7 +217,8 @@ mod tests {
             .filter(|(_, r)| r.uv_trim_curve.is_some())
             .map(|(x, _)| x)
             .collect();
-        assert!(!trims.is_empty(), "the body has trims");
+        let joined = solidcore::topology::EdgeuseId::from_index(23);
+        assert!(trims.contains(&joined), "the joined edge's edge use has a trim");
         for x in trims {
             let e = b.edgeuse(x).unwrap().edge.unwrap();
             let tol = b.edge(e).unwrap().tolerance;
@@ -234,7 +235,7 @@ mod tests {
                 _ => 0,
             };
             eprintln!("BSTUV mouse two struts: {spans} spans, {cert:?}");
-            if x == solidcore::topology::EdgeuseId::from_index(23) {
+            if x == joined {
                 assert_eq!(spans, 77, "the joined edge's trim keeps its spans");
             }
             assert!(
