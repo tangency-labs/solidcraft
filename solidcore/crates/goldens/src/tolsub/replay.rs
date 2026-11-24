@@ -379,7 +379,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -656,27 +659,30 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// tangency-labs/solidcraft#21421 moves them again (the round's end vertices kept on the
 /// seams they are on), so each hash is of the row with those changes.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916).
+/// step latch (#18916). The drop tracer's clamped-sliver rule (a span whose clamped UV image
+/// is one point within the drop's tolerances is left out) moves all four in their
+/// `mass_properties` only, so each hash is of the row with that rule;
+/// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xce83_12e9_feb0_48d2,
+        0x9105_b0cf_0a36_d101,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x53c7_e638_2d5a_3371,
+        0x180e_63bf_5133_3443,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x9d97_b5a7_1a11_7697,
+        0xfdef_5335_9319_77fb,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x2763_1ef9_69ac_60dc,
+        0x7416_fdba_0f63_9434,
     ),
 ];
 
@@ -684,6 +690,7 @@ const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
 /// branch's committed line.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
+    let mut failures = Vec::new();
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
         assert!(
             !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
@@ -697,13 +704,17 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
+        if hash(&line) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's line ({:#018x})",
+                hash(&line)
+            ));
+        }
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{unit_id} {name}: not the committed line"));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
@@ -746,7 +757,9 @@ fn record() {
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
 /// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
-/// the put-back is shown to keep them.
+/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
+/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
+/// (`certify::trim_tolerance` certifies its moved tolerance).
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -857,7 +870,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0xc8792b6ad7002c8b,
+        0x50fca59ea3c3d0cc,
     ),
     (
         "topology.face_p3",
@@ -904,7 +917,10 @@ fn classified_read_rows_are_mains_without_the_trims() {
             failures.push(format!("{unit_id} {name}: no read put back"));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{unit_id} {name}: not main's row"));
+            failures.push(format!(
+                "{unit_id} {name}: not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
