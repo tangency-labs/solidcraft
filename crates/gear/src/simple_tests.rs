@@ -585,6 +585,7 @@ fn shafts_only_when_unsolvable() {
 }
 
 #[test]
+#[ignore = "timing: run alone with --ignored (other tests running alongside slow it)"]
 fn fast_enough() {
     // Defaults, every family: solve under 5 ms, schematic under 1 ms (a hypoid's schematic is
     // cached after its first call).
