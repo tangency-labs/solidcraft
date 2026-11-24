@@ -1645,6 +1645,14 @@ impl Surface {
         }
     }
 
+    /// Not upstream: the content digest of this surface ([`crate::geom::content`]): equal
+    /// for two surfaces that evaluate alike bit for bit, whichever objects they are; `None`
+    /// for a kind that has no digest yet or a surface keeping a blend's definition.
+    #[must_use]
+    pub fn content_id(&self) -> Option<crate::geom::content::ContentId> {
+        crate::geom::content::content_id(self)
+    }
+
     /// The concrete kind, mutable: a kind made by [`Surface::kind_with_nurb`] is moved
     /// into the surface first, and a plane's or extrusion's NURB cell (and a made kind's
     /// cell) is detached from the evaluation copies sharing it, so an edit applies to
@@ -7906,6 +7914,57 @@ impl<'s> IsoCurveLengthIntegrand<'s> {
         Self {
             surface,
             u_iso_value,
+        }
+    }
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]): the kind as it evaluates
+/// (with the NURB a cone, sphere or torus made, [`Surface::kind`]). The owners, the
+/// tolerance recorded from the face reached (a copy has neither) and the notification
+/// identity say which object the surface is and who owns it, not what it is; a digest of a
+/// neighbourhood writes the face's tolerance itself. The cache slot and the memos are caches.
+/// A surface that keeps a blend's definition, and the kinds that hold curves, other surfaces
+/// or volumes with state of their own, have no digest yet.
+impl crate::geom::content::Content for Surface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            kind: _,
+            owner: _,
+            owner_chain_face: _,
+            owner_zone_tol_3d: _,
+            cache_slot: _,
+            notify_identity: _,
+            made_kind: _,
+            boundary_memo: _,
+            singularities_memo: _,
+            continuity_memo: _,
+            definition,
+        } = self;
+        if definition.is_some() {
+            return None;
+        }
+        match self.kind() {
+            SurfaceKind::BSpline(s) => {
+                d.tag(1);
+                s.content(d)
+            }
+            SurfaceKind::Plane(s) => {
+                d.tag(2);
+                s.content(d)
+            }
+            SurfaceKind::Cone(s) => {
+                d.tag(3);
+                s.content(d)
+            }
+            SurfaceKind::Sphere(s) => {
+                d.tag(4);
+                s.content(d)
+            }
+            SurfaceKind::Torus(s) => {
+                d.tag(5);
+                s.content(d)
+            }
+            _ => None,
         }
     }
 }
