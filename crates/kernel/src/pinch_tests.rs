@@ -117,6 +117,9 @@ fn hole_touching_the_outline_stays_one_piece() {
 /// (15, 0) touching both rims there: the material on either side of the hole meets along the
 /// line x = 20, y = 0 only (a zero-thickness curved wall). The hole cut through both, the boss
 /// only and the base only, all exact (no tool nudge); then the same turned 30° and mirrored.
+/// The volume is the exact one: turned, the base-only cut's Ø40 wall is meshed by Delaunay,
+/// whose refinement at a 1e-4 chord stops at its point budget with facets 3.4e-3 off the wall
+/// (the plan names it over tolerance), so that mesh's volume does not bound the cut's.
 #[test]
 fn hole_tangent_inside_a_stepped_boss_cuts_exactly() {
     use std::f64::consts::PI;
@@ -131,7 +134,10 @@ fn hole_tangent_inside_a_stepped_boss_cuts_exactly() {
             let hole = prism(circle(15., 5.), z0, z1);
             let res = boolean(&stepped, &hole, BoolOp::Cut);
             let res = res.unwrap_or_else(|e| panic!("{what}: {e}")).unwrap();
-            assert_solid(&res, PI * want, 1e-5, 1, &what);
+            let v = crate::measure(&res).unwrap_or_else(|e| panic!("{what}: {e}")).volume;
+            assert!((v - PI * want).abs() <= PI * want * 1e-5, "{what}: volume {v} vs {}", PI * want);
+            assert_eq!(res.shell_count(), 1, "{what}: shells");
+            assert!(res.validity().is_empty(), "{what}: {:?}", res.validity());
         }
     }
 }

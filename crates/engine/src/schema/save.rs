@@ -67,6 +67,13 @@ pub struct SaveParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -111,6 +118,13 @@ pub struct SaveAsParams {
     /// true. Plain json has no room for it.
     #[serde(default)]
     pub cache: Option<bool>,
+    /// Keep the bodies of linked designs (Insert Design) in the file. false: the file keeps each
+    /// link without its bodies, and opening the design reads them from the linked design files
+    /// again; a container then has no saved model either. A link whose file cannot be read now
+    /// keeps its bodies, and the reply's warnings name it. Default: as the design was last saved
+    /// or opened; true for a new design.
+    #[serde(default)]
+    pub linked_bodies: Option<bool>,
     /// Keep the display meshes in the file. Default: false.
     #[serde(default)]
     pub preview: Option<bool>,
@@ -153,7 +167,11 @@ pub struct SaveResult {
     /// A file a newer SolidCraft saved: the format number it keeps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kept_format: Option<String>,
-    /// A newer file: what could not be kept, in sentences, when something could not.
+    /// A requested model cache was omitted and the next open will rebuild the design (#18815).
+    /// Absent when the cache was included, disabled, or the format does not support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_not_saved: Option<String>,
+    /// Save notices shown in the desktop app, including an omitted model cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warnings: Option<Vec<String>>,
     /// A newer file: what could not be kept, one item each, when something could not.

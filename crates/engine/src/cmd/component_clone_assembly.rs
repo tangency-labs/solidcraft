@@ -41,6 +41,7 @@ fn budget(assembly: &Assembly) -> Result<()> {
         assembly.contact_sets.len(),
         assembly.studies.len(),
         assembly.exploded.len(),
+        assembly.rigid_groups.len(),
     ];
     if counts.iter().any(|n| *n > MAX_RECORDS) {
         return Err(invalid("too many assembly records"));
@@ -275,6 +276,9 @@ fn origin(
     out.occurrence = *occurrences.get(&origin.occurrence)?;
     out.inside = origin.inside.iter().map(|o| occurrences.get(o).copied()).collect::<Option<_>>()?;
     datum_side(&mut out.snap, occurrences, doc)?;
+    if let Some(feature) = out.snap.secondary_axis_feature_mut() {
+        *feature = *features.get(feature)?;
+    }
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }
@@ -454,6 +458,26 @@ pub(super) fn clone_assembly_with_joint_ids(
         } else {
             report(&mut messages, "exploded view", &old.name);
         }
+    }
+    // A rigid group goes with its parts: the copy holds the copies of the parts it held, under
+    // the copy of its component (reached through any placement of that component).
+    for old in &source.assembly.rigid_groups {
+        let members: Vec<u64> = old.members.iter().filter_map(|m| occurrences.get(m).copied()).collect();
+        if members.is_empty() {
+            continue;
+        }
+        let copied = source
+            .occurrences
+            .iter()
+            .filter(|o| o.component == old.component)
+            .find_map(|o| occurrences.get(&o.id))
+            .and_then(|new| doc.occurrences.iter().find(|o| o.id == *new));
+        let Some(component) = copied.map(|o| o.component) else { continue };
+        if component == 0 || a.rigid_groups.iter().any(|g| g.component == component) {
+            continue;
+        }
+        let name = doc.components.iter().find(|c| c.id == component).map_or_else(|| old.name.clone(), |c| c.name.clone());
+        a.rigid_groups.push(solidcraft_doc::joints::RigidGroup { id: next_id(&mut item_id)?, name, component, members });
     }
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;

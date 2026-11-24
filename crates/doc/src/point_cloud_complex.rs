@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::canvas::{base64_decode, base64_encode};
+use crate::canvas::base64_decode;
 use crate::point_cloud::MAX_POINTS;
 use crate::{DocError, Result};
 
@@ -282,9 +282,12 @@ fn words<'de, D: Deserializer<'de>>(d: D, max: usize) -> std::result::Result<Vec
     Ok(b.as_chunks::<4>().0.to_vec())
 }
 
+/// Never the numbers themselves: a container writes a cloud's segments, triangles and properties
+/// to a part of their own, beside its points, and its record keeps this empty text. Reading still
+/// takes an older design's base64.
 impl Serialize for Indices {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.0.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()))
+        s.serialize_str("")
     }
 }
 
@@ -294,9 +297,10 @@ impl<'de> Deserialize<'de> for Indices {
     }
 }
 
+/// Never the numbers themselves, as [`Indices`].
 impl Serialize for Floats {
     fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
-        s.serialize_str(&base64_encode(&self.0.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()))
+        s.serialize_str("")
     }
 }
 
@@ -309,6 +313,7 @@ impl<'de> Deserialize<'de> for Floats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::base64_encode;
 
     #[test]
     fn a_complex_round_trips_and_is_checked_against_its_points() {
@@ -321,7 +326,16 @@ mod tests {
             ],
             names: Vec::new(),
         };
-        let back: Complex = serde_json::from_str(&serde_json::to_string(&complex).unwrap()).unwrap();
+        // Never the numbers as text (a container keeps them as a part); an older design's base64 reads.
+        let mut json = serde_json::to_value(&complex).unwrap();
+        assert_eq!((json["segments"].clone(), json["columns"][0]["values"].clone()), (serde_json::json!(""), serde_json::json!("")));
+        let text = |words: Vec<[u8; 4]>| serde_json::Value::from(base64_encode(&words.concat()));
+        json["segments"] = text(complex.segments.0.iter().map(|v| v.to_le_bytes()).collect());
+        json["triangles"] = text(complex.triangles.0.iter().map(|v| v.to_le_bytes()).collect());
+        for (i, column) in complex.columns.iter().enumerate() {
+            json["columns"][i]["values"] = text(column.values.0.iter().map(|v| v.to_le_bytes()).collect());
+        }
+        let back: Complex = serde_json::from_value(json).unwrap();
         assert_eq!(back, complex);
         let points: Column = serde_json::from_str(r#"{"name": "t", "values": ""}"#).unwrap();
         assert!(!serde_json::to_string(&points).unwrap().contains("\"on\""), "a column on the points does not say so");

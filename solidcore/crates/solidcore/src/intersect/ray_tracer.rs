@@ -99,7 +99,8 @@
 use crate::curve::curve::p2::evaluate_geometric;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -333,9 +334,12 @@ fn find_additional_tangent_guess(
     let (pv0, pv1) = match pv.as_slice() {
         [a, b, ..] => (*a, *b),
         _ => {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 "intersect::ray_tracer",
-                "the curve's first derivative was not evaluated",
+                IntersectFailure::Defect {
+                    why: "the curve's evaluation to the first derivative returned fewer than \
+                          two vectors, though it returns the point and each derivative asked for",
+                },
             ))
         }
     };
@@ -359,9 +363,12 @@ fn find_additional_tangent_guess(
     // Get the geometric properties of the curve at the intersection
     let geom_vec = evaluate_geometric(k, curve, current_t, 2, true)?;
     let mut curvature_vector = *geom_vec.get(2).ok_or_else(|| {
-        SolidError::intersect_failed(
+        SolidError::intersect(
             "intersect::ray_tracer",
-            "the curve's curvature vector was not evaluated",
+            IntersectFailure::Defect {
+                why: "the curve's geometric evaluation to second order returned no curvature \
+                      vector, though it returns the point and the vectors asked for",
+            },
         )
     })?;
     let curve_curvature = curvature_vector.length();
@@ -730,9 +737,12 @@ impl Lsi3LocalSolver {
         let mut ii = 0_usize;
         while ii < total_points {
             let (Some(&gu), Some(&gv)) = (uv_points.get(ii * 2), uv_points.get(ii * 2 + 1)) else {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     "intersect::ray_tracer::local_solve",
-                    "a guess point has no u or v parameter",
+                    IntersectFailure::Defect {
+                        why: "a guess point has no u or v parameter, though every guess point \
+                              is pushed with both as it is counted",
+                    },
                 ));
             };
             uv_point = Vec2::new(gu, gv);
@@ -1082,9 +1092,10 @@ impl<'s> RayTracer<'s> {
                                     operation: OP,
                                     reason: "polygon grid element of no listed poly B-rep",
                                 })?;
-                        let tree = traced.cache.surface_tree().ok_or_else(|| {
-                            SolidError::intersect_missing(OP, "the poly B-rep cache's surface tree")
-                        })?;
+                        let tree = traced
+                            .cache
+                            .surface_tree()
+                            .ok_or_else(|| poly_cache_without_tree(OP))?;
 
                         // Handle polygon ray firing
                         let hit = find_poly_hit(
@@ -1249,9 +1260,10 @@ impl<'s> RayTracer<'s> {
         mut cache: SurfaceCache<usize>,
     ) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_with_cache";
-        let top = cache.get_tree(k)?.top_node().ok_or_else(|| {
-            SolidError::intersect_failed(OP, "the surface cache's tree has no top node")
-        })?;
+        let top = cache
+            .get_tree(k)?
+            .top_node()
+            .ok_or_else(|| tree_without_top_node(OP))?;
         let bbox = cache.get_tree(k)?.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
 
@@ -1278,11 +1290,17 @@ impl<'s> RayTracer<'s> {
         mut cache: SurfaceCache<usize>,
     ) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_with_fetched_cache";
-        let tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::intersect_failed(OP, "the surface cache has no tree"))?;
+        // the caller has not built the tree this reads (its precondition), keeping SM_ERR
+        let tree = cache.tree().ok_or_else(|| {
+            Failure::new(OP, IntersectFailure::NotSetUp)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
+        // a tree with no top node was not built either (the caller's cache)
         let top = tree.top_node().ok_or_else(|| {
-            SolidError::intersect_failed(OP, "the surface cache's tree has no top node")
+            Failure::new(OP, IntersectFailure::NotSetUp)
+                .with_status(SM_ERR)
+                .into_error()
         })?;
         let bbox = tree.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
@@ -1317,9 +1335,9 @@ impl<'s> RayTracer<'s> {
         let cache = make_brep_cache(k, CacheSource::PolyBrep(&*poly_brep), &arena_identity)?;
 
         // get all Surface Tree Nodes
-        let tree = cache.surface_tree().ok_or_else(|| {
-            SolidError::intersect_missing(OP, "the poly B-rep cache's surface tree")
-        })?;
+        let tree = cache
+            .surface_tree()
+            .ok_or_else(|| poly_cache_without_tree(OP))?;
         let index = self.poly_breps.len();
 
         // For every Surface Tree Node
@@ -1675,10 +1693,15 @@ fn find_poly_hit(
         // for every object in pNode
         for list in tree.node_object_list(node)? {
             let Some(CacheObject::PolyFace(poly_face)) = tree.list(list)?.object else {
-                return Err(SolidError::intersect_missing(
+                return Err(Failure::new(
                     OP,
-                    "the poly face of a tree node object",
-                ));
+                    IntersectFailure::Defect {
+                        why: "an object of the poly B-rep cache's surface tree is not a poly \
+                              face, though the cache files only the poly B-rep's faces there",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             };
 
             // skip already processed PolyFaces (and mark this one)
@@ -1701,12 +1724,10 @@ fn find_poly_hit(
                 continue;
             }
             let (normal, _) = brep.face_normal(k, poly_face, false, true)?;
-            let poly_loop = brep
-                .face_outer_poly_loop(poly_face)?
-                .ok_or_else(|| SolidError::intersect_missing(OP, "the poly face's outer loop"))?;
-            let first_edge = brep
-                .loop_first_poly_edge(poly_loop)?
-                .ok_or_else(|| SolidError::intersect_missing(OP, "the poly loop's first edge"))?;
+            // a face of the caller's poly B-rep without a boundary (rule 9)
+            let no_edges = || SolidError::intersect(OP, IntersectFailure::PolyFaceWithoutEdges);
+            let poly_loop = brep.face_outer_poly_loop(poly_face)?.ok_or_else(no_edges)?;
+            let first_edge = brep.loop_first_poly_edge(poly_loop)?.ok_or_else(no_edges)?;
             let origin = brep.edge_start_point(first_edge)?;
             let Ok(t_param) = gu::line_plane_intersect(ray.point, ray.vector, origin, normal)
             else {
@@ -1732,12 +1753,59 @@ fn find_poly_hit(
     Ok(hit_face.map(|f| (hit_t, f)))
 }
 
+/// The poly B-rep cache has no surface tree, though its build sets one whenever it succeeds
+/// (`SM_ERR_NULL_POINTER`, upstream's `NER`).
+fn poly_cache_without_tree(op: &'static str) -> SolidError {
+    Failure::new(
+        op,
+        IntersectFailure::Defect {
+            why: "the poly B-rep cache has no surface tree, though its build sets the tree \
+                  whenever it succeeds",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
+/// The surface cache's tree has no top node right after [`SurfaceCache::get_tree`] built or
+/// returned it, though a successful build makes the top node for the surface's domain
+/// (`SM_ERR`).
+fn tree_without_top_node(op: &'static str) -> SolidError {
+    SolidError::intersect(
+        op,
+        IntersectFailure::Defect {
+            why: "the surface cache's tree has no top node after GetTree, though a successful \
+                  build makes one for the surface's domain",
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geom::extent3d::Extent3d;
     use crate::geom::polar_box::PolarBox;
     use crate::geom::pseudo_box::PseudoBox;
+
+    /// A cache whose tree the caller has not built is the caller's state, refused with
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_fetched_cache_without_its_tree_is_not_set_up() {
+        let k = Kernel::default();
+        let surface = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::new());
+        let cache = SurfaceCache::new(
+            surface.clone(),
+            Extent2d::new(),
+            crate::surface::surface_cache::SurfaceCacheOptions::default(),
+        );
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        let e = tracer
+            .add_surface_with_fetched_cache(&k, &surface, cache)
+            .unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotSetUp));
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
 
     fn grid() -> Grid<usize> {
         let bbox = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);

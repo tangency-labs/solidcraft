@@ -28,7 +28,13 @@
 //! its target and above the net's distance at every point checked), and the square corner's
 //! 1.04e-26 (rounding either way). Since #16652 the offset point is enclosed as one
 //! expansion and the root round's bound is 7.42e-5 (the square corner's still 1.04e-26).
-//! The spans and points are the fork's, bit for bit.
+//! Since #19306 it is so only near a focal distance, which neither case comes near (the
+//! ball rolls away from the cylinder's axis, and a plane has none): the sum's bounds, 7.88e-5
+//! and 1.04e-26, again. Since a span whose least values are over the target is left at its
+//! first piece for its halves (`SpanReuse::over_is_halved`, #13692), the halves take their
+//! own levels, not its finest interval pieces: the root round's bound is another level's,
+//! 1.49e-5, still under its target and above the net's distance at every point checked. The
+//! spans and points are the fork's, bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -246,8 +252,10 @@ fn the_root_round_is_the_fork_s_order_1_definition() {
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
     assert_eq!(spans, 16);
     // the fork's 9.034_561_390_963_572e-5; tighter here (module docs, #13984, #14405; the
-    // offset point enclosed as one expansion, #16652: 7.884_813_700_446_398e-5 before)
-    assert_eq!(bound, 7.424_961_576_754_573e-5);
+    // offset point enclosed as one expansion, #16652: 7.424_961_576_754_573e-5, and as the
+    // sum again away from a focal distance since #19306: 7.884_813_700_446_398e-5; the
+    // halves' own levels, #13692)
+    assert_eq!(bound, 1.490_752_459_228_076e-5);
     let net = net_of(&s);
     assert_pt(
         net.evaluate_point(Point2::new(0.37, 0.5)).unwrap(),
@@ -294,9 +302,9 @@ fn the_square_corner_s_circle_is_one_span() {
     let (s, bound, spans) = corner_round(&k);
     assert_eq!(spans, 1);
     // the fork's 1.036_985_213_585_547_6e-24, at rounding either way (module docs, #13984,
-    // #14405; #16652: 1.042_849_477_921_199_5e-26 before, the offset's own expansion
-    // rounded in more operations)
-    assert_eq!(bound, 1.043_738_376_444_446_8e-26);
+    // #14405; #16652: 1.043_738_376_444_446_8e-26, the offset's own expansion rounded in
+    // more operations, and the sum's again between two planes since #19306)
+    assert_eq!(bound, 1.042_849_477_921_199_5e-26);
     assert_pt(
         net_of(&s).evaluate_point(Point2::new(1.0, 0.25)).unwrap(),
         [

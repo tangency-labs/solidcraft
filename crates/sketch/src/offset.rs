@@ -29,6 +29,7 @@ impl Sketch {
             .find(|o| o.owns_output(output))
             .map(|o| o.distance)
             .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| o.distance))
+            .or_else(|| self.freeform_chain_offsets.iter().find(|o| o.outputs.iter().any(|id| id == output)).map(|o| o.distance))
     }
 
     /// A Parallel between an offset line and the source it follows (#4464). The association
@@ -82,7 +83,13 @@ impl Sketch {
             .iter()
             .find(|o| o.owns_output(output))
             .and_then(|o| o.sources.first().map(|(id, forward)| (id.as_str(), *forward, o.distance)))
-            .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| (o.source.as_str(), o.forward, o.distance)))?;
+            .or_else(|| self.freeform_offsets.iter().find(|o| o.output == output).map(|o| (o.source.as_str(), o.forward, o.distance)))
+            .or_else(|| {
+                self.freeform_chain_offsets
+                    .iter()
+                    .find(|o| o.outputs.iter().any(|id| id == output))
+                    .and_then(|o| o.sources.first().map(|(id, forward)| (id.as_str(), *forward, o.distance)))
+            })?;
         let index = self.curve_index(source)?;
         let segment = self.exact_segs(index).unwrap_or_else(|| self.segs(index)).into_iter().next()?;
         let p = segment.point_at(0.5);
@@ -103,9 +110,21 @@ impl Sketch {
             .filter(|offset| offset.outputs.iter().any(|id| removed.contains(id)))
             .flat_map(|offset| offset.outputs.iter().cloned().chain(offset.topology.iter().flat_map(|t| t.roles.iter().map(|r| r.output.clone()))))
             .chain(self.freeform_offsets.iter().filter(|offset| removed.contains(&offset.output)).map(|offset| offset.output.clone()))
+            .chain(
+                self.freeform_chain_offsets
+                    .iter()
+                    .filter(|offset| {
+                        offset.outputs.iter().any(|id| removed.contains(id)) || offset.sources.iter().any(|(source, _)| removed.contains(source))
+                    })
+                    .flat_map(|offset| offset.outputs.iter().cloned()),
+            )
             .collect::<std::collections::BTreeSet<_>>();
         self.offsets.retain(|offset| !offset.outputs.iter().any(|id| removed.contains(id)));
         self.freeform_offsets.retain(|offset| !removed.contains(&offset.output));
+        // A trimmed chain offset whose source is gone keeps its curves as ordinary geometry.
+        self.freeform_chain_offsets.retain(|offset| {
+            !offset.outputs.iter().any(|id| removed.contains(id)) && !offset.sources.iter().any(|(source, _)| removed.contains(source))
+        });
         self.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if released.contains(output)));
         let points = self
             .curves
@@ -198,7 +217,7 @@ impl Sketch {
     }
 
     pub fn refresh_offsets(&mut self) -> Result<(), SketchError> {
-        if self.offsets.is_empty() && self.freeform_offsets.is_empty() {
+        if self.offsets.is_empty() && self.freeform_offsets.is_empty() && self.freeform_chain_offsets.is_empty() {
             return Ok(());
         }
         let mut candidate = self.clone();
@@ -208,8 +227,10 @@ impl Sketch {
                 self.validate(&constraint.kind)?;
                 let analytic = candidate.offsets.iter().position(|o| o.owns_output(output));
                 let freeform = candidate.freeform_offsets.iter().position(|o| o.output == *output);
+                let chain = candidate.freeform_chain_offsets.iter().position(|o| o.outputs.iter().any(|id| id == output));
                 let identity = analytic
                     .or_else(|| freeform.map(|i| candidate.offsets.len() + i))
+                    .or_else(|| chain.map(|i| candidate.offsets.len() + candidate.freeform_offsets.len() + i))
                     .ok_or_else(|| SketchError::Invalid("missing offset dimension association".into()))?;
                 if constraint.driven || !driven.insert(identity) {
                     return Err(SketchError::Invalid("an offset must have exactly one driving distance".into()));
@@ -221,10 +242,14 @@ impl Sketch {
                 if let Some(offset) = freeform.and_then(|i| candidate.freeform_offsets.get_mut(i)) {
                     offset.distance = distance;
                 }
+                if let Some(offset) = chain.and_then(|i| candidate.freeform_chain_offsets.get_mut(i)) {
+                    offset.distance = distance;
+                }
             }
         }
         candidate.refresh_analytic_offsets()?;
         candidate.refresh_freeform_offsets()?;
+        candidate.refresh_freeform_chain_offsets()?;
         *self = candidate;
         Ok(())
     }
