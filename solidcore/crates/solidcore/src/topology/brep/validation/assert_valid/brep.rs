@@ -372,6 +372,12 @@ fn validate_and_update_body(
             let Some(end_v) = tvu::vertex(b, end_vu)? else {
                 return Ok((ERROR, out));
             };
+            // not upstream: a use of a face whose neighbourhood (its edges, vertices and their
+            // tolerances) passed this pass on a body before has no gap over its tolerance
+            // ([`crate::geom::check_memo`]); only a check reads the memo
+            if crate::geom::check_memo::face_clean(k, f) {
+                continue;
+            }
 
             // get all edgeuse start/end vertex gaps: upstream keeps pointers into the
             // vertex uses' caches and reads their lengths below, so a later refresh that

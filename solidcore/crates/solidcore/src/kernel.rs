@@ -960,6 +960,11 @@ pub struct Kernel {
     /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
     /// certificate, and a hit returns what certifying the loop again returns.
     pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
+    /// Not upstream: the memo of the vertex use parameters and edge use binormals worked
+    /// out on one unchanged B-rep value ([`crate::geom::check_memo::CheckMemo`]), on with
+    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
+    /// computation, and a hit returns what working it out again returns.
+    pub check_memo: RefCell<crate::geom::check_memo::CheckMemo>,
     /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
     /// record's faces their definitions back
     /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
@@ -1071,6 +1076,7 @@ impl Kernel {
             ),
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
+            check_memo: RefCell::default(),
             recertify_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),

@@ -81,6 +81,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         ),
         blend_w_memo: core::cell::RefCell::default(),
         loop_area_memo: core::cell::RefCell::default(),
+        check_memo: core::cell::RefCell::default(),
         recertify_memo: core::cell::RefCell::default(),
         // (inside the caller's operation: a scope opened on the copy keeps its memo)
         blend_operation_scopes: std::sync::Arc::new(core::sync::atomic::AtomicU32::new(

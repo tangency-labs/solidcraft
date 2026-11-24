@@ -379,6 +379,27 @@ pub fn check_brep_scoped(
     Ok(check_brep_counted(k, b, level, scope)?.0)
 }
 
+/// (not upstream) [`check_brep_scoped`] in full, the verify mode: with every memo and
+/// result-invariant shortcut off ([`Kernel::memoize_curve_caches`] off for the call), so
+/// nothing an earlier check or operation worked out about `b`'s geometry
+/// ([`crate::geom::check_memo`]) is read back. The memos never change a result, so this
+/// reports what [`check_brep_scoped`] does, only slower; it is there to show that.
+///
+/// # Errors
+///
+/// As [`check_brep`].
+pub fn check_brep_full(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
+    let memoize = std::mem::replace(&mut k.memoize_curve_caches, false);
+    let out = check_brep_scoped(k, b, level, scope);
+    k.memoize_curve_caches = memoize;
+    out
+}
+
 /// [`check_brep_scoped`], also saying how many `ValidatePointers` passes its `AssertValid` ran
 /// (0 when [`check_brep_with_keys`] skipped it, or when `AssertValid` did not run).
 fn check_brep_counted(
@@ -454,8 +475,41 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    use crate::geom::check_memo;
     let mut standing = standing_where_trims_lack(b)?;
     let b = standing.as_mut().unwrap_or(b);
+    // not upstream: the incremental check ([`crate::geom::check_memo`]): the geometric
+    // tests of entities whose neighbourhoods passed them before are skipped, and a body
+    // found valid with no report at all leaves its neighbourhoods clean
+    let salt = check_memo::salt(k, level.code(), scope == ValidityScope::Stitched);
+    if let Some(salt) = salt {
+        check_memo::begin(k, check_memo::Stars::of(b, salt));
+    }
+    let ran = check_once(k, b, level, keys, scope);
+    let after = match (&ran, salt) {
+        (Ok((c, _, true)), Some(salt))
+            if c.pointers_status == SUCCESS
+                && c.assert_valid == Some(true)
+                && c.pointer_reports.is_empty()
+                && c.reports.is_empty() =>
+        {
+            Some(check_memo::Stars::of(b, salt))
+        }
+        _ => None,
+    };
+    check_memo::end(k, after);
+    ran.map(|(c, passes, _)| (c, passes))
+}
+
+/// One run of [`check_with_keys_counted`] on the body it checks, also saying whether the
+/// pointer check found every face whole.
+fn check_once(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize, bool)> {
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
@@ -514,6 +568,7 @@ fn check_with_keys_counted(
             reports,
         },
         passes,
+        faces_whole,
     ))
 }
 
