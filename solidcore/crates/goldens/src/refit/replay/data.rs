@@ -21,6 +21,13 @@
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
+//!
+//! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
+//! the drop's tolerances is left out, #21353) moves the ten `sphere_diff_3cylinders` rows
+//! (`stubs4-delete-edge` `e1`, `e2`, `e4`, `e5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in
+//! their `mass_properties` only, so the hashes of those still here (`e1` and `e4` are deleted
+//! above) are of the refit run with that rule;
+//! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 use super::Row;
 
@@ -1011,17 +1018,17 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x405209a464313f0e,
+        0x042f4b954681d6de,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0xffcf312d60cdb459,
+        0x04a26c663dfbcc8d,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0x06ddff56205be79d,
+        0x43c338c0dde1e319,
     ),
     (
         "blend.fillet_executive_p3",
@@ -1031,16 +1038,16 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0xb22294900f9c8b8f,
+        0x1255d42c108d8c67,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0x03a447984bf8cd71,
+        0xeabc32c0dc187d61,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0x9f5bf5f05eb8f6cc,
+        0xbb2bc2454dc10ff0,
     ),
 ];

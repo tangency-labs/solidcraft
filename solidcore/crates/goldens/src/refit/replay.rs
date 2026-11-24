@@ -139,7 +139,7 @@ fn replay(unit_id: &str) -> usize {
         }
         if hash(&line) != old_hash {
             failures.push(format!(
-                "{name}: refit row {:#018x} is not main's row",
+                "{name}: refit row is not main's row ({:#018x})",
                 hash(&line)
             ));
         }

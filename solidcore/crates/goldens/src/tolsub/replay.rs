@@ -381,7 +381,7 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         let committed = golden.get(name);
         if hash(&line) != main_hash {
             failures.push(format!(
-                "{name}: the row put back {:#018x} is not main's row",
+                "{name}: the row put back is not main's row ({:#018x})",
                 hash(&line)
             ));
         }
@@ -658,11 +658,13 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916). WR-732's retirement (#18934) moves the four rows' mass through the
-/// fillet's own classifications while it edits (by up to 1.7e-10 of the area), so each
-/// hash is of main's line without its `mass_properties` key too (main's expected file at
-/// e97d2814d7); the moved mass entries are classified against a certified enclosure
-/// (`tests/wr493_moved_rows_are_classified`).
+/// step latch (#18916). Two changes move the four rows' `mass_properties` only: the drop
+/// tracer's clamped-sliver rule (#21353: a span whose clamped UV image is one point within
+/// the drop's tolerances is left out) and WR-732's retirement (#18934: the fillet's own
+/// classifications while it edits, by up to 1.7e-10 of the area). So each hash is of main's
+/// line without its `mass_properties` key (main's expected file at e97d2814d7; #21353 leaves
+/// it unchanged); the moved mass entries are classified against a certified enclosure
+/// (`tests/wr493_moved_rows_are_classified`, `tests/drop_clamped_sliver_moved_mass_rows.rs`).
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
@@ -697,6 +699,7 @@ const KEPT_E4_R05: u64 = 0x8557_8f8e_7925_20db;
 /// `mass_properties` key it is main's committed line to the bit.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
+    let mut failures = Vec::new();
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
         assert!(
             !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
@@ -710,22 +713,24 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{unit_id} {name}: not the committed line"));
+        }
         let mut without_mass = line.clone();
         let removed = without_mass["values"]
             .as_object_mut()
             .and_then(|v| v.remove("mass_properties"));
-        assert!(removed.is_some(), "{unit_id} {name}: no mass_properties");
-        assert_eq!(
-            hash(&without_mass),
-            main_hash,
-            "{unit_id} {name}: not main's line without its mass"
-        );
+        if removed.is_none() {
+            failures.push(format!("{unit_id} {name}: no mass_properties"));
+        }
+        if hash(&without_mass) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's line without its mass ({:#018x})",
+                hash(&without_mass)
+            ));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
@@ -772,7 +777,9 @@ fn record() {
 /// MEASURED at e97d2814d7, within the comparator), so its entry is deleted; its moved
 /// tolerances stay certified in `certify::trim_tolerance`. The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
-/// the put-back is shown to keep them.
+/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
+/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
+/// (`certify::trim_tolerance` certifies its moved tolerance).
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -882,7 +889,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0xc8792b6ad7002c8b,
+        0x50fca59ea3c3d0cc,
     ),
     (
         "topology.face_p3",
@@ -930,7 +937,7 @@ fn classified_read_rows_are_mains_without_the_trims() {
         }
         if hash(&line) != main_hash {
             failures.push(format!(
-                "{unit_id} {name}: {:#018x} is not main's row",
+                "{unit_id} {name}: not main's row ({:#018x})",
                 hash(&line)
             ));
         }
