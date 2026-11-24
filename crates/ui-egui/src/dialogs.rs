@@ -770,13 +770,36 @@ fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommand
     let made = crate::hole_place::holes_made(&replies);
     for (id, reply) in replies {
         let stop = (id == "joint.drive").then(|| crate::dialogs_assembly::drive_stop(&reply)).flatten();
+        // Stretch says whether it changed the sketch, and why not when Edit sketch asked for it
+        // (#20512): otherwise a Stretch step in the timeline is all there is to see.
+        let stretched = (id == "solid.stretch").then(|| stretch_status(&reply)).flatten();
         app.command_completed(&id, Ok(reply))?;
+        if let Some(message) = stretched {
+            app.set_status(message, false);
+        }
         if let Some(why) = stop {
             app.set_status(why, false);
         }
     }
     crate::hole_place::group_made(app, d, made);
     Ok(())
+}
+
+/// What a finished Stretch tells the user about Edit sketch: the parameters it changed, or why it
+/// added a Stretch step instead. `None` when the sketch was not asked to change.
+fn stretch_status(reply: &Value) -> Option<String> {
+    if reply.get("made_by").and_then(Value::as_str) == Some("sketch") {
+        let changed: Vec<String> = reply
+            .get("changed")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|c| Some(format!("{} = {}", c.get("parameter")?.as_str()?, c.get("expression")?.as_str()?)))
+            .collect();
+        return Some(solidcraft_ui_text::format("ui.stretch_sketch_changed", &[("changes", &changed.join(", "))]));
+    }
+    let why = reply.get("sketch_not_edited").and_then(Value::as_str)?;
+    Some(solidcraft_ui_text::format("ui.stretch_sketch_not_changed", &[("why", why)]))
 }
 
 /// A complete feature transaction, evaluated without changing the displayed session.

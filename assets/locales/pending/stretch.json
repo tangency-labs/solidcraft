@@ -10,7 +10,9 @@
     "X cut at": "X cut at",
     "Y cut at": "Y cut at",
     "Z cut at": "Z cut at",
-    "Edit sketch": "Edit sketch"
+    "Edit sketch": "Edit sketch",
+    "ui.stretch_sketch_changed": "Stretch changed the sketch: {changes}",
+    "ui.stretch_sketch_not_changed": "The sketch was not changed ({why}), so a Stretch step was added"
   },
   "ja": {
     "cmd.solid_stretch": "ストレッチ",
@@ -23,7 +25,9 @@
     "X cut at": "X 切断位置",
     "Y cut at": "Y 切断位置",
     "Z cut at": "Z 切断位置",
-    "Edit sketch": "スケッチを編集"
+    "Edit sketch": "スケッチを編集",
+    "ui.stretch_sketch_changed": "ストレッチでスケッチを変更しました: {changes}",
+    "ui.stretch_sketch_not_changed": "スケッチは変更されませんでした ({why})。代わりにストレッチのステップを追加しました"
   },
   "de": {
     "cmd.solid_stretch": "Strecken",
@@ -35,7 +39,9 @@
     "X cut at": "X-Schnitt bei",
     "Y cut at": "Y-Schnitt bei",
     "Z cut at": "Z-Schnitt bei",
-    "Edit sketch": "Skizze bearbeiten"
+    "Edit sketch": "Skizze bearbeiten",
+    "ui.stretch_sketch_changed": "Strecken hat die Skizze geändert: {changes}",
+    "ui.stretch_sketch_not_changed": "Die Skizze wurde nicht geändert ({why}), daher wurde ein Strecken-Schritt hinzugefügt"
   },
   "fr": {
     "cmd.solid_stretch": "Étirer",
@@ -47,7 +53,9 @@
     "X cut at": "Coupe X à",
     "Y cut at": "Coupe Y à",
     "Z cut at": "Coupe Z à",
-    "Edit sketch": "Modifier l'esquisse"
+    "Edit sketch": "Modifier l'esquisse",
+    "ui.stretch_sketch_changed": "Étirer a modifié l'esquisse : {changes}",
+    "ui.stretch_sketch_not_changed": "L'esquisse n'a pas été modifiée ({why}) ; une étape Étirer a été ajoutée"
   },
   "es": {
     "cmd.solid_stretch": "Estirar",
@@ -59,7 +67,9 @@
     "X cut at": "Corte X a",
     "Y cut at": "Corte Y a",
     "Z cut at": "Corte Z a",
-    "Edit sketch": "Editar boceto"
+    "Edit sketch": "Editar boceto",
+    "ui.stretch_sketch_changed": "Estirar cambió el boceto: {changes}",
+    "ui.stretch_sketch_not_changed": "El boceto no se cambió ({why}), así que se añadió un paso Estirar"
   },
   "zh": {
     "cmd.solid_stretch": "伸长",
@@ -72,6 +82,8 @@
     "X cut at": "X 切割位置",
     "Y cut at": "Y 切割位置",
     "Z cut at": "Z 切割位置",
-    "Edit sketch": "编辑草图"
+    "Edit sketch": "编辑草图",
+    "ui.stretch_sketch_changed": "伸长已修改草图: {changes}",
+    "ui.stretch_sketch_not_changed": "草图未修改 ({why})，因此添加了一个伸长步骤"
   }
 }
