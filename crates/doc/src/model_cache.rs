@@ -447,7 +447,10 @@ impl Model {
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
         // An import its checks healed is fingerprinted with its heals, which a model read back
         // does not have: it would never be taken.
+        // Nor while the SMLib checks of features still run ([`Model::set_background_checks`]): a
+        // model kept before they pass would open with results no check has passed.
         if self.results.is_empty()
+            || self.checking_features()
             || self.results.iter().any(|r| r.error.is_some())
             || !self.is_current(doc)
             || has_legacy_names(doc)
