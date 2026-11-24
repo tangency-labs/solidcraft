@@ -5238,6 +5238,53 @@ fn plugin_tool_arguments_must_be_objects_before_any_backend_call() {
     assert_eq!(backend.calls.last().unwrap().0, "control.running");
 }
 
+/// A docked panel and an MCP caller use the same entry and typed event payload.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn plugin_panel_row_action_runs_the_same_entry_over_mcp() {
+    let root = std::env::temp_dir().join(format!("solidcraft-mcp-panel-{}", std::process::id()));
+    let folder = root.join("sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","ui@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["inspect.measure"],"entries":[{"name":"make","effect":"read","input_schema":{
+            "type":"object","properties":{"panel":{"type":"string"},"event":{"type":"string"},"path":{"type":"string"},
+                "row":{"type":["string","null"]},"value":{"type":["object","string","null"]}}
+        }}],"limits":{"fuel":1000000,"memory_mib":2,"deadline_ms":5000},
+        "ui":{"ui_version":1,"panels":[{"id":"jobs","title":"Jobs","zones":["bottom"],"layout":{"root":0,"nodes":[{"widget":{"table":{
+            "bind":"/jobs","row_id":"id","columns":[{"key":"state","label":"state","unit":null}],"select":"single","on_select":"make","on_edit":"make"
+        }}}]}}],"workspaces":[]}
+    }});
+    let (package, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let source = include_str!("../../craft-plugin-wasm/src/ui_fixture.wat")
+        .replace("__PACKAGE__", package)
+        .replace("__VERSION__", version)
+        .replace("__COMMAND__", "inspect.measure")
+        .replace("__COMMAND_LEN__", "15")
+        .replace("__ARGS__", "{}")
+        .replace("__ARGS_LEN__", "2");
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+    let mut session = solidcraft_engine::Session::default();
+    session.plugin_state.plugins_dir = Some(root.clone());
+    let mut backend = Headless::new(session);
+    let initial = crate::call_tool(&mut backend, "sample.make", &json!({"panel":"jobs","event":"refresh"}));
+    assert_ne!(initial["isError"], true, "{initial}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("ready".into())));
+    let described = solidcraft_engine::plugin::describe_entry(&backend.session, "sample.make").unwrap().unwrap();
+    assert!(described.pointer("/input/properties/ui_event").is_some(), "the explicit event envelope is discoverable");
+    backend.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let event = json!({"panel":"jobs","event":"edit","path":"/jobs","row":"op1","value":null});
+    let approval = solidcraft_engine::plugin::read_package(&folder.to_string_lossy()).unwrap().approval;
+    let posted =
+        crate::call_tool(&mut backend, "execute", &json!({"command":"sample.make","params":{"approval":approval,"params":event,"ui_event":event}}));
+    assert_ne!(posted["isError"], true, "{posted}");
+    backend.session.merge_plugin_panel_data();
+    assert_eq!(backend.session.plugin_panels()[0].data.get("/jobs/0/state"), Some(&solidcraft_engine::plugin::ui::UiValue::Text("posted".into())));
+    assert!(backend.session.doc.features.is_empty(), "read entry updates panels without editing the design");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Installed plugins are tools (RFC 0002 section 6c): listed with a `plugin` field and their
 /// own text marked as plugin text, called with strict arguments, refused with the missing grant
 /// as data, and gone from the next listing once removed.

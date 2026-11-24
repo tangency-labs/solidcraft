@@ -4,7 +4,7 @@ use crate::DocError;
 use crate::display_units::{DecimalMarker, DimensionValue, MAX_DECIMALS, NumberFormat, format_dimension, format_number};
 use crate::drafting_profile::DraftingProfile;
 use crate::expr::Kind;
-use crate::tolerance::{Indicator, Repeat, Role, Tolerance, TolerancePresentation};
+use crate::tolerance::{DecimalsRow, GeneralTolerance, Indicator, RangeRow, Repeat, Role, Tolerance, TolerancePresentation};
 
 fn profile(id: &str) -> DraftingProfile {
     DraftingProfile::library().into_iter().find(|p| p.id == id).unwrap()
@@ -158,8 +158,13 @@ fn hostile_profiles_never_panic() {
         json!({"marker": "semicolon"}),
         json!(true),
         json!(u64::MAX),
+        json!("none"),
+        json!({"by_decimals": {"unit": "mm", "linear": [{"decimals": 9, "deviation": -1}], "angle": null}}),
+        json!({"by_range": {"unit": "mm", "ranges": [{"up_to": null, "deviation": 1}, {"up_to": 5, "deviation": 1}], "angle": 1e300}}),
+        json!({"by_range": {"unit": "in", "ranges": [{"up_to": 4, "deviation": 0.1}], "angle": null}}),
     ];
-    let fields = ["id", "version", "name", "edition", "number", "length_decimals", "angle_decimals", "tolerance_decimals", "repeat"];
+    let fields =
+        ["id", "version", "name", "edition", "number", "length_decimals", "angle_decimals", "tolerance_decimals", "repeat", "general_tolerance"];
     let base = serde_json::to_value(DraftingProfile::default()).unwrap();
     let (mut read, mut accepted) = (0, 0);
     for _ in 0..20_000 {
@@ -186,4 +191,55 @@ fn hostile_profiles_never_panic() {
         }
     }
     assert!(read > 1_000 && accepted > 500, "read {read}, accepted {accepted}");
+}
+
+/// A profile's general tolerance is checked with it: a decimal-places block needs the trailing
+/// zeros the ASME built-in leaves off (a range block doesn't), and a bad block is refused; each
+/// block is saved and read back the same, a field this version doesn't know refused; the
+/// built-ins have none. A built-in's copy given a block still matches the built-in.
+#[test]
+fn a_profiles_general_tolerance_is_checked_and_saved_with_it() {
+    assert!(DraftingProfile::library().iter().all(|p| p.general_tolerance == GeneralTolerance::None));
+    let parts = GeneralTolerance::ByDecimals {
+        unit: "mm".into(),
+        linear: vec![DecimalsRow { decimals: 0, deviation: 0.5 }, DecimalsRow { decimals: 1, deviation: 0.1 }],
+        angle: Some(0.3_f64.to_radians()),
+    };
+    let fabrication = GeneralTolerance::ByRange {
+        unit: "mm".into(),
+        ranges: vec![RangeRow { up_to: Some(100.0), deviation: 1.0 }, RangeRow { up_to: None, deviation: 2.0 }],
+        angle: None,
+    };
+    let house = DraftingProfile { id: "workshop".into(), name: "Workshop".into(), general_tolerance: parts.clone(), ..DraftingProfile::default() };
+    house.validate().unwrap();
+    refused(&DraftingProfile { general_tolerance: parts, ..profile("asme_y14_5") }, "trailing zeros");
+    let asme_fabrication = DraftingProfile { general_tolerance: fabrication, ..profile("asme_y14_5") };
+    asme_fabrication.validate().unwrap();
+    // A template's own general tolerance is no change to the built-in it copies; a changed version still is.
+    assert_eq!(asme_fabrication.differs_from_library(), None);
+    assert_eq!(DraftingProfile { version: 0, ..asme_fabrication.clone() }.differs_from_library(), Some((0, 1)));
+    let bad = GeneralTolerance::ByRange { unit: "deg".into(), ranges: vec![RangeRow { up_to: None, deviation: 1.0 }], angle: None };
+    refused(&DraftingProfile { general_tolerance: bad, ..DraftingProfile::default() }, "length unit");
+    for p in [house, asme_fabrication] {
+        let saved = serde_json::to_value(&p).unwrap();
+        assert_eq!(serde_json::from_value::<DraftingProfile>(saved.clone()).unwrap(), p);
+        let mut newer = saved;
+        let rows = newer["general_tolerance"].as_object_mut().and_then(|block| block.values_mut().next()).unwrap();
+        rows.as_object_mut().unwrap().insert("note".into(), json!("by agreement"));
+        assert!(serde_json::from_value::<DraftingProfile>(newer).is_err(), "{}", p.id);
+    }
+}
+
+/// A profile saved before general tolerances existed (no `general_tolerance` field) still reads,
+/// with none, so a drawing that kept such a copy opens unchanged.
+#[test]
+fn a_profile_saved_before_general_tolerances_reads_with_none() {
+    for p in DraftingProfile::library() {
+        let mut saved = serde_json::to_value(&p).unwrap();
+        assert!(saved.get("general_tolerance").is_none(), "{} saves as before, with no general tolerance", p.id);
+        saved.as_object_mut().unwrap().remove("general_tolerance");
+        let read = serde_json::from_value::<DraftingProfile>(saved).unwrap();
+        assert_eq!(read.general_tolerance, GeneralTolerance::None);
+        assert_eq!(read, p, "{}", p.id);
+    }
 }

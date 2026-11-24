@@ -38,6 +38,9 @@
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
 //! cover an edge end that `n` does.
 
+mod gap_samples;
+
+use gap_samples::{GAP_CHANGES, GAP_MAIN};
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
@@ -1480,22 +1483,30 @@ struct GoldenChange {
 /// and none belongs to [`ROWS`]. The vertex crossing correction itself moves no golden.
 /// Derivation: `plan/findings/blend.fillet_solver_p5--issue-17016-non-tangent-rollover.md`,
 /// "Three goldens rows that move, and why". No topology or status changes in these rows.
+/// #18294 moves the two setbacks rows again (each reason names the change and the row before
+/// it); its other seven `issue-880-*` rows are in [`MAIN`]'s digest.
 const FILLET_UV_CHANGES: &[GoldenChange] = &[
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-1",
         old_hash: 0x0c84b1bb5aabdeb6,
-        new_hash: 0x064c8b893b765eaf,
+        new_hash: 0xff20292224de653a,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
                  boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
-                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface.",
+                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 6.82e-5 to 4e-5 and \
+                 three of the ten vertices are listed in another order (row was 064c8b893b765eaf).",
     },
     GoldenChange {
         case: "issue-880-half-arc-rim-0-setbacks-1-2",
         old_hash: 0x0c29e482175fe1e2,
-        new_hash: 0x94a9c0596e8f0db7,
+        new_hash: 0x338bc7a48039bef7,
         reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
                  unequal setbacks too; the old boundary flattening and polygon moves have \
-                 no bound on that surface, and preserving the jets moves the mass integral.",
+                 no bound on that surface, and preserving the jets moves the mass integral. \
+                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
+                 edge, so two vertex and one edge tolerance fall from 7.47e-5 to 4.15e-5 \
+                 (row was 94a9c0596e8f0db7).",
     },
     GoldenChange {
         case: "source-file-nurb_box-edge0",
@@ -1511,15 +1522,20 @@ const FILLET_UV_CHANGES: &[GoldenChange] = &[
 /// Putting these back keeps [`MAIN`]'s original digest and every tolerance proof intact.
 const FILLET_UV_MAIN: &str = include_str!("trim_tolerance_fillet_uv_main.jsonl");
 
-/// Reverse exactly [`FILLET_UV_CHANGES`], rejecting a missing, duplicate, overlapping or
+/// Reverse the listed changes, rejecting a missing, duplicate, overlapping or
 /// differently changed row. Every other line is retained for the whole-file digest.
-fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String> {
+fn put_back_independent_changes(
+    text: &str,
+    rows: &[Row],
+    changes: &[GoldenChange],
+    originals: &str,
+) -> Result<String, String> {
     use crate::json::to_canonical_string;
     let mut original = std::collections::BTreeMap::new();
-    for line in FILLET_UV_MAIN.lines() {
+    for line in originals.lines() {
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let case = v["case"].as_str().ok_or("an original row has no case")?;
-        let change = FILLET_UV_CHANGES
+        let change = changes
             .iter()
             .find(|r| r.case == case)
             .ok_or_else(|| format!("{case}: unlisted original row"))?;
@@ -1539,7 +1555,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
             return Err(format!("{case}: duplicate original row"));
         }
     }
-    if original.len() != FILLET_UV_CHANGES.len() {
+    if original.len() != changes.len() {
         return Err("the independent changes and their original rows differ".into());
     }
     let mut out = String::new();
@@ -1548,7 +1564,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
         let change = v["case"]
             .as_str()
-            .and_then(|case| FILLET_UV_CHANGES.iter().find(|r| r.case == case));
+            .and_then(|case| changes.iter().find(|r| r.case == case));
         let line = if let Some(change) = change {
             if !seen.insert(change.case) {
                 return Err(format!("{}: duplicate changed row", change.case));
@@ -1569,7 +1585,7 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
         out.push_str(line);
         out.push('\n');
     }
-    if let Some(change) = FILLET_UV_CHANGES.iter().find(|r| !seen.contains(r.case)) {
+    if let Some(change) = changes.iter().find(|r| !seen.contains(r.case)) {
         return Err(format!("{}: missing changed row", change.case));
     }
     Ok(out)
@@ -1579,34 +1595,48 @@ fn put_back_fillet_uv_changes(text: &str, rows: &[Row]) -> Result<String, String
 /// later change that would bypass one of the tolerance proofs.
 #[test]
 fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
-    let text = include_str!("../../expected/blend.fillet_executive_p3.jsonl");
-    let lines: Vec<&str> = text
-        .lines()
-        .filter(|line| {
-            let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
-            FILLET_UV_CHANGES.iter().any(|r| v["case"] == r.case)
-        })
-        .collect();
-    let changed = lines.join("\n") + "\n";
-    assert_eq!(
-        put_back_fillet_uv_changes(&changed, &[]).expect("the documented changes"),
-        FILLET_UV_MAIN
-    );
-    let first = lines[0];
-    let missing = lines[1..].join("\n");
-    assert!(put_back_fillet_uv_changes(&missing, &[]).is_err());
-    let duplicate = format!("{changed}{first}\n");
-    assert!(put_back_fillet_uv_changes(&duplicate, &[]).is_err());
-    let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
-    v["error"] = serde_json::json!("an unrecorded change");
-    let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
-    assert!(put_back_fillet_uv_changes(&corrupted, &[]).is_err());
-    let overlap = Row {
-        case: FILLET_UV_CHANGES[0].case.to_string(),
-        moved: Vec::new(),
-        entities: Vec::new(),
-    };
-    assert!(put_back_fillet_uv_changes(&changed, &[overlap]).is_err());
+    for (text, changes, originals) in [
+        (
+            include_str!("../../expected/blend.fillet_executive_p3.jsonl"),
+            FILLET_UV_CHANGES,
+            FILLET_UV_MAIN,
+        ),
+        (
+            include_str!("../../expected/heal.gap.jsonl"),
+            GAP_CHANGES,
+            GAP_MAIN,
+        ),
+    ] {
+        let put_back =
+            |text: &str, rows: &[Row]| put_back_independent_changes(text, rows, changes, originals);
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|line| {
+                let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
+                changes.iter().any(|r| v["case"] == r.case)
+            })
+            .collect();
+        let changed = lines.join("\n") + "\n";
+        assert_eq!(
+            put_back(&changed, &[]).expect("the documented changes"),
+            originals
+        );
+        let first = lines[0];
+        let missing = lines[1..].join("\n");
+        assert!(put_back(&missing, &[]).is_err());
+        let duplicate = format!("{changed}{first}\n");
+        assert!(put_back(&duplicate, &[]).is_err());
+        let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
+        v["error"] = serde_json::json!("an unrecorded change");
+        let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
+        assert!(put_back(&corrupted, &[]).is_err());
+        let overlap = Row {
+            case: changes[0].case.to_string(),
+            moved: Vec::new(),
+            entities: Vec::new(),
+        };
+        assert!(put_back(&changed, &[overlap]).is_err());
+    }
 }
 
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
@@ -1694,8 +1724,10 @@ fn row_units() -> std::collections::BTreeSet<String> {
 /// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
 /// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
 /// case, moved value or other change is left out of the rows, and each row's new value is the
-/// expected one. Later independent changes are pinned separately ([`FILLET_UV_CHANGES`]);
-/// their exact original lines are restored before the tolerance changes are reversed.
+/// expected one. The ledger restores the original lines of [`FILLET_UV_CHANGES`] and
+/// [`GAP_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
+/// loop normal, [`crate::wr587_replay::put_back_main_lines`]), before it reverses the
+/// tolerance changes.
 #[test]
 fn the_rows_are_the_whole_golden_diff_from_main() {
     let main: std::collections::BTreeMap<String, u64> = MAIN
@@ -1738,11 +1770,18 @@ fn the_rows_are_the_whole_golden_diff_from_main() {
             .into_iter()
             .partition(|r| known.contains_key(&r.case));
         left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
-        let text = if unit == "blend.fillet_executive_p3" {
-            put_back_fillet_uv_changes(&text, &rows).unwrap_or_else(|e| panic!("{unit}: {e}"))
-        } else {
-            text
-        };
+        let text = match unit.as_str() {
+            "blend.fillet_executive_p3" => {
+                put_back_independent_changes(&text, &rows, FILLET_UV_CHANGES, FILLET_UV_MAIN)
+            }
+            "heal.gap" => put_back_independent_changes(&text, &rows, GAP_CHANGES, GAP_MAIN),
+            _ => Ok(text),
+        }
+        .unwrap_or_else(|e| panic!("{unit}: {e}"));
+        // and WR-587's loop normal rows (#21291), each replayed to main's line
+        let keep: Vec<&str> = rows.iter().map(|r| r.case.as_str()).collect();
+        let text = crate::wr587_replay::put_back_main_lines(unit, &text, &keep)
+            .unwrap_or_else(|e| panic!("{unit}: {e}"));
         let mut replay = |case: &str| replay_case(unit, case);
         let got =
             expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
