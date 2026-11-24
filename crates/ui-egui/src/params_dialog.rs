@@ -606,7 +606,7 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 ui.horizontal(|ui| {
                     let star = if r.favorite { "★" } else { "☆" };
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
+                    let favorite = ui_kit::compact_toggle(ui, star, "Favourite", true, r.favorite);
                     crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
                     if favorite.clicked() {
                         self.d.error = self.app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();

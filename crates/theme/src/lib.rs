@@ -739,13 +739,28 @@ impl TabAccent {
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
         let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
-        let color = match focus {
-            Some(ramp) => Self::for_ramp(&t, ramp).color,
-            None => Self::current(ui.ctx()).color,
-        };
+        let color = Self::number_accent_color(ui);
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
+        }
+    }
+
+    /// The numeric field focus ink, for controls that own their entire border.
+    pub fn number_focus_color(ui: &egui::Ui) -> Color32 {
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
+        if !active {
+            return ui.visuals().selection.stroke.color;
+        }
+        let color = Self::number_accent_color(ui);
+        if color == Tokens::get().accent { ui.visuals().selection.stroke.color } else { color }
+    }
+
+    fn number_accent_color(ui: &egui::Ui) -> Color32 {
+        let t = Tokens::get();
+        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
+        match focus {
+            Some(ramp) => Self::for_ramp(&t, ramp).color,
+            None => Self::current(ui.ctx()).color,
         }
     }
 }

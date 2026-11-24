@@ -379,6 +379,42 @@ fn refuse_reopens_a_keyboard_commit_with_its_text() {
 }
 
 #[test]
+fn editing_grid_cell_has_one_inside_focus_or_error_ring_without_corner_fragments() {
+    let (ctx, mut sheet) = focused(2);
+    sheet.value_required = true;
+    press(&ctx, &mut sheet, Key::ArrowRight, Modifiers::NONE);
+    press(&ctx, &mut sheet, Key::F2, Modifiers::NONE);
+    let t = solidcraft_theme::Tokens::get();
+    for error in [false, true] {
+        if error {
+            frame(&ctx, &mut sheet, key_with(Key::Delete, Modifiers::NONE));
+            let out = press(&ctx, &mut sheet, Key::Enter, Modifiers::NONE);
+            assert_eq!(out.refused.as_deref(), Some("needs a value"));
+        }
+        let (_, output) = run(&ctx, &mut sheet, vec![], Modifiers::NONE);
+        let rect = registry::rect_of("grid:g:r0:value").unwrap();
+        let mut rings = Vec::new();
+        for s in &output.shapes {
+            crate::test_support::each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && r.stroke.width > 0.0
+                    && r.rect.width() <= rect.width() + 8.0
+                    && r.rect.intersects(rect)
+                {
+                    assert!(s.clip_rect.contains_rect(r.rect), "no clipped outer ring: {r:?}");
+                    rings.push(r.clone());
+                }
+            });
+        }
+        assert_eq!(rings.len(), 1, "error {error}: {rings:?}");
+        assert_eq!(rings[0].rect, rect);
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+        assert_eq!(rings[0].stroke, if error { egui::Stroke::new(1.0, t.form_error) } else { egui::Stroke::new(1.5, crate::selection_ink(&t)) });
+    }
+}
+
+#[test]
 fn only_the_visible_rows_of_ten_thousand_are_built() {
     let ctx = crate::test_support::context();
     let mut sheet = Sheet::new(10_000);

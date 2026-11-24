@@ -822,8 +822,9 @@ fn draw_cell<S: GridSource>(
     if error {
         ui.painter().rect_stroke(rect.shrink(0.5), t.control_radius, egui::Stroke::new(1.0, t.form_error), egui::StrokeKind::Inside);
     }
-    if is_cursor && shows_focus {
-        ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(t.space_2, t.accent), egui::StrokeKind::Inside);
+    if is_cursor && shows_focus && !error && !drawn.as_ref().is_some_and(|r| r.has_focus()) {
+        let focus_rect = drawn.as_ref().map_or(rect, |r| r.rect);
+        ui.painter().rect_stroke(focus_rect, t.control_radius, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside);
     }
     let enabled = ui.is_enabled();
     response.widget_info(|| {
@@ -892,7 +893,6 @@ fn single<S: GridSource>(cell: &Cell<'_>, state: &mut State, source: &mut S, tex
 
 /// The cell being edited: its box, and the keys and focus changes that end the edit.
 fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, source: &mut S, shown: &Shown, out: &mut GridOutput) {
-    let t = Tokens::get();
     let id = editor_id(cell.sid, cell.key, cell.col);
     let Some(edit) = state.edit.as_mut() else { return };
     if let Some(caret) = edit.caret.take() {
@@ -908,7 +908,11 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
         text_state.store(ui.ctx(), id);
     }
     let mut text = std::mem::take(&mut edit.text);
-    let editor = source.editor(ui, cell.source_row, cell.col, id, &mut text);
+    let mut info = egui::UiStackInfo::default();
+    if edit.message.is_some() {
+        info = info.with_tag(super::fields::CELL_INVALID);
+    }
+    let editor = ui.scope_builder(egui::UiBuilder::new().ui_stack_info(info), |ui| source.editor(ui, cell.source_row, cell.col, id, &mut text)).inner;
     crate::keep_tab_in_cell(ui, &editor.response);
     let Some(edit) = state.edit.as_mut() else { return };
     edit.text = text;
@@ -921,10 +925,8 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
         edit.unfocused = edit.unfocused.saturating_add(1);
     }
     if let Some(message) = &edit.message {
-        ui.painter().rect_stroke(cell.rect, t.control_radius, egui::Stroke::new(1.0, t.form_error), egui::StrokeKind::Outside);
         let _ = editor.response.clone().backing_on_hover_text(message.clone());
     }
-    ui.painter().rect_stroke(cell.rect, t.control_radius, egui::Stroke::new(t.space_2, t.accent), egui::StrokeKind::Outside);
     let name = cell_name(cell);
     solidcraft_ui_registry::publish_target(&format!("grid:{}:{}:{}", cell.id, cell.key, cell.column.key), editor.response.rect);
     editor.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &name));

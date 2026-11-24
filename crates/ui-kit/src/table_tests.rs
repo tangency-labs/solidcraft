@@ -2,6 +2,344 @@ use super::*;
 use crate::test_support as harness;
 use solidcraft_ui_registry as registry;
 
+fn cell_frame(ctx: &egui::Context, selection: &mut CellSelection, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> egui::FullOutput {
+    registry::clear_handles();
+    harness::raw_frame(
+        ctx,
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 800.0))),
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect(),
+            focused: true,
+            ..Default::default()
+        },
+        |ui| {
+            ui.set_width(600.0);
+            crate::scope(ui, |ui| {
+                let columns = ["Name", "Expression", "Value", "Unit"].map(|label| Column::new(label, 1.0).flex());
+                table_custom(ui, "cells", &columns, "Empty", |ui, table| {
+                    table.cell_selection(selection, SelectionMode::Range);
+                    table.headers(ui, |_, _| false);
+                    for index in 0..5 {
+                        if index == 2 {
+                            table.group(ui, "band", "Parameters", 3, &mut true);
+                        }
+                        table.row(ui, &index.to_string(), false, |row| {
+                            for _ in 0..4 {
+                                row.cell(|ui| crate::text(ui, "Width", crate::Text::Cell));
+                            }
+                        });
+                    }
+                });
+            });
+        },
+    )
+}
+
+fn cell_key(ctx: &egui::Context, selection: &mut CellSelection, key: egui::Key, modifiers: egui::Modifiers) {
+    cell_frame(ctx, selection, vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }], modifiers);
+    cell_frame(ctx, selection, vec![egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }], modifiers);
+}
+
+#[test]
+fn cell_selection_coordinates_normalise_ranges_and_clear() {
+    let mut selection = CellSelection::default();
+    assert!(selection.is_empty());
+    assert_eq!(selection.single(), None);
+    selection.anchor = Some((3, 4));
+    selection.focus = Some((1, 2));
+    assert_eq!(selection.range(), Some((1..=3, 2..=4)));
+    assert!(selection.contains(2, 3));
+    assert!(!selection.contains(0, 3));
+    selection.focus = selection.anchor;
+    assert_eq!(selection.single(), Some((3, 4)));
+    selection.clear();
+    assert!(selection.is_empty());
+}
+
+#[test]
+fn cell_range_is_one_snapped_fill_and_inside_outline_across_hairlines_and_bands() {
+    for dark in [false, true] {
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        for ppp in [1.0, 1.25, 2.0] {
+            let ctx = harness::context();
+            ctx.set_pixels_per_point(ppp);
+            ctx.enable_accesskit();
+            let mut selection = CellSelection { anchor: Some((1, 1)), focus: Some((3, 3)) };
+            let output = cell_frame(&ctx, &mut selection, vec![], Default::default());
+            let first = registry::rect_of("dialog:table:cells:1:cell:Expression").unwrap();
+            let last = registry::rect_of("dialog:table:cells:3:cell:Unit").unwrap();
+            let expected = first.union(last).expand(t.space_4);
+            let block = registry::rect_of("dialog:table:cells:selection").unwrap();
+            assert!((block.min - expected.min).abs().max_elem() <= 1.0 / ppp);
+            assert!((block.max - expected.max).abs().max_elem() <= 1.0 / ppp);
+            assert_eq!(registry::count_of("dialog:table:cells:selection:cells"), Some(9.0));
+            let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+            let selected_cells = tree.nodes.iter().filter(|(_, node)| node.role() == egui::Role::Cell && node.is_selected() == Some(true)).count();
+            assert_eq!(selected_cells, 9);
+            let background = t.panel.blend(t.table_fill()).blend(t.form_primary.gamma_multiply(0.15));
+            assert!(solidcraft_theme::contrast_ratio(t.form_ink, background) >= 4.5);
+            let mut fills = Vec::new();
+            let mut outlines = Vec::new();
+            for (index, s) in output.shapes.iter().enumerate() {
+                harness::each_shape(&s.shape, &mut |shape| {
+                    if let egui::Shape::Rect(r) = shape {
+                        if r.fill == t.form_primary.gamma_multiply(0.15) {
+                            fills.push((index, r.clone()));
+                        }
+                        if r.stroke == egui::Stroke::new(1.5, t.form_primary) {
+                            outlines.push((index, r.clone()));
+                        }
+                    }
+                    if let egui::Shape::LineSegment { points, .. } = shape {
+                        let crosses = points[0].y > block.top()
+                            && points[0].y < block.bottom()
+                            && points[0].y == points[1].y
+                            && points[0].x < block.right()
+                            && points[1].x > block.left();
+                        assert!(!crosses, "an internal hairline cuts the selection: {points:?}");
+                    }
+                });
+            }
+            assert_eq!(fills.len(), 1);
+            assert_eq!(outlines.len(), 1);
+            assert_eq!(fills[0].1.rect, block);
+            assert_eq!(outlines[0].1.rect, block);
+            assert_eq!(outlines[0].1.corner_radius, egui::CornerRadius::same(t.control_radius));
+            assert_eq!(outlines[0].1.stroke_kind, egui::StrokeKind::Inside);
+            let text = output.shapes.iter().position(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == "Width")).unwrap();
+            assert!(fills[0].0 < text && outlines[0].0 < text, "contents remain above the block");
+        }
+    }
+}
+
+#[test]
+fn cells_shift_click_drag_keyboard_escape_and_select_all() {
+    let ctx = harness::context();
+    let mut selection = CellSelection::default();
+    cell_frame(&ctx, &mut selection, vec![], Default::default());
+    let first = registry::rect_of("dialog:table:cells:1:cell:Expression").unwrap().center();
+    let last = registry::rect_of("dialog:table:cells:3:cell:Unit").unwrap().center();
+    for pressed in [true, false] {
+        cell_frame(&ctx, &mut selection, harness::pointer(first, pressed), Default::default());
+    }
+    assert_eq!(selection.single(), Some((1, 1)));
+    for pressed in [true, false] {
+        cell_frame(&ctx, &mut selection, harness::pointer(last, pressed), egui::Modifiers::SHIFT);
+    }
+    assert_eq!(selection.range(), Some((1..=3, 1..=3)));
+    cell_key(&ctx, &mut selection, egui::Key::ArrowUp, Default::default());
+    assert_eq!(selection.single(), Some((2, 3)), "bands do not count as rows");
+    cell_key(&ctx, &mut selection, egui::Key::ArrowLeft, egui::Modifiers::SHIFT);
+    assert_eq!(selection.range(), Some((2..=2, 2..=3)));
+    cell_key(&ctx, &mut selection, egui::Key::Home, Default::default());
+    assert_eq!(selection.single(), Some((2, 0)));
+    cell_key(&ctx, &mut selection, egui::Key::End, Default::default());
+    assert_eq!(selection.single(), Some((2, 3)));
+    cell_key(&ctx, &mut selection, egui::Key::A, egui::Modifiers::CTRL);
+    assert_eq!(selection.range(), Some((0..=4, 0..=3)));
+    cell_key(&ctx, &mut selection, egui::Key::Escape, Default::default());
+    assert!(selection.is_empty());
+    cell_frame(&ctx, &mut selection, harness::pointer(first, true), Default::default());
+    cell_frame(&ctx, &mut selection, vec![egui::Event::PointerMoved(last)], Default::default());
+    cell_frame(&ctx, &mut selection, harness::pointer(last, false), Default::default());
+    assert_eq!(selection.range(), Some((1..=3, 1..=3)));
+    cell_frame(&ctx, &mut selection, harness::pointer(first, true), Default::default());
+    cell_frame(&ctx, &mut selection, vec![egui::Event::PointerMoved(last)], Default::default());
+    cell_key(&ctx, &mut selection, egui::Key::Escape, Default::default());
+    assert!(selection.is_empty(), "Esc cancels the drag as well as its current range");
+    cell_frame(&ctx, &mut selection, harness::pointer(last, false), Default::default());
+    assert!(selection.is_empty(), "releasing a cancelled drag does not recreate the range");
+}
+
+#[test]
+fn hostile_cell_indices_are_clamped_after_shrinking_or_emptying_the_table() {
+    let ctx = harness::context();
+    let mut selection = CellSelection { anchor: Some((usize::MAX, usize::MAX)), focus: Some((usize::MAX - 1, usize::MAX)) };
+    cell_frame(&ctx, &mut selection, vec![], Default::default());
+    assert_eq!(selection.single(), Some((4, 3)));
+    painted_frame(&ctx, vec![], |ui| {
+        table_custom(ui, "empty_cells", &[], "Empty", |_, table| table.cell_selection(&mut selection, SelectionMode::Range));
+    });
+    assert!(selection.is_empty());
+}
+
+#[test]
+fn single_cell_mode_paints_one_field_ring_and_does_not_extend() {
+    let ctx = harness::context();
+    let t = Tokens::get();
+    let mut selection = CellSelection { anchor: Some((0, 0)), focus: Some((1, 1)) };
+    let output = painted_frame(&ctx, vec![], |ui| {
+        let columns = [Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()];
+        table_custom(ui, "single_cell", &columns, "Empty", |ui, table| {
+            table.cell_selection(&mut selection, SelectionMode::Cell);
+            for index in 0..2 {
+                table.row(ui, &index.to_string(), false, |row| {
+                    row.cell(|ui| crate::text(ui, "Width", crate::Text::Cell));
+                    row.cell(|ui| crate::text(ui, "40 mm", crate::Text::MonoCell));
+                });
+            }
+        });
+    });
+    assert_eq!(selection.single(), Some((1, 1)));
+    let block = registry::rect_of("dialog:table:single_cell:selection").unwrap();
+    let cell = registry::rect_of("dialog:table:single_cell:1:cell:Value").unwrap();
+    assert_eq!(block, cell.expand(t.space_4), "the ring has padding without moving the text");
+    assert_eq!(output.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == block && r.fill == t.input_fill())).count(), 1);
+    assert_eq!(
+        output
+            .shapes
+            .iter()
+            .filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == block
+        && r.stroke == egui::Stroke::new(1.5, t.form_primary) && r.corner_radius == egui::CornerRadius::same(t.control_radius)
+        && r.stroke_kind == egui::StrokeKind::Inside))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn cell_range_records_virtual_rows_and_frozen_scrolled_cells_without_rebuilding_content() {
+    let ctx = harness::context();
+    let mut selection = CellSelection { anchor: Some((0, 0)), focus: Some((7, 2)) };
+    let mut built = Vec::new();
+    let mut expected = egui::Rect::NOTHING;
+    let scroll = std::cell::Cell::new(0.0);
+    {
+        let mut draw = |ui: &mut Ui| {
+            built.clear();
+            expected = egui::Rect::NOTHING;
+            ui.set_clip_rect(egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(600.0, 100.0)));
+            let columns = [
+                Column::new("Name", 1.0).frozen(),
+                Column::new("Expression", 1.0).min_content_width(300.0),
+                Column::new("Value", 1.0).min_content_width(300.0),
+            ];
+            table_custom(ui, "virtual_cells", &columns, "Empty", |ui, table| {
+                table.cell_selection(&mut selection, SelectionMode::Range);
+                scroll.set(table.scroll_x);
+                table.headers(ui, |_, _| false);
+                for index in 0..8 {
+                    table.row_visible(ui, &index.to_string(), false, false, |row| {
+                        built.push(index);
+                        for _ in 0..3 {
+                            row.cell(|ui| crate::text(ui, "Width", crate::Text::Cell));
+                        }
+                    });
+                }
+                assert_eq!(table.cells.len(), 24, "all rows have exact recorded geometry");
+                for cell in &table.cells {
+                    expected = expected.union(cell.rect);
+                }
+                let frozen = table.cells.first().unwrap().rect;
+                let scrolling = table.cells.get(1).unwrap().rect;
+                assert!(scrolling.left() >= frozen.right(), "scrolling cells stay behind the frozen region");
+            });
+        };
+        painted_frame(&ctx, vec![], &mut draw);
+        let pointer = registry::rect_of("dialog:table:virtual_cells:0:cell:Expression").unwrap().center();
+        painted_frame(
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(pointer),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(-80.0, 0.0),
+                    modifiers: Default::default(),
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                },
+            ],
+            &mut draw,
+        );
+        painted_frame(&ctx, vec![], &mut draw);
+    }
+    assert!(scroll.get() > 0.0, "the horizontal viewport actually scrolled");
+    let block = registry::rect_of("dialog:table:virtual_cells:selection").unwrap();
+    let expected = expected.expand(Tokens::get().space_4);
+    assert!((block.min - expected.min).abs().max_elem() <= 1.0);
+    assert!((block.max - expected.max).abs().max_elem() <= 1.0);
+    assert!(built.contains(&0));
+    assert!(!built.contains(&7));
+}
+
+#[test]
+fn cell_selection_leaves_buttons_and_editors_in_charge_of_their_clicks() {
+    let ctx = harness::context();
+    let mut selection = CellSelection::default();
+    let mut value = "10 mm".to_owned();
+    let clicked = std::cell::Cell::new(false);
+    let editor = std::cell::Cell::new(egui::Id::NULL);
+    let button = std::cell::Cell::new(egui::Rect::NOTHING);
+    let field = std::cell::Cell::new(egui::Rect::NOTHING);
+    let dropdown = std::cell::Cell::new(egui::Rect::NOTHING);
+    let dropdown_clicked = std::cell::Cell::new(false);
+    let copied = std::cell::Cell::new(false);
+    let copy_rect = std::cell::Cell::new(egui::Rect::NOTHING);
+    {
+        let mut draw = |ui: &mut Ui| {
+            let columns = ["Name", "Value", "Unit", "Expression"].map(|label| Column::new(label, 1.0).flex());
+            table_custom(ui, "interactive_cells", &columns, "Empty", |ui, table| {
+                table.cell_selection(&mut selection, SelectionMode::Range);
+                table.row(ui, "row", false, |row| {
+                    row.cell(|ui| {
+                        let response = crate::button(ui, "Delete", crate::Button::Small);
+                        button.set(response.rect);
+                        clicked.set(clicked.get() || response.clicked());
+                    });
+                    row.cell(|ui| {
+                        let response = crate::cell_editor(ui, ui.scope_id().with("edit"), &mut value, "", false);
+                        editor.set(response.id);
+                        field.set(response.rect);
+                    });
+                    row.cell(|ui| {
+                        let response = crate::dropdown(ui, "unit", &mut 0, &["mm", "in"]);
+                        dropdown.set(response.rect);
+                        dropdown_clicked.set(dropdown_clicked.get() || response.clicked());
+                    });
+                    row.cell(|ui| {
+                        copy_rect.set(ui.max_rect());
+                        let activated = crate::copy_cell(ui, "40 mm", "Width", true, "");
+                        copied.set(copied.get() || activated);
+                    });
+                });
+            });
+        };
+        painted_frame(&ctx, vec![], &mut draw);
+        for at in [button.get().center(), field.get().center()] {
+            for pressed in [true, false] {
+                painted_frame(&ctx, harness::pointer(at, pressed), &mut draw);
+            }
+        }
+        assert!(clicked.get());
+        assert!(ctx.memory(|memory| memory.has_focus(editor.get())));
+        painted_frame(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers { ctrl: true, command: true, ..Default::default() }),
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers { ctrl: true, command: true, ..Default::default() },
+                },
+            ],
+            &mut draw,
+        );
+        painted_frame(&ctx, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE), egui::Event::Text("25 mm".into())], &mut draw);
+        for at in [copy_rect.get().center(), dropdown.get().center()] {
+            for pressed in [true, false] {
+                painted_frame(&ctx, harness::pointer(at, pressed), &mut draw);
+            }
+        }
+    }
+    assert_eq!(value, "25 mm", "Ctrl+A belongs to the focused editor");
+    assert!(copied.get());
+    assert!(dropdown_clicked.get());
+    assert!(selection.is_empty());
+}
+
 #[test]
 fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_scales() {
     for ppp in [1.0, 1.25, 2.0] {
@@ -132,7 +470,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
                 let highlight = output
                     .shapes
                     .iter()
-                    .any(|shape| matches!(&shape.shape, egui::Shape::Rect(paint) if paint.rect == row && paint.fill == Tokens::get().hover));
+                    .any(|shape| matches!(&shape.shape, egui::Shape::Rect(paint) if paint.rect == row && paint.fill == Tokens::get().text.gamma_multiply(0.06)));
                 assert_eq!(highlight, enabled && !clipped, "pointer {at:?}, enabled {enabled}, clipped {clipped}");
             }
         }
@@ -546,6 +884,182 @@ fn consecutive_selection_is_one_rounded_painted_block_without_internal_rules_or_
             !output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { points, .. }
             if points[0].y == last.bottom() && points[1].y == last.bottom())),
             "no last-row hairline"
+        );
+    }
+}
+
+#[test]
+fn section_counts_are_filled_round_pills_in_both_themes() {
+    for dark in [false, true] {
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        let ctx = harness::context();
+        let output = painted_frame(&ctx, vec![], |ui| {
+            table_custom(ui, "pill", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+                table.group(ui, "group", "Parameters", 12, &mut false);
+            });
+        });
+        let pills: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.rect.height() == t.space_16 && r.fill == t.text.gamma_multiply(0.13) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pills.len(), 1);
+        assert_eq!(pills[0].stroke, egui::Stroke::NONE);
+        assert_eq!(pills[0].corner_radius, egui::CornerRadius::same((t.space_16 / 2.0) as u8));
+        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(text)
+            if text.galley.job.text == "12" && text.galley.job.sections[0].format.color == t.form_dim)));
+    }
+}
+
+#[test]
+fn selected_hover_strengthens_the_same_block_and_focus_is_inside_and_rounded() {
+    let t = Tokens::get();
+    let ctx = harness::context();
+    let ids = std::cell::Cell::new([egui::Id::NULL; 2]);
+    let draw = |ui: &mut Ui| {
+        table_custom(ui, "states", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            let group = table.group(ui, "group", "Parameters", 1, &mut true);
+            let row = table.row(ui, "selected", true, |_| {});
+            ids.set([group.id, row.id]);
+        });
+    };
+    let idle = painted_frame(&ctx, vec![], draw);
+    let rect = registry::rect_of("dialog:table:states:selected").unwrap();
+    assert!(idle.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == t.selected_bg)));
+    let hovered = painted_frame(&ctx, vec![egui::Event::PointerMoved(rect.center())], draw);
+    assert!(hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+        if r.rect == rect && r.fill == t.selected_bg.lerp_to_gamma(t.form_primary, 0.08))));
+    assert!(!hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.06))));
+    for (index, bounds) in [registry::rect_of("dialog:table:states:group:group").unwrap(), rect].into_iter().enumerate() {
+        ctx.memory_mut(|m| m.request_focus(ids.get()[index]));
+        let output = painted_frame(&ctx, vec![], draw);
+        let rings: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r) if r.stroke == egui::Stroke::new(1.5, t.form_primary) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rings.len(), 1);
+        assert!(bounds.contains_rect(rings[0].rect));
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.radius_md));
+    }
+}
+
+#[test]
+fn first_and_last_selected_rows_stay_within_the_rounded_card() {
+    let t = Tokens::get();
+    let ctx = harness::context();
+    let output = painted_frame(&ctx, vec![], |ui| {
+        table_custom(ui, "edges", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.row(ui, "first", true, |_| {});
+            table.row(ui, "last", true, |_| {});
+        });
+    });
+    let card = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.fill == t.table_fill() && r.stroke.width > 0.0 => Some(r.rect),
+            _ => None,
+        })
+        .unwrap();
+    let selected = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.fill == t.selected_bg => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert!(selected.rect.left() >= card.left() + t.space_4);
+    assert!(selected.rect.right() <= card.right() - t.space_4);
+    // Sample the rounded selection's four arcs against the card's corner circles.
+    for sx in [-1.0, 1.0] {
+        for sy in [-1.0, 1.0] {
+            let corner = egui::pos2(if sx < 0.0 { card.left() } else { card.right() }, if sy < 0.0 { card.top() } else { card.bottom() });
+            let center = corner - vec2(sx, sy) * f32::from(t.radius_lg);
+            let r = f32::from(t.radius_md);
+            let selection_center = egui::pos2(
+                if sx < 0.0 { selected.rect.left() + r } else { selected.rect.right() - r },
+                if sy < 0.0 { selected.rect.top() + r } else { selected.rect.bottom() - r },
+            );
+            for step in 0..=32 {
+                let angle = step as f32 / 32.0 * std::f32::consts::FRAC_PI_2;
+                let p = selection_center + vec2(sx * angle.cos(), sy * angle.sin()) * r;
+                assert!(card.contains(p));
+                if (p.x - center.x) * sx > 0.0 && (p.y - center.y) * sy > 0.0 {
+                    assert!(p.distance(center) <= f32::from(t.radius_lg) + 0.01, "selection pokes past card: {p:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn focused_table_dropdown_paints_one_inside_control_radius_ring() {
+    let ctx = harness::context();
+    let t = Tokens::get();
+    let id = std::cell::Cell::new(egui::Id::NULL);
+    let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+    let mut draw = |ui: &mut Ui| {
+        table_custom(ui, "choice_ring", &[Column::new("Unit", 1.0).flex()], "Empty", |ui, table| {
+            table.row(ui, "row", false, |row| {
+                row.cell(|ui| {
+                    let response = crate::dropdown(ui, "unit", &mut 0, &["mm", "in"]);
+                    id.set(response.id);
+                    rect.set(response.rect);
+                });
+            });
+        });
+    };
+    painted_frame(&ctx, vec![], &mut draw);
+    ctx.memory_mut(|m| m.request_focus(id.get()));
+    let output = painted_frame(&ctx, vec![], &mut draw);
+    let mut rings = Vec::new();
+    for s in &output.shapes {
+        harness::each_shape(&s.shape, &mut |shape| {
+            if let egui::Shape::Rect(r) = shape
+                && r.stroke.width > 0.0
+                && r.rect.width() <= rect.get().width() + 4.0
+                && r.rect.intersects(rect.get())
+            {
+                assert!(s.clip_rect.contains_rect(r.rect));
+                rings.push(r.clone());
+            }
+        });
+    }
+    assert_eq!(rings.len(), 1, "{rings:?}");
+    assert_eq!(rings[0].stroke, egui::Stroke::new(1.5, crate::selection_ink(&t)));
+    assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+    assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+}
+
+#[test]
+fn active_configuration_pill_keeps_an_opaque_contrasting_surface_on_selection() {
+    for dark in [false, true] {
+        let t = Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        let ctx = harness::context();
+        let output = painted_frame(&ctx, vec![], |ui| {
+            table_custom(ui, "active", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+                table.row(ui, "configuration", true, |row| {
+                    row.cell(active_pill);
+                });
+            });
+        });
+        let rect = registry::rect_of("dialog:inline:Active").unwrap();
+        assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == rect && r.fill == t.control_fill)));
+        assert_eq!(t.control_fill.a(), 255);
+        assert!(solidcraft_theme::contrast_ratio(t.form_primary, t.control_fill) >= 4.5);
+        assert!(
+            harness::text_shapes(&output).any(|text| text.galley.job.text == "Active" && text.galley.job.sections[0].format.color == t.form_primary)
         );
     }
 }
