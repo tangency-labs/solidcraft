@@ -1731,12 +1731,12 @@ fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
     ] {
         assert_eq!(rename_key(&h.app, &target), "F2", "Rename shows F2: {target:?}");
     }
-    assert_eq!(rename_key(&h.app, &Target::NamedView { name: "Top".into() }), "", "F2 does not rename a saved view");
+    assert_eq!(rename_key(&h.app, &Target::NamedView { name: "Top".into() }), "F2", "F2 renames a saved view (#15331)");
     let sample = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Hinge Assembly").unwrap();
     let mut assembly = SolveApp::new(Session::default(), Services::default());
     assembly.session.run_script(&(sample.script)()).unwrap();
     let joint = assembly.session.doc.assembly.joints[0].id;
-    assert_eq!(rename_key(&assembly, &Target::Joint { id: joint }), "", "F2 does not rename a joint");
+    assert_eq!(rename_key(&assembly, &Target::Joint { id: joint }), "F2", "F2 renames a joint (#15331)");
 
     let press_f2 = |h: &mut crate::scenario::Harness| {
         for pressed in [true, false] {

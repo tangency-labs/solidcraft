@@ -254,6 +254,8 @@ pub struct TreeState {
     pub picked_components: Vec<u64>,
     /// The last folder label clicked, for V; independent of the geometry selection.
     picked_folder: Option<FolderPick>,
+    /// The saved view whose row was clicked last, for F2; it lasts as a folder pick does.
+    picked_view: Option<String>,
     /// Canvases picked in the tree.
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
@@ -384,6 +386,7 @@ impl TreeState {
 
     pub(crate) fn clear_folder_pick(&mut self) {
         self.picked_folder = None;
+        self.picked_view = None;
     }
 
     /// Open a row. A placement's row is noted open in `expanded` as well, because it starts
@@ -770,6 +773,21 @@ pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
     find_group(app, id).map(|g| g.id)
 }
 
+/// The saved view whose row was clicked last, while that pick holds and the view exists: F2
+/// renames it.
+pub(crate) fn picked_view(app: &SolveApp) -> Option<String> {
+    let name = app.tree.picked_view.as_ref()?;
+    app.session.doc.named_views.iter().any(|v| v.name == *name).then(|| name.clone())
+}
+
+/// A saved view picked for F2 that was renamed from `old` to `new` stays picked under its new
+/// name, so F2 still renames it.
+pub(crate) fn follow_renamed_view(app: &mut SolveApp, old: &str, new: &str) {
+    if let Some(pick) = app.tree.picked_view.as_mut().filter(|pick| pick.as_str() == old) {
+        *pick = new.to_owned();
+    }
+}
+
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
     let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
     let key = pick.key.clone();
@@ -864,11 +882,6 @@ pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
     });
 }
 
-/// With a dialog open a second click on a row picks again, so it never waits to rename.
-fn dialog_open(ui: &egui::Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_dialog_open"))).unwrap_or(false)
-}
-
 fn eye_left(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
@@ -958,7 +971,7 @@ impl Hit {
 /// (the host's editor, `context_menu`), unless a dialog is open: then a second click picks again.
 pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit {
     let Spec { key, item, drag, drops, accept } = spec;
-    let rename = if row.rename && !dialog_open(rows.ui()) { panel::Rename::Host } else { panel::Rename::Never };
+    let rename = if row.rename && !crate::row_rename::dialog_open(rows.ui()) { panel::Rename::Host } else { panel::Rename::Never };
     let out = rows.row(panel::Node {
         id: node_id(key),
         key,
@@ -2472,6 +2485,8 @@ fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: 
             start_inline_rename(app, crate::context_menu::RenameWhat::View(name.clone()), r.name_at());
         } else if r.double {
             restore_view(app, &name);
+        } else if r.clicked {
+            app.tree.picked_view = Some(name.clone());
         }
         inline_rename(app, rows.ui(), r.name_at(), &name);
         if let Some(p) = r.secondary {
@@ -2507,7 +2522,7 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
         Item::action("ui.restoreView", "Restore", "home").with(json!({ "view": name })),
         Item::action("ui.updateView", "Update to Current View", "perspective").with(json!({ "view": name })).on_if(saved),
         Item::sep(),
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "view": name })).on_if(saved),
+        Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "view": name })).on_if(saved),
         Item::action("view.delete", "Delete", "delete").with(json!({ "view": name })).on_if(saved),
     ]
 }
@@ -3414,45 +3429,14 @@ fn order_before(top: &[BrowserEntry], dragged: &[BrowserEntry], before: Option<&
 
 pub(crate) fn start_inline_rename(app: &mut SolveApp, what: crate::context_menu::RenameWhat, row: NameAt) {
     if let Some(row_id) = row.row_id {
-        crate::context_menu::start_inline_rename(app, what, row.rect.map(|rect| rect.left_bottom()).unwrap_or_default(), row_id);
+        crate::row_rename::start(app, what, row_id, row.rect.map(|rect| rect.left_bottom()).unwrap_or_default());
     }
 }
 
-/// Edit a browser name in its row: Enter or leaving the box keeps the name, Escape cancels.
+/// Edit a browser name in its row ([`crate::row_rename::editor`]).
 pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: NameAt, label: &str) {
-    let (Some(edit_rect), Some(row_id)) = (row.label_rect, row.row_id) else { return };
-    let editing = app.menu.rename.as_ref().is_some_and(|rename| rename.inline && rename.inline_id == Some(row_id));
-    if !editing {
-        return;
-    }
-    let Some(mut rename) = app.menu.rename.take() else { return };
-    ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.scope_id().with(("browser_rename", row_id));
-    let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
-    crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-    crate::scenario::publish_handle(&format!("rename:{label}"), edit_rect.center());
-    let was_focused = rename.focused;
-    if !rename.focused {
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-            let end = rename.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), id);
-        }
-        response.request_focus();
-        rename.focused = true;
-    }
-    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    let commit = ui.input(|i| i.key_pressed(egui::Key::Enter)) || (was_focused && response.lost_focus());
-    if escape {
-        // Dropping the state cancels the edit.
-    } else if commit {
-        // A refused name keeps the editor open, focused with the name selected.
-        if crate::context_menu::commit_rename(app, &rename).is_err() {
-            rename.focused = false;
-            app.menu.rename = Some(rename);
-        }
-    } else {
-        app.menu.rename = Some(rename);
+    if let (Some(edit_rect), Some(row_id)) = (row.label_rect, row.row_id) {
+        crate::row_rename::editor(app, ui, row_id, edit_rect, &format!("rename:{label}"));
     }
 }
 
