@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_revolve")
         .contract(&SURFACE_REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -424,7 +424,11 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle2")?;
     }
     let symmetric = bool_(p, "symmetric").unwrap_or(false) || str_(p, "direction").is_some_and(|d| d.eq_ignore_ascii_case("symmetric"));
-    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric })
+    let faced = match p.get("faced") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
+    };
+    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced })
 }
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1110,6 +1114,49 @@ mod tests {
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"], "axis": {"origin": [3, 2, 0], "dir": [1, 0, 0]}})).is_err());
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"]})).is_err());
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"], "axis": "y", "angle": "400 deg"})).is_err());
+    }
+
+    /// A surface revolve's walls face out of the profile, as Surface Extrude's do: the end faces
+    /// of a rectangle turned half a turn face away from each other. A design saved before `faced`
+    /// keeps the faces it built (both ends facing -Z) through an edit, a redefine and reopening,
+    /// and a new surface revolve in it faces its faces.
+    #[test]
+    fn surface_revolve_faces_follow_the_profile_and_older_designs_keep_theirs() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let turn = |name: &str, body: &str| json!({"sketch": "R", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "180 deg", "symmetric": true, "name": name, "body_name": body});
+        run(&mut s, "surface.revolve", turn("Turn", "Ring"));
+        // The z of the unit normals of the end faces at z = 0 and z = 10.
+        let ends = |s: &Session, body: &str| {
+            let st = s.world_state().unwrap();
+            let faces = st.body(body).unwrap().body.faces(1e-6).unwrap();
+            let at = |z: f64| faces.iter().find(|f| (f.centroid.z - z).abs() < 1e-6).and_then(|f| f.plane_normal).unwrap().z;
+            (at(0.0).round(), at(10.0).round())
+        };
+        let faced = |s: &Session, name: &str| matches!(s.doc.find_feature(name).unwrap().kind, FeatureKind::SurfaceRevolve { faced: true, .. });
+        assert_eq!(ends(&s, "Ring"), (-1.0, 1.0));
+        assert!(faced(&s, "Turn"));
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("faced");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "timeline.edit", json!({"feature": "Turn", "set": {"angle": "90 deg"}}));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut params = turn("Turn", "Ring");
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": "surface.revolve", "params": params}));
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "surface.revolve", turn("NewTurn", "NewRing"));
+        assert!(faced(&s, "NewTurn"));
+        assert_eq!(ends(&s, "NewRing"), (-1.0, 1.0));
     }
 
     /// Surface Sweep: a line along y carried up a path in the XZ plane, straight then round a
