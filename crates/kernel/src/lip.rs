@@ -108,9 +108,10 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
             }
         });
     }
-    // Joints: where the offsets don't meet (sharp corners of lines), the lines are extended or
-    // cut back to their crossing.
+    // Joints: where the offsets don't meet (sharp corners), the pieces are extended or cut back to
+    // their crossing.
     let k = out.len();
+    let mut turned = vec![false; k];
     for i in 0..k {
         let j = (i + 1) % k;
         let (Some(pi), Some(pj)) = (out.get(i).copied(), out.get(j).copied()) else { continue };
@@ -138,10 +139,78 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
                     e.a = x;
                 }
             }
-            _ => return Err(fail("an arc meeting another edge at a corner")),
+            _ => {
+                // An arc at the corner: the moved line and circle (or the two moved circles)
+                // cross nearest the old corner, and both pieces end there.
+                let corner = pieces.get(j).map(|p| p.a).ok_or_else(|| fail("piece"))?;
+                let x = carriers_cross(&pi, &pj, n, corner).ok_or_else(|| fail("an arc meeting another edge at a corner the band's edge can't go round"))?;
+                if let Some(e) = out.get_mut(i) {
+                    e.b = x;
+                }
+                if let Some(e) = out.get_mut(j) {
+                    e.a = x;
+                }
+                for m in [i, j] {
+                    if let Some(t) = turned.get_mut(m) {
+                        *t = true;
+                    }
+                }
+            }
         }
     }
+    // An arc cut back or carried on at a corner turns through a new angle, the same way round.
+    for (p, _) in out.iter_mut().zip(&turned).filter(|(_, t)| **t) {
+        let Some(arc) = p.arc.as_mut() else { continue };
+        let (x, y) = (p.a - arc.centre, p.b - arc.centre);
+        let tau = std::f64::consts::TAU;
+        let mut sweep = n.dot(x.cross(y)).atan2(x.dot(y));
+        sweep += ((arc.sweep - sweep) / tau).round() * tau;
+        if sweep * arc.sweep <= 0.0 {
+            return Err(fail("the offset swallows an arc"));
+        }
+        arc.sweep = sweep;
+    }
     Ok(out)
+}
+
+/// Where the carriers of two moved pieces cross (a line's line, an arc's circle, all in the plane
+/// with normal `n`), the crossing nearest `near`; `None` when they don't cross.
+fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3) -> Option<Vec3> {
+    let nearest = |x: Vec3, y: Vec3| if x.dist(near) <= y.dist(near) { x } else { y };
+    let x = match (p.arc, q.arc) {
+        (None, None) => return None,
+        (Some(arc), None) | (None, Some(arc)) => {
+            let (line, round) = if p.arc.is_none() { (p, q) } else { (q, p) };
+            let d = (line.b - line.a).normalized()?;
+            let r = round.a.dist(arc.centre);
+            // The foot of the centre on the line, and the half chord beside it: r² − h², with h
+            // the centre's distance from the line, factored to keep its digits near tangency.
+            let f = arc.centre - line.a;
+            let foot = line.a + d * f.dot(d);
+            let h = foot.dist(arc.centre);
+            let chord2 = (r - h) * (r + h);
+            if chord2 < 0.0 {
+                return None;
+            }
+            let s = chord2.sqrt();
+            nearest(foot + d * s, foot - d * s)
+        }
+        (Some(a1), Some(a2)) => {
+            let (r1, r2) = (p.a.dist(a1.centre), q.a.dist(a2.centre));
+            let gap = a2.centre - a1.centre;
+            let apart = gap.len();
+            let u = gap.normalized()?;
+            // Along u from the first centre to the chord, then half the chord across it.
+            let along = (r1 * r1 - r2 * r2 + apart * apart) / (2.0 * apart);
+            let half2 = (r1 - along) * (r1 + along);
+            if half2 < 0.0 {
+                return None;
+            }
+            let (base, across) = (a1.centre + u * along, n.cross(u) * half2.sqrt());
+            nearest(base + across, base - across)
+        }
+    };
+    x.is_finite().then_some(x)
 }
 
 /// The pieces of a loop (seen from outside the body, whose normal is `n`), from its record edges:
