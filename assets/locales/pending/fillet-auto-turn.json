@@ -1,42 +1,26 @@
 {
   "en": {
-    "prefs.fillet_legacy_turn": "Use the previous Solid Fillet turns default",
-    "prefs.fillet_legacy_turn.help": "Off by default. When on, a new Solid Fillet opens with its Turns row at Mitre, as before; when off, it opens at Auto, which sweeps where the turn can be swept and mitres the rest.",
     "ui.fillet_turn_auto": "Auto"
   },
   "de": {
-    "prefs.fillet_legacy_turn": "Den vorherigen Standard für Wendungen bei Solid-Fillet verwenden",
-    "prefs.fillet_legacy_turn.help": "Standardmäßig aus. Ein: Die Zeile Wendungen eines neuen Solid-Fillets steht auf Gehrung, wie zuvor; aus: Sie steht auf Automatisch, das schwenkt, wo die Wendung geschwenkt werden kann, und den Rest mit Gehrung ausführt.",
     "ui.fillet_turn_auto": "Automatisch"
   },
   "ja": {
-    "prefs.fillet_legacy_turn": "以前の Solid Fillet の曲がり角の既定値を使う",
-    "prefs.fillet_legacy_turn.help": "既定ではオフです。オンのとき：新しい Solid Fillet の曲がり角の行は留め継ぎで始まり、以前と同じです。オフのとき：自動で始まり、回転で作れる箇所は回転し、それ以外は留め継ぎになります。",
     "ui.fillet_turn_auto": "自動"
   },
   "zh": {
-    "prefs.fillet_legacy_turn": "使用之前的 Solid Fillet 转角默认值",
-    "prefs.fillet_legacy_turn.help": "默认关闭。开启时：新的 Solid Fillet 的转角行以斜接开始，与之前相同。关闭时：以自动开始，能在可旋转处旋转，其余斜接。",
     "ui.fillet_turn_auto": "自动"
   },
   "ko": {
-    "prefs.fillet_legacy_turn": "이전 Solid Fillet 꺾임 기본값 사용",
-    "prefs.fillet_legacy_turn.help": "기본적으로 꺼짐입니다. 켜면: 새 Solid Fillet의 꺾임 행이 마이터로 시작하며 이전과 같습니다. 끄면: 자동으로 시작하며, 회전할 수 있는 곳은 회전하고 나머지는 마이터로 처리합니다.",
     "ui.fillet_turn_auto": "자동"
   },
   "vi": {
-    "prefs.fillet_legacy_turn": "Dùng giá trị mặc định Chỗ rẽ trước đây của Solid Fillet",
-    "prefs.fillet_legacy_turn.help": "Mặc định tắt. Khi bật: hàng Chỗ rẽ của Solid Fillet mới bắt đầu ở Vát góc, như trước; khi tắt: hàng này bắt đầu ở Tự động, quét vòng nơi có thể và vát góc ở những chỗ còn lại.",
     "ui.fillet_turn_auto": "Tự động"
   },
   "ar": {
-    "prefs.fillet_legacy_turn": "استخدام الافتراضي السابق لالتفاف Solid Fillet",
-    "prefs.fillet_legacy_turn.help": "معطّل افتراضيًا. عند التفعيل: يبدأ صف الالتفاف في Solid Fillet جديد على وصلة مائلة، كما كان سابقًا؛ وعند الإيقاف: يبدأ على تلقائي، فيلتف حيث يمكن الالتفاف ويُوصل بوصلة مائلة في الباقي.",
     "ui.fillet_turn_auto": "تلقائي"
   },
   "he": {
-    "prefs.fillet_legacy_turn": "שימוש בברירת המחדל הקודמת לפניות Solid Fillet",
-    "prefs.fillet_legacy_turn.help": "כבוי כברירת מחדל. כשהוא פעיל: שורת הפניות של Solid Fillet חדש מתחילה במיטר, כמו קודם; כשהוא כבוי: היא מתחילה באוטומטי, שמסובב היכן שאפשר לסובב ועושה מיטר בשאר.",
     "ui.fillet_turn_auto": "אוטומטי"
   }
 }
