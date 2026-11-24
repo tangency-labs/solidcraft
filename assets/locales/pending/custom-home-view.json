@@ -1,0 +1,10 @@
+{
+  "en": {
+    "cmd.view_reset_home": "Reset Home View",
+    "cmd.view_set_home": "Set Current View as Home"
+  },
+  "de": {
+    "cmd.view_reset_home": "Startansicht zurücksetzen",
+    "cmd.view_set_home": "Aktuelle Ansicht als Startansicht festlegen"
+  }
+}

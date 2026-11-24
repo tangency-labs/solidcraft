@@ -4296,6 +4296,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        home_view,
         notes,
         visibility,
         drawings,
@@ -4336,6 +4337,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *home_view == b.home_view
         && *notes == b.notes
         && *visibility == b.visibility
         && *drawings == b.drawings

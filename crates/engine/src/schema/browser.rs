@@ -1327,6 +1327,36 @@ pub struct ViewSaved {
     pub param_warnings: Vec<String>,
 }
 
+/// Make the camera the design's Home view: Home goes to it instead of framing the model from the
+/// iso view (#19972). One undo step. A Home view set before is replaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = camera_required)]
+pub struct ViewSetHomeParams {
+    // Optional in the type and required in the schema (`camera_required`), as in `view.save`.
+    /// The camera Home goes to: `{target: [x, y, z], yaw, pitch, distance, fov?, roll?, up?}`,
+    /// finite, with a distance above 0. Up is "z" or "y".
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewCamera")]
+    pub camera: Option<ViewCamera>,
+}
+
+/// `view.reset_home` takes no parameters: Home frames the model from the iso view again. One undo
+/// step; refused when the design has no Home view of its own.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewResetHomeParams {}
+
+/// What `view.set_home` and `view.reset_home` return.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewHome {
+    /// The camera Home goes to now; none: the iso view framing the model.
+    #[schemars(with = "Option<ViewEntry>")]
+    pub home: Option<solidcraft_doc::NamedView>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Rename a named view. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = view_and_name_required)]
