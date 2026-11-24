@@ -1299,7 +1299,7 @@ fn separated_end_picks(
     Ok(Some(SeparateEndPicks { trailing, limit }))
 }
 
-/// Use separate Ends, or name a support limit only after the same operation builds at it.
+/// Use separate Ends, or report the common limit certified from the support geometry.
 fn separated_end_passes(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1313,9 +1313,6 @@ fn separated_end_passes(
         return Ok(None);
     };
     if let Some((size, edge)) = limit {
-        if !separate_end_limit_builds(k, b, picked, &trailing, size, kind, contract)? {
-            return Ok(None);
-        }
         let kind = if kind == Blend::Chamfer {
             FitKind::Distance
         } else {
@@ -1330,50 +1327,6 @@ fn separated_end_passes(
         })));
     }
     build_separated_end_groups(k, b, picked, sizes, kind, contract, &trailing).map(Some)
-}
-
-fn separate_end_limit_builds(
-    k: &mut Kernel,
-    b: &Brep,
-    picked: &[EdgeId],
-    trailing: &HashMap<usize, [f64; 3]>,
-    limit: f64,
-    kind: Blend,
-    contract: Contract,
-) -> solidcore::Result<bool> {
-    let log = k.blend_face_log.clone();
-    let note = crate::session::note();
-    let trial: solidcore::Result<bool> = (|| {
-        let mut copy = brep_copy(k, b)?;
-        let mapped: Option<Vec<_>> = picked
-            .iter()
-            .map(|edge| {
-                let index = b
-                    .edge_list()
-                    .iter()
-                    .position(|candidate| candidate == edge)?;
-                copy.edge_list().get(index).copied()
-            })
-            .collect();
-        let Some(mapped) = mapped else {
-            return Ok(false);
-        };
-        let expect = Expect::under(k, &mut copy, Proof::default(), contract)?;
-        let sizes = vec![limit; picked.len()];
-        if build_separated_end_groups(k, &mut copy, &mapped, &sizes, kind, contract, trailing)?
-            .is_err()
-        {
-            return Ok(false);
-        }
-        Ok(done(k, &mut copy, expect, contract)?.is_ok())
-    })();
-    k.blend_face_log = log;
-    crate::session::note_back(note);
-    match trial {
-        Err(e) if e.is_cancelled() => Err(e),
-        Ok(true) => Ok(true),
-        _ => Ok(false),
-    }
 }
 
 /// Build the two groups of separated ends with the ordinary end construction. The first

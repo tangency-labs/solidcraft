@@ -9,7 +9,8 @@
 use crate::blend::blend_corner::mixed::leaving;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::Result;
+use crate::error::topology::TopologyFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::certified::{distance, next_down, next_up};
 use crate::geom::expansion;
 use crate::geom::extent3d::Extent3d;
@@ -20,6 +21,9 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
 use crate::topology::{edge, vertex, vertexuse, Brep, EdgeId, FaceId, VertexId};
+
+mod corridor;
+use corridor::{certified_limit_span, resolved_vertex, Corridor};
 
 const OP: &str = "blend::blend_corner::separate_ends::classify_separate_ends";
 
@@ -44,7 +48,7 @@ pub enum SeparateEndFit {
     NotApplicable,
     /// Every pair fits and the blend envelopes are disjoint.
     Fits,
-    /// A common size exceeds a support length. The candidate still has to build.
+    /// A common size exceeds the certified room for the whole selection.
     Limited {
         /// The largest representable common size allowed by the supports.
         size: f64,
@@ -54,15 +58,15 @@ pub enum SeparateEndFit {
 }
 
 struct Supports {
-    at: Point3,
-    ends: [Point3; 3],
+    corridor: Corridor,
+    rails: [EdgeId; 3],
     span: Extent3d,
 }
 
 /// Qualifies separate Ends and finds a support limit for a common size.
 ///
 /// # Errors
-/// Propagates failures reading or evaluating the candidate geometry.
+/// Propagates allocation failures and failures reading or evaluating the candidate geometry.
 pub fn independent_separate_ends(
     k: &Kernel,
     b: &mut Brep,
@@ -71,9 +75,13 @@ pub fn independent_separate_ends(
     let common = pairs
         .first()
         .is_some_and(|first| pairs.iter().all(|pair| pair.sizes == [first.sizes[0]; 2]));
-    let mut supports = Vec::with_capacity(pairs.len());
+    let mut supports = Vec::new();
+    supports
+        .try_reserve_exact(pairs.len())
+        .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
     let mut limit: Option<(f64, EdgeId)> = None;
     for pair in pairs {
+        k.check_cancelled(OP)?;
         let [a, z] = pair.sizes;
         if !pair
             .sizes
@@ -87,31 +95,47 @@ pub fn independent_separate_ends(
         };
         let size = a.max(z);
         let [first, second] = pair.edges;
-        for (end, (width, edge)) in
-            geometry
-                .ends
-                .into_iter()
-                .zip([(a, first), (z, second), (size, first)])
+        let (_, at) = geometry.corridor.at;
+        for (((_, end), rail), (width, edge)) in geometry
+            .corridor
+            .ends
+            .into_iter()
+            .zip(geometry.rails)
+            .zip([(a, first), (z, second), (size, first)])
         {
-            match has_room(geometry.at, end, width) {
+            match has_room(at, end, width) {
                 Some(true) => {}
                 Some(false) if common => {
-                    let Some(fit) = support_limit(geometry.at, end) else {
+                    let Some(fit) = support_limit(at, end) else {
                         return Ok(SeparateEndFit::NotApplicable);
                     };
                     if limit.is_none_or(|(old, _)| fit < old) {
+                        if !support_stops(b, rail, pair.vertex, at, end)? {
+                            return Ok(SeparateEndFit::NotApplicable);
+                        }
                         limit = Some((fit, edge));
                     }
                 }
                 _ => return Ok(SeparateEndFit::NotApplicable),
             }
         }
-        supports.push((geometry.span, size));
+        supports.push((geometry, size));
     }
 
-    let mut envelopes = Vec::with_capacity(supports.len());
-    for (span, requested) in supports {
+    let mut envelopes = Vec::new();
+    envelopes
+        .try_reserve_exact(supports.len())
+        .map_err(|_| SolidError::topology(OP, TopologyFailure::AllocationFailed))?;
+    for (geometry, requested) in supports {
         let size = limit.map_or(requested, |(fit, _)| fit);
+        let span = if limit.is_some() {
+            let Some(span) = certified_limit_span(k, b, &geometry.corridor, size)? else {
+                return Ok(SeparateEndFit::NotApplicable);
+            };
+            span
+        } else {
+            geometry.span
+        };
         let Some(envelope) = swept_envelope(span, size) else {
             return Ok(SeparateEndFit::NotApplicable);
         };
@@ -196,12 +220,13 @@ fn classify_separate_ends(
     if !(is_concave_edge(k, b, first)? && is_concave_edge(k, b, second)?) {
         return Ok(None);
     }
-    let (Some(end_a), Some(end_b)) = (
+    let (Some((vertex_a, end_a, far_a)), Some((vertex_b, end_b, far_b))) = (
         square_cap(b, first, v, u, roundoff)?,
         square_cap(b, second, v, w, roundoff)?,
     ) else {
         return Ok(None);
     };
+    let rails = [rim_a, rim_b, up];
     let (Some(rim_a), Some(rim_b), Some(up)) = (
         other_end(b, rim_a, v)?,
         other_end(b, rim_b, v)?,
@@ -211,8 +236,14 @@ fn classify_separate_ends(
     };
     let span = Extent3d::from_points(at, end_a).union(&Extent3d::from_point(end_b));
     Ok(Some(Supports {
-        at,
-        ends: [rim_a, rim_b, up],
+        corridor: Corridor {
+            at: (v, at),
+            ends: [rim_a, rim_b, up],
+            far: [vertex_a, vertex_b],
+            faces,
+            far_caps: [far_a, far_b],
+        },
+        rails,
         span,
     }))
 }
@@ -240,28 +271,78 @@ fn square_cap(
     v: VertexId,
     outward: Vec3,
     roundoff: f64,
-) -> Result<Option<Point3>> {
-    let Some(end) = edge::other_vertex(b, e, Some(v))?.filter(|&end| end != v) else {
+) -> Result<Option<(VertexId, Point3, FaceId)>> {
+    let Some((end, at)) = other_end(b, e, v)? else {
         return Ok(None);
     };
     if vertex::edges(b, end, None)?.len() != 3 {
         return Ok(None);
     }
-    let at = vertex::point(b, end)?;
     for face in vertex::faces(b, end)? {
         if oriented_plane_at(b, face, at, outward, roundoff)? {
-            return Ok(Some(at));
+            return Ok(Some((end, at, face)));
         }
     }
     Ok(None)
 }
 
-fn other_end(b: &Brep, e: EdgeId, v: VertexId) -> Result<Option<Point3>> {
+/// A vertex that just splits a straight support is not a geometric bound on its reach.
+fn support_stops(b: &Brep, rail: EdgeId, start: VertexId, at: Point3, end: Point3) -> Result<bool> {
+    let Some(v) = edge::other_vertex(b, rail, Some(start))? else {
+        return Ok(false);
+    };
+    let from = [at.x, at.y, at.z];
+    let to = [end.x, end.y, end.z];
+    let mut varying = from
+        .into_iter()
+        .zip(to)
+        .enumerate()
+        .filter(|(_, (a, z))| a != z);
+    let Some((axis, (a, z))) = varying.next() else {
+        return Ok(false);
+    };
+    if varying.next().is_some() {
+        return Ok(false);
+    }
+    for continuation in vertex::edges(b, v, None)?
+        .into_iter()
+        .filter(|&id| id != rail)
+    {
+        if !matches!(
+            edge::curve(b, continuation)?.map(Curve::kind),
+            Some(CurveKind::Line(_))
+        ) {
+            return Ok(false);
+        }
+        let Some((end_vertex, _)) = other_end(b, continuation, v)? else {
+            return Ok(false);
+        };
+        let Some(p) = resolved_vertex(b, end_vertex)? else {
+            return Ok(false);
+        };
+        let q = [p.x, p.y, p.z];
+        if q.into_iter().zip(to).enumerate().all(|(i, (p, e))| {
+            if i == axis {
+                (a < z && p > e) || (a > z && p < e)
+            } else {
+                p == e
+            }
+        }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn other_end(b: &Brep, e: EdgeId, v: VertexId) -> Result<Option<(VertexId, Point3)>> {
     let Some(end) = edge::other_vertex(b, e, Some(v))?.filter(|&end| end != v) else {
         return Ok(None);
     };
     let p = vertex::point(b, end)?;
-    Ok([p.x, p.y, p.z].into_iter().all(f64::is_finite).then_some(p))
+    Ok([p.x, p.y, p.z]
+        .into_iter()
+        .all(f64::is_finite)
+        .then_some((end, p)))
 }
 
 /// Compare squared lengths exactly when the distance bound straddles the requested

@@ -315,6 +315,94 @@ fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
 }
 
 #[test]
+fn post_foot_blends_certify_the_limit_with_a_rounded_vertex() {
+    all_fixes();
+    let (mut record, _) = post_foot(true).to_record().unwrap();
+    let exact = [10.0_f64, 0.0, 4.0];
+    let displaced = [exact[0].next_down(), exact[1], exact[2]];
+    // The application fixture's glued vertex is one ulp off the three exact planes.
+    // Only the vertex is changed. The plane supports and line carriers stay exact.
+    let vertex = record
+        .vertices
+        .iter_mut()
+        .find(|vertex| vertex.point == exact)
+        .unwrap();
+    vertex.point = displaced;
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 25.0 / 2.0),
+        (Blend::Round, FitKind::Radius, 25.0 * (1.0 - PI / 4.0)),
+    ] {
+        let (input, _) = Body::from_record(&record, true).unwrap();
+        let (before, _) = input.to_record().unwrap();
+        assert!(before
+            .vertices
+            .iter()
+            .any(|vertex| vertex.point == displaced));
+        let refused = blend(
+            &input,
+            kind,
+            &post_foot_edges(&input),
+            &[6.0],
+            &[],
+            Corners::Filled,
+        );
+        assert!(
+            matches!(refused, Err(Error::TooLarge { size, kind: reported, at: Some(_), .. })
+                if size == 5.0 && reported == fit_kind),
+            "{kind:?}: {refused:?}",
+        );
+        assert_eq!(input.to_record().unwrap().0, before);
+        assert!(rel(volume(&input), 12_900.0) < 1e-9);
+        assert!(input.check(CheckLevel::All).unwrap().is_valid());
+
+        // The independently reopened input builds exactly at the advertised limit.
+        let (body, _) = Body::from_record(&record, true).unwrap();
+        let made = blend(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[5.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(made.holes.is_empty());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert!(rel(volume(&body), 12_900.0 + 20.0 * section) < 1e-9);
+    }
+}
+
+#[test]
+fn post_foot_blends_do_not_report_a_limit_with_an_obstructed_sweep() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    for kind in [Blend::Chamfer, Blend::Round] {
+        for (point, obstructs) in [([10.5, 4.0, 4.0], true), ([20.0, 20.0, 4.0], false)] {
+            let boss = make_box(point, [1.0, 2.0, 2.0]).unwrap();
+            let body = boolean(post_foot(true), boss, BooleanOp::Union)
+                .unwrap()
+                .unwrap();
+            let edges = post_foot_edges(&body);
+            let before = body.counts().unwrap();
+            let result = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
+            assert!(result.is_err(), "{kind:?} at {point:?}: {result:?}");
+            assert_eq!(
+                matches!(result, Err(Error::TooLarge { size: 5.0, .. })),
+                !obstructs,
+                "{kind:?} at {point:?}: {result:?}"
+            );
+            assert_eq!(body.counts().unwrap(), before);
+            assert!(rel(volume(&body), 12_904.0) < 1e-9);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        }
+    }
+}
+
+#[test]
 fn post_foot_blends_report_the_shortest_support_across_independent_pairs() {
     use solidcore_ops::{boolean::boolean, BooleanOp};
 
