@@ -1166,6 +1166,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
+- `design_properties_button` (default true: a Design Properties button in the application bar, right of Redo; false hides it and leaves File › Design Properties… as the way to the window, #17791)
 - `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed)
 - `design_reuse_views` (default true: opening a sheet or workspace that a view already shows activates that view; false makes a new view each time)
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)

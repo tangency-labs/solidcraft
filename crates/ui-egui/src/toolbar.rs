@@ -242,16 +242,26 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
+            // An open bug report describes the designs as they are, and a window opened behind it
+            // covers it (#7188): the bar's button stays disabled, as File › Design Properties… is.
+            let behind_report = app.issue_report.draft.is_some();
             // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
             let tip = |id: &str, keys: &[&str]| {
                 let label = app.tr(id);
+                if !shown {
+                    return solidcraft_ui_text::format("ui.needs_design", &[("command", label)]);
+                }
+                if keys.is_empty() {
+                    return label.to_string();
+                }
                 let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
-                if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
+                format!("{label} ({keys})")
             };
             let (undo_keys, redo_keys) = (crate::keymap::keys(app, "edit.undo"), crate::keymap::keys(app, "edit.redo"));
             let (undo_keys, redo_keys): (Vec<&str>, Vec<&str>) =
                 (undo_keys.iter().map(String::as_str).collect(), redo_keys.iter().map(String::as_str).collect());
             let (save_tip, undo_tip, redo_tip) = (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &undo_keys), tip("ui.redo", &redo_keys));
+            let metadata_tip = tip("cmd.document_metadata", &[]);
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -265,6 +275,15 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
             let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
+            let mut actions = vec![
+                action("save", "save", &save_tip, shown, false),
+                action("undo", "undo", &undo_tip, shown, true),
+                action("redo", "redo", &redo_tip, shown, true),
+            ];
+            // Design Properties sits right of Redo; a preference puts the bar back as it was (#17791).
+            if app.preferences.design_properties_button {
+                actions.push(action("design_properties", "settings", &metadata_tip, shown && !behind_report, true));
+            }
             let bar = app_bar::AppBar {
                 items: Some(&preview_layout),
                 quick_ids: &quick_ids,
@@ -274,11 +293,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
-                actions: vec![
-                    action("save", "save", &save_tip, shown, false),
-                    action("undo", "undo", &undo_tip, shown, true),
-                    action("redo", "redo", &redo_tip, shown, true),
-                ],
+                actions,
                 quick: quick_ids.len(),
                 help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
@@ -365,6 +380,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         "save" => save(app),
                         "undo" => FileAction::Undo.run(app),
                         "redo" => FileAction::Redo.run(app),
+                        "design_properties" => app.start("document.metadata"),
                         "settings" => crate::prefs::open_at(app, 0),
                         _ => {}
                     },
@@ -5859,6 +5875,50 @@ mod app_bar_tests {
         assert!(h.app.dialog.is_none() && h.app.tool.is_none());
         assert!(!h.app.preferences.show_donate_button && !h.app.preferences.show_discord_button && !h.app.preferences.ai_toolbar_button);
         assert_eq!((h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), before);
+    }
+
+    /// #17791: a Design Properties button sits right of Redo. The preference puts the bar back as
+    /// it was, and File › Design Properties… still opens the window.
+    #[test]
+    fn design_properties_button_sits_right_of_redo_and_can_be_hidden() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        let redo = crate::scenario::rect_of("appbar:redo").expect("Redo is drawn");
+        let button = crate::scenario::rect_of("appbar:design_properties").expect("Design Properties is drawn");
+        assert!(button.left() > redo.right(), "the button sits right of Redo");
+        // The File menu keeps the old way to the window.
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
+        h.frames(2);
+        h.step(&json!({"widget": "Design Properties…"})).unwrap();
+        assert!(h.app.design_properties.is_some(), "File › Design Properties… still opens it");
+        h.app.design_properties = None;
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"appbar:design_properties"}})).unwrap();
+        assert!(h.app.design_properties.is_some(), "the button opens Design Properties");
+        h.app.design_properties = None;
+        assert_eq!(h.call("ui.prefs", json!({"design_properties_button": false}))["ok"], true);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("appbar:design_properties").is_none(), "the preference hides the button");
+        // Home hides the design: the button stays, disabled as Save, Undo and Redo are.
+        h.app.design_properties = None;
+        assert_eq!(h.call("ui.prefs", json!({"design_properties_button": true}))["ok"], true);
+        h.app.home.open = true;
+        h.frames(3);
+        let at = crate::scenario::handle_at("appbar:design_properties").expect("the button is drawn on Home");
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.settle();
+        assert!(h.app.design_properties.is_none(), "no design, no window");
+        // An open bug report keeps the window closed, as File › Design Properties… does (#7188).
+        h.app.home.open = false;
+        h.frames(2);
+        h.app.issue_report.draft = Some(crate::issue_report::draft_for(&h.app, None, None));
+        h.frames(2);
+        let at = crate::scenario::handle_at("appbar:design_properties").expect("the button is drawn behind a report");
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.settle();
+        assert!(h.app.design_properties.is_none(), "a bug report draft blocks the window");
+        h.app.issue_report.draft = None;
     }
 
     #[test]

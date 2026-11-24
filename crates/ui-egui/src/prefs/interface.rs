@@ -287,6 +287,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        // A Design Properties button in the application bar, right of Redo.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.design_properties_button"),
+                            app.tr("prefs.design_properties_button_note"),
+                            &mut app.preferences.design_properties_button,
+                            "design_properties_button",
+                        );
                         // The operations under way, with their Cancel, in the view's corner.
                         layout_check(
                             ui,

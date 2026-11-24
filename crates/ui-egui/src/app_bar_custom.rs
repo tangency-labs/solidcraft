@@ -379,6 +379,7 @@ fn label_icon(app: &SolveApp, id: &str) -> (String, String) {
         "save" => ("ui.save", "save"),
         "undo" => ("ui.undo", "undo"),
         "redo" => ("ui.redo", "redo"),
+        "design_properties" => ("cmd.document_metadata", "settings"),
         "assistant" => ("ui.assistant", "assistant"),
         "donate" => ("links.kofi_button", "kofi"),
         "discord" => ("links.discord_button", "discord"),
@@ -432,6 +433,7 @@ fn control<'a>(app: &'a SolveApp, id: &'a str, version: &'a str) -> Control<'a> 
                 "save" => "save",
                 "undo" => "undo",
                 "redo" => "redo",
+                "design_properties" => "settings",
                 "settings" => "settings",
                 "help" => "help",
                 _ => id.strip_prefix("quick:").and_then(solidcraft_engine::find_command).map_or("help", |c| c.info(&app.session).icon),
@@ -844,5 +846,20 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #17791: the customize editor names the Design Properties button and keeps its gear.
+    #[test]
+    fn customize_editor_names_the_design_properties_button() {
+        let h = crate::scenario::Harness::new();
+        let (label, icon) = label_icon(&h.app, "design_properties");
+        assert_eq!(label, h.app.tr("cmd.document_metadata"));
+        assert_eq!(icon, "settings");
+        assert!(matches!(control(&h.app, "design_properties", "v0"), Control::Icon { icon: "settings", .. }));
     }
 }

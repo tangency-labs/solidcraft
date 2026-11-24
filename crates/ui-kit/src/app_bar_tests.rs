@@ -218,7 +218,24 @@ fn app_bar_default_dividers_migrate_once_and_removal_survives_loading() {
     use crate::app_bar_items::{Layout, Placement, Preset, Zone};
     let defaults = Layout::default();
     let ids: Vec<_> = defaults.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect();
-    assert_eq!(ids, ["documents", "home", "separator:1", "file", "save", "undo", "redo", "separator:2"]);
+    assert_eq!(ids, ["documents", "home", "separator:1", "file", "save", "undo", "redo", "design_properties", "separator:2"]);
+    // Version 1's canonical quick-access layout had a third divider before the quick buttons;
+    // the new Design Properties default must not stop that divider from being removed.
+    let quick_defaults = Layout::default_for(["solid.box", "solid.fillet"]);
+    let mut v1 = quick_defaults.to_value();
+    v1["version"] = 1.into();
+    // Version 1 predates Design Properties: a genuine old file does not list it.
+    v1["items"].as_array_mut().unwrap().retain(|p| p["id"].as_str() != Some("design_properties"));
+    let at = v1["items"].as_array().unwrap().iter().position(|p| p["id"].as_str().is_some_and(|id| id.starts_with("quick:"))).unwrap();
+    v1["items"].as_array_mut().unwrap().insert(at, serde_json::json!({"id":"separator:3","zone":"start","shown":true}));
+    let loaded = Layout::from_value(&v1, &quick_defaults);
+    assert!(!loaded.items.iter().any(|p| p.id == "separator:3"), "a canonical version-1 layout loses its obsolete third divider");
+    assert_eq!(loaded, quick_defaults, "the rest of the version-1 layout is kept, with the new default right of Redo");
+    // A saved version-2 layout from before the button existed gains it right of Redo too,
+    // before the group divider, not after it.
+    let mut v2 = quick_defaults.to_value();
+    v2["items"].as_array_mut().unwrap().retain(|p| p["id"].as_str() != Some("design_properties"));
+    assert_eq!(Layout::from_value(&v2, &quick_defaults), quick_defaults, "an old saved layout gains the new default right of Redo");
     let mut old = defaults.to_value();
     old.as_object_mut().unwrap().remove("version");
     old["items"].as_array_mut().unwrap().retain(|p| !p["id"].as_str().unwrap().starts_with("separator:"));
@@ -702,7 +719,7 @@ fn app_bar_edit_moves_before_after_and_between_zones() {
     assert!(layout.move_before("redo", Zone::Start, Some("save"), &defaults));
     assert_eq!(
         layout.items.iter().filter(|p| p.zone == Zone::Start).map(|p| p.id.as_str()).collect::<Vec<_>>(),
-        ["documents", "home", "separator:1", "file", "redo", "save", "undo", "quick:solid.box", "separator:2"]
+        ["documents", "home", "separator:1", "file", "redo", "save", "undo", "design_properties", "quick:solid.box", "separator:2"]
     );
     assert!(layout.move_after("redo", "undo", &defaults));
     assert!(layout.move_before("save", Zone::End, Some("settings"), &defaults));
@@ -2565,7 +2582,19 @@ mod app_bar_items {
         let ids = |zone| layout.items.iter().filter(|p| p.zone == zone).map(|p| p.id.as_str()).collect::<Vec<_>>();
         assert_eq!(
             ids(Zone::Start),
-            ["documents", "home", "separator:1", "file", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet", "separator:2"]
+            [
+                "documents",
+                "home",
+                "separator:1",
+                "file",
+                "save",
+                "undo",
+                "redo",
+                "design_properties",
+                "quick:solid.box",
+                "quick:solid.fillet",
+                "separator:2"
+            ]
         );
         assert_eq!(ids(Zone::End), ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"]);
         assert!(layout.items.iter().all(|p| p.shown));

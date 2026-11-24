@@ -31,6 +31,9 @@ macro_rules! layout_preferences {
             clear_view_tabs: bool = true, PAGE_LAYOUT;
             /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
             construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
+            /// A Design Properties button in the application bar, right of Redo (#17791). Off: the File
+            /// menu's Design Properties… still opens the window, as before.
+            design_properties_button: bool = true, PAGE_LAYOUT;
             /// A design opens with the views it had when it was last closed.
             design_reopen_views: bool = false, PAGE_LAYOUT;
             /// Opening a sheet or workspace that a view already shows activates that view.

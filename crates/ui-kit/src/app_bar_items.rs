@@ -16,6 +16,7 @@ pub enum ItemId {
     Save,
     Undo,
     Redo,
+    DesignProperties,
     Quick(String),
     Search,
     Assistant,
@@ -41,6 +42,7 @@ impl ItemId {
             "save" => Self::Save,
             "undo" => Self::Undo,
             "redo" => Self::Redo,
+            "design_properties" => Self::DesignProperties,
             "search" => Self::Search,
             "assistant" => Self::Assistant,
             "update" => Self::Update,
@@ -67,6 +69,7 @@ impl ItemId {
             Self::Save => "save".into(),
             Self::Undo => "undo".into(),
             Self::Redo => "redo".into(),
+            Self::DesignProperties => "design_properties".into(),
             Self::Search => "search".into(),
             Self::Assistant => "assistant".into(),
             Self::Update => "update".into(),
@@ -358,7 +361,7 @@ impl Layout {
     /// placements. Legacy visibility preferences remain an additional draw-time condition.
     pub fn default_for<'a>(quick: impl IntoIterator<Item = &'a str>) -> Self {
         let mut items = Vec::new();
-        for id in ["documents", "home", "separator:1", "file", "save", "undo", "redo"] {
+        for id in ["documents", "home", "separator:1", "file", "save", "undo", "redo", "design_properties"] {
             items.push(Placement { id: id.into(), zone: Zone::Start, shown: true });
         }
         for id in quick.into_iter().take(24) {
@@ -389,6 +392,9 @@ impl Layout {
             .filter(|p| placement_id(&p.id) && !p.id.starts_with("separator:") && !p.id.starts_with("space:"))
             .take(MAX_ITEMS)
             .collect();
+        // Restored items still take their place beside the default separators that are present,
+        // so a new default between two groups lands in its own group, not the next one.
+        let anchors: Vec<_> = defaults.items.iter().filter(|p| placement_id(&p.id)).take(MAX_ITEMS).collect();
         let mut kept: Vec<Placement> = Vec::new();
         let mut unknown = 0;
         for p in self.items.iter().take(4096) {
@@ -419,12 +425,13 @@ impl Layout {
             }
             kept.push(p);
         }
-        for (i, p) in known.iter().enumerate() {
+        for p in &known {
             if kept.iter().any(|k| k.id == p.id) {
                 continue;
             }
-            let before = known.iter().skip(i + 1).find_map(|next| kept.iter().position(|k| k.id == next.id && k.zone == p.zone));
-            let after = known.iter().take(i).rev().find_map(|prev| kept.iter().position(|k| k.id == prev.id && k.zone == p.zone));
+            let Some(i) = anchors.iter().position(|a| a.id == p.id) else { continue };
+            let before = anchors.iter().skip(i + 1).find_map(|next| kept.iter().position(|k| k.id == next.id && k.zone == p.zone));
+            let after = anchors.iter().take(i).rev().find_map(|prev| kept.iter().position(|k| k.id == prev.id && k.zone == p.zone));
             let at = before.or_else(|| after.map(|at| at + 1)).unwrap_or(kept.len());
             kept.insert(at, (*p).clone());
         }
@@ -477,7 +484,12 @@ impl Layout {
             if let Some(at) = old.items.iter().position(|p| p.id.starts_with("quick:")) {
                 old.items.insert(at, Placement { id: "separator:3".into(), zone: Zone::Start, shown: true });
             }
-            if layout.items.iter().filter(|p| ItemId::parse(&p.id).is_some()).eq(old.items.iter()) {
+            // The Design Properties default is newer than version 1, so a version-1 file cannot
+            // place it; sanitize inserted it after the old third divider. Ignore it on both sides
+            // so a canonical old layout still matches and loses that divider.
+            let current = layout.items.iter().filter(|p| ItemId::parse(&p.id).is_some() && p.id != "design_properties");
+            let expected = old.items.iter().filter(|p| p.id != "design_properties");
+            if current.eq(expected) {
                 layout.items.retain(|p| p.id != "separator:3");
             }
         }
