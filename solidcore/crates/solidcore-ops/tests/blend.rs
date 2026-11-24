@@ -1081,6 +1081,46 @@ fn a_variable_round_runs_from_the_end_nearest_a_point() {
     );
 }
 
+/// A variable round of a closed edge, a cylinder's top or bottom rim: a smooth law from 2 at
+/// its seam, rising halfway round and back to 2, and 2 all round, builds a valid body whose
+/// volume lies between the constant rounds' of 2 and 4 (the same as 2's for 2 all round). The
+/// station closing the loop used to take t at the rim's start, not its end, and the round
+/// failed with status 1001 (#18542).
+#[test]
+fn a_variable_round_of_a_closed_rim_builds() {
+    all_fixes();
+    let cylinder = || make_cylinder([0.0; 3], 20.0, 60.0).unwrap();
+    let constant = |e: usize, r: f64| {
+        let b = cylinder();
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+        volume(&b)
+    };
+    for e in [1, 2] {
+        let (v2, v4) = (constant(e, 2.0), constant(e, 4.0));
+        for (knots, radii) in [
+            (
+                &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0][..],
+                &[2.0, 2.0, 4.0, 2.0, 2.0][..],
+            ),
+            (&[0.0, 0.0, 1.0, 1.0][..], &[2.0, 2.0][..]),
+        ] {
+            let b = cylinder();
+            let degree = knots.len() - radii.len() - 1;
+            fillet_variable_from(&b, e, [20.0, 0.0, 60.0], degree, knots, radii).unwrap();
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "edge {e}, {radii:?}"
+            );
+            let v = volume(&b);
+            if radii.len() == 2 {
+                assert!(rel(v, v2) < 1e-6, "edge {e}: {v} against {v2}");
+            } else {
+                assert!(v4 < v && v < v2, "edge {e}: {v} not between {v4} and {v2}");
+            }
+        }
+    }
+}
+
 #[test]
 fn chamfers_by_sides_take_the_face_asked() {
     all_fixes();
