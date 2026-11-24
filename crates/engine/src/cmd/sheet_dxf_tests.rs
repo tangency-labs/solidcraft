@@ -1825,3 +1825,45 @@ fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
     let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
     assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
 }
+
+/// The file for a shop (#17752): a sheet with press-in hardware, exported with the default options,
+/// gives what the same sheet gives with plain holes of the hardware's size and nothing else: the
+/// same layers and entities, the mounting holes as circles, no HARDWARE layer and no note texts.
+/// The hardware is only a property of the hole, so the sheet's STEP is the same too.
+#[test]
+fn a_sheet_with_press_in_hardware_exports_only_the_sheet_and_its_holes() {
+    let mut with = plate_with(&[]);
+    run(&mut with, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut with, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    let listed = run(&mut with, "sheet.flat_pattern", json!({}))["hardware"].as_array().cloned().unwrap_or_default();
+    let diameters: Vec<f64> = listed.iter().filter_map(|h| h["hole_diameter"].as_f64()).collect();
+    assert_eq!(diameters.len(), 2, "{listed:?}");
+    let mut without = plate_with(&[]);
+    for (d, at) in diameters.iter().zip([[30.0, 30.0, 2.5], [70.0, 30.0, 2.5]]) {
+        run(&mut without, "solid.hole", json!({"position": at, "diameter": d}));
+    }
+    let (dxf, plain) = (export(&mut with, json!({})), export(&mut without, json!({})));
+    assert_eq!(layer_table(&dxf), layer_table(&plain));
+    assert!(!layer_table(&dxf).contains_key("HARDWARE"));
+    let (a, b) = (entities(&dxf), entities(&plain));
+    let shapes = |es: &[Entity]| es.iter().map(|e| (e.0.clone(), e.1.clone(), e.2.clone())).collect::<Vec<_>>();
+    assert_eq!(shapes(&a), shapes(&b));
+    assert_eq!(count(&a, "CIRCLE"), 2, "the mounting holes are plain circles");
+    assert!(a.iter().all(|e| e.0 != "TEXT"), "no note texts");
+    assert!(!dxf.contains("nut") && !dxf.contains("stud") && !dxf.contains("HARDWARE"));
+    // STEP: the bodies are all it writes, and the hardware is not a body or a part of one. Its data
+    // section (the header holds the time) is the same as the plain sheet's.
+    let step = |s: &mut Session, name: &str| {
+        // The same file name in a folder of its own: the STEP product is named after the file.
+        let dir = std::env::temp_dir().join(format!("solidcraft-pih-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("sheet.step");
+        run(s, "file.export_step", json!({"path": path.to_string_lossy()}));
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        text.split_once("DATA;").map(|(_, data)| data.to_string()).unwrap_or(text)
+    };
+    let (with_step, plain_step) = (step(&mut with, "with"), step(&mut without, "plain"));
+    assert!(!with_step.is_empty());
+    assert_eq!(with_step, plain_step);
+}
