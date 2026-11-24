@@ -882,6 +882,28 @@ fn measure_summary_keeps_only_the_check_fields() {
     assert_eq!(raw_tool(&mut s, "measure", json!({"summary": "yes"}))["error"]["code"], -32602);
 }
 
+#[test]
+fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
+    let mut s = server();
+    for (name, x) in [("Inside", 0), ("Touching", 10), ("Outside", 30)] {
+        tool(&mut s, "execute", json!({"command":"solid.box","params":{"length":10,"width":10,"height":10,"corner":[x,0,0],"body_name":name}}));
+    }
+    let within = json!({"min":[0,0,0],"max":[10,10,10]});
+    let full = tool(&mut s, "measure", json!({}));
+    assert_eq!(full["body_count"], 3);
+    let intersects = tool(&mut s, "measure", json!({"summary":true,"within":within}));
+    assert_eq!(intersects["body_count"], 2, "{intersects}");
+    assert!((intersects["total"]["volume_mm3"].as_f64().unwrap() - 2000.0).abs() < 1e-6);
+    let inside = tool(&mut s, "measure", json!({"summary":true,"within":within,"mode":"inside"}));
+    assert_eq!(inside["body_count"], 1, "{inside}");
+    assert_eq!(inside["bodies"][0]["name"], "Inside");
+    let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":{"summary":true,"within":within,"mode":"inside"}}]}));
+    assert_eq!(batch["results"][0], inside, "{batch}");
+    let empty = tool(&mut s, "measure", json!({"within":within,"body":"Outside"}));
+    assert_eq!(empty["body_count"], 0, "{empty}");
+    assert_eq!(tool(&mut s, "measure", json!({})), full);
+}
+
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
 #[test]
 fn open_stands_a_y_up_step_file_up() {
