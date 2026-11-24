@@ -657,6 +657,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
         let look = DeferredLook {
             id: "a.on".into(),
             selected: true,
+            kept: false,
             running: false,
             focus_ring: true,
             label: Some("On".into()),

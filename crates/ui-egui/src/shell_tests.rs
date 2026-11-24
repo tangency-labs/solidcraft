@@ -1279,7 +1279,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
                 );
             }
             if width > 1000.0 {
-                h.app.start("construct.plane.offset");
+                h.app.start("sketch.offset");
                 h.settle();
                 let dialog = h.app.viewport.dialog_rect.unwrap();
                 let viewport = h.app.viewport.rect.unwrap();

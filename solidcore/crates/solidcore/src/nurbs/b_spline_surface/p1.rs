@@ -130,7 +130,7 @@ use crate::error::nurbs::BSplineFailure;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1211,7 +1211,11 @@ impl BSplineSurface {
     /// `SM_ERR_NULL_POINTER` without NURB.
     pub fn canonical(&self) -> Result<SurfaceCanonical> {
         let sur = self.nurb_ref().ok_or_else(|| {
-            SolidError::b_spline(OP_GET_CANON, BSplineFailure::Missing("the NURBS form"))
+            SolidError::b_spline_with_status(
+                OP_GET_CANON,
+                BSplineFailure::NoNurbsForm,
+                SM_ERR_NULL_POINTER,
+            )
         })?;
         let (knu, knv) = sur.knot_vectors()?;
         let (u_knots, u_multiplicities) = get_knots(&knu, None);
@@ -2193,7 +2197,7 @@ impl BSplineSurface {
         let Some(&uv) = solutions.first() else {
             return Err(SolidError::b_spline(
                 OP_STEP_INV,
-                BSplineFailure::Failed("the point is not close enough to the surface"),
+                BSplineFailure::NoFootWithinTolerance { tolerance: tol_3d },
             ));
         };
 
@@ -2565,6 +2569,28 @@ mod tests {
         .unwrap()
     }
 
+    /// A point 10 off the plane has no foot within the tolerance: the inversion names
+    /// the tolerance it searched within, class not within tolerance, status `SM_ERR`.
+    #[test]
+    fn step_inversion_of_a_point_off_the_surface_names_its_tolerance() {
+        let k = Kernel::default();
+        let s = bilinear();
+        let dom = s.natural_uv_domain();
+        let e = s
+            .step_inversion(&k, &dom, Point3::new(5.0, 5.0, 10.0), 1e-6, None)
+            .unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 }
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+    }
+
     #[test]
     fn bilinear_counts_and_domain() {
         let s = bilinear();
@@ -2597,7 +2623,7 @@ mod tests {
             s.canonical(),
             Err(e) if e.sm_status() == Some(1006)
                 && e.nurbs_failure()
-                    == Some(&NurbsFailure::BSpline(BSplineFailure::Missing("the NURBS form")))
+                    == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
         assert!(s.copy().gw_nurb().is_none());
         assert!(s.approx_eq(&BSplineSurface::new()));
