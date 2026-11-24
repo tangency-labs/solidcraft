@@ -4425,6 +4425,7 @@ fn a_cylinders_side_face_projected_across_its_axis_is_its_outline() {
     run(&mut s, "component.create", json!({"activate": true}));
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Body1", "face": [15, 0, 15]}], "projection_link": true}));
+    assert_eq!(r["links"][0]["curves"].as_array().map(Vec::len), Some(4), "the rims and the sides, at once: {r}");
     let si = inspect(&mut s);
     let links = si["links"].as_array().unwrap();
     assert!(links.iter().all(|l| l["lost"] != json!(true)), "{r} {si}");

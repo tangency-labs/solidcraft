@@ -354,6 +354,7 @@ fn resolve_uncached(
                     } else {
                         let (g, names) = projected_edges_named(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?)?;
                         let before = g.len();
+                        let g = closed_by_silhouettes(target, plane, f as usize, g);
                         let g = if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g };
                         edge_names = names_kept(names, before, &g);
                         g
