@@ -2384,3 +2384,90 @@ mod reverse_refusal_tests {
         assert!(accepted > 0, "no accepted reversal was checked");
     }
 }
+
+/// #21383: a G1R extension of a rational surface is G1 across the old boundary whatever
+/// its weights. The bases are the 23 golden scripts' rational B-splines whose boundary
+/// weight ratios vary along a side (upstream's ruled row kinked 16 of them, normals
+/// jumping by up to 87 deg). Each is extended by G1R one domain size past every side,
+/// as an offset's extension grows it, and then every weight of the extension is
+/// positive and, at 21 points of each side of the base, the unit normals on its two
+/// sides agree: the sine of the angle between them is at most `1e-12` and they point
+/// the same way (no fold). The derivation is at `ruled_far_row` in
+/// `solidcore::nurbs::srf_adv::p3`.
+#[cfg(test)]
+mod g1r_rational_extension_tests {
+    use super::*;
+    use solidcore::nurbs::crv_adv::p1::CurveEnd;
+    use solidcore::nurbs::srf_adv::p3::{extend_by_param_dist, ExtendContinuity};
+    use solidcore::nurbs::srf_basic::Direction;
+
+    const ROWS: [&str; 23] = [
+        "gen0157", "gen0436", "gen0572", "gen0598", "gen0745", "gen0889", "gen0989", "gen1043",
+        "gen1066", "gen1086", "gen1219", "gen1387", "gen1548", "gen1560", "gen1593", "gen1889",
+        "gen1904", "gen2014", "gen2071", "gen2316", "gen2862", "gen2912", "gen2968",
+    ];
+
+    #[test]
+    fn g1r_extension_of_a_rational_base_is_g1_across_its_sides() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !ROWS.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Ok(Inputs::Script { off, .. }) = c.parse::<Inputs>() else {
+                panic!("{}: not a script", c.name)
+            };
+            let s = rust_off(&k, &off).unwrap().unwrap();
+            let mut base = s.base_surface().clone();
+            while let SurfaceKind::OffsetSurface(o) = base.kind() {
+                base = o.base_surface().clone();
+            }
+            let bn = match base.kind_with_nurb(&k).unwrap() {
+                SurfaceKind::BSpline(b) => b.gw_nurb().cloned(),
+                SurfaceKind::SurfOfRevolution(r) => r.base().gw_nurb().cloned(),
+                SurfaceKind::SurfOfExtrusion(r) => r.base().gw_nurb().cloned(),
+                _ => None,
+            }
+            .unwrap_or_else(|| panic!("{}: no NURB for a {}", c.name, base.type_code()));
+            assert!(bn.is_rational(), "{}", c.name);
+            let d = base.natural_uv_domain_with_nurb(&k).unwrap();
+            let (lo, hi, sz) = (d.min(), d.max(), d.size());
+            let mut e = bn.clone();
+            for (par, dir, end) in [
+                (lo.x - sz.x, Direction::U, CurveEnd::Start),
+                (hi.x + sz.x, Direction::U, CurveEnd::End),
+                (lo.y - sz.y, Direction::V, CurveEnd::Start),
+                (hi.y + sz.y, Direction::V, CurveEnd::End),
+            ] {
+                e = extend_by_param_dist(&e, par, dir, end, ExtendContinuity::G1R)
+                    .unwrap_or_else(|x| panic!("{}: {x}", c.name));
+            }
+            for row in e.cpts() {
+                for cp in row {
+                    assert!(cp.w > 0.0, "{}: weight {}", c.name, cp.w);
+                }
+            }
+            let es = Surface::from(BSplineSurface::from_gw_nurb(&e));
+            for (udir, b) in [(true, lo.x), (true, hi.x), (false, lo.y), (false, hi.y)] {
+                let mut worst = 0.0_f64;
+                for t in 0..=20 {
+                    let f = f64::from(t) / 20.0;
+                    let (uv, l, r) = if udir {
+                        (Point2::new(b, lo.y + f * sz.y), (Side::Left, Side::Left), (Side::Right, Side::Left))
+                    } else {
+                        (Point2::new(lo.x + f * sz.x, b), (Side::Left, Side::Left), (Side::Left, Side::Right))
+                    };
+                    let nl = es.evaluate_normal(&k, uv, l.0, l.1).unwrap();
+                    let nr = es.evaluate_normal(&k, uv, r.0, r.1).unwrap();
+                    worst = worst.max(nl.cross(nr).length());
+                    assert!(nl.dot(nr) > 0.0, "{} side u{udir} {b}: the surface folds back", c.name);
+                }
+                assert!(worst <= 1e-12, "{} side u{udir} {b}: normals differ, sine {worst:e}", c.name);
+            }
+        }
+        assert_eq!(seen, ROWS.len());
+    }
+}
