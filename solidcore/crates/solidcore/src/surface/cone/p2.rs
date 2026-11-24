@@ -1689,6 +1689,33 @@ impl Cone {
         Ok(base)
     }
 
+    /// Not upstream (WR-385, #17228): the rebuild's net on the cylinder of `radius` about
+    /// the axis of `frame` (through its origin along its Z): `None` when `keep_if_on` and
+    /// the net is certified on it as it is (kept), else the net moved onto it by
+    /// [`Self::cylinder_net`] and certified by [`Self::certified_cylinder_net`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::cylinder_net`], [`Self::certified_cylinder_net`] and the
+    /// certificate.
+    fn net_on_axis(
+        &self,
+        frame: &Axis2Placement,
+        height: f64,
+        radii: (f64, f64),
+        radius: f64,
+        keep_if_on: bool,
+    ) -> Result<Option<BSplineSurface>> {
+        let (origin, z) = (frame.origin(), frame.z_axis());
+        // (#17228) a net the certificate already puts on the cylinder is the upstream
+        // result and stays untouched; any other is moved and certified
+        if keep_if_on && self.net_on_cylinder(origin, z, radius)? {
+            return Ok(None);
+        }
+        let moved = self.cylinder_net(origin, z, height, radii, radius)?;
+        Ok(Some(self.certified_cylinder_net(moved, origin, z, radius)?))
+    }
+
     /// Not upstream (#17228): whether [`implicit::lies_on`] certifies the NURB as it is
     /// on the cylinder of `radius` about the axis through `centre` along `z`.
     ///
@@ -1722,7 +1749,9 @@ impl Cone {
     /// describe one surface (WR-385, #713; see [`Self::cylinder_net`]). Radii within
     /// `EFF_ZERO * (1 + bottom_radius)` take the bottom radius, and the net is kept
     /// when certified on that cylinder as it is, else moved onto it and certified
-    /// (#17228). Not upstream (#16982 review): the top circle's plane must be
+    /// (#17228). When neither works about the end circle's normal, the same is tried about
+    /// the centre line through both circles' centres, and a net that passes is recorded
+    /// with that axis (a rigid move of one end within the angle checks). Not upstream (#16982 review): the top circle's plane must be
     /// perpendicular to the axis too.
     ///
     /// # Errors
@@ -1913,7 +1942,13 @@ impl Cone {
         // axis of the placement recorded below so the net and the analytic cylinder
         // share one axis and radius (heights along it run from the placement's end
         // circle to the other one). Computed before any state changes, so a refused net
-        // leaves the cone as it was
+        // leaves the cone as it was. The placement's axis is its end circle's normal
+        // (upstream); when the net is on no cylinder about it, the cylinder about the
+        // centre line through both end circles' centres is tried (#17228): a net whose
+        // end circles were moved rigidly against each other by a little (within the angle
+        // checks) is on that one, up to rounding, and is recorded with it rather than
+        // refused
+        let mut refit_position = None;
         let moved_net = match net_onto_cylinder {
             Some((bot_radius, top_radius, keep_if_on)) => {
                 let (frame, radii) = if inside_out {
@@ -1921,14 +1956,28 @@ impl Cone {
                 } else {
                     (&bot.frame, (bot_radius, top_radius))
                 };
-                let (origin, z) = (frame.origin(), frame.z_axis());
-                // (#17228) a net the certificate already puts on the cylinder is the
-                // upstream result and stays untouched; any other is moved and certified
-                if keep_if_on && self.net_on_cylinder(origin, z, bot.radius)? {
-                    None
+                let centre_z = if frame.z_axis().dot(nurb_z_axis) < 0.0 {
+                    -nurb_z_axis
                 } else {
-                    let moved = self.cylinder_net(origin, z, height, radii, bot.radius)?;
-                    Some(self.certified_cylinder_net(moved, origin, z, bot.radius)?)
+                    nurb_z_axis
+                };
+                // Both axes square to the centre line (the end circle's x axis is square
+                // to its normal, not to the centre line), so the placement's z axis is
+                // the centre line itself
+                let refit_y = centre_z.cross(frame.x_axis());
+                let refit = Axis2Placement::new(frame.origin(), refit_y.cross(centre_z), refit_y);
+                match self.net_on_axis(frame, height, radii, bot.radius, keep_if_on) {
+                    Ok(net) => net,
+                    Err(off) if refit != *frame => {
+                        match self.net_on_axis(&refit, height, radii, bot.radius, keep_if_on) {
+                            Ok(net) => {
+                                refit_position = Some(refit);
+                                net
+                            }
+                            Err(_) => return Err(off),
+                        }
+                    }
+                    Err(off) => return Err(off),
                 }
             }
             None => None,
@@ -1954,7 +2003,8 @@ impl Cone {
         self.base_radius = if inside_out { top.radius } else { bot.radius };
         self.inside_out = inside_out;
         self.rev.planar_generator = true;
-        self.rev.position = if inside_out { top.frame } else { bot.frame };
+        self.rev.position =
+            refit_position.unwrap_or(if inside_out { top.frame } else { bot.frame });
         self.rev.swap_uv = swap_uv;
         if let Some(base) = moved_net {
             self.rev.base = base;
@@ -2992,11 +3042,14 @@ mod tests {
     /// radius and recorded the cylinder whatever the net. A net of exactly equal radii
     /// whose top row is turned 1e-4 rad (middle section 9 (1 - cos 5e-5) = 1.1e-8
     /// inside), or moved 0.01 sideways on a 1000 long cylinder (5.7e-4 degrees off
-    /// the axis, under the 1e-3 degree angle checks; `surface.cone_p2` `gen0152` is this
-    /// shape, 0.353 off at r 2.8, with radii just outside the branch), is now refused
-    /// with the cone, its net and its analytic data unchanged; before, both rebuilt as
-    /// the right cylinder. The untouched cylinder still rebuilds, its net kept bit for
-    /// bit (certified on the cylinder as it is).
+    /// the axis, under the 1e-3 degree angle checks), is now refused with the cone,
+    /// its net and its analytic data unchanged; before, both rebuilt as the right
+    /// cylinder. Neither is on the cylinder about the centre line either (the turn is
+    /// about it; the moved top leaves both circles tilted 1e-5 rad from it, `9 t^2 / 2`
+    /// = 4.5e-10 off it, far beyond rounding at this size; `surface.cone_p2` `gen0152`,
+    /// tilted 1.4e-7 rad at r 2.8 with coordinates near 1e6, is within rounding of its
+    /// centre line and rebuilds there). The untouched cylinder still rebuilds, its net kept
+    /// bit for bit (certified on the cylinder as it is).
     #[test]
     fn rebuild_cylinder_within_eff_zero_certifies_the_net() {
         let k = kernel();
@@ -3057,6 +3110,88 @@ mod tests {
                         assert!(c.is_cylinder_class() && c.semi_angle_deg() == 0.0, "{case}");
                     }
                 }
+            }
+        }
+    }
+
+    /// #17228 (`surface.cone_p2` `gen0291`): a top row moved rigidly sideways by a
+    /// little, 1e-8 on a 1000 long cylinder of radius 9, leaves the net on no cylinder
+    /// about the bottom circle's normal (the top circle is 1e-8 off it, far beyond
+    /// rounding), but on the cylinder about the centre line through both circles'
+    /// centres: tilted `t` = 1e-11 rad from it, each circle is within `9 t^2 / 2` =
+    /// 4.5e-22 of it, below rounding. The rebuild records that cylinder, the net kept bit
+    /// for bit and certified on it, rather than refusing a cylinder.
+    #[test]
+    fn rebuild_cylinder_records_the_centre_line_of_a_slightly_moved_top() {
+        let k = kernel();
+        let shift = 1e-8;
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let mut c = Cone::new_cylinder_bounded(
+                    Vec3::ZERO,
+                    Vec3::X,
+                    Vec3::Y,
+                    9.0,
+                    0.0,
+                    360.0,
+                    1000.0,
+                    swap,
+                    inside,
+                    false,
+                );
+                c.make_nurb(&k).unwrap();
+                let s = c.base_mut().get_or_create_gw_nurb().unwrap();
+                let (n, m) = (s.n(), s.m());
+                let mut moved_z = 0.0;
+                for i in 0..=n {
+                    for j in 0..=m {
+                        if if swap { i == n } else { j == m } {
+                            let p = s.cpt_mut(i, j).unwrap();
+                            p.x += shift * p.w;
+                            moved_z = p.z / p.w;
+                        }
+                    }
+                }
+                let net = net_of(&c);
+                let case = format!("{swap} {inside}");
+                // not on the cylinder about the bottom circle's normal
+                let on_normal = implicit::lies_on(
+                    &c.rev().base,
+                    &implicit::Implicit::Cone {
+                        origin: Vec3::ZERO,
+                        axis: Vec3::Z,
+                        radius: 9.0,
+                        tan_angle: 0.0,
+                    },
+                )
+                .unwrap();
+                assert!(!on_normal, "{case}");
+                c.rebuild_step_from_nurb_parameters(&k).unwrap();
+                assert_eq!(net_of(&c), net, "{case}");
+                assert!(c.is_cylinder_class() && c.semi_angle_deg() == 0.0, "{case}");
+                assert_eq!(c.base_radius(), 9.0, "{case}");
+                let pos = *c.rev().position();
+                let z = pos.z_axis();
+                // along the centre line, from the unmoved circle's centre to the moved
+                // one's (an inside-out net may run down, its last row at z = 0): (1e-8, 0,
+                // 1000) or (1e-8, 0, -1000), up to its sign
+                let tilt = z.x / z.z;
+                let want = if moved_z > 500.0 { shift } else { -shift } / 1000.0;
+                assert!((tilt - want).abs() < 1e-6 * shift / 1000.0, "{case}: {z:?}");
+                assert!(z.y.abs() < 1e-20, "{case}: {z:?}");
+                assert!(
+                    implicit::lies_on(
+                        &c.rev().base,
+                        &implicit::Implicit::Cone {
+                            origin: pos.origin(),
+                            axis: z,
+                            radius: 9.0,
+                            tan_angle: 0.0,
+                        },
+                    )
+                    .unwrap(),
+                    "{case}"
+                );
             }
         }
     }
