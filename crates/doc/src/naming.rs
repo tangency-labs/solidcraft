@@ -983,9 +983,15 @@ pub(crate) fn along_spread(cs: Vec<(usize, Vec3)>) -> Vec<usize> {
     order.into_iter().map(|(j, _)| j).collect()
 }
 
-/// Each face's centre: the mean of the sampled centres of its triangles.
+/// Each face's centre: the area-weighted centroid from the kernel, falling back to sample mean.
 pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
-    samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
+    let nf = face_count(b);
+    if let Ok(fs) = b.body.faces(0.01)
+        && fs.len() == nf
+    {
+        return fs.into_iter().map(|f| f.centroid).collect();
+    }
+    samples(&b.mesh(), nf).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
 }
 
 /// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
