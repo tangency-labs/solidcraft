@@ -473,10 +473,15 @@ impl OffsetExecutive {
                                 original,
                                 b,
                                 f,
-                                next,
-                                true,
-                                sv,
-                                tol,
+                                Gap {
+                                    u: next,
+                                    at_start: true,
+                                    other: this,
+                                    v,
+                                    vertex_point: sv,
+                                    tol,
+                                    original_vertex: vertex,
+                                },
                                 notifications,
                                 closed_edges,
                             )?
@@ -486,10 +491,15 @@ impl OffsetExecutive {
                                 original,
                                 b,
                                 f,
-                                this,
-                                false,
-                                sv,
-                                tol,
+                                Gap {
+                                    u: this,
+                                    at_start: false,
+                                    other: next,
+                                    v,
+                                    vertex_point: sv,
+                                    tol,
+                                    original_vertex: vertex,
+                                },
                                 notifications,
                                 closed_edges,
                             )?
@@ -507,14 +517,30 @@ impl OffsetExecutive {
                                 self.gap_site(original, b, f, Some(next), Some(sv)),
                             ));
                         };
-                        if let Some((from, to)) = segment {
-                            segments.push(GapSegment {
-                                face: f,
-                                from,
-                                to,
-                                tol,
-                                vertex,
-                            });
+                        if let Some((from, to, bridge)) = segment {
+                            // (#21215) the segment as the face's offset face use runs: its
+                            // loop here is the upward one, which runs the other way where
+                            // the input's face use is not on its surface's normal side
+                            let segment = if self.loops_against_input(original, f)? {
+                                GapSegment {
+                                    face: f,
+                                    from: to,
+                                    to: from,
+                                    bridge: reversed(bridge)?,
+                                    tol,
+                                    vertex,
+                                }
+                            } else {
+                                GapSegment {
+                                    face: f,
+                                    from,
+                                    to,
+                                    bridge,
+                                    tol,
+                                    vertex,
+                                }
+                            };
+                            segments.push(segment);
                         }
                         closed = true;
                         break 'loops;
@@ -623,21 +649,35 @@ impl OffsetExecutive {
     }
 
     /// `CloseLoopGap(pFace, pEdgeuse, bAtStart, crVertexPoint, dTol)`: one gap closed
-    /// (see [`OffsetExecutive::close_loop_gaps`]).
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one fork routine
+    /// (see [`OffsetExecutive::close_loop_gaps`]). Returns the segment added to the face's
+    /// loop, its ends as the loop runs and, where it is no straight segment, its curve
+    /// (see [`Self::plane_section_bridge`]); `None` where an edge was trimmed instead.
+    ///
+    /// Not in the fork (#21215): where the gap's end lies on the other edge at the vertex,
+    /// the two edges meet at the gap's end, and that edge is trimmed to it and the vertex
+    /// moved there, instead of the gap's edge running on to the vertex and back along the
+    /// other edge (a loop that doubles back on itself); not in a local operation, whose moved
+    /// faces' edges can be left behind.
+    #[allow(clippy::too_many_lines)] // one fork routine
     fn close_loop_gap(
         &mut self,
         kernel: &mut Kernel,
         original: &Brep,
         b: &mut Brep,
         f: FaceId,
-        u: EdgeuseId,
-        at_start: bool,
-        vertex_point: Point3,
-        tol: f64,
+        gap: Gap,
         notifications: &mut OffsetNotifications<'_>,
         closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
-    ) -> Result<Option<(Point3, Point3)>> {
+    ) -> Result<Option<(Point3, Point3, Option<BSplineCurve>)>> {
+        let Gap {
+            u,
+            at_start,
+            other,
+            v,
+            vertex_point,
+            tol,
+            original_vertex,
+        } = gap;
         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
         let surface = b
             .face(f)?
@@ -708,6 +748,27 @@ impl OffsetExecutive {
             }
         }
 
+        // (#21215) The gap's end on the other edge at the vertex: the two edges cross
+        // there, so the other edge is trimmed back to the gap's end and the vertex moved
+        // to it. Not in a local operation: there a moved face's edge can be left behind
+        // at its old place (`a_far_top_on_a_unit_square_plane_is_refused_as_not_sound`),
+        // its end on the other edge where the two do not meet.
+        if self.operation() != OffsetOperation::LocalOperation
+            && self.trim_other_to_gap_end(
+                kernel,
+                original,
+                b,
+                f,
+                other,
+                (v, vertex_point),
+                gap_end,
+                tol,
+                notifications,
+            )?
+        {
+            return Ok(None);
+        }
+
         // The straight segment must lie on the face's surface (as extended for the offset:
         // the face's own surface ends at its old boundary). Its far end is no farther past
         // the face than its length.
@@ -719,6 +780,7 @@ impl OffsetExecutive {
             .get_create_extended_surface(kernel, key, &surface, margin)?
             .clone();
         let ext_domain = ext.natural_uv_domain_with_nurb(kernel)?;
+        let mut straight = true;
         for ii in 1..4 {
             let w = f64::from(ii) / 4.0;
             let pnt = vertex_point + (gap_end - vertex_point) * w;
@@ -731,16 +793,40 @@ impl OffsetExecutive {
                 tol,
                 SolutionRequested::Single,
             )?;
-            let on = sols.first().is_some_and(|s| s.solution_value <= tol);
-            if !on {
-                // The bridge could not be established within tolerance. Refuse here,
-                // before the result is judged.
-                return Err(self.loop_gap_uncertified(original, f));
+            if !sols.first().is_some_and(|s| s.solution_value <= tol) {
+                straight = false;
+                break;
             }
         }
 
-        // The segment, from the vertex to the gap end, joined at the gap end.
-        let mut segment = BSplineCurve::create_line_segment(3, vertex_point, gap_end)?;
+        // The segment, from the vertex to the gap end, joined at the gap end: straight
+        // where that lies on the face's surface, else the face's section by the plane of
+        // the offset face that holds both ends (#21215).
+        let (mut segment, bridge) = if straight {
+            (
+                BSplineCurve::create_line_segment(3, vertex_point, gap_end)?,
+                None,
+            )
+        } else {
+            match self.plane_section_bridge(
+                kernel,
+                original,
+                b,
+                f,
+                &ext,
+                original_vertex,
+                [vertex_point, gap_end],
+                tol,
+                notifications,
+            )? {
+                Some(c) => (c.clone(), Some(c)),
+                None => {
+                    // The bridge could not be established within tolerance. Refuse here,
+                    // before the result is judged.
+                    return Err(self.loop_gap_uncertified(original, f));
+                }
+            }
+        };
         curve.join_with(kernel, !at_curve_start, &mut segment, true, Some(tol))?;
 
         // Where they join: the parameter of the gap end on the joined curve.
@@ -757,6 +843,12 @@ impl OffsetExecutive {
                 )
             })?
             .0;
+        // a bridge that is no straight segment meets the edge at a kink: its knot
+        let joint = if bridge.is_some() {
+            kink_at(&curve, joint, gap_end, tol)?
+        } else {
+            joint
+        };
 
         // The edge takes the joined curve and is split at the joint.
         set_edge_curve(kernel, b, e, curve, notifications)?;
@@ -791,10 +883,235 @@ impl OffsetExecutive {
         // the segment as the face's loop runs: from the vertex to the gap where the gap is
         // at the edge use's start, else from the gap to the vertex
         Ok(Some(if at_start {
-            (vertex_point, gap_end)
+            (vertex_point, gap_end, bridge)
         } else {
-            (gap_end, vertex_point)
+            (gap_end, vertex_point, reversed(bridge)?)
         }))
+    }
+
+    /// Whether offset face `f`'s upward loops run against the loops of the input's face use
+    /// it is the offset of (#21215): the input's face use is not the upward one of its face,
+    /// so the result's face use of `f` is the one below its surface, whose loops run the
+    /// other way. The segments of faces whose surfaces face opposite ways then still run
+    /// one way round a gap between them. `false` where `f` is the offset of no single input
+    /// face use.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries.
+    fn loops_against_input(&self, original: &Brep, f: FaceId) -> Result<bool> {
+        let [fu] = self.faceuse_to_faces.firsts(f)[..] else {
+            return Ok(false);
+        };
+        let Some(face) = eu::faceuse_face(original, fu)? else {
+            return Ok(false);
+        };
+        Ok(face2::upward_faceuse(original, face)? != Some(fu))
+    }
+
+    /// `close_loop_gap`'s trim of the `other` edge use at the gap's vertex `v` (#21215): where
+    /// `gap_end`, the end of the gap's edge away from the vertex, lies on `other`'s curve
+    /// within `tol`, the two edges meet there, not at the vertex. `other`'s curve is trimmed
+    /// so that its end at the vertex (the end nearer the vertex's point, where `other`'s
+    /// use ends or starts within the gap's tolerance) is at `gap_end`, and the vertex moved
+    /// to `gap_end`. Without the trim the gap's edge would run
+    /// on to the vertex along `other` and the loop come back over it.
+    ///
+    /// Returns whether it trimmed; `false` where `gap_end` is not on `other`'s curve.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::offset::OffsetFailure::EdgeVanishes`] where `gap_end` is at or past
+    /// `other`'s far end; those of the curve edits and the vertex move.
+    #[allow(clippy::too_many_arguments)]
+    fn trim_other_to_gap_end(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        f: FaceId,
+        other: EdgeuseId,
+        (v, vertex_point): (VertexId, Point3),
+        gap_end: Point3,
+        tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<bool> {
+        let e = eu::edge(b, other)?.ok_or_else(|| null("edge use without edge"))?;
+        let Some(trimmed) = edge::create_trimmed_nurbs_curve(kernel, b, e)? else {
+            return Ok(false);
+        };
+        let CurveKind::BSpline(curve) = trimmed.kind() else {
+            return Ok(false);
+        };
+        let mut curve = curve.clone();
+        let ivl = curve.natural_interval();
+        let Some((at, value)) = closest_on(kernel, &curve, &ivl, gap_end, tol)? else {
+            return Ok(false);
+        };
+        if value > tol {
+            return Ok(false);
+        }
+        // the curve's end at the vertex
+        let at_curve_start = curve.evaluate_point(ivl.min())?.distance(vertex_point)
+            <= curve.evaluate_point(ivl.max())?.distance(vertex_point);
+        let mut keep = if at_curve_start {
+            Extent1d::from_min_max(at, ivl.max())
+        } else {
+            Extent1d::from_min_max(ivl.min(), at)
+        };
+        if keep.length() <= EFF_ZERO * (1.0 + ivl.max_dimension()) {
+            // the gap's end at the other edge's far end: that edge vanishes
+            let input_edge = self.original_edge(original, b, other).ok().flatten();
+            return Err(self.edge_vanishes(original, f, input_edge));
+        }
+        curve.trim(kernel, &mut keep, TrimMode::Notify)?;
+        let new_ivl = curve.natural_interval();
+        set_edge_curve(kernel, b, e, curve, notifications)?;
+        edge::set_interval(b, e, &new_ivl)?;
+        let key_of = notifications.result_key_of;
+        crate::topology::vertex::set_point(
+            b,
+            v,
+            gap_end,
+            &mut *notifications.records,
+            &mut *notifications.attributes,
+            None,
+            key_of(EntityRef::Vertex(v)),
+            &|vu| key_of(EntityRef::Vertexuse(vu)),
+        )?;
+        Ok(true)
+    }
+
+    /// `close_loop_gap`'s bridge where the straight segment between `ends` (the vertex,
+    /// then the gap's end) is not on the face's surface `ext` (as extended), #21215: the
+    /// two ends are corners of the offset of `original_vertex` where the offsets of faces
+    /// tangent along an edge cross a third face's offset at different points (a tube's
+    /// rounded corner joined to a loft's at a crease: the tube's round and side and the
+    /// loft's round and side meet the tube's side's offset at two points), and the gap runs
+    /// along the third face. Where that face's surface is a plane holding both ends within
+    /// `tol`, the bridge is the section of `ext` by that plane between the ends: an offset
+    /// face of one of the faces at `original_vertex`, the plane extended as the face's own
+    /// offset is. Its curve runs from the first end to the second, its ends within `tol` of
+    /// them, and its control polygon lies within `tol` of the plane, which bounds the curve
+    /// there.
+    ///
+    /// Returns `None` where no such plane holds both ends, or no single open section through
+    /// both ends is found.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries, the extension, the curve solves and the trim; a
+    /// cancelled intersection.
+    #[allow(clippy::too_many_arguments)]
+    fn plane_section_bridge(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &Brep,
+        f: FaceId,
+        ext: &Surface,
+        original_vertex: Option<VertexId>,
+        ends: [Point3; 2],
+        tol: f64,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<Option<BSplineCurve>> {
+        let Some(v0) = original_vertex else {
+            return Ok(None);
+        };
+        let at_vertex = crate::topology::vertex::faces(original, v0)?;
+        let [from, to] = ends;
+        for g in bp1::faces(b, None)? {
+            if g == f {
+                continue;
+            }
+            let mut of_vertex = false;
+            for fu in self.faceuse_to_faces.firsts(g) {
+                if eu::faceuse_face(original, fu)?.is_some_and(|o| at_vertex.contains(&o)) {
+                    of_vertex = true;
+                }
+            }
+            if !of_vertex {
+                continue;
+            }
+            let Some(surface) = b.face(g)?.surface.as_ref() else {
+                continue;
+            };
+            let SurfaceKind::Plane(plane) = surface.kind() else {
+                continue;
+            };
+            let (origin, normal, _) = plane.is_planar();
+            let Ok(normal) = normal.unitize() else {
+                continue;
+            };
+            let off = |p: Point3| (p - origin).dot(normal).abs();
+            if off(from) > tol || off(to) > tol {
+                continue;
+            }
+            let surface = surface.clone();
+            let key = (notifications.result_key_of)(EntityRef::Face(g)).key.0;
+            let margin = self.offset_extension_margin(g).max(from.distance(to));
+            let plane_ext = self
+                .get_create_extended_surface(kernel, key, &surface, margin)?
+                .clone();
+            let (curves, status) = crate::intersect::api_intersectors::intersect_surfaces_within(
+                kernel,
+                ext,
+                &plane_ext,
+                Some(0.25 * tol),
+            );
+            if let Err(e) = status {
+                if e.is_cancelled() {
+                    return Err(e);
+                }
+                // no section of this plane: another plane may still hold both ends
+                continue;
+            }
+            let mut found: Option<BSplineCurve> = None;
+            for c in &curves {
+                let CurveKind::BSpline(section) = c.kind() else {
+                    continue;
+                };
+                let ivl = section.natural_interval();
+                if section
+                    .evaluate_point(ivl.min())?
+                    .distance(section.evaluate_point(ivl.max())?)
+                    <= tol
+                {
+                    // a closed section has two ways between the ends
+                    continue;
+                }
+                let (Some((t0, d0)), Some((t1, d1))) = (
+                    closest_on(kernel, section, &ivl, from, tol)?,
+                    closest_on(kernel, section, &ivl, to, tol)?,
+                ) else {
+                    continue;
+                };
+                if d0 > tol || d1 > tol || (t1 - t0).abs() <= EFF_ZERO * (1.0 + ivl.max_dimension())
+                {
+                    continue;
+                }
+                if found.is_some() {
+                    // two sections through both ends: none is the bridge
+                    return Ok(None);
+                }
+                let mut piece = section.clone();
+                let mut keep = Extent1d::from_min_max(t0.min(t1), t0.max(t1));
+                piece.trim(kernel, &mut keep, TrimMode::Notify)?;
+                if t0 > t1 {
+                    let whole = piece.natural_interval();
+                    piece.reverse_parameterization(&whole)?;
+                }
+                let (polygon, _) = piece.control_polygon()?;
+                if polygon.iter().any(|&p| off(p) > tol) {
+                    continue;
+                }
+                found = Some(piece);
+            }
+            if found.is_some() {
+                return Ok(found);
+            }
+        }
+        Ok(None)
     }
 
     /// `CloseLoopGap`'s closed edge (fork ccbf77a): when the edge's other vertex is at
@@ -1122,16 +1439,80 @@ fn straight_edge_ends(
     )))
 }
 
-/// A straight segment `close_loop_gap` added to an offset face's loop: the face, the
-/// segment's ends in the direction the face's loop runs, the gap's tolerance, and the
-/// original vertex the gap is at (where the gap's edge use has one original edge use).
+/// The parameter to split the joined `curve` at near `param`, the nearest point of `joint`
+/// on it: the knot there where the curve is only continuous (a joint of two curves meeting
+/// at an angle) and whose point is within `tol` of `joint`, else `param`. A split beside the
+/// knot would leave the kink inside one piece.
+///
+/// # Errors
+///
+/// Those of the knot query and the evaluation.
+fn kink_at(curve: &BSplineCurve, param: f64, joint: Point3, tol: f64) -> Result<f64> {
+    let degree = curve.degree()?;
+    let (knots, multiplicities) = curve.knots(None)?;
+    let mut best: Option<f64> = None;
+    for (&k, &m) in knots.iter().zip(&multiplicities) {
+        if m < degree || curve.evaluate_point(k)?.distance(joint) > tol {
+            continue;
+        }
+        if best.is_none_or(|b| (k - param).abs() < (b - param).abs()) {
+            best = Some(k);
+        }
+    }
+    Ok(best.unwrap_or(param))
+}
+
+/// `curve` run the other way, keeping its interval.
+fn reversed(curve: Option<BSplineCurve>) -> Result<Option<BSplineCurve>> {
+    let Some(mut c) = curve else {
+        return Ok(None);
+    };
+    let ivl = c.natural_interval();
+    c.reverse_parameterization(&ivl)?;
+    Ok(Some(c))
+}
+
+/// One gap of an offset face's loop at vertex `v` (at `vertex_point`), as
+/// `close_loop_gaps` found it: the edge use `u` whose end lies away from the vertex (its
+/// start where `at_start`), the `other` edge use at the vertex, the gap's tolerance and the
+/// original vertex the gap is the offset of, where known.
 #[derive(Clone, Copy)]
+struct Gap {
+    u: EdgeuseId,
+    at_start: bool,
+    other: EdgeuseId,
+    v: VertexId,
+    vertex_point: Point3,
+    tol: f64,
+    original_vertex: Option<VertexId>,
+}
+
+/// A segment `close_loop_gap` added to an offset face's loop: the face, the segment's ends
+/// in the direction the face's loop runs, its curve in that direction where it is no
+/// straight segment (a plane's section of the face's surface, #21215), the gap's tolerance,
+/// and the original vertex the gap is at (where the gap's edge use has one original edge
+/// use).
+#[derive(Clone)]
 struct GapSegment {
     face: FaceId,
     from: Point3,
     to: Point3,
+    bridge: Option<BSplineCurve>,
     tol: f64,
     vertex: Option<VertexId>,
+}
+
+/// A polygon of [`OffsetExecutive::cap_vertex_gaps`]: its corners in order, each side's
+/// curve where it is a curved segment (`None`: straight), its tolerance, its original
+/// vertex and the edge it is closed along.
+struct CapPolygon {
+    corners: Vec<Point3>,
+    sides: Vec<Option<BSplineCurve>>,
+    tol: f64,
+    vertex: Option<VertexId>,
+    /// The straight edge the polygon is closed along, from its last corner to its first,
+    /// where its segments do not close it.
+    along: Option<EdgeId>,
 }
 
 impl GapSegment {
@@ -1180,13 +1561,13 @@ impl OffsetExecutive {
         if segments.len() < 2 {
             return Ok(());
         }
-        let mut polygons: Vec<(Vec<Point3>, f64, Option<VertexId>)> = Vec::new();
+        let mut polygons: Vec<CapPolygon> = Vec::new();
         {
             let b = self.offset_brep().ok_or_else(|| null("no offset B-rep"))?;
             let mut open: Vec<GapSegment> = Vec::new();
             for s in segments {
                 if !bordered_elsewhere(b, s)? {
-                    open.push(*s);
+                    open.push(s.clone());
                 }
             }
             let mut used: BTreeSet<usize> = BTreeSet::new();
@@ -1207,7 +1588,7 @@ impl OffsetExecutive {
                 }) {
                     let Some(c) = open.get(j) else { break };
                     used.insert(j);
-                    after.push(*c);
+                    after.push(c.clone());
                     end = c.from;
                     last_tol = c.tol;
                     if end.distance(start) <= max2(first_tol, last_tol) {
@@ -1223,7 +1604,7 @@ impl OffsetExecutive {
                     };
                     let Some(c) = open.get(j) else { break };
                     used.insert(j);
-                    before.push(*c);
+                    before.push(c.clone());
                     start = c.to;
                     first_tol = c.tol;
                     closed = start.distance(end) <= max2(first_tol, last_tol);
@@ -1231,43 +1612,325 @@ impl OffsetExecutive {
                 let chain: Vec<GapSegment> = before
                     .into_iter()
                     .rev()
-                    .chain(std::iter::once(*s))
+                    .chain(std::iter::once(s.clone()))
                     .chain(after)
                     .collect();
                 // the polygon's own tolerance: the largest of its segments'
                 let tol = chain.iter().fold(0.0, |t, c| max2(t, c.tol));
                 let mut corners: Vec<Point3> = chain.iter().map(|c| c.to).collect();
+                // side i runs from corner i to the next: segment i backwards
+                let mut sides: Vec<Option<BSplineCurve>> = Vec::new();
+                for c in &chain {
+                    sides.push(reversed(c.bridge.clone())?);
+                }
+                let mut along = None;
                 if !closed {
-                    if chain.len() < 2 || !along_an_edge(kernel, b, end, start, tol)? {
+                    if chain.len() < 2 {
                         continue;
                     }
+                    let Some(e) = along_an_edge(kernel, b, end, start, tol)? else {
+                        continue;
+                    };
                     corners.push(end);
+                    sides.push(None);
+                    along = Some(e);
                 }
                 let vertex = s
                     .vertex
                     .filter(|_| chain.iter().all(|c| c.vertex == s.vertex));
                 if corners.len() >= 3 {
-                    polygons.push((corners, tol, vertex));
+                    polygons.push(CapPolygon {
+                        corners,
+                        sides,
+                        tol,
+                        vertex,
+                        along,
+                    });
                 }
             }
         }
-        for (corners, tol, vertex) in polygons {
-            self.cap_gap_polygon(kernel, &corners, tol, vertex, notifications)?;
+        for polygon in polygons {
+            if let Some(e) = polygon.along {
+                let mut b = self
+                    .take_offset_brep()
+                    .ok_or_else(|| null("no offset B-rep"))?;
+                let r = Self::widen_face_over_polygon(kernel, &mut b, &polygon, e, notifications);
+                self.set_offset_brep(b);
+                if r? {
+                    continue;
+                }
+            }
+            self.cap_gap_polygon(kernel, &polygon, notifications)?;
         }
         Ok(())
     }
 
-    /// One polygon of [`Self::cap_vertex_gaps`], its `corners` in order: its plane face,
-    /// made when the corners lie on one plane within `tol` and its area is clear of zero,
-    /// and related to its original vertex where one is known.
+    /// Not in the fork (#21215): a polygon of [`Self::cap_vertex_gaps`] closed along the
+    /// straight edge `along` of an offset face whose plane holds the whole polygon, its
+    /// corners and its curved sides' control polygons within its tolerance, with one end of
+    /// the closing stretch at an end vertex `w` of `along` and the other inside it. The
+    /// polygon is then part of that face: the stretch of its boundary along `along` gives
+    /// way to the polygon's other sides. The face's other edge at `w` runs on through them
+    /// (joined to them and split at each corner), `w` moves to the stretch's other end and
+    /// `along` is trimmed to it. A plane face of its own there would meet the face across a
+    /// stretch where the polygon's curved side runs tangent into `along` (the section of a
+    /// round's offset by the plane, where the round is tangent to a plane that crosses it
+    /// along `along`), which the merge cannot join.
+    ///
+    /// Returns whether the face took the polygon; `false` leaves the polygon to its own face.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries, the curve joins and edits, the vertex move and the
+    /// splits.
+    #[allow(clippy::too_many_lines)] // one edit of one loop
+    fn widen_face_over_polygon(
+        kernel: &mut Kernel,
+        b: &mut Brep,
+        polygon: &CapPolygon,
+        along: EdgeId,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<bool> {
+        let CapPolygon {
+            corners,
+            sides,
+            tol,
+            ..
+        } = polygon;
+        let tol = *tol;
+        let (Some(&start), Some(&end)) = (corners.first(), corners.last()) else {
+            return Ok(false);
+        };
+        if corners.len() < 3 || sides.len() != corners.len() {
+            return Ok(false);
+        }
+        let [g] = crate::query::edge::edge_faces(b, along)?[..] else {
+            return Ok(false);
+        };
+        let Some(surface) = b.face(g)?.surface.as_ref() else {
+            return Ok(false);
+        };
+        let SurfaceKind::Plane(plane) = surface.kind() else {
+            return Ok(false);
+        };
+        let (origin, normal, _) = plane.is_planar();
+        let Ok(normal) = normal.unitize() else {
+            return Ok(false);
+        };
+        let off = |p: Point3| (p - origin).dot(normal).abs();
+        if corners.iter().any(|&p| off(p) > tol) {
+            return Ok(false);
+        }
+        for curve in sides.iter().flatten() {
+            let (points, _) = curve.control_polygon()?;
+            if points.iter().any(|&p| off(p) > tol) {
+                return Ok(false);
+            }
+        }
+        // the stretch's end at an end vertex of `along`, and its other end inside it
+        let ends = crate::query::edge::edge_vertices(b, along)?;
+        let [v0, v1] = ends[..] else {
+            return Ok(false);
+        };
+        let (p0, p1) = (b.vertex(v0)?.point, b.vertex(v1)?.point);
+        let at_end = |p: Point3| {
+            if p.distance(p0) <= tol {
+                Some(v0)
+            } else if p.distance(p1) <= tol {
+                Some(v1)
+            } else {
+                None
+            }
+        };
+        // the path from `w` to the stretch's other end over the polygon's other sides
+        let n = corners.len();
+        let side = |i: usize| -> Result<BSplineCurve> {
+            match (
+                sides.get(i),
+                corners.get(i),
+                corners.get(i.saturating_add(1)),
+            ) {
+                (Some(Some(c)), _, _) => Ok(c.clone()),
+                (_, Some(&p), Some(&q)) => BSplineCurve::create_line_segment(3, p, q),
+                _ => Err(null("polygon side without corners")),
+            }
+        };
+        // the sides but the closing stretch, the last
+        let sides_before_stretch = n.saturating_sub(1);
+        let (w, inside, path, joints) = match (at_end(start), at_end(end)) {
+            (Some(w), None) => {
+                let mut path = Vec::new();
+                for i in 0..sides_before_stretch {
+                    path.push(side(i)?);
+                }
+                let joints: Vec<Point3> =
+                    corners.iter().take(sides_before_stretch).copied().collect();
+                (w, end, path, joints)
+            }
+            (None, Some(w)) => {
+                let mut path = Vec::new();
+                for i in (0..sides_before_stretch).rev() {
+                    if let Some(c) = reversed(Some(side(i)?))? {
+                        path.push(c);
+                    }
+                }
+                let joints: Vec<Point3> = corners.iter().skip(1).rev().copied().collect();
+                (w, start, path, joints)
+            }
+            _ => return Ok(false),
+        };
+        if inside.distance(p0) <= tol || inside.distance(p1) <= tol {
+            return Ok(false);
+        }
+        let w_point = b.vertex(w)?.point;
+        // the face's other edge at `w`
+        let mut others = Vec::new();
+        for e in face4::edges(b, g, None, false, None)? {
+            if e != along && crate::query::edge::edge_vertices(b, e)?.contains(&w) {
+                others.push(e);
+            }
+        }
+        let [t] = others[..] else {
+            return Ok(false);
+        };
+        let curve_of = |kernel: &Kernel, b: &mut Brep, e: EdgeId| -> Result<Option<BSplineCurve>> {
+            let Some(trimmed) = edge::create_trimmed_nurbs_curve(kernel, b, e)? else {
+                return Ok(None);
+            };
+            Ok(match trimmed.kind() {
+                CurveKind::BSpline(c) => Some(c.clone()),
+                _ => None,
+            })
+        };
+        let (Some(mut joined), Some(mut trimmed_along)) =
+            (curve_of(kernel, b, t)?, curve_of(kernel, b, along)?)
+        else {
+            return Ok(false);
+        };
+        // `along` keeps its part from `inside` to its far end
+        let along_ivl = trimmed_along.natural_interval();
+        let Some((at, value)) = closest_on(kernel, &trimmed_along, &along_ivl, inside, tol)? else {
+            return Ok(false);
+        };
+        if value > tol {
+            return Ok(false);
+        }
+        let along_starts_at_w = trimmed_along
+            .evaluate_point(along_ivl.min())?
+            .distance(w_point)
+            <= trimmed_along
+                .evaluate_point(along_ivl.max())?
+                .distance(w_point);
+        let mut keep = if along_starts_at_w {
+            Extent1d::from_min_max(at, along_ivl.max())
+        } else {
+            Extent1d::from_min_max(along_ivl.min(), at)
+        };
+        if keep.length() <= EFF_ZERO * (1.0 + along_ivl.max_dimension()) {
+            return Ok(false);
+        }
+        // the other edge runs on from `w` over the path
+        let t_ivl = joined.natural_interval();
+        let t_ends_at_w = joined.evaluate_point(t_ivl.max())?.distance(w_point)
+            <= joined.evaluate_point(t_ivl.min())?.distance(w_point);
+        for piece in path {
+            if t_ends_at_w {
+                let mut piece = piece;
+                joined.join_with(kernel, true, &mut piece, false, Some(tol))?;
+            } else if let Some(mut piece) = reversed(Some(piece))? {
+                joined.join_with(kernel, false, &mut piece, true, Some(tol))?;
+            }
+        }
+        trimmed_along.trim(kernel, &mut keep, TrimMode::Notify)?;
+        let new_along = trimmed_along.natural_interval();
+        set_edge_curve(kernel, b, along, trimmed_along, notifications)?;
+        edge::set_interval(b, along, &new_along)?;
+        let new_t = joined.natural_interval();
+        set_edge_curve(kernel, b, t, joined, notifications)?;
+        edge::set_interval(b, t, &new_t)?;
+        let key_of = notifications.result_key_of;
+        crate::topology::vertex::set_point(
+            b,
+            w,
+            inside,
+            &mut *notifications.records,
+            &mut *notifications.attributes,
+            None,
+            key_of(EntityRef::Vertex(w)),
+            &|vu| key_of(EntityRef::Vertexuse(vu)),
+        )?;
+        // a vertex at each corner the edge now runs through
+        for joint in joints {
+            let mut split = false;
+            for e in face4::edges(b, g, None, false, None)? {
+                if e == along {
+                    continue;
+                }
+                let Some(c) = curve_of(kernel, b, e)? else {
+                    continue;
+                };
+                let ivl = c.natural_interval();
+                let Some((param, value)) = closest_on(kernel, &c, &ivl, joint, tol)? else {
+                    continue;
+                };
+                let param = kink_at(&c, param, joint, tol)?;
+                if value > tol
+                    || c.evaluate_point(ivl.min())?.distance(joint) <= tol
+                    || c.evaluate_point(ivl.max())?.distance(joint) <= tol
+                {
+                    continue;
+                }
+                let mut stores = NotificationStores {
+                    records: &mut *notifications.records,
+                    attributes: &mut *notifications.attributes,
+                    key_of: notifications.result_key_of,
+                };
+                let mut state = NotifyState::from_kernel_stores(&mut stores);
+                let output = make_vertex_split_edge_with_state(
+                    kernel,
+                    b,
+                    e,
+                    param,
+                    &mut state,
+                    notifications.result_curve_ref,
+                )?;
+                split = output.split;
+                break;
+            }
+            if !split {
+                // the corner lies within an end vertex's tolerance along the edge, which the
+                // checks above put farther than the tolerance from both its ends: two checks
+                // of the kernel's own edge disagree, a defect
+                return Err(gap_failure(
+                    OffsetFailure::SplitAtEdgeEnd {
+                        face: None,
+                        vertex_tolerance: end_vertex_tolerance(b, t)?,
+                    },
+                    Site::default(),
+                ));
+            }
+        }
+        Ok(true)
+    }
+
+    /// One polygon of [`Self::cap_vertex_gaps`], its corners in order: its plane face,
+    /// made when the corners (and a curved side's control polygon) lie on one plane within
+    /// its tolerance and its area is clear of zero, and related to its original vertex where
+    /// one is known. A side is straight, or the curve of the segment it is.
     fn cap_gap_polygon(
         &mut self,
         kernel: &mut Kernel,
-        corners: &[Point3],
-        tol: f64,
-        vertex: Option<VertexId>,
+        polygon: &CapPolygon,
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
+        let CapPolygon {
+            corners,
+            sides: curved,
+            tol,
+            vertex,
+            ..
+        } = polygon;
+        let (tol, vertex) = (*tol, *vertex);
         let Some(&origin) = corners.first() else {
             return Ok(());
         };
@@ -1285,6 +1948,12 @@ impl OffsetExecutive {
         let n = normal.unitize()?;
         if corners.iter().any(|&p| (p - origin).dot(n).abs() > tol) {
             return Ok(());
+        }
+        for curve in curved.iter().flatten() {
+            let (points, _) = curve.control_polygon()?;
+            if points.iter().any(|&p| (p - origin).dot(n).abs() > tol) {
+                return Ok(());
+            }
         }
         let Some(&second) = corners.get(1) else {
             return Ok(());
@@ -1308,8 +1977,11 @@ impl OffsetExecutive {
         let mut plane = Plane::new(origin, x_axis, y_axis, Vec2::new(1.0, 1.0), &domain);
         plane.make_nurb()?;
         let mut curves = Vec::new();
-        for (&p, &q) in sides() {
-            curves.push(Curve::from(BSplineCurve::create_line_segment(3, p, q)?));
+        for (k, (&p, &q)) in sides().enumerate() {
+            curves.push(Curve::from(match curved.get(k) {
+                Some(Some(curve)) => curve.clone(),
+                _ => BSplineCurve::create_line_segment(3, p, q)?,
+            }));
         }
         let orientations = vec![OrientType::Same; curves.len()];
         let mut stores = NotificationStores {
@@ -1384,11 +2056,11 @@ fn only(
     found.next().is_none().then_some(first)
 }
 
-/// Whether an edge of `b` runs along the straight stretch from `p` to `q`: a straight edge
+/// The edge of `b` that runs along the straight stretch from `p` to `q`, if any: a straight edge
 /// (its control points within `tol` of one line, so the whole curve is) with both ends of
 /// the stretch within `tol` of it. The distance to a straight segment is convex, so the
 /// whole stretch is then within `tol` of the edge.
-fn along_an_edge(k: &Kernel, b: &Brep, p: Point3, q: Point3, tol: f64) -> Result<bool> {
+fn along_an_edge(k: &Kernel, b: &Brep, p: Point3, q: Point3, tol: f64) -> Result<Option<EdgeId>> {
     for &e in b.edge_list() {
         let Some(curve) = b.edge(e)?.curve.as_ref() else {
             continue;
@@ -1400,10 +2072,10 @@ fn along_an_edge(k: &Kernel, b: &Brep, p: Point3, q: Point3, tol: f64) -> Result
             Ok(closest_point(k, b, e, x)?.is_some_and(|cp| cp.distance <= tol))
         };
         if near(p)? && near(q)? {
-            return Ok(true);
+            return Ok(Some(e));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 /// One corner's planned edits (see [`OffsetExecutive::split_corner_vertices`]): the

@@ -163,7 +163,7 @@ job (§5.1).
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
-| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance: neither the straight segment across the gap nor the face's section by a plane offset face holding both ends lies on the face | the original input face, when available | always | `offset_executive/step_gaps.rs` |
 
 The loop-gap search's own failures are defects, not refusals (class `stage_failed`, status `SM_ERR`): the gaps are in the offset loops the kernel built, so the input is not what fails (#21059).
 
@@ -310,6 +310,17 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
   along the normal). If all or none are cavity, every region is kept. This is a local test, not
   S4's winding number.
+- **The loop gaps** (`offset_executive/step_gaps.rs`, `close_loop_gaps`): where an input vertex's
+  faces' offsets do not meet in one point, a face's loop has a gap between its two edges at the
+  vertex. Where the gap's end lies on the other edge, that edge is trimmed to it and the vertex
+  moved there (not in a local operation, whose moved faces' edges can be left behind). Otherwise
+  the gap's edge runs on to the vertex: straight where the segment lies on the face's extended
+  surface, else along the face's section by the plane of another offset face at the vertex that
+  holds both ends (#21215: the offsets of a round and its side, tangent, cross a third face's
+  offset at two points). The segments no other face borders bound a polygon (`cap_vertex_gaps`),
+  filled by its own plane face, or taken into the plane face along whose straight edge it closes
+  when that face's plane holds it. A face's segments are oriented by the input's face use, so
+  faces whose surfaces face opposite ways chain into one polygon.
 
 Without `extend_convex_edges` the rounded offset closes convex edges with cylinders and vertices
 with spheres (`edgeuse_offset`, `vertex_offset`, `offset_geometry_creation.rs`).
