@@ -4774,4 +4774,36 @@ mod tests {
             assert!(output.rejected.is_none(), "{name}: {output:?}");
         }
     }
+
+    /// WR-441 (`crate::bstuv_trim_rows`): the offset rows whose trims keep their short end
+    /// spans: `gen0074`'s edge use 15 and `gen0400`'s edge use 23, in each of the three
+    /// bodies the runner writes. Each is certified on its edge within the edge's tolerance
+    /// (`trims_on_edges::certify_edgeuse`, a rounded-interval bound both ways, refined to an
+    /// eighth of the tolerance). These are the only trims of the bodies whose certificates
+    /// differ from upstream's cleanup (measured when the PR retiring the flag was written).
+    #[test]
+    #[ignore = "replays two offsets; see crate::bstuv_trim_rows"]
+    fn bstuv_offset_moved_trims_lie_on_their_edges() {
+        for (name, eu) in [("gen0074", 15), ("gen0400", 23)] {
+            let case = crate::case::regression_case(&Runner, name);
+            crate::certify::watch_written();
+            let _ = Runner.run_rust(&case).unwrap();
+            let bodies = crate::certify::take_written();
+            assert_eq!(bodies.len(), 3, "{name}: the written bodies");
+            for b in &bodies {
+                let x = EdgeuseId::from_index(eu);
+                let e = b.edgeuse(x).unwrap().edge.unwrap();
+                let tol = b.edge(e).unwrap().tolerance;
+                let cert =
+                    crate::trims_on_edges::certify_edgeuse(&Kernel::default(), b, x, 0.125 * tol)
+                        .unwrap();
+                eprintln!("BSTUV {name}: {cert:?}");
+                assert!(
+                    cert.holds(),
+                    "{name}: edge use {x:?}'s trim is {:e} off edge {e:?} (tolerance {tol:e})",
+                    cert.bound
+                );
+            }
+        }
+    }
 }

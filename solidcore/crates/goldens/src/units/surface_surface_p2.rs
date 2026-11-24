@@ -3243,4 +3243,45 @@ mod tests {
             );
         }
     }
+
+    /// WR-441 (`crate::bstuv_trim_rows`): the intersection row whose UV curves keep their
+    /// short end spans. Each moved UV curve, on both surfaces, has its end spans certified
+    /// on the 3D intersection curve within the intersection's tolerance: a rounded-interval
+    /// Hausdorff bound between `C` and `S(W)`. The moved curves are listed by their control
+    /// point counts, the ones the row records.
+    #[test]
+    #[ignore = "certifies intersection curves; see crate::bstuv_trim_rows"]
+    fn bstuv_intersection_kept_spans_lie_on_their_curves() {
+        let name = "ssi_adv_ssi_clasic_ruled_f0_f0";
+        let case = crate::case::regression_case(&Runner, name);
+        let input: Inputs = case.parse().unwrap();
+        let mut first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi { dom, other, other_dom, tol, translate } = input.op else {
+            panic!("{name}: not an intersection case")
+        };
+        let mut second = Surface::from(bss_of(&other).unwrap());
+        let k = Kernel::default();
+        if let Some(t) = translate {
+            let mut ax = Axis2Placement::default();
+            ax.translate(v3(t));
+            first.transform(&k, &ax, None).unwrap();
+            second.transform(&k, &ax, None).unwrap();
+        }
+        let r = first
+            .global_surface_intersect(&k, &dom_of(dom), &second, &dom_of(other_dom), [true, true], tol, None)
+            .unwrap();
+        let tol = tol.expect("an intersection tolerance");
+        for (j, n) in [(1, 15), (3, 6)] {
+            let uv = [&r.surface1_uv_curves[j], &r.surface2_uv_curves[j]];
+            for (side, (s, w)) in [&first, &second].into_iter().zip(uv).enumerate() {
+                let w = w.as_ref().expect("a UV curve");
+                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, &r.curves_3d[j], w);
+                eprintln!("BSTUV {name} curve {j} side {side}: {ends:?} (tolerance {tol:e})");
+                assert_eq!(ends.n, n, "curve {j} side {side}: the row's UV curve");
+                for b in ends.bound {
+                    assert!(b <= tol, "curve {j} side {side}: an end span {b:e} off its curve");
+                }
+            }
+        }
+    }
 }

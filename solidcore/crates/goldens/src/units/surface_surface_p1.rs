@@ -1532,4 +1532,46 @@ mod tests {
         assert_eq!(listed_seen, listed.len(), "every listed case is a DomCont case");
         assert!(lines_seen > 0);
     }
+
+    /// WR-441 (`crate::bstuv_trim_rows`): the silhouette rows whose UV curves keep their short
+    /// end spans. A parallel projection splits each traced curve at its interior points with
+    /// a tangent parallel to the view, and trims its UV curve at the same intervals. Each
+    /// moved UV curve's end spans are certified on the 3D curve within the trace's
+    /// tolerance (`pOptApproxTol3d`): a rounded-interval Hausdorff bound between `C` and
+    /// `S(W)`. The moved curves are listed by their control point counts, the ones the row
+    /// records.
+    #[test]
+    #[ignore = "certifies traced curves; see crate::bstuv_trim_rows"]
+    fn bstuv_silhouette_kept_spans_lie_on_their_curves() {
+        let moved: [(&str, &[(usize, usize)]); 2] = [
+            ("sil0048", &[(4, 1389)]),
+            ("sil_adv_20_torus_f0", &[(2, 96), (3, 96), (5, 108)]),
+        ];
+        for (name, curves) in moved {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let OpIn::Sil { dom, eye, perspective, tol, ang, translate } = &i.op else {
+                panic!("{name}: not a silhouette case")
+            };
+            let k = Kernel::default();
+            let mut s = surface_in(&i.surf).unwrap();
+            if let Some(t) = translate {
+                let mut ax = Axis2Placement::default();
+                ax.translate(v3(*t));
+                s.transform(&k, &ax, None).unwrap();
+            }
+            let (c3, cuv) = s
+                .create_silhouette_curves(&k, &dom_of(*dom), v3(*eye), *perspective, *tol, *ang)
+                .unwrap();
+            let tol = tol.expect("a trace tolerance");
+            for &(j, n) in curves {
+                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, &s, &c3[j], &cuv[j]);
+                eprintln!("BSTUV {name} curve {j}: {ends:?} (tolerance {tol:e})");
+                assert_eq!(ends.n, n, "{name} curve {j}: the row's UV curve");
+                for b in ends.bound {
+                    assert!(b <= tol, "{name} curve {j}: an end span {b:e} off its curve");
+                }
+            }
+        }
+    }
 }
