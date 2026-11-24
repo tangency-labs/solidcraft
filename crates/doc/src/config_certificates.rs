@@ -438,13 +438,16 @@ impl<'a> ExactSketchCurves<'a> {
     }
 
     /// The one free-form sketch curve (an ellipse, conic or spline) a generated segment is a
-    /// whole piece of, either way round: one of the exact segments the curve is made of. A
-    /// segment two curves share stays ambiguous.
+    /// whole piece of, or a trimmed part of a cubic span, either way round. A segment
+    /// two curves share stays ambiguous.
     pub(crate) fn find_free_form(&self, generated: &Seg2) -> Option<String> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| *original == *generated || *original == reversed) {
+            if originals
+                .iter()
+                .any(|original| *original == *generated || *original == reversed || solidcore_ops::prism::cubic_contains(original, generated))
+            {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -1022,6 +1025,32 @@ mod tests {
         ] {
             assert!(validate_certificate_json(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_cubic_cut_by_a_sketch_crossing_keeps_its_source() {
+        use solidcore_record::Vec2;
+        let span = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(2., 4.), p2: Vec2::new(6., -1.), p3: Vec2::new(8., 2.) };
+        let trimmed = span.part(0.125, 0.875);
+        let mut sources = ExactSketchCurves { segments: vec![], free_form: vec![("s1", vec![span])] };
+        assert_eq!(sources.find_free_form(&trimmed).as_deref(), Some("s1"));
+        assert_eq!(sources.find_free_form(&trimmed.reversed()).as_deref(), Some("s1"));
+        let Seg2::Cubic { p0, p1, p2, p3 } = trimmed else { panic!("a trimmed cubic remains cubic") };
+        let different = Seg2::Cubic { p0, p1: p1 + Vec2::Y, p2, p3 };
+        assert_eq!(sources.find_free_form(&different), None);
+        sources.free_form.push(("s2", vec![trimmed]));
+        assert_eq!(sources.find_free_form(&trimmed), None);
+    }
+
+    #[test]
+    fn a_trim_starting_near_a_coordinate_turn_keeps_its_source_in_both_directions() {
+        use solidcore_record::Vec2;
+        // x(t) = 3t(1-t) rounds to 0.75 at the trim. y(t) = 0.375t still separates it from t = 0.5.
+        let span = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1., 0.125), p2: Vec2::new(1., 0.25), p3: Vec2::new(0., 0.375) };
+        let piece = span.part(0.5 + 2_f64.powi(-30), 0.875);
+        let sources = ExactSketchCurves { segments: vec![], free_form: vec![("s1", vec![span])] };
+        assert_eq!(sources.find_free_form(&piece).as_deref(), Some("s1"));
+        assert_eq!(sources.find_free_form(&piece.reversed()).as_deref(), Some("s1"));
     }
 
     #[test]

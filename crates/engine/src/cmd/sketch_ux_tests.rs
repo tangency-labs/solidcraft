@@ -2524,6 +2524,31 @@ fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
     assert_eq!(s.model.state().bodies.len(), 1);
 }
 
+/// #15414: another edit that finishes the sketch (the Extrude key pressed by mistake) leaves the
+/// sketch's own steps in the history apart: one Undo takes back one change of the sketch, not
+/// the whole session the person had drawn.
+#[test]
+fn undo_after_another_edit_finished_the_sketch_takes_back_one_change() {
+    let (mut s, id) = sketch_below_a_solid();
+    // The person opens the sketch and draws a circle and a line in it.
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 6}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 20], [-10, 25]]}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+    // The Extrude key by mistake: it finishes the sketch and makes the solid.
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    assert_eq!(s.active_sketch, None, "the sketch is finished");
+    // One Undo takes the extrude back; the sketch keeps every curve the person drew.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6, "the sketch keeps every curve");
+    // The next Undo takes back ONE change of the sketch, not the whole session.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5, "one change of the sketch is taken back");
+    // And the next one takes back the other, still one at a time.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4, "the other change is taken back too");
+}
+
 /// #14010: a sketch with features after it, opened by `sketch.edit` without `restore_marker`
 /// (as MCP calls it), is edited with the timeline rolled to it: each sketch command evaluates up
 /// to the sketch only, and the later features are rebuilt once, at Finish. A save made during the

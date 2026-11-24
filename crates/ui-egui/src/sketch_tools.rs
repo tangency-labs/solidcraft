@@ -1224,8 +1224,9 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
 /// side (the engine refuses it), and construction curves are ignored when more than two meet.
-/// Each side must be a line, or an arc for a fillet.
-pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
+/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open control
+/// point spline (#9178).
+pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, curves_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
         .curves
@@ -1239,7 +1240,12 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    let takes = |c: &solidcraft_engine::sketch::Curve| match c.kind {
+        CurveKind::Line { .. } => true,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => curves_ok,
+        _ => false,
+    };
+    if curves.iter().any(|(_, c)| !takes(c)) {
         return None;
     }
     match curves[..] {
@@ -1250,7 +1256,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
-pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
+pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, curves_ok: bool) -> Option<(Vec2, String)> {
     let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
@@ -1262,7 +1268,7 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, pi, arcs_ok)?;
+            corner_curves(sk, pi, curves_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))

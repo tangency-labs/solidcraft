@@ -108,6 +108,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch_construction_lines",
             "prefs.construction_line_classic",
             "prefs.sketch_mirror_auto_line",
+            "prefs.region_pick_takes_holes",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
@@ -174,6 +175,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.construction_line_classic,
                 );
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(
+                    ui,
+                    "region_pick_takes_holes",
+                    "prefs.region_pick_takes_holes",
+                    Some("prefs.region_pick_takes_holes_note"),
+                    &mut app.preferences.region_pick_takes_holes,
+                );
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
@@ -254,6 +262,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.projection_workflow_ui",
                     Some("prefs.sketch.projection_workflow_ui_note"),
                     &mut app.preferences.projection_workflow_ui,
+                );
+                check(
+                    ui,
+                    "sketch_move_classic",
+                    "prefs.sketch_move_classic",
+                    Some("prefs.sketch_move_classic_note"),
+                    &mut app.preferences.sketch_move_classic,
                 );
                 check(
                     ui,
@@ -728,5 +743,6 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
             });
             ui.data_mut(|data| data.insert_temp(key, (app.preferences.dimension_colour, hex)));
         });
+        setting::dimension_rim(app, ui);
     });
 }

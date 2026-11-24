@@ -19,16 +19,43 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-pub use solidcore_ops::develop::{Bent, Fold, crossings, curve_through, hermite};
+pub use solidcore_ops::develop::Bent;
+pub use solidcore_ops::develop::Fold;
+pub use solidcore_ops::develop::crossings;
+pub use solidcore_ops::develop::curve_through;
+pub use solidcore_ops::develop::hermite;
 pub use solidcore_ops::query::Query;
-pub use solidcore_record::develop::{
-    Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, EdgeFrom, FlatPanel, Joint, JointKind, Lap, Mismatch, Panel, Relief, Rigid2, Rigid3,
-    Rip, Sheet, Surface, Tail, Trim, Zone, ZoneEnds,
-};
+pub use solidcore_record::develop::Anchor;
+pub use solidcore_record::develop::Bend;
+pub use solidcore_record::develop::Corner;
+pub use solidcore_record::develop::CornerRelief;
+pub use solidcore_record::develop::Cut;
+pub use solidcore_record::develop::Datum;
+pub use solidcore_record::develop::Development;
+pub use solidcore_record::develop::EdgeFrom;
+pub use solidcore_record::develop::FlatPanel;
+pub use solidcore_record::develop::Joint;
+pub use solidcore_record::develop::JointKind;
+pub use solidcore_record::develop::Lap;
+pub use solidcore_record::develop::Mismatch;
+pub use solidcore_record::develop::Panel;
+pub use solidcore_record::develop::Relief;
+pub use solidcore_record::develop::Rigid2;
+pub use solidcore_record::develop::Rigid3;
+pub use solidcore_record::develop::Rip;
+pub use solidcore_record::develop::Sheet;
+pub use solidcore_record::develop::Surface;
+pub use solidcore_record::develop::Tail;
+pub use solidcore_record::develop::Trim;
+pub use solidcore_record::develop::Zone;
+pub use solidcore_record::develop::ZoneEnds;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
 pub mod prelude {
-    pub use solidcore_ops::develop::{BendOps as _, LapOps as _, Rigid2Ops as _, Rigid3Ops as _};
+    pub use solidcore_ops::develop::BendOps as _;
+    pub use solidcore_ops::develop::LapOps as _;
+    pub use solidcore_ops::develop::Rigid2Ops as _;
+    pub use solidcore_ops::develop::Rigid3Ops as _;
 }
 
 use solidcore_ops::develop::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};

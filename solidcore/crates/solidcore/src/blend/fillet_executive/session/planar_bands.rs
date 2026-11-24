@@ -14,6 +14,9 @@
 //! do not establish a constant kept domain and therefore name no size here. Interior
 //! witnesses must clear every incident selected planar straight-edge chamfer strip;
 //! unsupported moving corners name no size. All clearance products use expansions.
+//! The width event itself is compared exactly but read through the rounding of the feet's
+//! own coordinates (`gamma(32)` of their size): bands that meet to that rounding do not
+//! overlap, and a gap proved under the widths by more than it does.
 
 mod family;
 mod interval;
@@ -527,6 +530,27 @@ fn closest_feet(
     }))
 }
 
+/// Whether a gap (its exact square, `gap_squared`) is under `widths` (exactly `exact_widths`)
+/// by more than `rounding`: `gap < widths - rounding`. For a rounding below the widths that
+/// is `gap^2 - widths^2 < -(2 widths - rounding) rounding`, compared exactly. A rounding
+/// that reaches the widths leaves no gap proved under them: at such a size the coordinates
+/// do not tell the two bands apart.
+fn gap_proved_under(
+    gap_squared: &[f64],
+    exact_widths: &[f64],
+    widths: f64,
+    rounding: f64,
+) -> Result<bool> {
+    if rounding.is_nan() || rounding >= widths {
+        return Ok(false);
+    }
+    let slack = interval::mul(&[2.0 * widths - rounding], &[rounding])?;
+    Ok(exact::sign(&interval::add(
+        &interval::sub(gap_squared, &interval::mul(exact_widths, exact_widths)?)?,
+        &slack,
+    )?) < 0)
+}
+
 /// Construct the retained normal contact and classify its closed width event.
 /// The witness location is retained for the caller's trimmed-face classification.
 pub(super) fn retained_contact(
@@ -592,10 +616,16 @@ pub(super) fn retained_contact(
         gap_squared = interval::add(&gap_squared, &interval::mul(&delta, &delta)?)?;
     }
     let exact_widths = interval::add(&[a.width], &[b.width])?;
-    let overlapping = exact::sign(&interval::sub(
-        &gap_squared,
-        &interval::mul(&exact_widths, &exact_widths)?,
-    )?) < 0;
+    // The feet are the model's own points, each coordinate a few roundings off the designed
+    // one: a face meant 2 wide measured 1.9999999999999991 between an edge a cut left at
+    // z = 6.000000000000001 and one at 8 (#20450), and two 1 mm bands that exactly meet on it
+    // read as overlapping by 9e-16. The bands overlap only when the gap is proved under
+    // their widths by more than those roundings can account for, as a contact is read
+    // ([`crate::geom::tol::within_contact_tol`]): `gamma(32)` of the largest coordinate
+    // involved.
+    let size = foot_a.max_dimension().max(foot_b.max_dimension()) + widths;
+    let rounding = crate::nurbs::math::gamma(32) * size;
+    let overlapping = gap_proved_under(&gap_squared, &exact_widths, widths, rounding)?;
     let rho = a
         .offsets
         .first()
@@ -651,4 +681,39 @@ pub(super) fn contact(
     }
     contact.at = crate::topology::face::p2::calculate_an_internal_point(k, target, contact.face)?;
     Ok(Some(contact))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `gap < widths - rounding`, for a gap `g` and two widths of 1.
+    fn proved(g: f64, rounding: f64) -> bool {
+        let squared = interval::mul(&[g], &[g]).unwrap();
+        let widths = interval::add(&[1.0], &[1.0]).unwrap();
+        gap_proved_under(&squared, &widths, 2.0, rounding).unwrap()
+    }
+
+    /// Two bands overlap when the gap is under their widths by more than the rounding of the
+    /// coordinates it was measured on, and not otherwise: an exact meeting, the 9e-16
+    /// shortfall of #20450 and a shortfall of exactly the rounding are no overlap; one past
+    /// it is. A rounding that reaches the widths (coordinates near 2e15 for widths of 2)
+    /// proves no overlap, whatever the gap.
+    #[test]
+    fn a_gap_is_under_the_widths_only_past_its_rounding() {
+        let rounding = crate::nurbs::math::gamma(32) * 10.0;
+        assert!(!proved(2.0, rounding));
+        assert!(!proved(1.999_999_999_999_999_1, rounding));
+        assert!(!proved(2.0 - rounding, rounding));
+        assert!(proved(2.0 - 4.0 * rounding, rounding));
+        assert!(proved(1.98, rounding));
+        // with no rounding the comparison is the exact one
+        assert!(!proved(2.0, 0.0));
+        assert!(proved(1.999_999_999_999_999_1, 0.0));
+        for rounding in [2.0, 2.5, 3.0, 5.0, f64::INFINITY, f64::NAN] {
+            for g in [1e-9, 0.5, 1.0, 1.9, 2.0, 3.0] {
+                assert!(!proved(g, rounding), "{g} {rounding}");
+            }
+        }
+    }
 }

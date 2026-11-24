@@ -1955,12 +1955,7 @@ pub(crate) fn refresh_sketch_links_with(
                 }
                 // An edge or vertex link saved without a name takes the name of the geometry it was
                 // found on. A sketch that is edited stores it; evaluation leaves the design as it is.
-                if l.edge_name.is_none()
-                    && let Some(name) = resolved_edge_name(st, &r)
-                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
-                {
-                    link.edge_name = Some(name);
-                }
+                let new_edge_name = l.edge_name.is_none().then(|| resolved_edge_name(st, &r)).flatten();
                 if l.vertex_name.is_none()
                     && let Some(name) = resolved_vertex_name(st, &r)
                     && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
@@ -1989,6 +1984,13 @@ pub(crate) fn refresh_sketch_links_with(
                 } else {
                     sk.update_link_detail(&l.id, &geom)
                 };
+                // A name captured from a point on this rebuild did not identify
+                // the saved curve. Publish it only after matching the old link.
+                if let Some(name) = new_edge_name
+                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
+                {
+                    link.edge_name = Some(name);
+                }
                 match updated {
                     Ok(update) => {
                         if let Some(m) = &motion {

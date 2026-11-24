@@ -3294,7 +3294,15 @@ fn ball_on_face_along_arc(
         }
     }
     let [e0, e1] = feet;
-    let Ok(axis) = e0.cross(e1).unitize() else {
+    // One point or opposite within the tolerance (the cross product is the radius squared
+    // times the sine of their angle, a chord of the radius times that angle): a round along
+    // a whole closed edge starts and ends at its seam, its feet there a rounding apart, and
+    // the arc between them is no evidence of a ball lying on the face (#20411)
+    let normal = e0.cross(e1);
+    if normal.length() <= radius * tol {
+        return Ok(None);
+    }
+    let Ok(axis) = normal.unitize() else {
         return Ok(None);
     };
     let (Ok(x), Ok(y)) = (e0.unitize(), axis.cross(e0).unitize()) else {
