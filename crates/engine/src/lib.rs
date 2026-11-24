@@ -2682,29 +2682,34 @@ impl Session {
                 return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
             }
             if r.error.is_some()
-                && solved_before.contains_key(&r.id)
+                && let Some(before) = solved_before.get(&r.id)
                 && let Ok(sk) = self.doc.sketch(r.id)
                 && (!sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty())
             {
                 let vals = self.doc.evaluation_values();
                 let mut trial = sk.clone();
-                let offset_err = match self.doc.apply_dimension_values(&vals, &mut trial) {
-                    Ok(()) => {
-                        let mut solved_trial = sk.clone();
-                        self.doc
-                            .solve_sketch_with_analysis(
-                                &vals,
-                                &mut solved_trial,
-                                &sk.driving_values(),
-                                Some(sk),
-                                solidcraft_sketch::Analysis::StatusOnly,
-                            )
-                            .err()
-                            .map(|e| e.to_string())
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        msg.contains("offset dimension").then_some(msg)
+                let applied = self.doc.apply_dimension_values(&vals, &mut trial);
+                let offset_err = if own_values(&trial) == *before {
+                    None
+                } else {
+                    match applied {
+                        Ok(()) => {
+                            let mut solved_trial = sk.clone();
+                            self.doc
+                                .solve_sketch_with_analysis(
+                                    &vals,
+                                    &mut solved_trial,
+                                    &sk.driving_values(),
+                                    Some(sk),
+                                    solidcraft_sketch::Analysis::StatusOnly,
+                                )
+                                .err()
+                                .map(|e| e.to_string())
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            msg.contains("offset dimension").then_some(msg)
+                        }
                     }
                 };
                 if let Some(e) = offset_err {
