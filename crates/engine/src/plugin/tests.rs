@@ -2378,6 +2378,30 @@ mod native {
         assert!(refused.contains("needs the storage capability"), "{refused}");
     }
     #[test]
+    fn cancelling_a_long_job_changes_nothing() {
+        let f = Fixture::new("call $box (loop br 0)");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","job":true}]);
+        m["runtime"]["limits"]["fuel"] = json!(u64::MAX / 2);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_limits.max_fuel = u64::MAX;
+        let before = s.doc.to_json();
+        // Cancelled from the operations panel (its watch), it stops and nothing of it lands. The
+        // job's own deadline is tested in the runtime crate.
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        let stop = progress.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stop.cancel();
+        });
+        let failure = solidcraft_doc::progress::watch(progress, || f.run(&mut s)).unwrap_err().to_string();
+        canceller.join().unwrap();
+        assert!(failure.contains("cancelled"), "{failure}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 0));
+    }
+
+    #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut m = manifest();
@@ -2756,6 +2780,45 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+#[test]
+fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_is_in_scope() {
+    // #20493: under `--allow-path`, `New/Deep/x.json` in an allowed folder needs folders that do not exist yet.
+    let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let outside = root.with_file_name(format!("solidcraft-plugin-new-outside-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&outside);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut session = Session::default();
+    session.plugin_state.file_grants = vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }];
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), true).is_ok(), "two missing levels inside the scope");
+        assert!(host.authorize_file_path(&root.join("New/Deep/x.json"), false).is_err(), "a read still needs the path to exist");
+        assert!(host.authorize_file_path(&root.join("../elsewhere/New/x.json"), true).is_err(), "outside the scope");
+        assert!(host.authorize_file_path(&outside.join("New/Deep/x.json"), true).is_err(), "a missing folder under an out-of-scope one");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            assert!(host.authorize_file_path(&root.join("link/New/Deep/x.json"), true).is_err(), "an existing link out of scope");
+        }
+    });
+    assert!(!root.join("New").exists() && !outside.join("New").exists(), "checking creates nothing");
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&outside);
 }
 
 /// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
@@ -3455,6 +3518,32 @@ mod install_zip {
         assert!(!root.join("plugins").exists(), "even the plugins root and staging folders stay unwritten");
         assert!(s.plugin_state.grants.is_empty());
         assert!(s.plugin_state.packages.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// #20814: a write that finds another write in progress waits for it, so a job the app gave up on
+    /// never overlaps the next install or removal.
+    #[test]
+    fn a_package_write_waits_for_the_write_in_progress() {
+        let (_s, root) = session("write-lock");
+        let plugin = unpack(&gears("0.1.0")).unwrap();
+        let dir = root.join("plugins");
+        let held = crate::plugin::install::write_lock();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let dir = dir.clone();
+            move || {
+                let result = crate::plugin::install::install(&plugin, &dir, false);
+                let _ = finished.send(());
+                result
+            }
+        });
+        assert!(done.recv_timeout(std::time::Duration::from_millis(300)).is_err(), "the second write started while the first held the lock");
+        assert!(!dir.exists(), "nothing was written yet");
+        drop(held);
+        assert!(done.recv_timeout(std::time::Duration::from_secs(60)).is_ok(), "the waiting write runs once the lock is free");
+        assert!(worker.join().unwrap().is_ok());
+        assert!(dir.join("gears").join("plugin.json").exists());
         let _ = std::fs::remove_dir_all(root);
     }
 

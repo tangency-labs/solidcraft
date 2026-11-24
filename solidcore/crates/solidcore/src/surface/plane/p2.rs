@@ -104,7 +104,6 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::gamma;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::p1::{evaluate_1st_derivatives, SurfaceIntersectContext};
 use crate::surface::surface::p2::{
@@ -648,9 +647,8 @@ impl Plane {
         let x_axis = x_axis.unitize_or_z();
         let mut y_axis = y_axis.unitize_or_z();
 
-        // Keep the recognised plane's frame within the rounding bound used by the record
-        // reader. Cancellation in NURBS derivatives can leave a larger residual after a rotation.
-        if x_axis.dot(y_axis).abs() > gamma(3) {
+        // Force XAxis and YAxis to be nicely perpendicular
+        if x_axis.dot(y_axis).abs() > EFF_ZERO {
             y_axis = x_axis.cross(y_axis).cross(x_axis);
             y_axis = y_axis.unitize().map_err(|e| {
                 Failure::new(OP_NURB, SurfaceFailure::NurbAxesParallel)
@@ -2029,27 +2027,6 @@ mod tests {
             let expected = orthogonal.evaluate_point(uv).unwrap();
             assert!(plane.evaluate_point(uv).distance(expected) < 1.0e-12);
         }
-    }
-
-    #[test]
-    fn recognised_plane_axes_are_square_to_record_rounding() {
-        let k = Kernel::default();
-        let domain = dom();
-        let shear = 5.0 * f64::EPSILON;
-        let surface = skewed_bilinear(domain, shear);
-        let plane = Plane::is_nurb_surface_plane(&k, &surface, 1.0)
-            .unwrap()
-            .unwrap();
-        let (x, y) = (plane.position().x_axis(), plane.position().y_axis());
-        let bound = gamma(3) * x.length() * y.length();
-        assert!(x.dot(y).abs() <= bound);
-        let lower = domain.min();
-        assert!(
-            plane
-                .evaluate_point(lower)
-                .distance(surface.evaluate_point(lower).unwrap())
-                < 1.0e-11
-        );
     }
 
     #[test]

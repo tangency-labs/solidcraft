@@ -354,22 +354,11 @@ fn cutters_in_frame(
     Ok(tools)
 }
 
-/// The box cutters as one record compound, or `None` when a side has no slots to cut.
+/// The cutters gathered without sewing, or `None` when a side has no slots to cut.
 fn compound_tools(tools: &[crate::Body]) -> Result<Option<crate::Body>> {
-    if tools.is_empty() {
-        return Ok(None);
+    match tools {
+        [] => Ok(None),
+        [tool] => tool.copy().map(Some),
+        _ => crate::stitch::gather(&tools.iter().collect::<Vec<_>>()).map(Some),
     }
-    let records = tools
-        .iter()
-        .map(|tool| tool.to_record().map(|(record, _)| record))
-        .collect::<Result<Vec<_>>>()?;
-    let refs: Vec<_> = records.iter().collect();
-    if records.len() == 1 {
-        let record = records.first().ok_or(crate::Error::Argument)?;
-        return crate::Body::from_record(record, true).map(|(body, _)| Some(body));
-    }
-    let compound = solidcore_record::brep::part::compound(&refs)
-        .map_err(|_| crate::Error::Argument)?
-        .brep;
-    crate::Body::from_record(&compound, true).map(|(body, _)| Some(body))
 }

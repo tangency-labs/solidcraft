@@ -726,9 +726,16 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         // What the export noted (a mesh that is not a clean closed surface, a face short of its
         // shape) goes to stderr, as a newer file's warnings do, unless --quiet: the file is
         // written, but not silently.
-        if !args.iter().any(|a| a == "--quiet") {
+        let quiet = args.iter().any(|a| a == "--quiet");
+        // A body left out of the file is said whatever --quiet says: a part is missing from it.
+        for line in skipped_body_lines(out, &reply) {
+            eprintln!("{line}");
+        }
+        if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
-                eprintln!("{out}: warning: {w}");
+                if !w.contains(SKIPPED_NOTE) {
+                    eprintln!("{out}: warning: {w}");
+                }
             }
         }
     }
@@ -744,6 +751,23 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         print_json(&m, json_out)?;
     }
     Ok(())
+}
+
+/// What an export's note for a body it could not mesh has after the body's name.
+const SKIPPED_NOTE: &str = ": skipped: meshing failed";
+
+/// One line for each body the export of `out` left out because it could not be meshed, naming the
+/// body and why: `reply` is `file.export`'s.
+fn skipped_body_lines(out: &str, reply: &Value) -> Vec<String> {
+    let notes = reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    notes
+        .filter_map(|w| w.split_once(SKIPPED_NOTE))
+        .map(|(body, why)| {
+            let why = why.trim().trim_start_matches('(').trim_end_matches(')');
+            let because = if why.is_empty() { String::new() } else { format!(": {why}") };
+            format!("{out}: warning: body {body} is NOT in this file, it could not be meshed{because}")
+        })
+        .collect()
 }
 
 /// Only this standalone CLI invocation changes directory, before the renderer or session starts.
@@ -1580,7 +1604,7 @@ mod tests {
     use serde_json::json;
     use solidcraft_engine::Session;
 
-    use super::read_session;
+    use super::{read_session, skipped_body_lines};
 
     /// A file removed when the test ends, failed or not.
     struct Temp(std::path::PathBuf);
@@ -1622,5 +1646,21 @@ mod tests {
             .unwrap();
         assert!(s.model.last_recomputed > 0, "evaluated while profiling");
         assert_eq!(volume(&s).to_bits(), volume(&built).to_bits());
+    }
+
+    /// A body left out of an export is named on its own line, with why, and the line is the same
+    /// whether or not the file's other notes are shown.
+    #[test]
+    fn a_body_left_out_of_an_export_is_named_on_stderr() {
+        let reply = json!({
+            "path": "out.stl",
+            "skipped": ["BrokenSliver"],
+            "warnings": ["Bolt: face 3 is short of its chord tolerance", "BrokenSliver: skipped: meshing failed (BrokenSliver: tessellation: face 7 (cylinder))"]
+        });
+        let lines = skipped_body_lines("out.stl", &reply);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].starts_with("out.stl: warning: body BrokenSliver is NOT in this file"), "{lines:?}");
+        assert!(lines[0].contains("face 7"), "{lines:?}");
+        assert!(skipped_body_lines("out.stl", &json!({"path": "out.stl", "warnings": ["Bolt: a note"]})).is_empty());
     }
 }

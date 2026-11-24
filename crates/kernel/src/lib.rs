@@ -433,6 +433,9 @@ pub use solidcore_ops::member_turn::parallel_turn;
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
+/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
+/// stops with it (a sketch solve).
+pub use solidcraft_smlib::stop::token as stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::SplitTool;
 pub use splitface::face_split_if_on_face;
