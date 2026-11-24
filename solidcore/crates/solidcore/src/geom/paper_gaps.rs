@@ -159,6 +159,40 @@ pub fn cut(
     Ok(result)
 }
 
+/// The stroke from `a` to `b` lengthened by `overshoot` past each end along its own direction, as
+/// a centre line reaches past the points it joins; with no `overshoot`, whether its ends are apart.
+/// The ends may lie anywhere finite (a caller bounds them to its paper); `overshoot` is within
+/// 0..=5000 paper units, as [`cut`]'s margin is.
+///
+/// # Errors
+/// Rejects non-finite input or output, an out-of-range `overshoot`, and ends that coincide.
+pub fn extend(a: [f64; 2], b: [f64; 2], overshoot: f64) -> Result<([f64; 2], [f64; 2])> {
+    let bad = || SolidError::InvalidInput {
+        operation: "geom::paper_gaps::extend",
+        reason: "non-finite or coincident paper stroke ends",
+    };
+    let finite = |p: [f64; 2]| p.into_iter().all(f64::is_finite);
+    if !finite(a)
+        || !finite(b)
+        || !overshoot.is_finite()
+        || !(0.0..=MAX_MARGIN).contains(&overshoot)
+    {
+        return Err(bad());
+    }
+    let (a, b) = (Vec2::from_array(a), Vec2::from_array(b));
+    let d = b - a;
+    let length = d.length();
+    if !length.is_finite() || length <= EPS {
+        return Err(bad());
+    }
+    let along = d * (overshoot / length);
+    let (start, end) = ((a - along).to_array(), (b + along).to_array());
+    if !finite(start) || !finite(end) {
+        return Err(bad());
+    }
+    Ok((start, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +302,27 @@ mod tests {
                     < scale * 1e-12
             );
         }
+    }
+
+    #[test]
+    fn extend_lengthens_both_ends_along_the_stroke_and_refuses_coincident_ends() {
+        let (start, end) = extend([1.0, 1.0], [4.0, 5.0], 2.5).unwrap();
+        // The stroke is 3-4-5, so 2.5 along it is (1.5, 2.0).
+        assert!((start[0] + 0.5).abs() < 1e-12 && (start[1] + 1.0).abs() < 1e-12);
+        assert!((end[0] - 5.5).abs() < 1e-12 && (end[1] - 7.0).abs() < 1e-12);
+        assert_eq!(
+            extend([2.0, 3.0], [7.0, 3.0], 0.0).unwrap(),
+            ([2.0, 3.0], [7.0, 3.0])
+        );
+        assert!(extend([2.0, 3.0], [2.0, 3.0], 1.0).is_err());
+        assert!(extend([0.0, 0.0], [1.0, 0.0], f64::NAN).is_err());
+        assert!(extend([0.0, 0.0], [1.0, 0.0], 5_001.0).is_err());
+        assert!(extend([0.0, f64::INFINITY], [1.0, 0.0], 1.0).is_err());
+        assert!(extend([-f64::MAX, 0.0], [f64::MAX, 0.0], 0.0).is_err());
+        // Ends off any paper are still apart: the caller bounds them to its paper.
+        assert_eq!(
+            extend([0.0, 0.0], [2e5, 0.0], 0.0).unwrap(),
+            ([0.0, 0.0], [2e5, 0.0])
+        );
     }
 }

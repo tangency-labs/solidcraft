@@ -53,7 +53,8 @@ impl Document {
                 let basis = drawing.resolve_view(line.view)?.basis;
                 let found = lookup.corner(&line.a).and_then(|(a, exact_a)| {
                     lookup.corner(&line.b).and_then(|(b, exact_b)| {
-                        if (basis.to_local(a) - basis.to_local(b)).normalized().is_none() {
+                        let (local_a, local_b) = (basis.to_local(a), basis.to_local(b));
+                        if solidcore_ops::paper_gaps::extend([local_a.x, local_a.y], [local_b.x, local_b.y], 0.0).is_err() {
                             Err(Status::Unmeasurable("the centre-line endpoints coincide in the view".into()))
                         } else {
                             Ok(([a, b], exact_a && exact_b))

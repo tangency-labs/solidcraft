@@ -4,7 +4,6 @@
 
 use crate::EPS;
 use crate::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
-use crate::prelude::*;
 use solidcore_record::{Seg2, Vec2};
 
 /// A centre mark that cannot be represented on the paper scene.
@@ -45,9 +44,9 @@ pub fn centre_line(a: Vec2, b: Vec2, overshoot_mm: f64) -> Result<Seg2, Invalid>
     if !overshoot_mm.is_finite() || !(0.0..=MAX_SIDE_MM).contains(&overshoot_mm) {
         return Err(Invalid("the paper overshoot must be finite and between zero and the maximum sheet side"));
     }
-    let along = (b - a).normalized().ok_or(Invalid("the endpoints must be distinct"))?;
-    let start = a - along * overshoot_mm;
-    let end = b + along * overshoot_mm;
+    let (start, end) =
+        solidcore_ops::paper_gaps::extend([a.x, a.y], [b.x, b.y], overshoot_mm).map_err(|_| Invalid("the endpoints must be distinct"))?;
+    let (start, end) = (Vec2::new(start[0], start[1]), Vec2::new(end[0], end[1]));
     if !start.is_finite() || !end.is_finite() || [start.x, start.y, end.x, end.y].iter().any(|v| v.abs() > MAX_COORDINATE_MM) {
         return Err(Invalid("the line must fit within the paper scene's coordinate limit"));
     }
