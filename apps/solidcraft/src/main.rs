@@ -97,7 +97,8 @@ struct App {
     /// The viewport's shader compile, running beside the window while the start page shows (it no
     /// longer waits for it); the app waits for it when it closes (#1210).
     gpu_job: Option<solidcraft_ui_egui::starting::Worker<solidcraft_ui_egui::WgpuBuilt>>,
-    /// The settings folder whose start marker the first frame clears (`startup::started`).
+    /// The settings folder whose start marker clears once startup is over (`startup::started`):
+    /// the first app frame presented and the 3D view's shader compile done.
     starting: Option<std::path::PathBuf>,
     /// A newly selected API is confirmed only once the first frame has been presented.
     backend_attempt: Option<(std::path::PathBuf, startup::BackendAttempt)>,
@@ -112,8 +113,8 @@ struct App {
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
-    /// Frames begun once the setup was done; the second one means the first was drawn (the start
-    /// page is up).
+    /// Painted frames begun once the setup was done; the second one means the first was presented
+    /// (the start page is up). Logic-only updates and repeated layout passes do not advance startup.
     frames: u32,
     /// Startup is over: the start page was drawn and the 3D view's pipelines are compiled (or
     /// failed). Until then a crash still counts as a failed start.
@@ -232,24 +233,6 @@ impl eframe::App for App {
     /// A frame's logic. The first frames show the starting page while the setup runs behind it, a
     /// step a frame (#1210); then the app's own.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.window_frames < 2 {
-            self.window_frames += 1;
-            // Before the window is shown: its title bar must be within reach (window_fit.rs).
-            #[cfg(target_os = "windows")]
-            if self.window_frames == 1 {
-                fit_window_to_work_area(ctx, _frame);
-            }
-            mark(if self.window_frames == 1 { "first frame begins" } else { "second frame begins (first presented)" });
-            ctx.request_repaint();
-            // The window is shown only once its first frame is presented, and Windows then keeps
-            // a window of a process started from a shortcut or an installer behind the others. Ask
-            // for the foreground once, now that it is on screen; never again, so later frames don't
-            // take the focus from whatever the user moved to. Automation over the control channel
-            // keeps the focus where it is.
-            if self.window_frames == 2 && !self.take_focus_unwanted {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        }
         // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
         // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
         // Before the starting page returns, so a signal during the setup closes the app too.
@@ -276,50 +259,6 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
-        }
-        if self.frames < 2 {
-            self.frames += 1;
-            // A second frame right away, which means the first was presented: the start page is up.
-            ctx.request_repaint();
-            if self.frames == 2 {
-                mark("start page up (first app frame presented)");
-                // The device is up and presented a frame: its API did not crash the process.
-                if let Some(guard) = self.backend_guard.take() {
-                    guard.clear();
-                }
-                // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
-                #[cfg(target_os = "macos")]
-                std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
-                // Automation runs (a control port was asked for) leave the user's AI apps alone.
-                if !self.take_focus_unwanted {
-                    solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
-                    solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
-                }
-                if !self.setup.settled() {
-                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
-                }
-            }
-        }
-        // Startup is over once the 3D view's shader compile, running beside the start page, is
-        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
-        // backend retry), and a new graphics API is confirmed only once it drew the view.
-        if !self.up && self.frames >= 2 && self.setup.settled() {
-            self.up = true;
-            mark("app up (3D view ready)");
-            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
-            if let Some((path, attempt)) = self.backend_attempt.take()
-                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
-            {
-                log::warn!("graphics: could not confirm the startup choice: {reason}");
-                self.solve.set_status(reason, true);
-            }
-            if let Some(dir) = self.starting.take() {
-                startup::started(&dir);
-            }
-            // The minute that proves full graphics runs from here (`prove_full_graphics`).
-            if self.safe_graphics_record.is_some() {
-                self.full_graphics_up = Some(std::time::Instant::now());
-            }
         }
         self.watch_device();
         self.prove_full_graphics(ctx);
@@ -364,6 +303,7 @@ impl eframe::App for App {
             self.solve.set_status(text, false);
         }
         self.dialog_folder.design(self.solve.session.path.as_deref());
+        self.dialog_folder.settings(&self.solve.preferences.designs_folder, &self.solve.preferences.exports_folder);
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if !self.solve.file_picker_busy()
             && let Some(space_mouse) = &mut self.space_mouse
@@ -423,6 +363,26 @@ impl eframe::App for App {
     /// A frame's UI: the starting page while the setup runs (in the saved language and fonts),
     /// then the app's, whose changed settings are written soon after (#8275).
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Logic-only control updates cannot present a frame or complete startup.
+        let ctx = ui.ctx();
+        if self.window_frames < 2 && ctx.current_pass_index() == 0 {
+            self.window_frames += 1;
+            // Before the window is shown: its title bar must be within reach (window_fit.rs).
+            #[cfg(target_os = "windows")]
+            if self.window_frames == 1 {
+                fit_window_to_work_area(ctx, frame);
+            }
+            mark(if self.window_frames == 1 { "first frame begins" } else { "second frame begins (first presented)" });
+            ctx.request_repaint();
+            // The window is shown only once its first frame is presented, and Windows then keeps
+            // a window of a process started from a shortcut or an installer behind the others. Ask
+            // for the foreground once, now that it is on screen; never again, so later frames don't
+            // take the focus from whatever the user moved to. Automation over the control channel
+            // keeps the focus where it is.
+            if self.window_frames == 2 && !self.take_focus_unwanted {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+        }
         if !self.setup.done() {
             let _language = self.solve.prepare_text(ui.ctx());
             self.setup.ui(ui);
@@ -450,6 +410,51 @@ impl eframe::App for App {
             };
             self.solve.refresh_panel_monitors(monitors);
             solidcraft_ui_egui::view_windows::refresh_displays(&mut self.solve, monitors);
+        }
+        // Only painted passes count: a logic-only control update presents nothing (#743).
+        if self.frames < 2 && ctx.current_pass_index() == 0 {
+            self.frames += 1;
+            // A second frame right away, which means the first was presented: the start page is up.
+            ctx.request_repaint();
+            if self.frames == 2 {
+                mark("start page up (first app frame presented)");
+                // The device is up and presented a frame: its API did not crash the process.
+                if let Some(guard) = self.backend_guard.take() {
+                    guard.clear();
+                }
+                // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
+                #[cfg(target_os = "macos")]
+                std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
+                // Automation runs (a control port was asked for) leave the user's AI apps alone.
+                if !self.take_focus_unwanted {
+                    solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
+                    solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
+                }
+                if !self.setup.settled() {
+                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+                }
+            }
+        }
+        // Startup is over once the 3D view's shader compile, running beside the start page, is
+        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
+        // backend retry), and a new graphics API is confirmed only once it drew the view.
+        if !self.up && self.frames >= 2 && self.setup.settled() {
+            self.up = true;
+            mark("app up (3D view ready)");
+            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+            if let Some((path, attempt)) = self.backend_attempt.take()
+                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
+            {
+                log::warn!("graphics: could not confirm the startup choice: {reason}");
+                self.solve.set_status(reason, true);
+            }
+            if let Some(dir) = self.starting.take() {
+                startup::started(&dir);
+            }
+            // The minute that proves full graphics runs from here (`prove_full_graphics`).
+            if self.safe_graphics_record.is_some() {
+                self.full_graphics_up = Some(std::time::Instant::now());
+            }
         }
         solidcraft_ui_egui::view_windows::prepare(&mut self.solve, ui.ctx());
         content_ui(&mut self.solve, ui);
@@ -689,13 +694,42 @@ struct DialogFolderState {
     folder: Option<std::path::PathBuf>,
     /// The open design's path when last looked at, to notice another design opened or saved.
     design: Option<String>,
+    /// Settings › Design › Designs folder (`designs_folder`): where a design never saved is saved.
+    designs: Option<std::path::PathBuf>,
+    /// Settings › Design › Exports folder (`exports_folder`): where other files are saved (#5522).
+    exports: Option<std::path::PathBuf>,
+    /// The folder last chosen in an export dialog while an Exports folder is set: the next export
+    /// opens there, not beside a design opened since.
+    export_chosen: Option<std::path::PathBuf>,
+}
+
+/// What a file dialog is for, which decides the folder it opens in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DialogKind {
+    /// Open, or pick a file to read: the folder last used.
+    Open,
+    /// Save a design (Save, Save As).
+    Design,
+    /// Save any other file: an export, a mesh, a drawing, parameters.
+    Export,
+}
+
+/// A folder setting as a path: `None` when it is empty.
+fn folder_setting(value: &str) -> Option<std::path::PathBuf> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| std::path::PathBuf::from(value))
+}
+
+/// The parent folder of a file, when it names one.
+fn parent_folder(file: &std::path::Path) -> Option<std::path::PathBuf> {
+    file.parent().filter(|f| !f.as_os_str().is_empty()).map(std::path::Path::to_path_buf)
 }
 
 impl DialogFolder {
     /// A file was chosen in a dialog: the next one opens in its folder.
     fn chosen(&self, file: &std::path::Path) {
-        if let Some(folder) = file.parent().filter(|f| !f.as_os_str().is_empty()) {
-            self.remember(folder);
+        if let Some(folder) = parent_folder(file) {
+            self.remember(&folder);
         }
     }
 
@@ -709,6 +743,18 @@ impl DialogFolder {
     fn remember(&self, folder: &std::path::Path) {
         if let Ok(mut state) = self.0.lock() {
             state.folder = Some(folder.to_path_buf());
+        }
+    }
+
+    /// The Designs and Exports folder settings, every frame. Changing the Exports folder forgets
+    /// the folder chosen in an export dialog, so the next export opens in the new one.
+    fn settings(&self, designs: &str, exports: &str) {
+        let Ok(mut state) = self.0.lock() else { return };
+        state.designs = folder_setting(designs);
+        let exports = folder_setting(exports);
+        if state.exports != exports {
+            state.exports = exports;
+            state.export_chosen = None;
         }
     }
 
@@ -726,10 +772,20 @@ impl DialogFolder {
     }
 
     /// A dialog's answer as a path, its folder remembered for the next dialog.
-    fn answer(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
+    fn answer(&self, kind: DialogKind, picked: Option<rfd::FileHandle>) -> Option<String> {
         let picked = picked?;
-        self.chosen(picked.path());
+        self.picked(kind, picked.path());
         Some(picked.path().to_string_lossy().into_owned())
+    }
+
+    /// A file was chosen in a dialog of this kind: remember its folder for the next one.
+    fn picked(&self, kind: DialogKind, file: &std::path::Path) {
+        self.chosen(file);
+        if kind == DialogKind::Export
+            && let (Some(folder), Ok(mut state)) = (parent_folder(file), self.0.lock())
+        {
+            state.export_chosen = Some(folder);
+        }
     }
 
     /// A folder picker's answer as a path. The picked folder itself is remembered, so the next
@@ -741,13 +797,36 @@ impl DialogFolder {
         Some(picked.path().to_string_lossy().into_owned())
     }
 
+    #[cfg(test)]
     fn folder(&self) -> Option<std::path::PathBuf> {
-        self.0.lock().ok().and_then(|state| state.folder.clone())
+        self.folder_for(DialogKind::Open, |_| true)
     }
 
-    /// The dialog, opening in the remembered folder when there is one.
-    fn start(&self, dialog: rfd::AsyncFileDialog) -> rfd::AsyncFileDialog {
-        match self.folder() {
+    /// The folder a dialog of this kind opens in (#5522). A design save opens beside the open
+    /// design, or in the Designs folder for a design never saved. An export opens in the folder
+    /// last chosen for an export while it still exists, or in the Exports folder. Without the setting, or when its
+    /// folder does not exist (`is_dir`), the dialog opens in the folder last used, as before.
+    fn folder_for(&self, kind: DialogKind, is_dir: impl Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
+        let state = self.0.lock().ok()?;
+        let setting = match kind {
+            DialogKind::Open => None,
+            DialogKind::Design => state
+                .designs
+                .as_ref()
+                .filter(|f| is_dir(f))
+                .map(|designs| state.design.as_deref().and_then(|p| parent_folder(std::path::Path::new(p))).unwrap_or_else(|| designs.clone())),
+            DialogKind::Export => state
+                .exports
+                .as_ref()
+                .filter(|f| is_dir(f))
+                .map(|exports| state.export_chosen.clone().filter(|f| is_dir(f)).unwrap_or_else(|| exports.clone())),
+        };
+        setting.or_else(|| state.folder.clone())
+    }
+
+    /// The dialog, opening in the folder for its kind when there is one.
+    fn start(&self, kind: DialogKind, dialog: rfd::AsyncFileDialog) -> rfd::AsyncFileDialog {
+        match self.folder_for(kind, std::path::Path::is_dir) {
             Some(folder) => dialog.set_directory(folder),
             None => dialog,
         }
@@ -831,7 +910,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             #[cfg(target_os = "linux")]
             desktop_chooser::note_opening(&chooser_ctx);
             // The file type the command reads comes first, so the picker opens on it (#1801).
-            let mut dialog = open_folder.start(open_parent.clone());
+            let mut dialog = open_folder.start(DialogKind::Open, open_parent.clone());
             if !first.is_empty() {
                 let label = first.iter().map(|e| e.to_uppercase()).collect::<Vec<_>>().join(", ");
                 dialog = dialog.add_filter(label, &case_variants(first));
@@ -854,7 +933,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let future = dialog.add_filter("All files", &["*"]).pick_file();
             let folder = open_folder.clone();
-            Box::pin(async move { folder.answer(future.await) })
+            Box::pin(async move { folder.answer(DialogKind::Open, future.await) })
         })),
         // One kind of file (the agent chat's attachments): only the types it names, as given and in
         // lower and upper case (Linux dialogs match case; macOS allows just the listed types).
@@ -869,9 +948,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let all: Vec<&str> = all.iter().map(String::as_str).collect();
             // Any other file attaches by reference, so the list is not the only choice.
-            let future = file_folder.start(file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
+            let future = file_folder.start(DialogKind::Open, file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
             let folder = file_folder.clone();
-            Box::pin(async move { folder.answer(future.await) })
+            Box::pin(async move { folder.answer(DialogKind::Open, future.await) })
         })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
@@ -879,14 +958,23 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
-        pick_folder: Some(Box::new(move || {
-            let future = browse_folder.start(folder_parent.clone()).set_title("Choose a folder").pick_folder();
+        // A folder: the library's root, a plugin's folder field, or a folder setting (Settings ›
+        // Design › Designs folder), opening in the one it names, else in the folder last used.
+        pick_folder: Some(Box::new(move |current: &str| {
+            let dialog = folder_parent.clone().set_title("Choose a folder");
+            let dialog = match folder_setting(current).filter(|f| f.is_dir()) {
+                Some(folder) => dialog.set_directory(folder),
+                None => browse_folder.start(DialogKind::Open, dialog),
+            };
+            let future = dialog.pick_folder();
             let folder = browse_folder.clone();
             Box::pin(async move { folder.answer_folder(future.await) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
-            let dialog = save_folder.start(parent.clone()).set_file_name(name);
-            let dialog = if exts == [io::DESIGN_EXT, "json"] {
+            let design = exts == [io::DESIGN_EXT, "json"];
+            let kind = if design { DialogKind::Design } else { DialogKind::Export };
+            let dialog = save_folder.start(kind, parent.clone()).set_file_name(name);
+            let dialog = if design {
                 if name.ends_with(".json") {
                     dialog.add_filter("Plain JSON design", &["json"]).add_filter("SolidCraft container", &[io::DESIGN_EXT])
                 } else {
@@ -897,7 +985,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             };
             let future = dialog.save_file();
             let folder = save_folder.clone();
-            Box::pin(async move { folder.answer(future.await) })
+            Box::pin(async move { folder.answer(kind, future.await) })
         })),
         graphics_adapters: Vec::new(),
         graphics_backend: None,
@@ -1578,6 +1666,10 @@ fn main() -> eframe::Result {
     let custom_titlebar = CUSTOM_TITLEBAR && app_titlebar_wanted() && !startup::system_title_bar(cfg!(target_os = "windows"), started);
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
+    // The control channel's wake (#743): eframe's event loop proxy, handed over when the loop
+    // starts, so the control server serves requests without waiting for a GUI frame.
+    let wake = control_server::Wake::new(std::sync::Arc::new(std::sync::Mutex::new(None)));
+    let wake_hook = wake.clone();
     let options = eframe::NativeOptions {
         viewport: app_viewport(custom_titlebar)?,
         // The window's pass (egui's) has no depth and one sample: the viewport draws its scene
@@ -1596,6 +1688,8 @@ fn main() -> eframe::Result {
         },
         persist_window: !safe_mode,
         wgpu_options,
+        // #743: hand the control channel the event loop's proxy so it can run a logic pass at once.
+        event_loop_ready: Some(Box::new(move |proxy| wake_hook.set(proxy.clone()))),
         ..Default::default()
     };
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1746,11 +1840,17 @@ fn main() -> eframe::Result {
             // by default) opens its port, and turning it off or on later takes effect at once
             // (docs/control-protocol.md).
             let ctx = cc.egui_ctx.clone();
-            solidcraft_ui_egui::control_switch::launch(&mut app, Box::new(move |listen| control_server::start(listen, ctx.clone())), control_port);
+            let control_wake = wake.clone();
+            solidcraft_ui_egui::control_switch::launch(
+                &mut app,
+                Box::new(move |listen| control_server::start(listen, ctx.clone(), control_wake.clone())),
+                control_port,
+            );
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
-            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            let wake = wake.clone();
+            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone(), &wake)));
             // Later launches with a file hand it to this window instead of opening another app. Not
             // when driven over the control channel or by `--new-instance`.
             if !new_instance && !sample && control_port.is_none() {
@@ -2627,7 +2727,7 @@ mod prefs_writer_tests {
 
 #[cfg(test)]
 mod dialog_folder_tests {
-    use super::DialogFolder;
+    use super::{DialogFolder, DialogKind};
     use std::path::{Path, PathBuf};
 
     /// #7756: a file dialog opens where the last one left off, not in the home folder.
@@ -2669,6 +2769,70 @@ mod dialog_folder_tests {
         assert_eq!(folder.folder(), Some(PathBuf::from("/exports")), "a new, unsaved design has no folder of its own");
         folder.design(Some("/work/base/base.solidcraft"));
         assert_eq!(folder.folder(), Some(PathBuf::from("/work/base")));
+    }
+
+    /// #5522: with the folder settings empty, every kind of dialog opens where it did before.
+    #[test]
+    fn empty_folder_settings_keep_the_folder_last_used() {
+        let folder = DialogFolder::default();
+        folder.settings("", "  ");
+        for kind in [DialogKind::Open, DialogKind::Design, DialogKind::Export] {
+            assert_eq!(folder.folder_for(kind, |_| true), None, "{kind:?}: the system decides");
+        }
+        folder.design(Some("/work/lid/lid.solidcraft"));
+        folder.picked(DialogKind::Export, Path::new("/exports/lid.3mf"));
+        for kind in [DialogKind::Open, DialogKind::Design, DialogKind::Export] {
+            assert_eq!(folder.folder_for(kind, |_| true), Some(PathBuf::from("/exports")), "{kind:?}");
+        }
+    }
+
+    /// #5522: a design never saved is saved in the Designs folder; Save As for a saved design opens
+    /// beside it; Open keeps the folder last used.
+    #[test]
+    fn a_design_never_saved_is_saved_in_the_designs_folder() {
+        let folder = DialogFolder::default();
+        folder.settings("/home/sam/Designs", "");
+        folder.picked(DialogKind::Open, Path::new("/downloads/bracket.step"));
+        assert_eq!(folder.folder_for(DialogKind::Design, |_| true), Some(PathBuf::from("/home/sam/Designs")));
+        assert_eq!(folder.folder_for(DialogKind::Open, |_| true), Some(PathBuf::from("/downloads")));
+        assert_eq!(folder.folder_for(DialogKind::Export, |_| true), Some(PathBuf::from("/downloads")), "no Exports folder");
+        folder.design(Some("/work/lid/lid.solidcraft"));
+        assert_eq!(folder.folder_for(DialogKind::Design, |_| true), Some(PathBuf::from("/work/lid")));
+        folder.design(None);
+        assert_eq!(folder.folder_for(DialogKind::Design, |_| true), Some(PathBuf::from("/home/sam/Designs")), "a new design");
+    }
+
+    /// #5522: exports open in the Exports folder, then in the folder last chosen for an export,
+    /// whatever design is opened in between. A new Exports folder starts over.
+    #[test]
+    fn exports_open_in_the_exports_folder_until_another_is_chosen() {
+        let folder = DialogFolder::default();
+        folder.settings("", "/home/sam/Prints");
+        folder.design(Some("/work/lid/lid.solidcraft"));
+        assert_eq!(folder.folder_for(DialogKind::Export, |_| true), Some(PathBuf::from("/home/sam/Prints")));
+        folder.picked(DialogKind::Export, Path::new("/home/sam/Prints/lids/lid.stl"));
+        folder.design(Some("/work/base/base.solidcraft"));
+        assert_eq!(folder.folder_for(DialogKind::Export, |_| true), Some(PathBuf::from("/home/sam/Prints/lids")));
+        assert_eq!(folder.folder_for(DialogKind::Open, |_| true), Some(PathBuf::from("/work/base")));
+        folder.settings("", "/home/sam/Prints");
+        assert_eq!(folder.folder_for(DialogKind::Export, |_| true), Some(PathBuf::from("/home/sam/Prints/lids")), "same setting");
+        folder.settings("", "/mnt/printer");
+        assert_eq!(folder.folder_for(DialogKind::Export, |_| true), Some(PathBuf::from("/mnt/printer")));
+    }
+
+    /// #5522: a folder setting that names no folder (deleted, a drive not plugged in) is ignored.
+    #[test]
+    fn a_missing_folder_falls_back_to_the_folder_last_used() {
+        let folder = DialogFolder::default();
+        folder.settings("/gone/Designs", "/gone/Prints");
+        folder.picked(DialogKind::Open, Path::new("/work/lid.solidcraft"));
+        let exists = |f: &Path| !f.starts_with("/gone");
+        assert_eq!(folder.folder_for(DialogKind::Design, exists), Some(PathBuf::from("/work")));
+        assert_eq!(folder.folder_for(DialogKind::Export, exists), Some(PathBuf::from("/work")));
+        // A folder chosen in an export dialog and deleted since gives way to the Exports folder.
+        folder.settings("", "/home/sam/Prints");
+        folder.picked(DialogKind::Export, Path::new("/gone/output/lid.stl"));
+        assert_eq!(folder.folder_for(DialogKind::Export, exists), Some(PathBuf::from("/home/sam/Prints")));
     }
 }
 
