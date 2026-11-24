@@ -5017,8 +5017,7 @@ fn an_open_drawing_allows_every_model_command_it_would_without_one() {
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(open.unwrap())}));
     s.model_focus = true;
     run(&mut s, "select.all", json!({}));
-    assert!(s.selection_all_bodies, "Select All in Design picks the model's bodies with a drawing open");
-    assert!(s.selected_count().unwrap() > 0, "the scope covers the model's bodies");
+    assert!(!s.selection.is_empty(), "Select All in Design picks the model's bodies with a drawing open");
 }
 
 /// A circumscribed polygon's size naming a source parameter works on a sheet sketch: the support

@@ -1374,13 +1374,11 @@ mod tests {
         h.frames(3);
         h.app.session.selection.clear();
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
-        assert!(!h.app.session.has_selection(), "the palette's field selects its own text");
+        assert!(h.app.session.selection.is_empty(), "the palette's field selects its own text");
         h.call("ui.palette", json!({"open": false}));
         h.frames(2);
         h.step(&json!({"key": "A", "cmd": true})).unwrap();
-        // Select All names the whole-body scope rather than listing the body.
-        assert!(h.app.session.selection_all_bodies);
-        assert_eq!(h.app.session.selected_count().unwrap(), 1);
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Block".into() }]);
     }
 
     /// #20639: Undo and Redo are ordinary bindings. The exact chord decides, so Ctrl+Shift+Z
