@@ -383,6 +383,8 @@ impl PanelVisibilitySnapshot {
 struct PanelSnapshot {
     product: Product,
     available: bool,
+    /// Takes its column's whole height whatever it lists (the compact Browser holding the History, #14566).
+    fills: bool,
     presentation: PanelPresentation,
     extent: Option<ContentExtent>,
 }
@@ -437,6 +439,7 @@ impl ProductionState {
             panels: Product::all_map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
+                fills: product == Product::Browser && crate::browser::holds_compact_history(app),
                 presentation: product.presentation(app),
                 extent: None,
             }),
@@ -459,8 +462,14 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     if app.panel_runtime.is_some() {
         return Err(error(Rule::Lifecycle, "application panel runtime is already enabled"));
     }
+    // Register inert plugin declarations before decoding saved workspace layouts.
+    // Otherwise their placements would be quarantined as unknown at every startup.
+    crate::plugins::sync_policy(app);
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
+    let plugins = super::plugin::PluginState::initial(&app.session)?;
     let state = ProductionState::new(app)?;
-    let registry = registry()?;
+    let mut registry = registry()?;
+    plugins.register_specs(&mut registry)?;
     let workspace = WorkspaceId::new(WORKSPACES[0].0)?;
     let defaults = crate::prefs::Prefs::default();
     let settings = pop_out.unwrap_or(&app.panel_layout_preferences);
@@ -495,6 +504,7 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
             },
         )?;
     }
+    plugins.register_controllers(&mut runtime)?;
     let services = ProductionServices {
         models: ProductionModels,
         commands: ProductionCommands,
@@ -507,6 +517,7 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     };
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.production = Some(state);
+    integration.plugins = plugins;
     integration.tick(&app.session)?;
     let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
     options.geometry.default_opaque = false;
@@ -567,6 +578,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     }
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
+        panel.fills = panel.product == Product::Browser && crate::browser::holds_compact_history(app);
         panel.presentation = panel.product.presentation(app);
     }
     Ok(())
@@ -1229,11 +1241,12 @@ impl PanelController for ProductionController {
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
+        let panel = snapshot.panels.iter().find(|panel| panel.product == self.product);
         Ok(Arc::new(ProductionMetrics {
-            extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            extent: panel.and_then(|panel| panel.extent),
             strip_width: (self.product == Product::History).then(|| crate::ui_kit::history_width(false)),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
-            policy: spec.side_height_policy,
+            policy: if panel.is_some_and(|panel| panel.fills) { SideHeightPolicy::Fill } else { spec.side_height_policy },
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
@@ -1479,9 +1492,12 @@ impl FramePanelContent for ProductionFrame<'_> {
         slot: ContentSlot,
         ui: &mut egui::Ui,
         context: &PanelContext,
-        _content: &mut dyn PanelController,
+        content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if context.instance.0.starts_with(super::plugin::PREFIX) {
+            return content.render(slot, ui, context, services);
+        }
         if slot == ContentSlot::Title {
             // Only the Browser asks for the title's place (`set_header_content`): its search field.
             if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {

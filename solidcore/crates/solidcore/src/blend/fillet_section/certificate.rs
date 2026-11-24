@@ -174,6 +174,7 @@ use super::tay::{
     gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
 };
 use super::taylor_model::Tm;
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{contraction, k_operator};
 pub(crate) use crate::geom::nurbs_enclosure::{
@@ -240,11 +241,20 @@ impl NurbsCurve {
                 u.push(k);
             }
         }
-        if p < 1 || u.len() != n + p + 1 {
-            // "SmGnSectionFSG: the centre line's NURBS data do not agree"
-            return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: the centre line's NURBS data do not agree"
+        if p < 1 {
+            return Err(SolidError::blend(
                 OP,
-                "the centre line's NURBS data do not agree",
+                BlendFailure::SectionUnsupported(SectionLimit::DegreeBelowOne),
+            ));
+        }
+        if u.len() != n + p + 1 {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the curve's knots do not number its control points plus its order: \
+                          a B-spline curve the kernel holds keeps the two consistent",
+                },
             ));
         }
         let rational = ws.len() == cps.len();
@@ -257,9 +267,9 @@ impl NurbsCurve {
             };
             let positive = w > 0.0;
             if !positive {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the centre line's weights are not positive",
+                    BlendFailure::SectionUnsupported(SectionLimit::CurveWeightNotPositive),
                 ));
             }
             pw.extend_from_slice(&[cp.x * w, cp.y * w, cp.z * w, w]);
@@ -423,9 +433,9 @@ fn derivs_over(
         first = false;
     }
     if first {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "no piece covers the parameter",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval),
         ));
     }
     Ok(rd)
@@ -604,7 +614,7 @@ pub fn leader_series_piecewise(
             }
         });
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
@@ -654,9 +664,12 @@ pub fn law_series(
         derivs = derivs.min(law.curve.degree()?);
     }
     if derivs > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius law's order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_S,
+            }),
         ));
     }
     let d = law.curve.evaluate(s, derivs, !before, false)?;
@@ -666,16 +679,25 @@ pub fn law_series(
             fact *= i as f64;
         }
         let di = d.get(i).ok_or_else(|| {
-            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+            SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "the radius law's evaluation returned fewer derivatives than asked: \
+                          a B-spline curve's evaluation returns every order up to the one asked",
+                },
+            )
         })?;
         r.set(i, 0, di.x / fact);
     }
     let positive = r.at(0, 0) > 0.0;
     if !positive {
         // "SmGnSectionFSG: the radius law is not positive"
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius law is not positive",
+            BlendFailure::RadiusLawNotPositive {
+                s,
+                radius: r.at(0, 0),
+            },
         ));
     }
     Ok(Some(r))
@@ -699,9 +721,9 @@ pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>
         r.set(i, 0, at1(&d, i, VZ).x * (Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).is_positive() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius is not proved positive",
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
         ));
     }
     Ok(r)
@@ -797,6 +819,19 @@ pub fn face_partials_over(
         return definition_partials_over_box(k, d, cn, ku, kv, ua, ub, va, vb, lk);
     }
     nurbs_partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk)
+}
+
+/// The failure of a hull over a box's parts that found none: [`knot_cuts`] returns at least
+/// one part for every interval it does not refuse, and a box past a continued end adds its
+/// part past the end, so an empty hull is the kernel's fault.
+pub(crate) fn no_part_of_the_box(op: &'static str) -> SolidError {
+    SolidError::blend(
+        op,
+        BlendFailure::Defect {
+            why: "a box's hull over its pieces found no piece: the knot cuts return at least \
+                  one part for every interval they do not refuse",
+        },
+    )
 }
 
 /// Whether `[lo, hi]` lies on more than one piece of `knots` (it crosses an inner knot, or
@@ -964,7 +999,7 @@ pub fn nurbs_partials_over_box_ending(
             });
         }
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// Whether the piece `(ku, kv)` of a cone's net over the part `[a0, a1] x [b0, b1]` past its
@@ -4241,9 +4276,9 @@ pub fn gn_certify_span_reusing(
     let l_jets = if arc { 0 } else { n }; // the jets graded on their own: the arc's rails only
     if let Some(v) = vary.as_deref() {
         if !(a.w.is_finite() && b.w.is_finite()) {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the varying jets' thumbweights are not finite",
+                BlendFailure::SectionNotProved(SectionProof::BoundFinite),
             ));
         }
         bar = gn_form_normalized(v.n, Ivl::from(a.w));
@@ -4414,14 +4449,11 @@ pub fn gn_certify_span_reusing(
         solved_ends = Some((level, ends.clone()));
         let mut acc = LevelAcc::new(bar.w.len());
         let mut level_pieces = Vec::new();
-        for pair in ends.windows(2) {
+        for (ea, eb) in ends.iter().zip(ends.iter().skip(1)) {
             if !acc.proved {
                 break;
             }
             k.check_cancelled(OP_CERTIFY_SPAN)?;
-            let [ea, eb] = pair else {
-                return Err(SolidError::blend_failed(OP, "the span has no pair of ends"));
-            };
             // the piece's enclosures ([`gn_fourth_over_series`]'s); the middle's also where
             // the piece's is not proved, for its feet's Taylor models (#14405)
             let pe = gn_try!(
@@ -7251,7 +7283,10 @@ mod tests {
         let error = curve_derivs_over(&cn, Ivl::new(0.0, 0.0), 1, None).unwrap_err();
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "no piece covers the parameter")
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval)
+            )
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }

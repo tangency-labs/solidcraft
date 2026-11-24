@@ -79,8 +79,8 @@
 //! status. Recursion: none.
 
 use super::p1::{
-    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, OperandDomain,
-    SolveOperands, SurfaceSolveContext,
+    get_surface_cache, is_node_valid, is_point_valid_with as is_point_valid, LentSurfaceCache,
+    OperandDomain, SolveOperands, SurfaceSolveContext,
 };
 use super::p2::{
     original_surface, CrossSectionValues, DerivSurfDefinition, LsiGlobalSolver, Surface,
@@ -93,8 +93,10 @@ use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
-use crate::error::surface::SurfaceFailure;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{SolverPart, SurfaceFailure};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::certified;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -123,7 +125,7 @@ use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::surface::surface_cache::BezierPatch;
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -319,13 +321,31 @@ fn evaluate_3x3_into(
 /// shows nothing) when either cannot be evaluated there. Upstream ignores both statuses
 /// and compares whatever the arrays held; the fork passes them on and fails the whole
 /// check (WR-663, tangency-labs/smlib 21dcf69).
+///
+/// Not upstream (#16870): `false` too where one surface's parameterisation is singular at its
+/// sample (one first derivative vanishing against the other: a sphere's pole) and the other's
+/// is not. Normal curvatures are read from the first fundamental form, which is degenerate at
+/// the singular one, so its readings say nothing of its shape to compare with the regular
+/// one's: at a sphere's pole the curvature along a cylinder's axis read so is 0, the
+/// cylinder's, and a cylinder whose rim is a great circle of the sphere through its poles was
+/// taken for the sphere itself. Where both are singular (a surface with a pole against itself)
+/// the sample is compared as upstream compares it.
 fn evaluate_pair(
     k: &Kernel,
     (sa, uva, pa): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
     (sb, uvb, pb): (&Surface, Point2, &mut [[Vec3; 3]; 3]),
 ) -> Result<bool> {
     Ok(ignored(evaluate_3x3_into(k, sa, uva, pa))?.is_some()
-        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some())
+        && ignored(evaluate_3x3_into(k, sb, uvb, pb))?.is_some()
+        && regular(pa) == regular(pb))
+}
+
+/// Whether a surface sampled into `p` ([`evaluate_3x3_into`]: `p[1][0]` is `S_u`, `p[0][1]`
+/// is `S_v`) is regular there: neither first derivative vanishes against the other, to the
+/// square root of effective zero.
+fn regular(p: &[[Vec3; 3]; 3]) -> bool {
+    let (su, sv) = (p[1][0].length(), p[0][1].length());
+    su.min(sv) > EFF_ZERO_SQRT * su.max(sv)
 }
 
 /// The B-spline part of a curve of a kind derived from `SmBSplineCurve`.
@@ -708,13 +728,25 @@ impl Surface {
             let mut i = 1;
             while i + 1 < knots.len() {
                 let c = continuities.get(i).copied().ok_or_else(|| {
-                    SolidError::surface_failed(OP_KNOTS, "a knot has no continuity")
+                    SolidError::surface(
+                        OP_KNOTS,
+                        SurfaceFailure::KnotsAndContinuitiesDisagree {
+                            knots: knots.len(),
+                            continuities: continuities.len(),
+                        },
+                    )
                 })?;
                 if (!at_continuity && (c as i32) <= (max_continuity as i32))
                     || (at_continuity && c == max_continuity)
                 {
                     out.push(knots.get(i).copied().ok_or_else(|| {
-                        SolidError::surface_failed(OP_KNOTS, "a continuity has no knot")
+                        SolidError::surface(
+                            OP_KNOTS,
+                            SurfaceFailure::KnotsAndContinuitiesDisagree {
+                                knots: knots.len(),
+                                continuities: continuities.len(),
+                            },
+                        )
                     })?);
                 }
                 i += 1;
@@ -927,10 +959,7 @@ impl Surface {
         if domain0.size().length_squared() < EFF_ZERO_SQ
             || domain1.size().length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::surface_failed(
-                OP_COINC,
-                "a surface has an empty domain",
-            ));
+            return Err(SolidError::surface(OP_COINC, SurfaceFailure::EmptyDomain));
         }
 
         // Check bounding boxes (statuses ignored upstream; passed on as the fork does,
@@ -1381,9 +1410,9 @@ impl Surface {
         let mut def = if let Some(d) = opt_ds_def {
             let mut def = *d;
             if !def.is_from_surface_boundary_curve() {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_BLEND,
-                    "the blend definition is not from a surface boundary curve",
+                    SurfaceFailure::BlendDefinitionNotFromBoundary,
                 ));
             }
             def.tangency_type = TangencyType::DirToReferenceCurve;
@@ -1483,11 +1512,10 @@ impl Surface {
             }
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a NULL blend surface
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    OP_BLEND,
-                    "the blend surface could not be made",
-                ))
+            Err(e) => {
+                return Err(Failure::new(OP_BLEND, SurfaceFailure::BlendSurfaceNotMade)
+                    .caused_by(e)
+                    .into_error())
             }
         };
         Ok(Self::from(blend))
@@ -1516,7 +1544,9 @@ impl Surface {
         match cache.get_tree(k) {
             Ok(_) => Ok(cache),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::surface_missing(op, "the surface cache's tree")),
+            Err(e) => Err(Failure::new(op, SurfaceFailure::SolveCacheNotMade)
+                .caused_by(e)
+                .into_error()),
         }
     }
 
@@ -1530,7 +1560,11 @@ impl Surface {
         let mut cache = match get_surface_cache::<O>(k, self, handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::surface_missing(op, "the surface's cache")),
+            Err(e) => {
+                return Err(Failure::new(op, SurfaceFailure::SolveCacheNotMade)
+                    .caused_by(e)
+                    .into_error())
+            }
         };
         // the solves' GetTree (NER): a reused cache whose tree is not built yet
         // (the surface's cache slot) builds it now
@@ -1550,6 +1584,23 @@ impl Surface {
         match context {
             None => self.solve_cache_of(k, handle, op),
             Some(context) => context.build_surface_cache(k, self, handle),
+        }
+    }
+
+    /// [`Surface::solve_cache_from_context`] for a solve that only reads the cache: the
+    /// context's lent cache ([`SurfaceSolveContext::lend_surface_cache`]).
+    fn lent_cache_from_context<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        handle: Option<O>,
+        op: &'static str,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+    ) -> Result<LentSurfaceCache<O>> {
+        match context {
+            None => self
+                .solve_cache_of(k, handle, op)
+                .map(LentSurfaceCache::Owned),
+            Some(context) => context.lend_surface_cache(k, self, handle),
         }
     }
 
@@ -1607,30 +1658,19 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
-            SurfaceKind::Plane(p) => p.global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-            _ => self.base_global_line_intersect_in(
-                k,
-                surface,
-                cache,
-                uv_domain,
-                line_point,
-                line_vector,
-                line_interval,
-                fire_ray,
-                distance_tolerance,
-            ),
-        }
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            None,
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
     }
 
     /// [`Surface::global_line_intersect`] with caller-supplied topology prepared
@@ -1653,10 +1693,52 @@ impl Surface {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
-        match self.kind() {
+        self.global_line_intersect_under(
+            k,
+            surface,
+            cache,
+            Some(context),
+            None,
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+        )
+    }
+
+    /// [`Surface::global_line_intersect_in`] (no `context`) or
+    /// [`Surface::global_line_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]). The caller's cache keeps
+    /// its flags.
+    ///
+    /// # Errors
+    ///
+    /// Those of the kind's body.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_line_intersect_under<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        surface: Option<O>,
+        cache: Option<&mut SurfaceCache<O>>,
+        context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        fire_ray: bool,
+        distance_tolerance: f64,
+    ) -> Result<SolutionArray<O>> {
+        let source = match cache {
+            Some(cache) => LineCacheSource::Caller(cache),
+            None => LineCacheSource::Fresh,
+        };
+        match (self.kind(), context) {
             // (the plane's base solve runs on this surface, its face's, with the
             // caller's cache and context)
-            SurfaceKind::Plane(p) => p.global_line_intersect_with_base(
+            (SurfaceKind::Plane(p), Some(context)) => p.global_line_intersect_with_base(
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1667,11 +1749,9 @@ impl Surface {
                     self.base_global_line_intersect_from(
                         k,
                         surface,
-                        match cache {
-                            Some(cache) => LineCacheSource::Caller(cache),
-                            None => LineCacheSource::Fresh,
-                        },
+                        source,
                         Some(context),
+                        modes,
                         uv_domain,
                         line_point,
                         line_vector,
@@ -1681,14 +1761,37 @@ impl Surface {
                     )
                 },
             ),
-            _ => self.base_global_line_intersect_from(
+            // (without a context, `Plane::global_line_intersect_in`: the base solve
+            // runs on the bare plane)
+            (SurfaceKind::Plane(p), None) => p.global_line_intersect_with_base(
+                uv_domain,
+                line_point,
+                line_vector,
+                line_interval,
+                fire_ray,
+                distance_tolerance,
+                |sub_interval| {
+                    Surface::from(p.clone()).base_global_line_intersect_from(
+                        k,
+                        surface,
+                        source,
+                        None,
+                        modes,
+                        uv_domain,
+                        line_point,
+                        line_vector,
+                        Some(sub_interval),
+                        fire_ray,
+                        distance_tolerance,
+                    )
+                },
+            ),
+            (_, context) => self.base_global_line_intersect_from(
                 k,
                 surface,
-                match cache {
-                    Some(cache) => LineCacheSource::Caller(cache),
-                    None => LineCacheSource::Fresh,
-                },
-                Some(context),
+                source,
+                context,
+                modes,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1765,6 +1868,7 @@ impl Surface {
             k,
             surface,
             source,
+            None,
             None,
             uv_domain,
             line_point,
@@ -1877,6 +1981,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Held(held),
                 context,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1928,6 +2033,7 @@ impl Surface {
                 Some(surface),
                 LineCacheSource::Face(face_cache),
                 None,
+                None,
                 uv_domain,
                 line_point,
                 line_vector,
@@ -1939,7 +2045,7 @@ impl Surface {
     }
 
     /// The body of [`Surface::base_global_line_intersect_in`] with the cache from
-    /// `source`.
+    /// `source`, the solve running in `modes` (`None`: the cache's own).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn base_global_line_intersect_from<O: SolutionObject>(
         &self,
@@ -1947,6 +2053,7 @@ impl Surface {
         surface: Option<O>,
         source: LineCacheSource<'_, O>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         line_point: Point3,
         line_vector: Vec3,
@@ -1959,7 +2066,7 @@ impl Surface {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -1978,17 +2085,21 @@ impl Surface {
                 owned = match source.build(k) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
+                    Err(e) => {
+                        return Err(Failure::new(OP_LINE, SurfaceFailure::SolveCacheNotMade)
+                            .caused_by(e)
+                            .into_error())
+                    }
                 };
                 face_cache = Some(source);
                 // the face's source ran the trimmed cache's own GetTree: the base
                 // cache's cannot rebuild a face-owned tree
                 let has_tree = owned.tree().is_some();
-                held = Some(&mut owned);
-                match held.as_deref_mut() {
-                    Some(c) if has_tree => &*c,
-                    Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => return Err(SolidError::surface_missing(OP_LINE, "the face's cache")),
+                let c = &mut **held.insert(&mut owned);
+                if has_tree {
+                    &*c
+                } else {
+                    Self::held_cache(k, c, OP_LINE)?
                 }
             }
             LineCacheSource::Caller(c) => {
@@ -1996,17 +2107,15 @@ impl Surface {
                 // context built, which already ran the owning face's virtual GetTree;
                 // the bare base cache cannot rebuild a face-owned tree.
                 let ready = context.is_some() && c.tree().is_some();
-                held = Some(c);
-                match held.as_deref_mut() {
-                    Some(c) if ready => &*c,
-                    Some(c) => Self::held_cache(k, c, OP_LINE)?,
-                    None => {
-                        return Err(SolidError::surface_missing(OP_LINE, "the surface's cache"))
-                    }
+                let c = &mut **held.insert(c);
+                if ready {
+                    &*c
+                } else {
+                    Self::held_cache(k, c, OP_LINE)?
                 }
             }
             LineCacheSource::Fresh => {
-                built = self.solve_cache_from_context(
+                built = self.lent_cache_from_context(
                     k,
                     surface,
                     OP_LINE,
@@ -2018,10 +2127,18 @@ impl Surface {
                 // delays its tree builds it now
                 // The context already performed the owning face's virtual GetTree.
                 // Re-entering the bare base cache cannot rebuild a face-owned tree.
-                if context.is_some() && built.tree().is_some() {
-                    &built
+                // (only a context lends a shared cache, and with its tree)
+                let ready = match &built {
+                    LentSurfaceCache::Shared(_) => true,
+                    LentSurfaceCache::Owned(c) => context.is_some() && c.tree().is_some(),
+                };
+                if ready {
+                    &*built
                 } else {
-                    Self::held_cache(k, &mut built, OP_LINE)?
+                    match &mut built {
+                        LentSurfaceCache::Owned(c) => Self::held_cache(k, c, OP_LINE)?,
+                        LentSurfaceCache::Shared(c) => &**c,
+                    }
                 }
             }
             LineCacheSource::Held(kept) => {
@@ -2043,12 +2160,29 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        let tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the cache's tree"))?;
-        let top = tree
-            .top_node()
-            .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the tree's top node"))?;
+        let tree = cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_LINE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
+        let top = tree.top_node().ok_or_else(|| {
+            Failure::new(
+                OP_LINE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache's tree has no top node, though a successful \
+                          build makes one for the surface's domain",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let tree_box = tree.node(top)?.bbox;
 
         // scale LineVec so that its length is about 1 to improve solution tolerances
@@ -2071,6 +2205,7 @@ impl Surface {
             distance_tolerance,
         );
         gs.surface_cache = Some(cache);
+        gs.modes = modes;
         gs.face_queries = face_queries;
         gs.face_cache = face_cache;
         // (not upstream) the net the certified pass runs on, for the kinds whose net is
@@ -2103,10 +2238,7 @@ impl Surface {
         std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
         sols.set_side_record(certified?);
         // restore the original scaling to solution parameters
-        for ii in 0..sols.len() {
-            let sol = sols
-                .get_mut(ii)
-                .ok_or_else(|| SolidError::surface_missing(OP_LINE, "the solution"))?;
+        for sol in sols.as_mut_slice() {
             *sol.start.param_mut(0)? /= scale;
             if sol.solution_type == SolutionType::RangeOfValues {
                 *sol.end.param_mut(0)? /= scale;
@@ -2210,8 +2342,9 @@ impl Surface {
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
             // surface's face through the caller's context, when there is one)
+            // (its fast drop tests the face only when the solve's point testing is on)
             let found = if let Some(context) = context.as_deref_mut() {
-                self.simple_coincidence_checker_with_context::<O>(
+                self.simple_coincidence_checker_from::<O>(
                     k,
                     uv_domain,
                     &line,
@@ -2220,7 +2353,8 @@ impl Surface {
                     true, // bAllowPartialCoinc [B122]
                     [None, surface],
                     Some(cache),
-                    context,
+                    Some(context),
+                    modes.is_some_and(|m| !m.point_test_enabled),
                 )?
             } else {
                 self.simple_coincidence_checker::<O>(
@@ -2530,6 +2664,7 @@ impl Surface {
             handles,
             cache,
             None,
+            None,
             uv_domain,
             curve,
             interval,
@@ -2560,6 +2695,7 @@ impl Surface {
             handles,
             cache,
             Some(context),
+            None,
             uv_domain,
             curve,
             interval,
@@ -2567,19 +2703,31 @@ impl Surface {
         )
     }
 
+    /// [`Surface::global_curve_intersect_in`] (no `context`) or
+    /// [`Surface::global_curve_intersect_with_context`], the solve running in `modes`
+    /// (`None`: the surface cache's own, [`SolveModes::of`]): its tree solves, line
+    /// solve and point solves read them, and the caller's cache keeps its flags. The
+    /// point solves' fast drop tests the face only when the solve's point testing is
+    /// on and the cache's is too.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::global_curve_intersect`].
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    fn global_curve_intersect_from<O: SolutionObject>(
+    pub(crate) fn global_curve_intersect_from<O: SolutionObject>(
         &self,
         k: &Kernel,
         handles: [Option<O>; 2],
         mut cache: Option<&mut SurfaceCache<O>>,
         mut context: Option<&mut dyn SurfaceSolveContext<O>>,
+        modes: Option<SolveModes>,
         uv_domain: &Extent2d,
         curve: &Curve,
         interval: &Extent1d,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
         let [curve_handle, surface_handle] = handles;
+        let point_test_off = modes.is_some_and(|m| !m.point_test_enabled);
 
         // Special case DegenerateCurve/Surface intersections
         if curve.is_degenerate(k, EFF_ZERO, Some(interval))? {
@@ -2589,7 +2737,13 @@ impl Surface {
             // call found before failing stays in the solutions)
             let mut sols: SolutionArray<O> = SolutionArray::new();
             let solve = if let Some(context) = context {
-                self.global_point_solve_into_with_context(
+                let point_solve = if point_test_off {
+                    Self::global_point_solve_into_with_context_point_test_off
+                } else {
+                    Self::global_point_solve_into_with_context
+                };
+                point_solve(
+                    self,
                     k,
                     surface_handle,
                     cache.as_deref(),
@@ -2619,10 +2773,7 @@ impl Surface {
             solve?;
 
             // set output values
-            for ii in 0..sols.len() {
-                let sol = sols
-                    .get_mut(ii)
-                    .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
+            for sol in sols.as_mut_slice() {
                 sol.num_objects = 2;
                 sol.objects[0] = curve_handle;
                 sol.objects[1] = surface_handle;
@@ -2641,48 +2792,35 @@ impl Surface {
             if curve.is_line(k, 10, EFF_ZERO)?.is_some() {
                 // get Line value at param=0.0 avoiding interval boundary problems
                 let pv = curve.evaluate(k, interval.min(), 1, true, false)?;
-                let p0 = pv
-                    .first()
-                    .copied()
-                    .ok_or_else(|| SolidError::surface_failed(OP_CURVE, "the line has no point"))?;
-                let d1 = pv.get(1).copied().ok_or_else(|| {
-                    SolidError::surface_failed(OP_CURVE, "the line has no direction")
-                })?;
+                let (Some(&p0), Some(&d1)) = (pv.first(), pv.get(1)) else {
+                    return Err(SolidError::surface(
+                        OP_CURVE,
+                        SurfaceFailure::Defect {
+                            why: "the line's evaluation returned no point or first \
+                                  derivative, though it returns the derivatives 0..=1 asked \
+                                  of it",
+                        },
+                    ));
+                };
                 let line_point = p0 - interval.min() * d1;
 
                 // pass call to global surface/line intersect
-                let mut sols = if let Some(context) = context {
-                    self.global_line_intersect_with_context(
-                        k,
-                        surface_handle,
-                        cache,
-                        context,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                } else {
-                    self.global_line_intersect_in(
-                        k,
-                        surface_handle,
-                        cache,
-                        uv_domain,
-                        line_point,
-                        d1,
-                        Some(interval),
-                        false,
-                        distance_tolerance,
-                    )?
-                };
+                let mut sols = self.global_line_intersect_under(
+                    k,
+                    surface_handle,
+                    cache,
+                    context,
+                    modes,
+                    uv_domain,
+                    line_point,
+                    d1,
+                    Some(interval),
+                    false,
+                    distance_tolerance,
+                )?;
 
                 // for every solution set the object values
-                for ii in 0..sols.len() {
-                    let sol = sols
-                        .get_mut(ii)
-                        .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the solution"))?;
+                for sol in sols.as_mut_slice() {
                     sol.num_objects = 2;
                     sol.objects[0] = curve_handle;
                     sol.objects[1] = surface_handle;
@@ -2705,6 +2843,7 @@ impl Surface {
             interval,
             distance_tolerance,
             true,
+            point_test_off,
         )?;
 
         // the parts of the curve the general solve looks at: all of it, unless parts
@@ -2763,7 +2902,7 @@ impl Surface {
                 Self::held_cache(k, c, OP_CURVE)?
             }
         } else {
-            built = self.solve_cache_from_context(
+            built = self.lent_cache_from_context(
                 k,
                 surface_handle,
                 OP_CURVE,
@@ -2771,23 +2910,36 @@ impl Surface {
                     .as_mut()
                     .map(|context| &mut **context as &mut dyn SurfaceSolveContext<O>),
             )?;
-            &built
+            &*built
         };
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
-        let surface_tree = surface_cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the surface cache's tree"))?;
+        let surface_tree = surface_cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_CURVE,
+                SurfaceFailure::Defect {
+                    why: "the surface cache has no tree, though each source gives one: \
+                          GetTree builds it, or a solve context's build_surface_cache \
+                          returns its cache with the tree ready",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let curve_cache =
             match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, curve_handle) {
                 Ok(c) => c,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::surface_missing(OP_CURVE, "the curve's cache")),
+                Err(e) => {
+                    return Err(Failure::new(OP_CURVE, SurfaceFailure::SolveCacheNotMade)
+                        .caused_by(e)
+                        .into_error())
+                }
             };
-        let curve_tree = curve_cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_CURVE, "the curve cache's tree"))?;
+        let curve_tree = curve_cache.tree().ok_or_else(|| {
+            Failure::new(OP_CURVE, SurfaceFailure::SolveCacheNotMade).into_error()
+        })?;
 
         // the solutions name the trees' owners (LocalSolve: the curve, sm_GetOriginalSurface)
         let surface_domain = surface_cache.surface().natural_uv_domain_with_nurb(k)?;
@@ -2826,6 +2978,7 @@ impl Surface {
             );
             gs.curve = Some(curve);
             gs.surface_cache = Some(surface_cache);
+            gs.modes = modes;
             gs.face_queries = face_queries;
             gs.operands = Some(operands);
 
@@ -2893,6 +3046,7 @@ impl Surface {
     /// `SimpleCoincidenceChecker` of `curve` over `interval` against this surface,
     /// under the caller's face solve `context` when there is one: whether its samples
     /// lie on the surface (all of them, or with `partial_coincidence_ok` enough of them).
+    /// `point_test_off`: the solve's point testing is off.
     #[allow(clippy::too_many_arguments)] // the solve's operands and options
     fn curve_coincidence_found<'c, O: SolutionObject>(
         &self,
@@ -2905,9 +3059,10 @@ impl Surface {
         interval: &Extent1d,
         distance_tolerance: f64,
         partial_coincidence_ok: bool,
+        point_test_off: bool,
     ) -> Result<bool> {
         let coincidence = if let Some(context) = context {
-            self.simple_coincidence_checker_with_context(
+            self.simple_coincidence_checker_from(
                 k,
                 uv_domain,
                 curve,
@@ -2916,7 +3071,8 @@ impl Surface {
                 partial_coincidence_ok,
                 handles,
                 cache,
-                context,
+                Some(context),
+                point_test_off,
             )?
         } else {
             self.simple_coincidence_checker::<O>(
@@ -3240,10 +3396,11 @@ fn join_across_coincidence<O: SolutionObject>(
         //  tolerances
         if last_end.param(0)? < curr_start.param(0)? {
             last_sol.end = curr_sol.end;
-            if last_sol.start.param(0)? > last_sol.end.param(0)? {
-                return Err(SolidError::surface_failed(
+            let (start, end) = (last_sol.start.param(0)?, last_sol.end.param(0)?);
+            if start > end {
+                return Err(SolidError::surface(
                     OP_LINE,
-                    "a merged solution interval is reversed",
+                    SurfaceFailure::MergedRangeReversed { start, end },
                 ));
             }
         }
@@ -3329,21 +3486,23 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let k = self.kernel;
         // locals
         let point_node = *self.base.branch_node(branch, 0)?;
-        let surface_node = *self.base.branch_node(branch, 1)?;
-        let surface_id = branch
-            .get(1)
-            .copied()
-            .flatten()
-            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the branch's surface patch"))?;
-        let cache = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP_SP, "the surface cache"))?;
+        let (surface_id, surface_node) = self.base.branch_entry(branch, 1)?;
+        let surface_node = *surface_node;
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP_SP,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
+            )
+        })?;
         let patch = cache.patch(surface_id)?.clone();
         let test_pnt = point_node.bbox.min();
         let tree1 = self.base.tree(1)?;
 
         // If the classification of the node is outside then we can quit here
-        if !is_node_valid(tree1.owner(), cache, &surface_node)? {
+        let modes = SolveModes::of(cache, self.modes);
+        if !is_node_valid(tree1.owner(), cache, modes, &surface_node)? {
             return Ok(false);
         }
 
@@ -3457,7 +3616,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             tol,
             op,
             solve_for_surface,
-            cache.process_boundary_curves(),
+            modes.process_boundary_curves,
         )?;
 
         // For every solution, set some solution parameters, and then check whether to
@@ -3483,6 +3642,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 k,
                 self.base.tree(1)?.owner(),
                 cache,
+                modes,
                 uv_found,
                 None,
                 self.face_queries,
@@ -3690,9 +3850,9 @@ impl Surface {
         }
         if degen_params.is_empty() {
             // Probably out of bounds (SM_TR_OUT_OF_BOUNDS / SM_TR_UNABLE_TO_CONVERGE).
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INVERT,
-                "the degenerate parameter toward the point did not converge",
+                SurfaceFailure::DegenerateParameterNotFound,
             ));
         }
 
@@ -3759,7 +3919,13 @@ impl Surface {
         }
         let Some((uv, found_d)) = kept else {
             return Err(first_err.unwrap_or_else(|| {
-                SolidError::surface_failed(OP_INVERT, "no iso curve drop succeeded")
+                SolidError::surface(
+                    OP_INVERT,
+                    SurfaceFailure::Defect {
+                        why: "no drop was kept and none failed, though there is at least one \
+                              degenerate parameter and each one's drop is kept or fails",
+                    },
+                )
             }));
         };
         if !bounded {
@@ -3776,10 +3942,9 @@ impl Surface {
         let (Some((found_lo, found_hi)), Some((guess_lo, guess_hi))) =
             (found_d, enclose(uv_guess, srf_pt)?)
         else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INVERT,
-                "a distance from the test point is not enclosed: not a number, or past a \
-                 rational net's knots",
+                SurfaceFailure::DistanceNotEnclosed,
             ));
         };
         // (not upstream) For a maximize the guess is kept where the drop kept is proven
@@ -3803,9 +3968,12 @@ impl Surface {
         // `surface_p8` gen1191: 35505.9 away, the guess 1395.2), and upstream reports it
         // found.
         if found_lo > guess_hi {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INVERT,
-                "the point found is farther from the test point than the guess",
+                SurfaceFailure::FartherThanGuess {
+                    found: found_lo,
+                    guess: guess_hi,
+                },
             ));
         }
         // (not upstream) The pole assumption checked: the boundary at `sSingUV` is a
@@ -3820,10 +3988,12 @@ impl Surface {
             k, sing_uv, sing_dir, uv, uv_domain, test_pt, tol, &enclose,
         )? {
             if near_hi < found_lo {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_INVERT,
-                    "a point of the singular boundary is nearer the test point than the point \
-                     found: the boundary is not a pole",
+                    SurfaceFailure::SingularBoundaryNotPole {
+                        boundary: near_hi,
+                        found: found_lo,
+                    },
                 ));
             }
         }
@@ -4166,10 +4336,11 @@ impl Surface {
 
         // Error if zero line vector.
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::surface_failed(
-                OP_LOCAL_LINE,
-                "the line direction is the zero vector",
-            ));
+            return Err(
+                Failure::new(OP_LOCAL_LINE, SurfaceFailure::LineDirectionZero)
+                    .with_status(SM_ERR)
+                    .into_error(),
+            );
         }
 
         let mut uv = uv_domain.clamp_point(uv_guess);
@@ -4184,9 +4355,12 @@ impl Surface {
             let m = s.evaluate(k, uv, 1, 1, flags)?;
             let at = |i: usize, j: usize| {
                 m.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
-                    SolidError::surface_failed(
+                    SolidError::surface(
                         OP_LOCAL_LINE,
-                        "the evaluation has too few derivatives",
+                        SurfaceFailure::Defect {
+                            why: "the surface's evaluation returned too few derivatives, \
+                                  though it returns the orders 0..=1 in u and v asked of it",
+                        },
                     )
                 })
             };
@@ -4470,6 +4644,18 @@ pub struct BoundaryIntersection {
     pub tangency: bool,
 }
 
+/// The boundary curve's evaluation returned no first derivative, though it returns the
+/// derivatives `0..=1` asked of it (`SM_ERR`).
+fn boundary_tangent_missing() -> SolidError {
+    SolidError::surface(
+        OP_BNDRY,
+        SurfaceFailure::Defect {
+            why: "the boundary curve's evaluation returned no first derivative, though it \
+                  returns the derivatives 0..=1 asked of it",
+        },
+    )
+}
+
 /// Intersects `surface` with the iso-parameter curve of `curve_surface` at
 /// `iso_parameter` in direction `param` near the guess (`sm_IntersectSrfBndryCrv`).
 /// A degenerate iso curve, or one lying in the surface at the guess (its tangent
@@ -4512,10 +4698,7 @@ pub fn intersect_srf_bndry_crv(
     // around. When the boundary curve is in the surface, then the regular intersector
     // will work just fine, so just act like nothing happened.
     let pv = iso.evaluate(k, guess_t, 1, true, true)?;
-    let tangent = pv
-        .get(1)
-        .copied()
-        .ok_or_else(|| SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent"))?;
+    let tangent = pv.get(1).copied().ok_or_else(boundary_tangent_missing)?;
     let srf_norm = surface.evaluate_normal(k, guess_uv, Side::Right, Side::Right)?;
     if srf_norm.is_perpendicular_to(tangent, 0.05) {
         return Ok(out); // no solutions
@@ -4539,9 +4722,7 @@ pub fn intersect_srf_bndry_crv(
         out.t = f.t;
         out.deviation = f.deviation;
         let pv = iso.evaluate(k, f.t, 1, true, true)?;
-        let tangent = pv.get(1).copied().ok_or_else(|| {
-            SolidError::surface_failed(OP_BNDRY, "the boundary curve has no tangent")
-        })?;
+        let tangent = pv.get(1).copied().ok_or_else(boundary_tangent_missing)?;
         let normal = surface.evaluate_normal(k, f.uv, Side::Left, Side::Left)?;
 
         // when the angle curveTangent/SurfaceNormal angle is perpendicular to +/-5 deg
@@ -5121,6 +5302,10 @@ mod tests {
     impl crate::surface::surface_cache::face_context::FaceQueries<NoObject> for NumericalTrimContext {
         fn face_zone_tol_3d(&self, _face: NoObject) -> Result<f64> {
             Ok(1e-5)
+        }
+
+        fn face_has_loopuses(&self, _face: NoObject) -> Result<bool> {
+            Ok(true)
         }
 
         fn face_point_classify(

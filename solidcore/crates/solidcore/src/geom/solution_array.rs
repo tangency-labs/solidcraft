@@ -1708,6 +1708,11 @@ impl<O: SolutionObject> SolutionArray<O> {
         &self.data
     }
 
+    /// The solutions, to change in place (`GetDataArray`).
+    pub fn as_mut_slice(&mut self) -> &mut [Solution<O>] {
+        &mut self.data
+    }
+
     /// Solution `index`, `None` past the size (`operator[]`).
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&Solution<O>> {

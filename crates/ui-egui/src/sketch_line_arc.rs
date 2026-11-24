@@ -179,7 +179,7 @@ fn switch(app: &mut SolveApp) {
     next.chain = LineChain { curve: old.chain.curve.clone(), back_to_lines: !to_arc, back: old.chain.back.clone(), ..LineChain::default() };
     app.tool = Some(next);
     let hint = if to_arc { app.tr("ui.line_arc_hint").to_string() } else { crate::tools::hint(LINE) };
-    app.set_status(hint, false);
+    app.set_tool_hint(hint);
 }
 
 /// Right-click or Esc while drawing tangent arcs: the chain ends as a line chain does, and the Line
@@ -189,7 +189,7 @@ pub fn finish(app: &mut SolveApp) -> bool {
         return false;
     }
     app.tool = Tool::for_command(LINE);
-    app.set_status(crate::tools::hint(LINE), false);
+    app.set_tool_hint(crate::tools::hint(LINE));
     true
 }
 

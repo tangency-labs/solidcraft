@@ -20,9 +20,11 @@
 //! there, so no message changes. Knots and nets are read by checked indices (a knot or a
 //! coordinate outside reads NaN, which shows in the result). No recursion.
 
+use crate::blend::fillet_section::certificate::no_part_of_the_box;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::{v_hull, V3, VZ};
 use crate::blend::fillet_section::station::{ders_basis, knot, span, Nurbs, Partials};
+use crate::error::blend::{BlendFailure, SectionProof};
 use crate::error::{Result, SolidError};
 
 /// The operation the errors name: where these functions were, kept so that no message
@@ -224,10 +226,11 @@ pub(crate) fn partials_over_piece(
     };
     let positive = w00.lo > 0.0;
     if !positive {
-        // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::blend_failed(
+        // "SmGnSectionFSG: a face's weights are not positive over a box" (status SM_ERR
+        // and this operation: `is_certificate_sm_err` subdivides a wide box on it)
+        return Err(SolidError::blend(
             OP,
-            "a face's weights are not positive over a box",
+            BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
         ));
     }
     let mut out = Partials::default();
@@ -388,7 +391,7 @@ fn over_box(
             });
         }
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// The hull of two enclosures of partials, `a + b <= lk`.

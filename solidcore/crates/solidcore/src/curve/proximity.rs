@@ -85,7 +85,9 @@
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::length_bound::Span;
 use crate::error::Result;
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
@@ -94,6 +96,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::gamma;
 
 const OP: &str = "curve::proximity::proved_near";
+const OP_DISJOINT: &str = "curve::proximity::proved_disjoint";
 
 /// How many times a piece is halved at most.
 pub const DEPTH: usize = 32;
@@ -130,6 +133,34 @@ fn form(curve: &Curve) -> Option<Form<'_>> {
         _ => return None,
     };
     spline.nurb.is_some().then_some(Form::Spline(spline))
+}
+
+/// A whole native piece's convex hull, including each coordinate's outward
+/// rounding allowance. No sampled or approximation box participates in separation.
+fn native_piece_box(curve: &Curve, domain: &Extent1d) -> Option<Extent3d> {
+    let points = curve.piece_hull_points(domain)?;
+    let mut bounds = Extent3d::new();
+    for (p, error) in points {
+        if !(p.x.is_finite()
+            && p.y.is_finite()
+            && p.z.is_finite()
+            && error.is_finite()
+            && error >= 0.0)
+        {
+            return None;
+        }
+        bounds.add_point(Vec3::new(
+            next_down(p.x - error),
+            next_down(p.y - error),
+            next_down(p.z - error),
+        ));
+        bounds.add_point(Vec3::new(
+            next_up(p.x + error),
+            next_up(p.y + error),
+            next_up(p.z + error),
+        ));
+    }
+    bounds.is_defined().then_some(bounds)
 }
 
 /// A failed evaluation proves nothing (`None`); a cancellation and an unported callee are
@@ -324,6 +355,77 @@ fn angle(a: Vec3, b: Vec3) -> f64 {
 }
 
 impl Curve {
+    /// Proves that two native curves have no common point. Each parameter rectangle
+    /// is discarded only when outward native hull boxes separate it on a coordinate axis.
+    /// Subdivision changes the enclosure, never a geometric tolerance. Unsupported
+    /// definitions or exhausted work leave separation unproved.
+    ///
+    /// # Errors
+    /// The kernel's cancellation.
+    pub(crate) fn proved_disjoint(
+        &self,
+        k: &Kernel,
+        interval: Extent1d,
+        other: &Self,
+        other_interval: Extent1d,
+    ) -> Result<bool> {
+        for (curve, domain) in [(self, interval), (other, other_interval)] {
+            let natural = curve.natural_interval();
+            if !(domain.min().is_finite()
+                && domain.max().is_finite()
+                && natural.min() <= domain.min()
+                && domain.min() < domain.max()
+                && domain.max() <= natural.max())
+            {
+                return Ok(false);
+            }
+        }
+        let mut work = vec![(interval, other_interval, 0_usize)];
+        let mut visits = 0;
+        while let Some((a, b, depth)) = work.pop() {
+            k.check_cancelled(OP_DISJOINT)?;
+            visits += 1;
+            if visits > MAX_PIECES {
+                return Ok(false);
+            }
+            let (Some(x), Some(y)) = (native_piece_box(self, &a), native_piece_box(other, &b))
+            else {
+                return Ok(false);
+            };
+            let (lo, hi, other_lo, other_hi) = (x.min(), x.max(), y.min(), y.max());
+            if hi.x < other_lo.x
+                || other_hi.x < lo.x
+                || hi.y < other_lo.y
+                || other_hi.y < lo.y
+                || hi.z < other_lo.z
+                || other_hi.z < lo.z
+            {
+                continue;
+            }
+            // Twice the one-parameter depth allows alternating splits of both curves.
+            if depth >= 2 * DEPTH {
+                return Ok(false);
+            }
+            let split_first = x.size().length_squared() >= y.size().length_squared();
+            let domain = if split_first { a } else { b };
+            let mid = domain.mid();
+            if !(domain.min() < mid && mid < domain.max()) {
+                return Ok(false);
+            }
+            for piece in [
+                Extent1d::from_min_max(domain.min(), mid),
+                Extent1d::from_min_max(mid, domain.max()),
+            ] {
+                work.push(if split_first {
+                    (piece, b, depth + 1)
+                } else {
+                    (a, piece, depth + 1)
+                });
+            }
+        }
+        Ok(true)
+    }
+
     /// A cone holding every tangent direction of this curve over `[a, b]` (`a < b`), from
     /// its control points: a line's direction; for a B-spline (and a conic by its rational
     /// B-spline) the tangent of a Bezier piece with positive weights is a combination with
@@ -923,6 +1025,92 @@ mod tests {
     use crate::curve::ellipse::{Ellipse, EllipseOptions};
     use crate::curve::line::Line;
     use crate::math::Point3;
+
+    #[test]
+    fn subnormal_split_rounding_cannot_prove_crossing_curves_disjoint() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        let left = Extent1d::from_min_max(0.0, 0.5);
+        let crossing = Curve::from(Line::from_points(
+            Point3::new(3.0 / 10.0, 1.0 / 40.0, 0.0),
+            Point3::new(9.0 / 20.0, 1.0 / 40.0, 0.0),
+            3,
+        ));
+        for weight in [f64::from_bits(16), f64::MIN_POSITIVE, 1.0] {
+            // Equal weights define exactly (u, u/16, 0). At the smallest
+            // weight, splitting at 1/2 rounds the weighted y = 2^-1075 to zero.
+            let curve = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, weight),
+                        CPoint::new(weight, weight / 16.0, 0.0, weight),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ));
+            if let Some(bounds) = native_piece_box(&curve, &left) {
+                assert!(
+                    bounds.contains_point(Point3::new(0.5, 1.0 / 32.0, 0.0), 0.0),
+                    "weight {weight}: {bounds:?} misses the exact endpoint"
+                );
+            }
+            // At the stored horizontal y = fl(1/40), x = 16y is strictly inside
+            // both pieces. This is an exact intersection of the stored inputs.
+            assert!(!curve.proved_disjoint(&k, left, &crossing, domain).unwrap());
+        }
+    }
+
+    #[test]
+    fn disjoint_curves_need_whole_span_separation() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        let seam = Curve::from(Line::from_points(
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            3,
+        ));
+        let cubic = |heights: [f64; 4]| {
+            let points = [-1.0, -1.0 / 3.0, 1.0 / 3.0, 1.0]
+                .into_iter()
+                .zip(heights)
+                .map(|(x, y)| CPoint::new(x, y, 0.0, NOW))
+                .collect();
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(points, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
+                3,
+                false,
+            ))
+        };
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        // Negative controls, but y(t) = 1 - 3.3t(1-t) >= 0.175 everywhere.
+        let apart = cubic([1.0, -0.1, -0.1, 1.0]);
+        assert!(seam.proved_disjoint(&k, domain, &apart, domain).unwrap());
+        // All three stations are positive, but y(1/4) = -13/32: two crossings.
+        let crossing = cubic([1.0, -3.0, 3.0, 1.0]);
+        for t in [0.0, 0.5, 1.0] {
+            assert!(crossing.evaluate_point(&k, t).unwrap().y > 0.0);
+        }
+        assert!(!seam.proved_disjoint(&k, domain, &crossing, domain).unwrap());
+        assert!(seam
+            .proved_disjoint(&k, domain, &crossing, Extent1d::from_min_max(0.5, 1.0))
+            .unwrap());
+        assert!(!seam.proved_disjoint(&k, domain, &seam, domain).unwrap());
+        let tangent = cubic([3.0, -1.0, -1.0, 3.0]);
+        assert!(!seam.proved_disjoint(&k, domain, &tangent, domain).unwrap());
+        assert!(!seam
+            .proved_disjoint(&k, domain, &apart, Extent1d::from_min_max(-1.0, 1.0))
+            .unwrap());
+    }
 
     /// A full circle or ellipse about `centre` in the plane z = `centre.z`.
     fn ellipse(k: &Kernel, centre: Point3, rx: f64, ry: f64) -> Curve {

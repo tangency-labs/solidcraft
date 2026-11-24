@@ -32,9 +32,9 @@ pub use assert_valid::{
     CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
 };
 pub(crate) use pointers::validate_geometry;
-pub(crate) use pointers::validate_pointers_excluding;
 pub(crate) use pointers::GROWTH_PAST_RATIO;
 pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
+pub(crate) use pointers::{validate_pointers_excluding, validate_pointers_traced};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 pub use wide_vertices::update_tolerances_after_boolean;

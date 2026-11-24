@@ -17,7 +17,13 @@
 //!    rows, every code undecided on both NURBs), the first run is held by its hash alone.
 //!
 //! So each committed row is this branch's output, and it differs from main's only through
-//! the NURB the found spheres keep. `corpus.parity` runs its two sides in this process
+//! the NURB the found spheres keep.
+//!
+//! #20179 (the point test asks the face whether to test) adds five UV trims to the result
+//! body of six `sphere_diff_3cylinders` rows; step 1 hashes those rows without them
+//! ([`run_without_classified_trims`]: the five edges' trim counts lowered, which
+//! `wr493_rows`' `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims` proves is
+//! the body's record without those trims, each certified on its edge). `corpus.parity` runs its two sides in this process
 //! (`run_in_process`) so the seam sees their reads.
 //!
 //! [`DATA`] was made by [`record`] from main's expected rows (`REFIT_OLD`, its `expected`
@@ -48,6 +54,7 @@ use serde_json::Value;
 use super::state::{self, Refit};
 use crate::case::{repo_root, Case, CaseContext};
 use crate::golden::{default_dir, encode, read};
+use crate::output::Output;
 use crate::rng::fnv1a64;
 use crate::units::corpus_parity::run_in_process;
 use crate::UnitDiff;
@@ -84,15 +91,25 @@ pub(crate) fn cases(u: &dyn UnitDiff) -> BTreeMap<String, Case> {
 }
 
 pub(crate) fn run(u: &dyn UnitDiff, case: &Case) -> Value {
+    encode(&case.name, &output(u, case))
+}
+
+fn output(u: &dyn UnitDiff, case: &Case) -> Output {
     let out = if u.id() == "corpus.parity" {
         run_in_process(case)
     } else {
         u.run_rust(case)
     };
-    encode(
-        &case.name,
-        &out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name)),
-    )
+    out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
+}
+
+/// [`run`] without the UV trims #20179's face classification adds to a row's result body
+/// (`wr493_rows::without_classified_trims`, which proves them; other rows as [`run`]): the
+/// row main's run gives, for the runs held to main's.
+pub(crate) fn run_without_classified_trims(u: &dyn UnitDiff, case: &Case) -> Value {
+    let mut out = output(u, case);
+    crate::wr493_rows::without_classified_trims(u.id(), &case.name, &mut out);
+    encode(&case.name, &out)
 }
 
 /// The hash of a row as main writes it: without the exact `contact` record of line and
@@ -114,7 +131,7 @@ fn contact(v: &Value) -> Option<Value> {
 /// `run` with the refit installed: the row and what the seam saw.
 pub(crate) fn run_refit(u: &dyn UnitDiff, case: &Case) -> (Value, Refit) {
     state::set(Some(Refit::default()));
-    let line = run(u, case);
+    let line = run_without_classified_trims(u, case);
     let refit = state::take().expect("refit lost");
     (line, refit)
 }

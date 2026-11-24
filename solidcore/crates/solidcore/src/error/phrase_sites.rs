@@ -3,7 +3,7 @@
 //! refusal ([`BlendFailure::is_phrase`](super::blend::BlendFailure::is_phrase)). The
 //! count may only fall: each site moves to a finer cause, a refusal, or a
 //! [`BlendFailure::Defect`](super::blend::BlendFailure::Defect) with its reason, and the PR
-//! that converts it lowers its file's count in [`PINNED`]. The other areas' phrase causes
+//! that converts it lowers its file's pin (see [`PINS`]). The other areas' phrase causes
 //! are counted the same way, each area's list in its own error file; how to convert a site
 //! is the conversion guide (`docs/failure-codes-and-reproduction.md` §6).
 //!
@@ -66,144 +66,25 @@ pub(in crate::error) fn phrase_sites() -> Vec<(String, Vec<Site>)> {
     crate_sites(&BLEND)
 }
 
-/// Every library file that builds a phrase cause, with its exact number of sites (see the
-/// module docs for what counts). Converting a site lowers its file's count here in the
-/// same PR, and a file that reaches 0 loses its line. The count never rises: a new
-/// failure gets a classed cause. Code that moves between files moves its sites: the PR
-/// lowers one file's count and raises the other's by the same number, and the total stays
-/// (the failure says so). Per file, as the bare-status ratchets are (`assert_waiting`), so
-/// a rise hidden by a conversion in another file still fails.
-#[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-const PINNED: &[(&str, usize)] = &[
-    ("solidcore/src/blend/blend_corner.rs", 5),
-    ("solidcore/src/blend/blend_corner/ball.rs", 15),
-    ("solidcore/src/blend/blend_corner/chamfer.rs", 8),
-    ("solidcore/src/blend/blend_corner/end.rs", 9),
-    ("solidcore/src/blend/blend_corner/mixed.rs", 25),
-    ("solidcore/src/blend/blend_corner/mixed/algebra.rs", 1),
-    ("solidcore/src/blend/blend_corner/setback.rs", 27),
-    ("solidcore/src/blend/blend_corner/swept.rs", 7),
-    ("solidcore/src/blend/blend_setback.rs", 29),
-    ("solidcore/src/blend/feature_executive.rs", 32),
-    ("solidcore/src/blend/fillet_cliff_overflow.rs", 16),
-    ("solidcore/src/blend/fillet_corner/p1.rs", 45),
-    ("solidcore/src/blend/fillet_corner/p2.rs", 17),
-    ("solidcore/src/blend/fillet_corner/p3.rs", 25),
-    ("solidcore/src/blend/fillet_corner/topology.rs", 7),
-    ("solidcore/src/blend/fillet_corner/topology/ball.rs", 7),
-    ("solidcore/src/blend/fillet_corner/topology/closed_turn.rs", 2),
-    ("solidcore/src/blend/fillet_corner/topology/concave_4x2.rs", 2),
-    ("solidcore/src/blend/fillet_corner/topology/concave_nxn.rs", 2),
-    ("solidcore/src/blend/fillet_corner/topology/end_corners.rs", 4),
-    ("solidcore/src/blend/fillet_corner/topology/end_smooth.rs", 8),
-    ("solidcore/src/blend/fillet_corner/topology/join.rs", 19),
-    ("solidcore/src/blend/fillet_corner/topology/mixed.rs", 9),
-    ("solidcore/src/blend/fillet_corner/topology/mixed_3x2.rs", 4),
-    ("solidcore/src/blend/fillet_corner/topology/nx1_end.rs", 1),
-    ("solidcore/src/blend/fillet_corner/topology/swept_turn.rs", 8),
-    ("solidcore/src/blend/fillet_custom_solver.rs", 20),
-    ("solidcore/src/blend/fillet_exact.rs", 19),
-    ("solidcore/src/blend/fillet_exact/rational.rs", 23),
-    ("solidcore/src/blend/fillet_executive/session.rs", 43),
-    ("solidcore/src/blend/fillet_executive/session/ball_regular.rs", 8),
-    ("solidcore/src/blend/fillet_executive/session/cliff_overflow.rs", 5),
-    ("solidcore/src/blend/fillet_executive/session/ease.rs", 49),
-    ("solidcore/src/blend/fillet_executive/session/finish.rs", 3),
-    ("solidcore/src/blend/fillet_executive/session/fit_size.rs", 20),
-    ("solidcore/src/blend/fillet_executive/session/insertion/live.rs", 3),
-    ("solidcore/src/blend/fillet_executive/session/keep_features.rs", 16),
-    ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 34),
-    ("solidcore/src/blend/fillet_executive/session/two_offsets.rs", 18),
-    ("solidcore/src/blend/fillet_intersector.rs", 13),
-    ("solidcore/src/blend/fillet_overflow.rs", 31),
-    ("solidcore/src/blend/fillet_removal.rs", 3),
-    ("solidcore/src/blend/fillet_removal/ring.rs", 5),
-    ("solidcore/src/blend/fillet_section/certificate.rs", 11),
-    ("solidcore/src/blend/fillet_section/continuation.rs", 2),
-    ("solidcore/src/blend/fillet_section/definition.rs", 6),
-    ("solidcore/src/blend/fillet_section/definition_box.rs", 12),
-    ("solidcore/src/blend/fillet_section/feet_tm.rs", 6),
-    ("solidcore/src/blend/fillet_section/section.rs", 26),
-    ("solidcore/src/blend/fillet_section/series.rs", 4),
-    ("solidcore/src/blend/fillet_section/station.rs", 15),
-    ("solidcore/src/blend/fillet_solver/curve_blend_sih.rs", 14),
-    ("solidcore/src/blend/fillet_solver/p1.rs", 25),
-    ("solidcore/src/blend/fillet_solver/p1/rails.rs", 7),
-    ("solidcore/src/blend/fillet_solver/p2.rs", 13),
-    ("solidcore/src/blend/fillet_solver/p3.rs", 25),
-    ("solidcore/src/blend/fillet_solver/p4.rs", 38),
-    ("solidcore/src/blend/fillet_solver/p5.rs", 7),
-    ("solidcore/src/blend/fillet_solver/p5/end_sections_fit.rs", 13),
-    ("solidcore/src/blend/fillet_solver/p5/rails_fit.rs", 16),
-    ("solidcore/src/blend/fillet_solver/p5/recovery.rs", 6),
-    ("solidcore/src/blend/fillet_solver/surfaces.rs", 2),
-    ("solidcore/src/blend/fillet_standard_solver/p1.rs", 32),
-    ("solidcore/src/blend/fillet_standard_solver/p2.rs", 28),
-    ("solidcore/src/blend/fillet_standard_solver/surface_surface.rs", 2),
-    ("solidcore/src/blend/fillet_standard_solver/touch_circle.rs", 1),
-    ("solidcore/src/blend/hcr.rs", 2),
-    ("solidcore/src/blend/identify_fillet.rs", 4),
-    ("solidcore/src/blend/law_corners.rs", 7),
-    ("solidcore/src/geom/nurbs_enclosure.rs", 2),
-];
+/// The pins of the phrase-cause sites: every library file that builds a phrase cause has
+/// one file in `src/error/pins/phrase/`, `<path>.pin` holding its exact number of sites
+/// (see the module docs for what counts; [`site_scan::pins`] for the layout). Converting a
+/// site lowers its file's pin in the same PR, and a file that reaches 0 loses its pin. The
+/// count never rises: a new failure gets a classed cause. Code that moves between files
+/// moves its sites: the PR lowers one pin and raises the other by the same number, and the
+/// total stays (the failure says so). Per file, as the bare-status ratchets are
+/// (`assert_waiting`), so a rise hidden by a conversion in another file still fails. One
+/// file per pin, so conversions in different files never touch the same line.
+const PINS: &str = "phrase";
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Write as _;
 
     /// The number of blend sites that build a phrase cause only falls.
     #[test]
     fn the_phrase_cause_sites_only_shrink() {
-        let found = phrase_sites();
-        let counts: Vec<(&str, usize)> = found.iter().map(|(f, s)| (f.as_str(), s.len())).collect();
-        if counts != PINNED {
-            let mut report = String::new();
-            let pinned_total: usize = PINNED.iter().map(|(_, n)| n).sum();
-            let found_total: usize = counts.iter().map(|(_, n)| n).sum();
-            writeln!(
-                report,
-                "phrase-cause sites: pinned {pinned_total}, found {found_total}"
-            )
-            .unwrap();
-            if pinned_total == found_total {
-                writeln!(
-                    report,
-                    "the total is unchanged: if code moved between files, update both lines"
-                )
-                .unwrap();
-            }
-            let mut files: Vec<&str> = PINNED.iter().map(|(f, _)| *f).collect();
-            files.extend(counts.iter().map(|(f, _)| *f));
-            files.sort_unstable();
-            files.dedup();
-            for file in files {
-                let pinned = PINNED
-                    .iter()
-                    .find(|(f, _)| *f == file)
-                    .map_or(0, |(_, n)| *n);
-                let sites = found.iter().find(|(f, _)| f == file).map(|(_, s)| s);
-                let n = sites.map_or(0, Vec::len);
-                if pinned != n {
-                    writeln!(report, "{file}: pinned {pinned}, found {n}").unwrap();
-                    for site in sites.into_iter().flatten() {
-                        writeln!(report, "    {file}:{}  {}", site.line, site.via).unwrap();
-                    }
-                }
-            }
-            writeln!(report, "the pinned list, as found:").unwrap();
-            for (file, n) in &counts {
-                writeln!(report, "    (\"{file}\", {n}),").unwrap();
-            }
-            panic!("{report}");
-        }
-        for (file, n) in PINNED {
-            assert!(*n > 0, "{file} builds no phrase cause: remove its line");
-        }
-        assert!(
-            PINNED.windows(2).all(|w| w[0].0 < w[1].0),
-            "PINNED is sorted by path, one file per line"
-        );
+        site_scan::assert_pins("phrase-cause sites", &phrase_sites(), PINS);
     }
 
     fn lines(code: &str) -> Vec<(usize, String)> {

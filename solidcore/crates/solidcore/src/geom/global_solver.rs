@@ -783,13 +783,23 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     /// [`SolidError::InvalidInput`] for a null slot or tree, or a node id the
     /// tree does not hold.
     pub fn branch_node(&self, branch: &Branch, index: usize) -> Result<&'t TreeNode<O>> {
+        Ok(self.branch_entry(branch, index)?.1)
+    }
+
+    /// The id and the node of `branch` in tree `index` (`apBranch[index]`), for a caller
+    /// that reads both.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`GlobalSolver::branch_node`].
+    pub fn branch_entry(&self, branch: &Branch, index: usize) -> Result<(NodeId, &'t TreeNode<O>)> {
         const OP: &str = "geom::global_solver::GlobalSolver::branch_node";
         let id = branch
             .get(index)
             .copied()
             .flatten()
             .ok_or_else(|| null_node(OP))?;
-        self.tree(index)?.node(id)
+        Ok((id, self.tree(index)?.node(id)?))
     }
 
     /// The bounding box of `branch`'s node in tree `index`

@@ -1399,6 +1399,24 @@ fn move_with_z_lifts_picked_points_too() {
     near(w.fit[1], Vec3::new(5.0, 14.0, 4.0));
 }
 
+#[test]
+fn moving_a_line_and_a_lone_point_off_the_plane_keeps_the_other_lines() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let l1 = run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let p = run(&mut s, "sketch.point", json!({"point":[25,5]}))["created"]["points"][0].as_str().unwrap().to_string();
+    let l2 = run(&mut s, "sketch.line", json!({"points":[[20,10],[30,10]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[l1, p.clone()], "translate":[0,0], "z": 5}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&l2).is_some(), "the other line stays: {r}");
+    let at = |end: &str, x: f64, y: f64| {
+        sk.resolve_point(&format!("{l2}.{end}")).is_some_and(|i| (sk.points[i].pos.x - x).abs() < 1e-9 && (sk.points[i].pos.y - y).abs() < 1e-9)
+    };
+    assert!(at("start", 20.0, 10.0) && at("end", 30.0, 10.0), "the other line is where it was");
+    assert!(sk.point_index(&p).is_none(), "the plane point went");
+    let fits: Vec<Vec3> = sk.wires.iter().flat_map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().any(|q| q.dist(Vec3::new(25.0, 5.0, 5.0)) < 1e-9), "{fits:?}");
+}
+
 /// What can't leave the plane says so and changes nothing: `z` on a circle is refused, the
 /// doc is the same afterwards.
 #[test]

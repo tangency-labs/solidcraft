@@ -76,6 +76,7 @@ use super::p9::implicit_iso;
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::surface::{SolverPart, SurfaceFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -94,7 +95,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
-use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::surface::surface_cache::p1::{SolveModes, SurfaceCache};
 use crate::topology::ObjectHandle;
 
 const OP_LSI: &str = "surface::surface::p10::LsiGlobalSolver::local_solve_branch";
@@ -429,7 +430,15 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 super::p1::ignore_native_classification(face_cache.point_test(k, uv))?
                     .unwrap_or(true),
             ),
-            _ => super::p1::is_point_valid_with(k, owner, cache, uv, None, self.face_queries),
+            _ => super::p1::is_point_valid_with(
+                k,
+                owner,
+                cache,
+                SolveModes::of(cache, self.modes),
+                uv,
+                None,
+                self.face_queries,
+            ),
         }
     }
 
@@ -490,15 +499,16 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         mut keep: Option<&mut Kept<O>>,
     ) -> Result<bool> {
         // locals - apBranch[0] is SurfaceNode
-        let surface_node = *self.base.branch_node(branch, 0)?;
-        let surface_id = branch
-            .first()
-            .copied()
-            .flatten()
-            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the branch's surface node"))?;
-        let cache = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP_LSI, "the surface cache"))?;
+        let (surface_id, surface_node) = self.base.branch_entry(branch, 0)?;
+        let surface_node = *surface_node;
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP_LSI,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
+            )
+        })?;
         let patch = cache.patch(surface_id)?.clone();
         let tree = self.base.tree(0)?;
         let parent = original_surface(tree, &surface_node)?;
@@ -521,11 +531,22 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         let srf_eval = cache.surface();
 
         // no work - This SurfaceNode is classified outside its face.
-        if !is_node_valid(tree.owner(), cache, &surface_node)? {
+        if !is_node_valid(
+            tree.owner(),
+            cache,
+            SolveModes::of(cache, self.modes),
+            &surface_node,
+        )? {
             return Ok(false);
         }
         // (not upstream) whether a component in it can straddle the face's border
-        let inside = keep.is_some() && is_node_inside(tree.owner(), cache, &surface_node)?;
+        let inside = keep.is_some()
+            && is_node_inside(
+                tree.owner(),
+                cache,
+                SolveModes::of(cache, self.modes),
+                &surface_node,
+            )?;
 
         // no work - surfaceLeafDomain disjoint from intersectionDomain
         if uv_domain.are_disjoint(&self.uv_domain, 0.0) {
@@ -698,7 +719,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             .first()
             .copied()
             .ok_or_else(|| {
-                SolidError::surface_failed(OP_LSI, "the tangent plane drop gave no point")
+                SolidError::surface(
+                    OP_LSI,
+                    SurfaceFailure::Defect {
+                        why: "the tangent-plane drop returned no point, though it maps each \
+                              point it is given and was given one",
+                    },
+                )
             })
         };
         let mut first_uv = drop(first_uv_guess, first_t)?;
@@ -890,7 +917,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             }
 
             // Handle surface boundary discontinuities
-            if !cache.process_boundary_curves {
+            if !SolveModes::of(cache, self.modes).process_boundary_curves {
                 continue;
             }
             for dir in [SurfParamType::U, SurfParamType::V] {
@@ -1524,12 +1551,22 @@ impl<O: SolutionObject> CombineContext<'_, O> {
         let (Some(n1), Some(id2)) = (valid1, valid2) else {
             return Ok(None);
         };
-        let tree = self
-            .curve_tree
-            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the curve tree"))?;
-        let cache = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP_COMBINE, "the surface cache"))?;
+        let tree = self.curve_tree.ok_or_else(|| {
+            SolidError::surface(
+                OP_COMBINE,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::CurveTree,
+                },
+            )
+        })?;
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP_COMBINE,
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
+            )
+        })?;
         Ok(Some((
             tree.curve_aux(n1)?.interval,
             cache.aux(id2)?.uv_domain,
@@ -1901,9 +1938,12 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         };
         // the packed indices never pass the array (shrinking only)
         if last >= solutions.len() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_COMBINE,
-                "the packed solution index is past the end of the solutions",
+                SurfaceFailure::Defect {
+                    why: "the combination packed a solution index past the end of the \
+                          solutions, though packing only moves solutions toward the front",
+                },
             ));
         }
         solutions.set_size(last + 1);
@@ -2118,7 +2158,13 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 let uv = Point2::new(p(&sol.start, 1)?, p(&sol.start, 2)?);
                 let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
                 let tangent = pv.get(1).copied().ok_or_else(|| {
-                    SolidError::surface_failed(OP_COMBINE, "the curve gave no tangent")
+                    SolidError::surface(
+                        OP_COMBINE,
+                        SurfaceFailure::Defect {
+                            why: "the curve's evaluation returned no first derivative, though \
+                                  it returns the derivatives 0..=1 asked of it",
+                        },
+                    )
                 })?;
                 if !tangent.is_perpendicular_to(normal, 2.0) {
                     tmp.add(sol);
@@ -2298,24 +2344,32 @@ mod tests {
         assert!(sols.is_empty());
     }
 
-    /// The line and curve intersection failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The line and curve intersection failures keep the operation, status and entity of the
+    /// bare `Upstream` statuses they replace (a sample); their class is the cause's.
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
-        use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+        use crate::error::surface::{SolverPart, SurfaceFailure};
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 2] = [
             (
                 OP_LSI,
-                SurfaceFailure::Missing("the surface cache"),
+                SurfaceFailure::SolverWithout {
+                    part: SolverPart::SurfaceCache,
+                },
                 crate::error::SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_COMBINE,
-                SurfaceFailure::Failed("the curve gave no tangent"),
+                SurfaceFailure::Defect {
+                    why: "the curve's evaluation returned no first derivative, though it \
+                          returns the derivatives 0..=1 asked of it",
+                },
                 crate::error::SM_ERR,
+                ErrorKind::StageFailed,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -2324,7 +2378,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

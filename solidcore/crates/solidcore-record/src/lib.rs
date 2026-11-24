@@ -36,5 +36,10 @@ pub mod step;
 pub mod vec;
 
 pub use plane::Plane;
-pub use profile::{Loop2, MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Region2, Seg2};
-pub use vec::{Vec2, Vec3};
+pub use profile::Loop2;
+pub use profile::MAX_BEZIER_CTRL;
+pub use profile::MAX_BEZIER_DEGREE;
+pub use profile::Region2;
+pub use profile::Seg2;
+pub use vec::Vec2;
+pub use vec::Vec3;

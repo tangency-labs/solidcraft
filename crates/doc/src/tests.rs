@@ -925,6 +925,7 @@ fn a_coil_follows_its_sketch() {
             position: 0,
             start_angle: None,
             clockwise: false,
+            end_cut: Default::default(),
             operation: Operation::NewBody,
             targets: Vec::new(),
         },
@@ -1144,7 +1145,7 @@ fn primitives_and_combine() {
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::new(5.0, 5.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
@@ -1443,10 +1444,10 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: the format before this one, and no list of the
-    // changes it has, so the pending change is applied to it as it opens.
+    // The design as an older build saved it: before v64 (`midplane-old-frame.rs`), so the
+    // v64 migration step is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
-    saved["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+    saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
     let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
     let built = plane_of(&older);
@@ -1502,6 +1503,35 @@ fn datum_refs_parse_strictly() {
 /// `Document::placement_frame` walks one exact placement the way the engine's occurrence walk
 /// does: the #7313 scenario's parent translated +100, a child +20, a copy of the parent another
 /// +50 - the copied child's XY plane sits at (170, 0, 0) against the original at (120, 0, 0).
+/// A direction of expressions turned by a frame keeps a constant however small it is next to
+/// nothing else: `["sin(t)", "0", "1e-20"]` at t = 0 is still along Z after a turn about Y, not
+/// zero (#18822). A length keeps its cutoff of 1e-12 mm for rounding.
+#[test]
+fn a_turned_direction_keeps_its_small_constants() {
+    let mut doc = Document::new("T");
+    doc.set_param("t", "0 deg", None, None).unwrap();
+    let turn = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_4);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "0".into(), "1e-20".into()];
+    crate::map_dir_expr(&turn, &mut d);
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    let unit = crate::unit_direction(Vec3::new(v[0], v[1], v[2])).expect("a direction, not zero");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(unit.dist(Vec3::new(h, 0.0, h)) < 1e-9, "{d:?} -> {unit:?}");
+    // Rounding from the turn itself is dropped from a direction of ordinary size, with or
+    // without an expression beside it, and every number is written short.
+    let quarter = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_2);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert_eq!(d[1].to_string(), "0", "{d:?}");
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1e-300".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    doc.set_param("t", "30 deg", None, None).unwrap();
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    assert!((v[0] - 0.5).abs() < 1e-15 && v[1].abs() < 1e-290 && (v[2] - 1e-300).abs() < 1e-310, "{d:?} -> {v:?}");
+}
+
 #[test]
 fn placement_frame_matches_the_occurrence_walk() {
     let mut doc = Document::new("datum frames");
@@ -1830,6 +1860,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
                 tool_plane: false,
+                tool_sheet: Default::default(),
+                tool_faces: Vec::new(),
                 sketch: None,
                 line: None,
             },

@@ -83,8 +83,9 @@
 //!   arrays are a function of the surface ([`Surface::continuities`]), which those
 //!   readers ask directly: they get no cache at all, so a read during a Boolean
 //!   operation builds no tree and makes no UV trim curves. No history of the surface's
-//!   caches is kept (the fast-drop face test's state bits still depend on whether the
-//!   face's cache was built: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest of the cache (its UV domain, face
+//!   caches is kept (the fast-drop face test asks the face whether to test, not the
+//!   cache's build: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest
+//!   of the cache (its UV domain, face
 //!   containment and modified-face state) is rebuilt as before. The debug cache
 //!   counters are not modelled. The owner of a face's surface is an
 //!   [`ObjectRef`] the surface cannot follow to the B-rep: a caller holding the face
@@ -134,7 +135,8 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::assert_array::labels::FACE_TYPE;
 use crate::geom::extent1d::Extent1d;
@@ -171,7 +173,9 @@ use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::p1::{SurfaceCache, SurfaceCacheOptions};
+use crate::surface::surface_cache::p1::{
+    SolveModes, SurfaceCache, SurfaceCacheOptions, SurfaceCacheState,
+};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
 use crate::topology::geometry_write::write_surface_at;
@@ -346,9 +350,9 @@ pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
     const OP: &str = "surface::surface::p1::evaluate_directional_derivs";
     // check state
     if highest_deriv > 3 {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "a derivative order above three was asked",
+            SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
         ));
     }
 
@@ -993,9 +997,9 @@ pub fn validate_surface_cache(
         }
         // low work - use OldCache when its given
         ObjectCacheType::Surface => Ok(old),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_CACHE,
-            "the cache type has no surface cache",
+            SurfaceFailure::UnsupportedCacheKind,
         )),
     }
 }
@@ -1194,11 +1198,16 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     /// This surface's cache as `smsurf_GetSurfaceCache` hands it out to a reader that
     /// does not call `GetTree` (the state bits `GlobalPointSolve`'s fast-drop face
     /// test reads). Upstream's factory defers the tree during a Boolean operation, and
-    /// the tree build may change those bits (it turns point testing off on a face
+    /// upstream's tree build changes those bits (it turns point testing off on a face
     /// without UV trim curves), so a context that keeps face caches answers the cache
-    /// without the deferred tree; by default the solve's cache. The bits then depend on
-    /// whether the face's cache was built before, as upstream's and as the live
-    /// readers' (`intersect::point_class`, `topology::vertexuse`) do.
+    /// without the deferred tree; by default the solve's cache. No build writes the
+    /// point test bit here: whether the test runs is asked of the face (its loop uses)
+    /// each time, so the answer does not depend on whether or how the face's cache was
+    /// built before (upstream's does), as for the live readers (`intersect::point_class`,
+    /// `topology::vertexuse`).
+    ///
+    /// Only those state bits are answered ([`SurfaceCacheState`]), read from a kept
+    /// cache in place: the values the cache handed out would read.
     ///
     /// # Errors
     /// As [`SurfaceSolveContext::build_surface_cache`].
@@ -1207,12 +1216,55 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
+    ) -> Result<SurfaceCacheState<O>> {
+        self.build_surface_cache(k, surface, handle)?.state()
+    }
+
+    /// This surface's cache for a solve that only reads it, as
+    /// [`SurfaceSolveContext::build_surface_cache`] builds it: a context that keeps
+    /// face caches may hand every such reader one copy of a kept cache
+    /// ([`LentSurfaceCache::Shared`]) when reads leave that copy as it was; by default
+    /// the cache built for this solve.
+    ///
+    /// # Errors
+    /// As [`SurfaceSolveContext::build_surface_cache`].
+    fn lend_surface_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<LentSurfaceCache<O>> {
         self.build_surface_cache(k, surface, handle)
+            .map(LentSurfaceCache::Owned)
     }
 
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
+}
+
+/// A surface's cache handed to a solve that reads it
+/// ([`SurfaceSolveContext::lend_surface_cache`]).
+#[allow(clippy::large_enum_variant)] // the owned cache moves by value, as `build_surface_cache` returns it
+pub enum LentSurfaceCache<O: Copy + PartialEq> {
+    /// A cache this solve owns, as [`SurfaceSolveContext::build_surface_cache`]
+    /// returns it.
+    Owned(SurfaceCache<O>),
+    /// The one copy of a context's kept cache that the context hands to each reader in
+    /// turn: it has its tree, and reading it leaves it as it was
+    /// ([`SurfaceCache::reads_leave_unchanged`]), so each reader reads what a copy of
+    /// its own would hold.
+    Shared(std::sync::Arc<SurfaceCache<O>>),
+}
+
+impl<O: Copy + PartialEq> core::ops::Deref for LentSurfaceCache<O> {
+    type Target = SurfaceCache<O>;
+
+    fn deref(&self) -> &SurfaceCache<O> {
+        match self {
+            Self::Owned(cache) => cache,
+            Self::Shared(cache) => cache,
+        }
+    }
 }
 
 /// The caller's face-aware cache preparation for a surface/surface intersection.
@@ -2402,8 +2454,22 @@ impl Surface {
 
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
-        let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
+        let mut cache = match get_surface_cache::<()>(k, self, None) {
+            Ok(cache) => cache,
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(e, SolidError::PreparationRequired { .. }) =>
+            {
+                return Err(e);
+            }
+            Err(e) => {
+                return Err(super::p7::chained(
+                    OP_BOX,
+                    SurfaceFailure::SurfaceCacheNotBuilt,
+                    e,
+                ))
+            }
+        };
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2928,10 +2994,14 @@ impl Surface {
             for (ii, curve) in curves_3d.iter_mut().enumerate() {
                 // SM_CAST_PTR(SmBSplineCurve, ..): NULL (then dereferenced) otherwise
                 if !matches!(curve.kind(), CurveKind::BSpline(_)) {
-                    return Err(SolidError::surface_missing(
+                    return Err(Failure::new(
                         OP,
-                        "the B-spline form of the 3D curve",
-                    ));
+                        SurfaceFailure::Defect {
+                            why: "a silhouette 3D curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 }
 
                 // To add color attribute for curve from color of surface: not modelled
@@ -2976,12 +3046,25 @@ impl Surface {
 
                     let uv_curve = curves_uv
                         .get_mut(ii)
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
+                        .ok_or_else(|| {
+                            Failure::new(
+                                OP,
+                                SurfaceFailure::Defect {
+                                    why: "a silhouette 3D curve has no UV curve, but the tracer stores its 3D and UV curves in pairs",
+                                },
+                            )
+                            .with_status(SM_ERR_NULL_POINTER)
+                            .into_error()
+                        })?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
-                        return Err(SolidError::surface_missing(
+                        return Err(Failure::new(
                             OP,
-                            "the B-spline form of the UV curve",
-                        ));
+                            SurfaceFailure::Defect {
+                                why: "a silhouette UV curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error());
                     }
                     let mut new_uv_bsc = uv_curve.clone();
                     // may snap sIvl by tol to existing knots
@@ -3761,9 +3844,11 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     }
 
     // error: arrive here when no segments contain the input dParamInside value
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_IVL,
-        "no segment contains the parameter",
+        SurfaceFailure::ParameterOutsideInterval {
+            param: param_inside,
+        },
     ))
 }
 
@@ -3927,7 +4012,8 @@ pub fn is_point_valid<O: Copy + PartialEq>(
     cache.point_test(uv)
 }
 
-/// [`is_point_valid`] with the trimmed cache's operation-scoped face queries.
+/// [`is_point_valid`] with the trimmed cache's operation-scoped face queries, in a
+/// solve running in `modes` (its point test, not the cache's built one).
 /// As upstream's `sm_IsPointValid`, a failed native classification keeps the
 /// candidate; an unavailable Rust capability still propagates as `Unported`.
 ///
@@ -3937,6 +4023,7 @@ pub fn is_point_valid_with<O: Copy + PartialEq>(
     k: &Kernel,
     owner: Option<TreeOwner>,
     cache: &SurfaceCache<O>,
+    modes: SolveModes,
     uv: Point2,
     tolerance: Option<f64>,
     faces: Option<&dyn FaceQueries<O>>,
@@ -3945,7 +4032,7 @@ pub fn is_point_valid_with<O: Copy + PartialEq>(
         return Ok(true);
     }
     Ok(
-        ignore_native_classification(cache.point_test_with(k, uv, tolerance, faces))?
+        ignore_native_classification(cache.point_test_with_under(k, modes, uv, tolerance, faces))?
             .is_none_or(|(valid, _)| valid),
     )
 }
@@ -3960,8 +4047,8 @@ pub(super) fn ignore_native_classification<T>(result: Result<T>) -> Result<Optio
 }
 
 /// `sm_IsNodeValid`: false only when `node` of a surface cache's tree (owner kind
-/// `owner`) is classified outside its face while the cache's point testing is on and
-/// current.
+/// `owner`) is classified outside its face while the solve's point testing (`modes`)
+/// is on and the cache is current.
 ///
 /// # Errors
 ///
@@ -3970,6 +4057,7 @@ pub(super) fn ignore_native_classification<T>(result: Result<T>) -> Result<Optio
 pub fn is_node_valid<O: Copy + PartialEq>(
     owner: Option<TreeOwner>,
     cache: &SurfaceCache<O>,
+    modes: SolveModes,
     node: &TreeNode<O>,
 ) -> Result<bool> {
     // no work - TreeNode is not part of a SurfaceCache (signals)
@@ -3978,7 +4066,7 @@ pub fn is_node_valid<O: Copy + PartialEq>(
     }
 
     // when testing is off or cache is not current
-    if !cache.point_test_enabled || cache.face_was_modified || !cache.have_t_surface_cache {
+    if !modes.point_test_enabled || cache.face_was_modified || !cache.have_t_surface_cache {
         // return TRUE so this node won't be culled
         return Ok(true);
     }
@@ -3994,8 +4082,11 @@ pub fn is_node_valid<O: Copy + PartialEq>(
 
 /// Whether the surface tree node `node` lies wholly inside its face (not upstream): its
 /// trim classification is inside, or no point can be rejected by the face (a tree no
-/// surface cache owns, the point test off). A cache that is not current classifies no node
-/// while the face's point test still filters points, so its nodes are not inside.
+/// surface cache owns, the solve's point test, `modes`, off, or a trimmed cache whose
+/// surface has no face: it keeps every point whatever built it,
+/// [`SurfaceCache::point_test_with_under`]). Otherwise a cache that is not current
+/// classifies no node while the face's point test still filters points, so its nodes are
+/// not inside.
 /// [`is_node_valid`] keeps a node on the face's border too; this tells the two apart for
 /// the certified line pass, whose component in a border node may straddle the trim.
 ///
@@ -4005,9 +4096,14 @@ pub fn is_node_valid<O: Copy + PartialEq>(
 pub(crate) fn is_node_inside<O: Copy + PartialEq>(
     owner: Option<TreeOwner>,
     cache: &SurfaceCache<O>,
+    modes: SolveModes,
     node: &TreeNode<O>,
 ) -> Result<bool> {
-    if !is_surface_cache_owner(owner) || !cache.point_test_enabled {
+    if !is_surface_cache_owner(owner) || !modes.point_test_enabled {
+        return Ok(true);
+    }
+    // (no face, so no trim to straddle; a face the cache cannot name stays undecided)
+    if cache.trimmed_dispatch && matches!(cache.face(), Ok(None)) {
         return Ok(true);
     }
     if cache.face_was_modified || !cache.have_t_surface_cache {
@@ -4238,9 +4334,9 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
         let Ok([unit_t, unit_tt]) = derivs else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
-                "the unit derivatives of the singular direction are undefined",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         };
 
@@ -4278,6 +4374,9 @@ pub struct CsiGlobalSolver<'t, 's, O> {
     pub curve: Option<&'s Curve>,
     /// Cache supplying the surface patches for leaf solves (part 9).
     pub surface_cache: Option<&'s SurfaceCache<O>>,
+    /// The modes the caller chose for this solve; `None` runs in the surface cache's
+    /// built modes ([`SolveModes::of`]).
+    pub modes: Option<SolveModes>,
     /// The prepared owning-face classifier for trimmed candidate acceptance.
     pub face_queries: Option<&'s dyn FaceQueries<O>>,
     /// `m_pSurf`.
@@ -4311,6 +4410,7 @@ impl<'t, 's, O: SolutionObject> CsiGlobalSolver<'t, 's, O> {
             base: GlobalSolver::with_trees_and_kernel(k, curve_tree, surface_tree, 3),
             curve: None,
             surface_cache: None,
+            modes: None,
             face_queries: None,
             surface,
             found_coincidence,
@@ -4474,6 +4574,7 @@ impl<'t, 's, O: SolutionObject> LsiGlobalSolver<'t, 's, O> {
             ray_fire,
             distance_tolerance,
             surface_cache: None,
+            modes: None,
             face_queries: None,
             face_cache: None,
         }
@@ -4497,6 +4598,7 @@ impl<'t, 's, O: SolutionObject> SpGlobalSolver<'t, 's, O> {
             surface,
             uv_domain,
             surface_cache: None,
+            modes: None,
             face_queries: None,
         }
     }
