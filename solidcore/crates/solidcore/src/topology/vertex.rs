@@ -12,6 +12,7 @@
 //! | [`crate::topology::Vertex`]                 | `SmVertex` (members; `Default` is `SmVertex()`, `Drop` `~SmVertex`) |
 //! | [`point`], [`set_point`]                    | `SmVertex::GetPoint`, `SetPoint`                 |
 //! | [`tolerance`], [`set_tolerance`], [`refresh_tolerance`] | `SmVertex::GetTolerance`, `SetTolerance`, `RefreshTolerance` (`SM_USE_OLDTOL`) |
+//! | `edge_end_reach` (crate)                    | none (not upstream: a bound on the vertex's distance to its edge ends) |
 //! | [`is_exact`], [`set_exact`]                 | `SmVertex::IsExact`, `SetExact` (without `SM_TOLERANT_WATCH`) |
 //! | [`poly_vertex`], [`set_poly_vertex`]        | `SmVertex::GetPolyVertex`, `SetPolyVertex`       |
 //! | [`primary_vertexuse`], [`vertexuses`], [`vertexuses_with_attribute`] | `SmVertex::GetPrimaryVertexuse`, `GetVertexuses` |
@@ -1315,6 +1316,66 @@ pub fn refresh_tolerance(b: &mut Brep, v: VertexId, nested_refreshes: bool) -> R
     // Set Vertex to consistent tolerance (SmTol::GetZoneTol3d(this) is GetTolerance)
     let t = tolerance(b, v)?;
     set_tolerance(b, v, t, true, true)
+}
+
+/// How [`edge_end_reach`] takes an edge end whose curve has no bound on its evaluation's
+/// error ([`crate::curve::curve::Curve::point_error_bound`] is `None`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnboundedEnd {
+    /// The end adds nothing to the reach.
+    Skip,
+    /// The end adds the distance from the vertex to the evaluated end point, as computed:
+    /// the same figure the vertex use's edge gap (`CalcVertexEdgeGap`) holds.
+    Computed,
+}
+
+/// Not upstream (#18166, #21340): an upper bound on the distance from `v`'s point to the
+/// ends of all its edges at `v`. Each end's distance is the evaluated end point's distance
+/// plus the evaluation's error, bounded per coordinate from the curve's own data
+/// ([`crate::curve::curve::Curve::point_error_bound`]: its control points, not the size of
+/// the point it returns) times `√3`, each step rounded up by 4 ulps. An end with no such
+/// bound is taken as `unbounded` says; an end not evaluated, or a non-finite reach, adds
+/// nothing. `0` for a vertex with no edge end.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub(crate) fn edge_end_reach(
+    k: &Kernel,
+    b: &Brep,
+    v: VertexId,
+    unbounded: UnboundedEnd,
+) -> Result<f64> {
+    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
+    let at = b.vertex(v)?.point;
+    let mut reach = 0.0_f64;
+    for x in edges(b, v, None)? {
+        let rec = b.edge(x)?;
+        let Some(curve) = rec.curve.as_ref() else {
+            continue;
+        };
+        let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
+        for (end, t) in [
+            (s0, rec.interval.evaluate(0.0)),
+            (s1, rec.interval.evaluate(1.0)),
+        ] {
+            if end != Some(v) {
+                continue;
+            }
+            let Ok(p) = curve.evaluate_point(k, t) else {
+                continue;
+            };
+            let far = match (curve.point_error_bound(t), unbounded) {
+                (Some(error), _) => up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt()))),
+                (None, UnboundedEnd::Computed) => at.distance(p),
+                (None, UnboundedEnd::Skip) => continue,
+            };
+            if far.is_finite() {
+                reach = reach.max(far);
+            }
+        }
+    }
+    Ok(reach)
 }
 
 /// `Notify`: passes `PostEdit`, `SplitInBrep`, `MergeInBrep` and `ChangeGeometry` to

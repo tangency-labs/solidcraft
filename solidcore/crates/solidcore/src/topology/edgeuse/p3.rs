@@ -2308,7 +2308,6 @@ fn raised_trim_bound(
 ///
 /// [`SolidError::NotFound`] for a dangling id.
 fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
     let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
     let mut vertices: Vec<crate::topology::VertexId> = Vec::new();
     for v in [v0, v1].into_iter().flatten() {
@@ -2317,35 +2316,14 @@ fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         }
     }
     for v in vertices {
-        let at = b.vertex(v)?.point;
-        let mut reach = 0.0_f64;
-        for x in crate::topology::vertex::edges(b, v, None)? {
-            let rec = b.edge(x)?;
-            let Some(curve) = rec.curve.as_ref() else {
-                continue;
-            };
-            let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
-            for (end, t) in [
-                (s0, rec.interval.evaluate(0.0)),
-                (s1, rec.interval.evaluate(1.0)),
-            ] {
-                if end != Some(v) {
-                    continue;
-                }
-                // (an end not evaluated, or with no bound on its evaluation's error, raises
-                // nothing: the vertex is left as upstream leaves it for that end)
-                let Ok(p) = curve.evaluate_point(k, t) else {
-                    continue;
-                };
-                let Some(error) = curve.point_error_bound(t) else {
-                    continue;
-                };
-                let far = up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt())));
-                if far.is_finite() {
-                    reach = reach.max(far);
-                }
-            }
-        }
+        // (an end not evaluated, or with no bound on its evaluation's error, raises
+        // nothing: the vertex is left as upstream leaves it for that end)
+        let reach = crate::topology::vertex::edge_end_reach(
+            k,
+            b,
+            v,
+            crate::topology::vertex::UnboundedEnd::Skip,
+        )?;
         if reach > b.vertex(v)?.tolerance {
             crate::topology::vertex::set_tolerance(b, v, reach, true, true)?;
         }
