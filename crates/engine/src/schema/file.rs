@@ -1071,6 +1071,14 @@ pub struct RecoverParams {
     /// Delete the entry once the design is open. Default: false.
     #[serde(default)]
     pub discard: Option<bool>,
+    /// For a design saved without the bodies of its linked designs, whose copy lacks the bodies
+    /// of a link: which linked design files are read for them, as `doc.open`'s `linked_bodies`.
+    /// `all` (the default): every link's file the caller may read. `folder`: only files in the
+    /// design's own folder or below it; the other links have no bodies until
+    /// `component.update_links` reads them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
 }
 
 /// `id` of `doc.recover`: text, which the handler gives its own message for when it is not.
@@ -1094,6 +1102,10 @@ pub struct RecoverResult {
     pub features: usize,
     /// How many of them failed to evaluate.
     pub errors: usize,
+    /// The links of a design saved without linked bodies that were not read, or whose file
+    /// changed, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

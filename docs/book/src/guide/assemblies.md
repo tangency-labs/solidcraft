@@ -538,7 +538,8 @@ another folder, SolidCraft asks once, naming the folders: **Load** reads those p
 remembers the folders, so designs that link files from them load them as they open from then
 on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
 An assembly saved without the bodies of its linked parts follows the same rule: parts in another
-folder have no bodies until you answer **Load**. A script or agent that opens it with `doc.open`
+folder have no bodies until you answer **Load**. So does one you recover after a crash, for the
+parts it had not read when it was autosaved. A script or agent that opens it with `doc.open`
 reads every linked part it may read; `linked_bodies: "folder"` keeps to the assembly's own folder.
 A linked part that was itself saved without the bodies of its own linked parts follows the rule
 too: read by itself, it reads them only from the assembly's folder or its own. One that reaches

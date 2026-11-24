@@ -164,7 +164,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&RECOVER_CONTRACT)
         .output(output_schema_for::<RecoverResult>)
-        .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
+        .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open); linked_bodies?: all|folder (a design saved without the bodies of its linked designs, whose copy lacks a link's bodies: which linked design files are read for them, as doc.open's `linked_bodies`; default all) — opens it with its file path, unsaved; → warnings name each link not read"),
     CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", crate::checked!("doc.recovery_discard", recovery_discard))
         .any_part()
         .icon("delete")
@@ -2358,17 +2358,32 @@ impl Session {
 
     /// [`Self::opened_at`], its features evaluated under `validation` ([`Session::set_validation`]).
     pub fn opened_at_validating(
-        mut doc: Document,
+        doc: Document,
         saved: Option<&solidcraft_doc::SavedModel>,
         path: Option<&str>,
         validation: solidcraft_kernel::Validation,
     ) -> Self {
-        super::component_link::resolve_design_links(&mut doc, path);
         // A design saved without linked bodies: what could not be read is said by its feature.
-        for warning in super::component_link::read_left_out_bodies(&mut doc, path, validation, super::component_link::LinkedRead::All) {
+        let (opened, warnings) = Self::opened_at_reading(doc, saved, path, validation, super::component_link::LinkedRead::All);
+        for warning in warnings {
             log::warn!("{}: {warning}", path.unwrap_or("design"));
         }
-        Self::opened_validating(doc, saved, validation).located(path)
+        opened
+    }
+
+    /// [`Self::opened_at_validating`] for a caller that chooses which linked design files a
+    /// design saved without linked bodies reads as it opens (`which`), with what to tell the
+    /// user of the links not read.
+    pub(crate) fn opened_at_reading(
+        mut doc: Document,
+        saved: Option<&solidcraft_doc::SavedModel>,
+        path: Option<&str>,
+        validation: solidcraft_kernel::Validation,
+        which: super::component_link::LinkedRead,
+    ) -> (Self, Vec<String>) {
+        super::component_link::resolve_design_links(&mut doc, path);
+        let warnings = super::component_link::read_left_out_bodies(&mut doc, path, validation, which);
+        (Self::opened_validating(doc, saved, validation).located(path), warnings)
     }
 
     /// This session, just opened, as the design in the file at `path`.
@@ -3490,18 +3505,29 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "doc.recover";
     let dir = recovery_dir(p, cmd)?;
     let id = str_(p, "id").ok_or_else(|| bad(cmd, "`id` is required (see doc.recovery_list)"))?;
+    let which = super::component_link::LinkedRead::read(p, cmd)?;
     let (mut doc, entry) = crate::recovery::load(&dir, id)?;
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
+    // The copy holds the linked bodies the design had; a link not read before the copy was made
+    // is read now by the same rule as when the design opens.
+    let (opened, warnings) = Session::opened_at_reading(doc, None, entry.path.as_deref(), s.validation(), which);
+    s.replace_design(opened);
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
     }
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    let reply =
-        RecoverResult { id: id.to_string(), path: entry.path, name: entry.name, features: s.doc.features.len(), errors, param_warnings: Vec::new() };
+    let reply = RecoverResult {
+        id: id.to_string(),
+        path: entry.path,
+        name: entry.name,
+        features: s.doc.features.len(),
+        errors,
+        warnings,
+        param_warnings: Vec::new(),
+    };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(format!("{cmd}: {e}")))
 }
 

@@ -1039,6 +1039,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// Recovering a design saved without linked bodies asks as opening it does: a link in
+    /// another folder that the autosaved copy has no bodies of is not read until Load.
+    #[test]
+    fn recovering_a_design_saved_without_linked_bodies_asks_before_it_reads_a_link_in_another_folder() {
+        let root = std::env::temp_dir().join(format!("solidcraft-link-folders-left-out-recover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("received")).unwrap();
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        let housing = root.join("parts").join("housing.solidcraft");
+        save_part(&housing, [10.0, 20.0, 30.0], false);
+        let case = root.join("received").join("case.solidcraft");
+        let mut saved = Session::default();
+        saved.execute("component.insert_design", &json!({"path": housing})).unwrap();
+        saved.execute("file.save", &json!({"path": case, "linked_bodies": false})).unwrap();
+        // The design as the app had it when it stopped: the link not read yet, and a change.
+        let mut stopped = Session::default();
+        stopped.execute("doc.open", &json!({"path": case, "linked_bodies": "folder"})).unwrap();
+        stopped.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]})).unwrap();
+        let recovery = root.join("recovery");
+        let mut autosaver = solidcraft_engine::recovery::Autosaver::new(&recovery, std::time::Duration::ZERO).unwrap();
+        assert!(autosaver.save(&stopped).unwrap());
+        drop(autosaver);
+        let entry = solidcraft_engine::recovery::orphans(&recovery).pop().unwrap();
+        let folder = root.join("parts").canonicalize().unwrap().to_string_lossy().into_owned();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let kind = crate::file_load::Kind::Recover { id: entry.id.clone(), dir: Some(recovery.to_string_lossy().into_owned()) };
+        crate::file_load::begin_request(&mut app, crate::file_load::Request::new(&entry.name, kind)).unwrap();
+        settle(&mut app);
+        // Only its own 5 x 5 x 5 box.
+        assert!((volume(&app) - 125.0).abs() < 1e-6, "nothing is read before the answer: {}", volume(&app));
+        let prompt = app.link_folders_prompt.first().cloned().expect("asked");
+        assert_eq!(prompt.folders, std::slice::from_ref(&folder));
+        crate::link_folders_prompt::answer(&mut app, crate::link_folders_prompt::Answer::Load);
+        settle(&mut app);
+        assert!((volume(&app) - 6125.0).abs() < 1e-6, "Load reads the link: {}", volume(&app));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Not now leaves the link out of date and remembers nothing; Update Links still reads it.
     #[test]
     fn not_now_keeps_a_link_in_another_folder_out_of_date_until_update_links() {

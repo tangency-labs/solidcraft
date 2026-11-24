@@ -1909,3 +1909,40 @@ fn many_linked_designs_reaching_out_of_the_folder_hold_up_no_design_inside_it() 
     assert!((volume(&mut opened) - 7000.0).abs() < 1e-5);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Recovering a design follows the rule its open followed: a link in another folder that was not
+/// read before the copy was made is read by `doc.recover` only when the caller reads every file.
+#[test]
+fn recovering_a_design_saved_without_linked_bodies_reads_only_the_folders_allowed() {
+    let dir = folder("left-out-recover");
+    let (project, elsewhere, recovery) = (dir.join("project"), dir.join("elsewhere"), dir.join("recovery"));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let far = elsewhere.join("far.json");
+    part(&far, 30);
+    let (_, file) = saved_without_linked_bodies(&project, &far, "assembly.json");
+    // Opened as the app opens it: the link outside the folder waits, and the copy is made so.
+    let mut s = Session::default();
+    assert_eq!(run(&mut s, "doc.open", json!({"path": file, "linked_bodies": "folder"}))["errors"], 1);
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]}));
+    let mut autosaver = crate::recovery::Autosaver::new(&recovery, std::time::Duration::ZERO).unwrap();
+    assert!(autosaver.save(&s).unwrap());
+    drop(autosaver);
+    let entry = crate::recovery::orphans(&recovery).pop().unwrap();
+
+    let mut held = Session::default();
+    let reply = run(&mut held, "doc.recover", json!({"dir": recovery, "id": entry.id, "linked_bodies": "folder"}));
+    assert_eq!(reply["errors"], 1, "{reply}");
+    assert!(reply["warnings"][0].as_str().is_some_and(|w| w.contains("another folder")), "{reply}");
+    // Its own boxes, 10 x 10 x 10 and 5 x 5 x 5, without the 10 x 20 x 30 part.
+    assert!((volume(&mut held) - 1125.0).abs() < 1e-5);
+    run(&mut held, "component.update_links", json!({}));
+    assert!((volume(&mut held) - 7125.0).abs() < 1e-5);
+
+    let mut all = Session::default();
+    let reply = run(&mut all, "doc.recover", json!({"dir": recovery, "id": entry.id}));
+    assert_eq!(reply["errors"], 0, "{reply}");
+    assert!((volume(&mut all) - 7125.0).abs() < 1e-5);
+    assert!(all.execute("doc.recover", &json!({"dir": recovery, "id": entry.id, "linked_bodies": "some"})).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
