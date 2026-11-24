@@ -2200,7 +2200,6 @@ mod tests {
             }];
             h.app.plugin_menu.loaded = true;
             crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-            h.app.preferences.plugin_import_file_first = file_first;
             h.app.services.pick_folder = Some(Box::new(|_| Box::pin(std::future::pending())));
             let path = h.dir.join("part.smp").to_string_lossy().into_owned();
             // Supply the host's file-facts result before editing for file-first, afterwards for

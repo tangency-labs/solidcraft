@@ -346,12 +346,14 @@ enabled state and grant checks from every placement. Missing command-group grant
 with an explanation. Opening a command dialog executes no plugin code; Run submits the
 existing `plugin.run` transaction. By default, importer menu entries show options before choosing
 a file, and File › Open and drag-and-drop import their paths directly.
-In **Preferences › Plugins**, turn on **Pick the file first when importing**
-(`plugin_import_file_first`, off by default) to choose the file before showing its options.
-With this enabled, File › Open and drag-and-drop already have a path and go straight to the same
-form. Open file opens it as a new design with `file.import`; Cancel at either step opens nothing.
+An importer entry may set `"file_first": true` in its manifest to choose the file before its
+options appear, so they can match the file. Its menu entry asks for the file first, and File › Open
+and drag-and-drop already have a path and go straight to the same form. Open file opens it as a
+new design with `file.import`; Cancel at either step opens nothing. Absent or `false` keeps the
+options-first dialog, and only an importer entry may set it. Releases before this field existed
+refuse a manifest that sets it, like any unknown entry field; set `min_host_version` to match.
 An importer may opt into the bounded dialog hook below; choosing a file then runs that hook,
-never the importer. This is an app-wide workflow preference; it changes no saved designs.
+never the importer. The field changes no saved designs, and scripts and MCP calls ignore it.
 
 ### File-aware importer forms
 

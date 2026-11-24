@@ -1744,3 +1744,34 @@ fn folder_read_annotations_under_other_schema_keywords_are_rejected_at_manifest_
         }
     }
 }
+
+#[test]
+fn an_importer_may_choose_its_file_first_and_old_manifests_keep_their_shape() {
+    let mut value = importer();
+    let old = parse(&value).unwrap().runtime.unwrap();
+    assert!(!old.entries[0].file_first, "absent keeps the options-first dialog");
+    let old_shape = serde_json::to_value(&old.entries[0]).unwrap();
+    assert!(old_shape.get("file_first").is_none(), "an importer without it serializes as before: {old_shape}");
+    value["runtime"]["entries"][0]["file_first"] = json!(true);
+    let entry = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert!(entry.file_first);
+    let saved = serde_json::to_value(&entry).unwrap();
+    assert_eq!(saved["file_first"], true);
+    let again: Entry = serde_json::from_value(saved.clone()).unwrap();
+    assert!(again.file_first && serde_json::to_value(&again).unwrap() == saved, "it round-trips");
+    value["runtime"]["entries"][0]["file_first"] = json!(false);
+    let explicit = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert!(!explicit.file_first && serde_json::to_value(&explicit).unwrap() == old_shape);
+    // A hostile value is refused: only a boolean, and only an importer.
+    for hostile in [json!("yes"), json!(1), json!(null), json!([true]), json!({"on":true})] {
+        let mut bad = importer();
+        bad["runtime"]["entries"][0]["file_first"] = hostile.clone();
+        assert!(matches!(parse(&bad), Err(HostError::InvalidManifest { .. })), "{hostile}");
+    }
+    let mut command = manifest();
+    command["runtime"]["entries"] = json!([{"name":"make","file_first":true}]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field.contains("file_first")));
+    let mut exporting = exporter();
+    exporting["runtime"]["entries"][0]["file_first"] = json!(true);
+    assert!(matches!(parse(&exporting), Err(HostError::InvalidManifest { field, .. }) if field.contains("file_first")));
+}

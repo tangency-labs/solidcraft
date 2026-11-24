@@ -631,6 +631,10 @@ pub struct Entry {
     /// §5). Accepted now; the data is passed once per-design plugin data lands.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub needs_plugin_data: bool,
+    /// Importers only: File > Open, a drop and the importer's menu entry choose the file first and
+    /// then show the options, so they can match it. Absent or false shows the options first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub file_first: bool,
     pub effect: Effect,
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
@@ -676,6 +680,8 @@ struct DeclaredEntry {
     label: String,
     #[serde(default)]
     needs_plugin_data: bool,
+    #[serde(default)]
+    file_first: bool,
     /// A command's effect is `edit` unless it says `read`; an exporter's is `read`; an importer's is
     /// `open`. An importer that says `edit` (the only effect it could state before `open` existed)
     /// still opens a new design.
@@ -699,6 +705,7 @@ impl From<EntryDeclaration> for Entry {
                 extensions: Vec::new(),
                 label: String::new(),
                 needs_plugin_data: false,
+                file_first: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
                 dialog_hook: false,
@@ -711,6 +718,7 @@ impl From<EntryDeclaration> for Entry {
                 extensions: value.extensions,
                 label: value.label.trim().to_string(),
                 needs_plugin_data: value.needs_plugin_data,
+                file_first: value.file_first,
                 effect: match (value.kind, value.effect) {
                     (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
                     (_, Some(effect)) => effect,
@@ -919,6 +927,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     if entry.needs_plugin_data && entry.kind != EntryKind::Exporter {
         return Err(invalid(format!("{field}.needs_plugin_data"), "only an export slot reads the design's plugin data"));
+    }
+    if entry.file_first && entry.kind != EntryKind::Importer {
+        return Err(invalid(format!("{field}.file_first"), "only an importer chooses its file first"));
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() || !entry.label.is_empty() => {

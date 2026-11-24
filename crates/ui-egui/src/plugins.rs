@@ -793,8 +793,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         if app.preferences.plugin_limits_expanded {
             resource_controls(app, ui);
         }
-        crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugin_import_file_first"), &mut app.preferences.plugin_import_file_first)
-            .backing_on_hover_text(solidcraft_ui_text::tr("prefs.plugin_import_file_first_help"));
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),

@@ -3224,13 +3224,18 @@ fn importing_entry() -> solidcraft_engine::plugin::Entry {
     .unwrap()
 }
 
+/// The same importer, whose manifest asks to choose the file before its options.
+fn file_first_entry() -> solidcraft_engine::plugin::Entry {
+    let mut entry = importing_entry();
+    entry.file_first = true;
+    entry
+}
+
 #[test]
-fn importer_menu_picks_first_and_cancel_opens_no_form_with_a_legacy_preference() {
+fn importer_menu_picks_first_only_when_its_manifest_says_file_first_and_cancel_opens_no_form() {
     let mut h = crate::scenario::Harness::new();
-    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.plugin_menu.listed = vec![listed("sample", vec![file_first_entry()])];
     h.app.plugin_menu.loaded = true;
-    assert!(!h.app.preferences.plugin_import_file_first, "existing workflows stay the default");
-    h.app.preferences.plugin_import_file_first = true;
     h.app.services.pick_open = Some(Box::new(|extensions| {
         assert_eq!(extensions, &["smp"]);
         Box::pin(std::future::ready(None))
@@ -3240,26 +3245,25 @@ fn importer_menu_picks_first_and_cancel_opens_no_form_with_a_legacy_preference()
     h.frames(2);
     assert!(h.app.plugin_menu.dialogs.is_empty(), "cancel never runs the importer or opens a form");
     assert!(h.app.file_load.idle());
-    h.app.preferences.plugin_import_file_first = false;
-    open_entry(&mut h.app, 0, 0);
-    assert!(h.app.plugin_menu.dialog().unwrap().source.is_none(), "the preference restores options first");
-    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Ok(json!({"part":"initial"})));
-    let saved = serde_json::to_value(&h.app.preferences).unwrap();
-    let restored: crate::prefs::Prefs = serde_json::from_value(saved).unwrap();
-    assert!(!restored.plugin_import_file_first, "the legacy choice persists");
-    h.app.plugin_menu.dialogs.clear();
-    h.app.preferences.plugin_import_file_first = true;
     h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(Some("picked.smp".into())))));
     open_entry(&mut h.app, 0, 0);
     crate::file_picker::tick(&mut h.app, &h.ctx);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().source.as_deref(), Some("picked.smp"));
     assert!(h.app.file_load.idle(), "choosing the file only starts its form");
+    // An importer that does not say so keeps the options-first dialog, and never asks for a file.
+    h.app.plugin_menu.dialogs.clear();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
+    h.app.services.pick_open = Some(Box::new(|_| panic!("an options-first importer does not pick a file first")));
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialog().unwrap().source.is_none(), "options come first");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Ok(json!({"part":"initial"})));
+    let saved = serde_json::to_value(&h.app.preferences).unwrap();
+    assert!(saved.get("plugin_import_file_first").is_none(), "no preference chooses it");
 }
 
 #[test]
 fn importer_file_generations_discard_late_updates_and_close_disconnects_the_worker() {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.plugin_import_file_first = false;
     h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
     h.app.plugin_menu.loaded = true;
     open_entry(&mut h.app, 0, 0);
@@ -3313,9 +3317,12 @@ fn interactive_open_and_drop_reuse_the_file_and_do_not_start_importing_before_th
     std::fs::write(&path, b"header").unwrap();
     let mut h = crate::scenario::Harness::new();
     h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
-    assert!(!offer_import(&mut h.app, &path), "direct Open/drop remain the default");
+    assert!(!offer_import(&mut h.app, &path), "an importer without file_first keeps direct Open/drop");
     assert!(h.app.plugin_menu.dialogs.is_empty());
-    h.app.preferences.plugin_import_file_first = true;
+    // The same importer, now asking for its file first in its manifest.
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[file_first_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
     for generation in 1..=2 {
         if generation == 1 {
             h.app.open_path_async(&path);
@@ -3333,6 +3340,10 @@ fn interactive_open_and_drop_reuse_the_file_and_do_not_start_importing_before_th
     if let Some(job) = h.app.plugin_menu.dialogs.last_mut().and_then(|d| d.file_job.take()) {
         let _ = job.reply.recv();
     }
+    // A script's `doc.open` never shows the form, whatever the manifest says.
+    let shown = h.app.plugin_menu.dialogs.len();
+    let _ = h.call("doc.open", json!({"path":path,"allow_paths":[root]}));
+    assert_eq!(h.app.plugin_menu.dialogs.len(), shown, "scripts and MCP calls are unchanged");
     h.app.plugin_menu.dialogs.clear();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -3640,13 +3651,12 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     let folder = root.join("plugins/sample");
     std::fs::create_dir_all(&folder).unwrap();
     let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
-        "module":"sample.wasm","commands":[],"entries":[importing_entry()]}});
+        "module":"sample.wasm","commands":[],"entries":[file_first_entry()]}});
     std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
     std::fs::write(folder.join("sample.wasm"), b"not executed by the dialog").unwrap();
     let path = root.join("part.smp").to_string_lossy().into_owned();
     std::fs::write(&path, b"header").unwrap();
     h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
-    h.app.preferences.plugin_import_file_first = true;
     let reply = h.call("ui.file", json!({"path":path,"allow_paths":[root]}));
     assert_eq!(reply["ok"], true, "{reply}");
     let id = h.app.plugin_menu.dialog().unwrap().id;

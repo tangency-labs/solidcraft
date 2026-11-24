@@ -1278,7 +1278,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     if !shown(app, &plugin) {
         return;
     }
-    if entry.kind == solidcraft_engine::plugin::EntryKind::Importer && app.preferences.plugin_import_file_first {
+    if entry.kind == solidcraft_engine::plugin::EntryKind::Importer && entry.file_first {
         pick_entry_file(app, &plugin, &entry.name, None);
         return;
     }
@@ -1307,7 +1307,7 @@ fn pick_entry_file(app: &mut SolveApp, plugin: &Listed, entry_name: &str, dialog
 
 /// File › Open and drops arrive here with a path. Programmatic requests bypass this UI route.
 pub(crate) fn offer_import(app: &mut SolveApp, path: &str) -> bool {
-    if !app.preferences.plugin_import_file_first || !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path":path})) {
+    if !solidcraft_engine::cmd::runs_plugin_importer(&app.session, "doc.open", &json!({"path":path})) {
         return false;
     }
     let importer = match solidcraft_engine::plugin::importer_for(&app.session, path, None) {
@@ -1321,6 +1321,10 @@ pub(crate) fn offer_import(app: &mut SolveApp, path: &str) -> bool {
     refresh(app);
     let Some(p) = app.plugin_menu.listed.iter().position(|p| p.id == importer.plugin_id) else { return false };
     let Some(e) = app.plugin_menu.listed.get(p).and_then(|p| p.entries.iter().position(|e| e.name == importer.entry)) else { return false };
+    // Only an importer whose manifest says `file_first` asks for the file before its options.
+    if !app.plugin_menu.listed.get(p).and_then(|p| p.entries.get(e)).is_some_and(|entry| entry.file_first) {
+        return false;
+    }
     open_entry_at(app, p, e, Some(path.into()));
     true
 }
