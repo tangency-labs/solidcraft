@@ -387,11 +387,23 @@ impl Writer {
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
         let threads = self.threads(st)?;
+        // Shape identity is process-local. Persist the decision in each timeline state,
+        // then restore its shared shape from that state's body after decoding the cache.
+        let members = st
+            .frame_members
+            .iter()
+            .map(|m| {
+                let mut record = serde_json::to_value(m).ok()?;
+                record["unmodified"] = json!(st.body(&m.body).is_some_and(|b| b.feature == m.feature && !b.transferred && m.is_unchanged(&b.body)));
+                Some(record)
+            })
+            .collect::<Option<Vec<_>>>()?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": runs(&threads),
+            "frame_members": members,
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "named_faces": self.named_faces(&st.named_faces),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
@@ -754,7 +766,7 @@ impl SavedModel {
                 }
                 named_faces.insert(*feature, points.clone());
             }
-            Ok(ModelState {
+            let mut st = ModelState {
                 frame_bodies: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
@@ -778,6 +790,11 @@ impl SavedModel {
                 },
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
                 threads: ids("threads", threads.len())?.into_iter().filter_map(|i| threads.get(i).cloned()).collect(),
+                // Kept since frame trims (#4003); a model saved before keeps no members.
+                frame_members: match s.get("frame_members") {
+                    None => Vec::new(),
+                    v => serde_json::from_value(parse(v)?).map_err(invalid)?,
+                },
                 sketch_keys,
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
@@ -796,7 +813,22 @@ impl SavedModel {
                 legacy_picks: BTreeMap::new(),
                 // What a cut was drawn as is read by the evaluation that made it.
                 cut_extents: BTreeMap::new(),
-            })
+            };
+            for (member, record) in st.frame_members.iter_mut().zip(s.get("frame_members").and_then(Json::as_array).into_iter().flatten()) {
+                // A pre-identity cache cannot prove a member safe to rebuild, so re-evaluate.
+                let unmodified = record.get("unmodified").and_then(Json::as_bool).ok_or_else(|| bad("saved model: frame member identity"))?;
+                if unmodified {
+                    member.built = Some(
+                        st.bodies
+                            .iter()
+                            .find(|b| b.name == member.body && b.feature == member.feature)
+                            .ok_or_else(|| bad("saved model: frame member body"))?
+                            .body
+                            .clone(),
+                    );
+                }
+            }
+            Ok(st)
         });
         let states = built.into_iter().map(|r| r.unwrap_or_else(|| Err(bad("saved model: state"))).map(Arc::new)).collect::<Result<Vec<_>>>()?;
         Ok(states)
@@ -1165,6 +1197,15 @@ impl Model {
                 unkept: state.is_none(),
                 state: state.unwrap_or_else(|| before.clone()),
             };
+            // A model saved before members were recorded (#4003) knows none in any state after
+            // its members: trims need them, so the design is evaluated again instead.
+            if !result.skipped
+                && !result.unkept
+                && matches!(f.kind, crate::FeatureKind::FrameMember { .. })
+                && !result.state.frame_members.iter().any(|m| m.feature == f.id)
+            {
+                return Err(bad("saved model: frame members"));
+            }
             if !result.skipped {
                 exact = !result.unkept;
                 before = result.state.clone();

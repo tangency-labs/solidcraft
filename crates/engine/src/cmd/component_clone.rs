@@ -580,6 +580,21 @@ pub(super) fn build(
                 }
             }
         }
+        if let (FeatureKind::FrameTrim { to, .. }, FeatureKind::FrameTrim { to: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (target, original) in to.iter_mut().zip(originals) {
+                if let (solidcraft_doc::frame::TrimTarget::Plane { plane }, solidcraft_doc::frame::TrimTarget::Plane { plane: original }) =
+                    (target, original)
+                    && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(original))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component =
+                            *components.get(&original.component).ok_or_else(|| bad(CMD, "trim's target face is outside the copied graph"))?;
+                        anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
+        }
         if let (FeatureKind::FrameGusset { supports, .. }, FeatureKind::FrameGusset { supports: originals, .. }) = (&mut f.kind, &old.kind) {
             for (support, original) in supports.iter_mut().zip(originals) {
                 if let (Some(anchor), Some(original)) =
@@ -764,6 +779,29 @@ pub(super) fn build(
             && !features.contains_key(&member.feature.0)
         {
             notices.push(format!("{} retains external feature reference {}", feature.name, member.feature));
+        }
+        // A trim of members it does not copy, or to a face it does not copy, keeps them outside.
+        if let FeatureKind::FrameTrim { members, to, .. } = &feature.kind {
+            let targets = to.iter().filter_map(|t| match t {
+                solidcraft_doc::frame::TrimTarget::Member { member, .. } => Some(member),
+                solidcraft_doc::frame::TrimTarget::Plane { .. } => None,
+            });
+            for member in members.iter().chain(targets) {
+                if source.find_feature(&member.feature.0).is_some() && !names.contains_key(&member.feature.0) {
+                    notices.push(format!("{} retains external feature reference {}", feature.name, member.feature.0));
+                }
+            }
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor(plane)
+                    && !bodies.contains_key(&anchor.target.body)
+                {
+                    notices.push(format!(
+                        "{} retains external exact face attachment to {} (producer {})",
+                        feature.name, anchor.target.body, anchor.target.origin_feature
+                    ));
+                }
+            }
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {
