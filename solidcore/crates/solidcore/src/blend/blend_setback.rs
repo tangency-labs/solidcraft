@@ -144,9 +144,31 @@ pub use scale::{certified_scale, CertifiedScale};
 
 const OP: &str = "blend::blend_setback";
 
-/// `SM_ERR`.
-fn sm_err() -> SolidError {
-    SolidError::blend_failed(OP, "the setback corner's construction could not continue")
+/// An index or size past a table of the setback fill ([`WHY_TABLE`], status `SM_ERR`): one
+/// condition at every index helper and size step of the fill and its child modules.
+#[track_caller]
+fn past_table() -> SolidError {
+    defect(WHY_TABLE)
+}
+
+/// The setback fill's tables (its jets, nets, Bernstein and tensor coefficients, programme
+/// rows and the per-round and per-face lists) are built at the sizes its order, degrees
+/// and round count give, from the canonical B-spline data of its rounds and patches. The
+/// indices a caller passes into a list are checked on entry: an edge's faces
+/// ([`distances`], `model_rounds`), a fill's faces ([`containment_kept`]).
+const WHY_TABLE: &str = "an index or size is past a table of the setback fill, though every table is built at the size its order, degrees and round count give, from the canonical B-spline data of its rounds and patches, and the indices a caller passes (an edge's faces, a fill's faces) are checked on entry";
+
+/// `round_jets` inserts the round's end parameter to the round's degree (`raise_knot`,
+/// which takes a knot within `param_tol` as that knot) once the end is checked inside the
+/// rails' interval, so a knot within `param_tol` of it is there, with one before it when
+/// the corner lies above the end.
+const WHY_END_KNOT: &str = "a round's end parameter is a knot of its rails once raise_knot has inserted it to the round's degree, with a knot before it when the corner lies above it, the end checked inside the rails' interval just before";
+
+/// The setback corner's construction has no result at `step` for its geometry
+/// ([`BlendFailure::CornerUnbuildable`], status `SM_ERR`), with no reason given.
+#[track_caller]
+fn corner_step(step: CornerStep) -> SolidError {
+    SolidError::blend(OP, BlendFailure::CornerUnbuildable(step))
 }
 
 /// A defect of the setback corner (`why`: why no caller reaches it), status `SM_ERR`.
@@ -208,18 +230,18 @@ pub struct EaseRamp {
 }
 
 fn at(v: &[f64], i: usize) -> Result<f64> {
-    v.get(i).copied().ok_or_else(sm_err)
+    v.get(i).copied().ok_or_else(past_table)
 }
 
 fn put(v: &mut [f64], i: usize, x: f64) -> Result<()> {
-    *v.get_mut(i).ok_or_else(sm_err)? = x;
+    *v.get_mut(i).ok_or_else(past_table)? = x;
     Ok(())
 }
 
 /// `sm_SplitBezier`: the Bezier coefficients `coef` (degree `coef.len() - 1`) split at `t`
 /// by de Casteljau: the left part on `[0, t]`, the right on `[t, 1]`.
 fn split_bezier(coef: &[f64], t: f64) -> Result<(Vec<f64>, Vec<f64>)> {
-    let n = coef.len().checked_sub(1).ok_or_else(sm_err)?;
+    let n = coef.len().checked_sub(1).ok_or_else(past_table)?;
     let mut work = coef.to_vec();
     let mut left = coef.to_vec();
     let mut right = coef.to_vec();
@@ -292,7 +314,7 @@ fn ease_law_on_span(ramps: &[EaseRamp], a: f64, b: f64) -> Result<Vec<f64>> {
 fn binomial(n: usize, k: usize) -> Result<f64> {
     let mut d = 1.0;
     for i in 1..=k {
-        let top = (n + i).checked_sub(k).ok_or_else(sm_err)?;
+        let top = (n + i).checked_sub(k).ok_or_else(past_table)?;
         d = d * top as f64 / i as f64;
     }
     Ok(d)
@@ -317,7 +339,7 @@ fn raise_knot(
     let mut knot = knot;
     for (i, &existing) in knots.iter().enumerate() {
         if (existing - knot).abs() <= tol {
-            have = mults.get(i).copied().ok_or_else(sm_err)?;
+            have = mults.get(i).copied().ok_or_else(past_table)?;
             knot = existing;
         }
     }
@@ -568,12 +590,20 @@ fn ease_nets(
         let inner = |n: usize| 1..n.saturating_sub(1);
         for i in inner(other.u_knots.len()) {
             let knot = at(&other.u_knots, i)?;
-            let mult = other.u_multiplicities.get(i).copied().ok_or_else(sm_err)?;
+            let mult = other
+                .u_multiplicities
+                .get(i)
+                .copied()
+                .ok_or_else(past_table)?;
             raise_knot(s, SurfParamType::U, knot, mult, param_tol)?;
         }
         for i in inner(other.v_knots.len()) {
             let knot = at(&other.v_knots, i)?;
-            let mult = other.v_multiplicities.get(i).copied().ok_or_else(sm_err)?;
+            let mult = other
+                .v_multiplicities
+                .get(i)
+                .copied()
+                .ok_or_else(past_table)?;
             raise_knot(s, SurfParamType::V, knot, mult, param_tol)?;
         }
     }
@@ -640,12 +670,12 @@ fn ease_nets(
             &ca.u_multiplicities,
         )
     };
-    let spans = along_knots.len().checked_sub(1).ok_or_else(sm_err)?;
+    let spans = along_knots.len().checked_sub(1).ok_or_else(past_table)?;
     let across_count = across_mult
         .iter()
         .sum::<usize>()
         .checked_sub(across_deg + 1)
-        .ok_or_else(sm_err)?;
+        .ok_or_else(past_table)?;
     let along_count = spans * along_deg + 1;
     if along_count * across_count != ca.control_points.len() {
         return Err(ease_stop(EaseStop::NetsNotOneStructure));
@@ -663,7 +693,7 @@ fn ease_nets(
             j * along_count + i
         };
         let w = if w.is_empty() { 1.0 } else { at(w, k)? };
-        let p = pts.get(k).copied().ok_or_else(sm_err)?;
+        let p = pts.get(k).copied().ok_or_else(past_table)?;
         Ok([p.x * w, p.y * w, p.z * w, w])
     };
 
@@ -687,10 +717,10 @@ fn ease_nets(
                     let wl = at(&w, l)?;
                     for c in 0..4 {
                         let (ha_c, hb_c) = (
-                            ha.get(c).copied().ok_or_else(sm_err)?,
-                            hb.get(c).copied().ok_or_else(sm_err)?,
+                            ha.get(c).copied().ok_or_else(past_table)?,
+                            hb.get(c).copied().ok_or_else(past_table)?,
                         );
-                        let hc = h.get_mut(c).ok_or_else(sm_err)?;
+                        let hc = h.get_mut(c).ok_or_else(past_table)?;
                         *hc += beta * ((1.0 - wl) * ha_c + wl * hb_c);
                     }
                 }
@@ -726,7 +756,7 @@ fn ease_nets(
             } else {
                 j * new_along_count + i
             };
-            *new_pts.get_mut(k).ok_or_else(sm_err)? =
+            *new_pts.get_mut(k).ok_or_else(past_table)? =
                 Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
             if rational {
                 put(&mut new_weights, k, h[3])?;
@@ -808,19 +838,19 @@ fn smin(a: f64, b: f64) -> f64 {
     }
 }
 
-/// An element of a slice, `SM_ERR` past its end.
+/// An element of a slice, [`past_table`] past its end.
 fn el<T: Copy>(v: &[T], i: usize) -> Result<T> {
-    v.get(i).copied().ok_or_else(sm_err)
+    v.get(i).copied().ok_or_else(past_table)
 }
 
-/// A reference to an element of a slice, `SM_ERR` past its end.
+/// A reference to an element of a slice, [`past_table`] past its end.
 fn el_ref<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(sm_err)
+    v.get(i).ok_or_else(past_table)
 }
 
-/// A mutable reference to an element of a slice, `SM_ERR` past its end.
+/// A mutable reference to an element of a slice, [`past_table`] past its end.
 fn el_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i).ok_or_else(sm_err)
+    v.get_mut(i).ok_or_else(past_table)
 }
 
 /// Why the setback corner refused, or the failure of a call it made (`SM_SB_FAIL`: the
@@ -857,14 +887,6 @@ impl Refusal {
     fn unbuildable(step: CornerStep, reason: &'static str) -> Self {
         Self {
             error: SolidError::blend(OP, BlendFailure::CornerUnbuildable(step)),
-            reason: Some(reason),
-        }
-    }
-
-    /// `SM_SB_FAIL(.., SM_ERR, reason)`.
-    fn sm_err(reason: &'static str) -> Self {
-        Self {
-            error: SolidError::blend_failed(OP, reason),
             reason: Some(reason),
         }
     }
@@ -1093,8 +1115,8 @@ type Bern = Vec<f64>;
 
 /// `sm_SbMul`: the product of two Bernstein polynomials.
 fn bern_mul(a: &[f64], b: &[f64]) -> Result<Bern> {
-    let p = a.len().checked_sub(1).ok_or_else(sm_err)?;
-    let q = b.len().checked_sub(1).ok_or_else(sm_err)?;
+    let p = a.len().checked_sub(1).ok_or_else(past_table)?;
+    let q = b.len().checked_sub(1).ok_or_else(past_table)?;
     let mut c = vec![0.0; p + q + 1];
     for (i, &ai) in a.iter().enumerate() {
         for (j, &bj) in b.iter().enumerate() {
@@ -1109,7 +1131,7 @@ fn bern_mul(a: &[f64], b: &[f64]) -> Result<Bern> {
 fn bern_elevate(a: &[f64], deg: usize) -> Result<Bern> {
     let mut a = a.to_vec();
     loop {
-        let p = a.len().checked_sub(1).ok_or_else(sm_err)?;
+        let p = a.len().checked_sub(1).ok_or_else(past_table)?;
         if p >= deg {
             return Ok(a);
         }
@@ -1170,7 +1192,7 @@ fn tensor_elevate(a: &Tensor, lp: usize, lq: usize) -> Result<Tensor> {
     for i in 0..=lp {
         let row = sa
             .get(i * (a.q + 1)..(i + 1) * (a.q + 1))
-            .ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
         let row = bern_elevate(row, lq)?;
         for j in 0..=lq {
             *el_mut(&mut c, i * (lq + 1) + j)? = el(&row, j)?;
@@ -1368,10 +1390,10 @@ fn round_jets(
         } else {
             &canonical.v_knots
         };
-        let ia = find_end(knots).ok_or_else(sm_err)?;
+        let ia = find_end(knots).ok_or_else(|| defect(WHY_END_KNOT))?;
         // the span on the round's side, raised to Bezier form at its other end
         let ib = if round.corner_above {
-            ia.checked_sub(1).ok_or_else(sm_err)?
+            ia.checked_sub(1).ok_or_else(|| defect(WHY_END_KNOT))?
         } else {
             ia + 1
         };
@@ -1397,13 +1419,13 @@ fn round_jets(
             "SmBlendSetback: a round must be one Bezier span across its rails",
         ));
     }
-    let ia = find_end(knots).ok_or_else(sm_err)?;
+    let ia = find_end(knots).ok_or_else(|| defect(WHY_END_KNOT))?;
     let row_of = |knot: usize| -> Result<usize> {
         if knot == 0 {
             return Ok(0);
         }
-        let s: usize = mults.get(..knot).ok_or_else(sm_err)?.iter().sum();
-        s.checked_sub(1).ok_or_else(sm_err)
+        let s: usize = mults.get(..knot).ok_or_else(past_table)?.iter().sum();
+        s.checked_sub(1).ok_or_else(past_table)
     };
     let lq = s.degree(across);
     let pts = &canonical.control_points;
@@ -1425,7 +1447,11 @@ fn round_jets(
     };
     let row = row_of(ia)?;
     let delta = if round.corner_above {
-        el(knots, ia)? - el(knots, ia.checked_sub(1).ok_or_else(sm_err)?)?
+        el(knots, ia)?
+            - el(
+                knots,
+                ia.checked_sub(1).ok_or_else(|| defect(WHY_END_KNOT))?,
+            )?
     } else {
         el(knots, ia + 1)? - el(knots, ia)?
     };
@@ -1440,7 +1466,7 @@ fn round_jets(
     }
     // the span's rows in increasing rail parameter, Q[0 ..= p]
     let first_row = if round.corner_above {
-        row.checked_sub(p).ok_or_else(sm_err)?
+        row.checked_sub(p).ok_or_else(past_table)?
     } else {
         row
     };
@@ -1661,7 +1687,7 @@ fn standard_form_across(
 /// A row's homogeneous point at the middle of its parameter across: its Bernstein mean,
 /// `sum_j C(q, j) / 2^q H_j`.
 fn row_middle(row: &[Hom]) -> Result<Hom> {
-    let q = row.len().checked_sub(1).ok_or_else(sm_err)?;
+    let q = row.len().checked_sub(1).ok_or_else(past_table)?;
     let mut m = HOM_ZERO;
     for (j, h) in row.iter().enumerate() {
         m = axpy(&m, binomial(q, j)? / 2.0_f64.powf(q as f64), h);
@@ -1792,7 +1818,7 @@ fn geometric_rows(
         let i = if e == 0 {
             0
         } else {
-            lv.checked_sub(1).ok_or_else(sm_err)?
+            lv.checked_sub(1).ok_or_else(past_table)?
         };
         let v0 = Vec3::new(el(vx, i)?, el(vy, i)?, el(vz, i)?);
         let along = d1.dot(t);
@@ -2591,7 +2617,7 @@ fn fill_hole_with(
                         let col = if e == 0 {
                             c
                         } else {
-                            q.checked_sub(c).ok_or_else(sm_err)?
+                            q.checked_sub(c).ok_or_else(past_table)?
                         };
                         let h = el_ref(row, col)?;
                         let face = face_of(m + e)?;
@@ -2814,7 +2840,7 @@ fn fill_hole_with(
                             let col = if e == 0 {
                                 c
                             } else {
-                                net.q.checked_sub(c).ok_or_else(sm_err)?
+                                net.q.checked_sub(c).ok_or_else(past_table)?
                             };
                             let h = el_ref(&net.pts, i * (net.q + 1) + col)?;
                             let face = face_of(m + e)?;
@@ -3097,11 +3123,16 @@ pub fn containment(k: &Kernel, fill: &Fill, faces: &[Face], convex: bool, tol: f
 /// parts have no test yet.
 ///
 /// # Errors
-/// As [`containment`]'s; a stage failure for a fill that is not the setback split's (`2n`
-/// patches of one span), `SM_ERR` for one whose faces meet in no one point.
+/// As [`containment`]'s; [`CornerInput::FillNotFromSetbackSplit`] for a fill that is not the
+/// setback split's (`2n` patches of one span, its faces among those given),
+/// [`CornerInput::SetbackFacesMeetInNoPoint`] (`SM_ERR`) for faces that meet in no one point.
 pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Result<f64> {
     let n = fill.round.len();
-    if n < 3 || fill.patches.len() != 2 * n || fill.face.len() != n {
+    if n < 3
+        || fill.patches.len() != 2 * n
+        || fill.face.len() != n
+        || fill.face.iter().any(|&f| f >= faces.len())
+    {
         return Err(fill_not_from_split());
     }
     let mut convex = Vec::new();
@@ -3118,7 +3149,15 @@ pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Re
     if faces.iter().any(Face::is_curved) {
         return Ok(f64::INFINITY);
     }
-    let vertex = graph::faces_common_point(faces).ok_or_else(sm_err)?;
+    let vertex = graph::faces_common_point(faces).ok_or_else(|| {
+        SolidError::blend(
+            OP,
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::SetbackFacesMeetInNoPoint,
+                entity: None,
+            },
+        )
+    })?;
     let mut nets = Vec::new();
     for patch in &fill.patches {
         nets.push(net_of(patch)?);
@@ -3126,7 +3165,8 @@ pub fn containment_kept(k: &Kernel, fill: &Fill, faces: &[Face], tol: f64) -> Re
     let mut worst = f64::NEG_INFINITY;
     for m in 0..n {
         let face = el_ref(faces, el(&fill.face, m)?)?;
-        let prev = (m + n - 1).checked_rem(n).ok_or_else(sm_err)?;
+        // the round before face m in the cycle (n >= 3)
+        let prev = if m == 0 { n - 1 } else { m - 1 };
         let (before, after) = (el(&convex, prev)?, el(&convex, m)?);
         if before == after {
             let side = if after { 1.0 } else { -1.0 };
@@ -3407,13 +3447,121 @@ mod tests {
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)
         );
-        let refusal = Refusal::sm_err("why");
+        let refusal = Refusal::unbuildable(CornerStep::SetbackFillNotCertified, "why");
+        assert_eq!(refusal.reason, Some("why"));
         assert_eq!(
             refusal.error.blend_failure(),
-            Some(&BlendFailure::Failed("why"))
+            Some(&BlendFailure::CornerUnbuildable(
+                CornerStep::SetbackFillNotCertified
+            ))
         );
         assert_eq!(
             crate::error::upstream_status(&refusal.error),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// The setback corner's geometric stops are named steps of its construction, refusals
+    /// of the geometry, each with the `SM_ERR` status the bare status had.
+    #[test]
+    fn the_setback_stops_are_named_steps_with_their_status() {
+        use crate::error::ErrorKind;
+        for (step, kind) in [
+            (CornerStep::RoundEndCurvatureUnbounded, ErrorKind::NotFound),
+            (CornerStep::SetbackBasePointsCoincide, ErrorKind::Degenerate),
+            (CornerStep::SetbackBaseSidesParallel, ErrorKind::Degenerate),
+            (
+                CornerStep::SetbackFacePointOffFace,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (CornerStep::SetbackFillNotCertified, ErrorKind::NotFound),
+            (CornerStep::SetbackMarginInfeasible, ErrorKind::NotFound),
+            (CornerStep::SetbackRailEndsCoincide, ErrorKind::Degenerate),
+            (
+                CornerStep::SetbackSpringEndsHalfTurnApart,
+                ErrorKind::Unsupported,
+            ),
+            (CornerStep::SetbackSpringPointAtPole, ErrorKind::Degenerate),
+            (CornerStep::SetbackSpringPointOnAxis, ErrorKind::Degenerate),
+        ] {
+            let err = corner_step(step);
+            assert_eq!(
+                err.blend_failure(),
+                Some(&BlendFailure::CornerUnbuildable(step))
+            );
+            assert_eq!(err.kind(), kind, "{step:?}");
+            assert!(!err.is_defect(), "{step:?}");
+            assert_eq!(
+                crate::error::upstream_status(&err),
+                Some(crate::error::SM_ERR),
+                "{step:?}"
+            );
+            // a refusal from a step keeps no reason, as the bare status's did
+            assert_eq!(Refusal::from(err).reason, None);
+        }
+    }
+
+    /// An index past one of the fill's tables is a `Defect` with the `SM_ERR` status the
+    /// bare status had.
+    #[test]
+    fn an_index_past_a_table_is_a_defect() {
+        let err = el(&[1.0, 2.0], 2).unwrap_err();
+        assert_eq!(err, past_table());
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::Defect { why: WHY_TABLE })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// A fill whose face indices are past the faces given is not the setback split's: the
+    /// caller's input, checked on entry, not an index past a table.
+    #[test]
+    fn a_kept_containment_with_a_face_past_the_faces_is_invalid_input() {
+        let fill = Fill {
+            patches: vec![quarter_cylinder(); 6],
+            round: vec![0, 1, 2],
+            face: vec![0, 0, 1],
+            reversed: vec![false; 3],
+            degree: 2,
+        };
+        let plane = [Face::plane(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        )];
+        let err = containment_kept(&Kernel::default(), &fill, &plane, 1e-6).unwrap_err();
+        assert_eq!(err, fill_not_from_split());
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+    }
+
+    /// Faces whose planes are parallel meet in no one point: the caller's faces, invalid
+    /// input with the `SM_ERR` status the bare status had.
+    #[test]
+    fn faces_meeting_in_no_point_are_invalid_input() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let faces = [
+            Face::plane(Point3::new(0.0, 0.0, 0.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 1.0), z),
+            Face::plane(Point3::new(0.0, 0.0, 2.0), z),
+        ];
+        assert_eq!(graph::faces_common_point(&faces), None);
+        let err = SolidError::blend(
+            OP,
+            BlendFailure::CornerInputInvalid {
+                input: CornerInput::SetbackFacesMeetInNoPoint,
+                entity: None,
+            },
+        );
+        assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(
+            crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
