@@ -733,12 +733,14 @@ const CIRCLE_SAMPLES: usize = 64;
 /// running the way the spline runs and starting at the spline's start, and the angle the spline
 /// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
 /// the one through the spline's points at the start and a third and two thirds of the way along
-/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of the spline's
-/// size: its control points' distance from the origin plus their spread).
+/// its parameter; every sample of the spline lies on it to within 1e-9 of the spline's own size
+/// (its samples' spread, the same wherever the spline lies) plus the rounding of computing that
+/// (γ of the operations, at the size of the numbers they work on). A non-finite sample refuses.
 pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
     b.weights.as_ref()?;
     let (t0, t1) = b.domain()?;
     let at = |s: f64| b.point(t0 + (t1 - t0) * s).map(v3);
+    let samples: Vec<Vec3> = (0..=CIRCLE_SAMPLES).map(|k| at(k as f64 / CIRCLE_SAMPLES as f64)).collect::<Option<_>>()?;
     let (a, m, c) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
     let (ab, ac) = (m - a, c - a);
     let n = ab.cross(ac);
@@ -752,21 +754,30 @@ pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64
     let axis = n.normalized()?;
     let x = (a - centre).normalized()?;
     let y = axis.cross(x);
-    // Rounding in the spline's own numbers: how far its control points lie from the origin and
-    // how far they spread. Not the circle's: three points of a spline that is nearly straight
-    // lie on a circle kilometres wide, 1e-9 of which is microns, and a sweep's straight seam
-    // microns off any circle was taken for one, about 4 µm off its face (#21379).
+    // On the circle to 1e-9 of the spline's own size, its samples' spread, the same wherever it
+    // lies; not of the circle's radius and centre: three points of a spline that is nearly
+    // straight lie on a circle kilometres wide, 1e-9 of which is microns, and a sweep's straight
+    // seam microns off any circle was taken for one, about 4 µm off its face (#21379). Plus the
+    // rounding of a sample (de Boor's steps), the circumcentre and the distance to it, as γ of
+    // those operations at the size of the numbers they work on.
     let inf = f64::INFINITY;
     let (mut far, mut lo, mut hi) = (0.0f64, Vec3 { x: inf, y: inf, z: inf }, Vec3 { x: -inf, y: -inf, z: -inf });
-    for p in b.points.iter().map(|p| v3(*p)) {
+    for p in &samples {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return None;
+        }
         far = far.max(p.len());
         lo = Vec3 { x: lo.x.min(p.x), y: lo.y.min(p.y), z: lo.z.min(p.z) };
         hi = Vec3 { x: hi.x.max(p.x), y: hi.y.max(p.y), z: hi.z.max(p.z) };
     }
-    let reach = 1e-9 * (far + (hi - lo).len());
+    let rounding = solidcore::nurbs::math::gamma(4 * (b.degree + 1) + 40) * (far + centre.len() + radius);
+    let reach = 1e-9 * (hi - lo).len() + rounding;
+    if !reach.is_finite() {
+        return None;
+    }
     let (mut swept, mut last) = (0.0, 0.0);
-    for k in 0..=CIRCLE_SAMPLES {
-        let d = at(k as f64 / CIRCLE_SAMPLES as f64)? - centre;
+    for p in samples {
+        let d = p - centre;
         if !((d.len() - radius).abs() <= reach && d.dot(axis).abs() <= reach) {
             return None;
         }

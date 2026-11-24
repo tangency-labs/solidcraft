@@ -2351,9 +2351,15 @@ fn quarter_circle_spline(quarters: usize) -> Curve {
 /// on a circle of radius 8.6 km, and the rest of it lies microns off that circle: it is no
 /// circle, and read as one it lay about 4 µm off its wall, which was then started anew a sliver
 /// off its seam. A
-/// rational quadratic quarter circle of radius 500 at the same distance is still its circle.
+/// rational quadratic quarter circle of radius 500 at the same distance is still its circle. Both
+/// stay so moved 50 m off: the bound is at the spline's own size, wherever it lies. A spline with
+/// a point that is not a number is no circle.
 #[test]
 fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
+    let moved = |b: &crate::geom::BSplineCurve, by: f64| crate::geom::BSplineCurve {
+        points: b.points.iter().map(|p| [p[0] + by, p[1], p[2]]).collect(),
+        ..b.clone()
+    };
     let seam = crate::geom::BSplineCurve {
         degree: 3,
         points: vec![
@@ -2374,7 +2380,6 @@ fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
         self_intersect: crate::geom::Logical::Unknown,
         knot_spec: crate::geom::KnotSpec::Unspecified,
     };
-    assert!(swept::spline_circle(&seam).is_none());
     let (r, o) = (500.0, [700.0, 200.0, 50.0]);
     let arc = crate::geom::BSplineCurve {
         degree: 2,
@@ -2387,10 +2392,19 @@ fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
         self_intersect: crate::geom::Logical::Unknown,
         knot_spec: crate::geom::KnotSpec::Unspecified,
     };
-    let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&arc) else { panic!("a quarter circle is a circle") };
-    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
-    assert!((swept - std::f64::consts::FRAC_PI_2).abs() <= 1e-9, "swept {swept}");
-    assert!(position.origin.iter().zip(o).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "{:?}", position.origin);
+    for by in [0.0, 5e4] {
+        assert!(swept::spline_circle(&moved(&seam, by)).is_none(), "seam moved {by}");
+        let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&moved(&arc, by)) else {
+            panic!("a quarter circle moved {by} is a circle")
+        };
+        assert!((radius - r).abs() <= 1e-9 * r, "moved {by}: radius {radius}");
+        assert!((swept - std::f64::consts::FRAC_PI_2).abs() <= 1e-9, "moved {by}: swept {swept}");
+        let centre = [o[0] + by, o[1], o[2]];
+        assert!(position.origin.iter().zip(centre).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "moved {by}: {:?}", position.origin);
+    }
+    let mut broken = arc.clone();
+    broken.points[1][2] = f64::NAN;
+    assert!(swept::spline_circle(&broken).is_none());
 }
 
 #[test]
