@@ -1459,9 +1459,13 @@ jobs:
       - name: Install trunk
         env:
           TRUNK_VERSION: v0.21.14
+          TRUNK_SHA256: f2b4680cd239693a646a2795e4633c625328d7b2a044fbe749fa3a2fe9e7036b
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.local/bin"
+          archive="$RUNNER_TEMP/trunk.tar.gz"
+          curl -fsSL -o "$archive" "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$TRUNK_SHA256  $archive" | sha256sum -c -
+          tar -xzf "$archive" -C "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the browser app
         working-directory: apps/solidcraft-web
