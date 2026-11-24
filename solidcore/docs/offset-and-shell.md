@@ -157,12 +157,21 @@ job (§5.1).
 
 | refusal | when | what it names | checked | file |
 |---|---|---|---|---|
-| `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_offset`; `sheets.rs`, `proved_singular` |
-| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
+| `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `proved_singular` (`least_wall`) |
+| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
 | `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+
+The loop-gap search's own failures are defects, not refusals (class `stage_failed`, status `SM_ERR`): the gaps are in the offset loops the kernel built, so the input is not what fails (#21059).
+
+| defect | when | what it names | checked | file |
+|---|---|---|---|---|
+| `OffsetFailure::LoopGapPassLimit` | the gap search, one gap closed per pass, reaches its 64 passes on a face | the original input face, when available, and the limit | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapEndsAmbiguous` | both ends of a gap longer than its tolerance are at the shared vertex, or neither is | the face, both ends' distances and the tolerance | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::SplitAtEdgeEnd` | the edge a gap's bridge or a step corner splits takes the point for one of its ends | the face, when available, and the end vertices' larger tolerance | during loop-gap closure and step corners | `offset_executive/step_gaps.rs` |
 
 The static `offset_brep` entry point reports an ordinary failure of `do_solid_offset` with
 status `SM_ERR` and retains the stage's original error as its cause
@@ -247,6 +256,27 @@ sheets, and the result is the cells whose number passes the rule. Local folds an
 self-intersections [10] are then one case, with no loop test. The rule, its ties at coincident
 sheets and its certificate are not designed in the code yet.
 
+The executive implements one exact empty-cell event before mating its sheets
+(`offset_executive/extinct_branches.rs`). A component attached through exactly one
+inner loop of an exterior planar support qualifies when all its straight-edged planar faces,
+together with the attachment polygon, bound a convex protrusion. Topology supplies incidence
+only: homogeneous exact expansion arithmetic reconstructs the vertices from triples of
+supporting planes. The first scope requires
+simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
+Every reconstructed vertex must lie on the support's outward side and in every exposed face's
+material halfspace. Toleranced stored vertices and trims do not decide this certificate.
+Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
+intersection. The branch contributes no cavity, so both its offset sheets and the support's
+attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
+
+This is an empty-cell certificate within the mitred construction, using outward-rounded
+interval inequalities and exact opposite normals, without a tolerance or an alternate
+construction. The source body remains intact for the shell difference. Curved or nonconvex
+branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
+plane pair still require the general arrangement and cavity rule. This event does not complete
+S3–S5 or change the existing refusal for exactly meeting planes.
+
 ### 5.2 Mitres and the reach, as they run today
 
 ![A convex edge between faces F and G with sector angle α. Each face's offset by d is drawn; F's offset is extended past F's edge until it meets G's offset at M. The reach r from the edge to M's foot is marked, and one more d past it.](offset-and-shell/mitre-reach.svg)
@@ -327,6 +357,17 @@ pull moves each control point radially, keeping its parameters. The hinge, the l
 sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The result is a plane
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
 operation (`solidcore-ops/src/offset.rs`, `draft`).
+
+**A draft into another shell.** A cone or cylinder drafted about the pull sweeps, at each height h
+above its hinge circle, the points whose ψ = atan t − atan((ρ − r0) / h) lies between 0 and the
+lean (`largest_clear_angle`, `offset/draft.rs`). A cavity's wall (or another lump) bounded by cones,
+cylinders and planes about the same axis, on one side of the neutral plane and within the face's
+heights, is first reached at a vertex, so the least |ψ| of its vertices is the largest angle that
+keeps a wall. A draft at or past it is refused before the local operation as
+`OffsetFailure::DraftClosesWall` naming that angle (ops' `OffsetRefusal::DraftClosesWall`), in
+place of a body whose faces cross. "About the same axis" holds to the body's tolerance over the shell's
+extent; a shell of another kind, or one holding a face the same call drafts, is left to the local
+operation's check.
 
 ## 7. Shell and thicken
 

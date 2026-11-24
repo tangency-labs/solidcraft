@@ -13,6 +13,9 @@
     clippy::disallowed_methods
 )] // test, its closed forms independent of the kernel
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::PI;
@@ -23,11 +26,7 @@ use solidcore_record::brep::Brep as Record;
 
 /// SolidCraft's fixes.
 fn solidcraft_fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 fn rel(a: f64, b: f64) -> f64 {

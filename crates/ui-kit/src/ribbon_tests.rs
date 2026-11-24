@@ -161,6 +161,7 @@ fn button(id: &'static str, enabled: bool) -> Button<'static> {
         name: id,
         icon: "box",
         size: ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
+        planned: false,
         enabled,
         pressed: false,
         exit: false,
@@ -655,6 +656,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
         let look = DeferredLook {
             id: "a.on".into(),
             selected: true,
+            kept: false,
             running: false,
             focus_ring: true,
             label: Some("On".into()),

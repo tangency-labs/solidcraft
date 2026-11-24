@@ -238,7 +238,7 @@ fn box_edge_order_2_round_takes_off_the_section_s_area() {
 /// this blend within 3.9e-6 on 227 spans, off the exact blend by 1.75e-7.
 ///
 /// Ignored by default: its certificate takes about 15 minutes in a debug build (run it with
-/// `cargo test --release --test wr685_gn_section -- --ignored`).
+/// `cargo test --release --test blend -- --ignored wr685_gn_section::`).
 #[test]
 #[ignore = "slow in a debug build: a 227-span certificate"]
 fn boss_root_order_2_round_adds_the_section_s_turned_area() {

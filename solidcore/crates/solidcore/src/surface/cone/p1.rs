@@ -67,8 +67,7 @@
 //!   arguments upstream marks `NotUsed` are dropped. Calls whose status upstream
 //!   ignores keep upstream's values, except that [`SolidError::Unported`] always
 //!   propagates and a failure whose output upstream would read uninitialised (a failed
-//!   point evaluation in `CreateIsoParametricCurve`, a failed STEP
-//!   inversion in `CreateIsoCircleFromPoint`) is returned. `GetApex` of a cylinder and
+//!   point evaluation in `CreateIsoParametricCurve`) is returned. `GetApex` of a cylinder and
 //!   `STEPInversion` of a point outside the sweep return `SM_ERR` upstream with their
 //!   outputs set (callers use them): here they return the outputs ([`Apex::is_cylinder`],
 //!   [`ConeStepInversion::inside`]). `Evaluate` and `EvaluateSTEP` entries upstream
@@ -84,12 +83,24 @@
 //!   status and still use the apex point it wrote. This differs only for a generator
 //!   whose inversion fails (e.g. a `MakeNurb` B-spline generator); no difftest case
 //!   reaches it.
-//!   `CreateIsoCircleFromPoint` ignores the status of `ConvertUVFromSTEPToNURBS` as
-//!   upstream does when `swap_uv` is set and the polar converter already wrote the
-//!   `x` value it then uses; otherwise (upstream reads an unset value) the error is
-//!   returned. Both happen for unbounded cones with a semi-angle just above the
-//!   cylinder test (e.g. `5e-11` degrees), whose polar circle lies far below the
-//!   origin.
+//!   `CreateIsoCircleFromPoint` returns the error of `ConvertUVFromSTEPToNURBS`
+//!   (upstream ignores it and reads what a failed polar conversion wrote, or an unset
+//!   value).
+//! - **`CreateIsoCircleFromPoint` (WR-704).** The circle's STEP height is the point's
+//!   projection onto the axis clamped to the height interval, with no inversion (the
+//!   SolidCraft fork's 1279539). Upstream inverts the point moved onto the cone at that
+//!   height, which past an apex end lands on the far nappe and fails.
+//! - **Unbounded cones (WR-713).** The unbounded constructor rotates the generator for
+//!   every cone that is no cylinder (upstream: for a semi-angle above `SM_EFF_ZERO`
+//!   radians only), a cone of negative semi-angle runs from `-SM_INFINITE_PARAMETER` up
+//!   to its apex, and an apex beyond `SM_INFINITE_PARAMETER` leaves that end at the
+//!   infinite parameter (upstream runs out to it, up to 1e14 radii away). The parameter conversions map an inside-out unbounded cone's height
+//!   linearly onto its NURB's reversed interval, as for a bounded cone, where upstream
+//!   negates it. Upstream's unbounded cones are then parameterised unlike their NURB.
+//!   A semi-angle outside `(-90, 90)` is taken modulo 180 into it (the same tangent and
+//!   generator line; upstream kept it, and ran the domain on the nappe without the base
+//!   circle); 90 modulo 180 (a plane), non-finite numbers and axes with no frame are
+//!   refused.
 //! - **`STEPInversion` out of bounds.** Upstream's `const` `STEPInversion` calls
 //!   `m_pGenCurve->SetOutOfBoundsEnabled(TRUE)`, changing the generator for good; here
 //!   the inversion turns it on in a clone of the generator. Results are the same:
@@ -124,7 +135,9 @@ use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -134,7 +147,7 @@ use crate::geom::tol::{approx_tol3d, are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
+use crate::math::{max3, BIG_DOUBLE, EFF_ZERO, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurfaceForm, IsoCurveOptions, LocationType, SurfParamType,
@@ -154,6 +167,7 @@ const OP_TO_STEP: &str = "surface::cone::p1::Cone::convert_uv_from_nurbs_to_step
 const OP_EVAL: &str = "surface::cone::p1::Cone::evaluate";
 const OP_EVAL_STEP: &str = "surface::cone::p1::Cone::evaluate_step";
 const OP_GEN: &str = "surface::cone::p1::Cone::gen_curve";
+const OP_NEW_UNBOUNDED: &str = "surface::cone::p1::Cone::new_unbounded";
 const OP_TRANSFORM: &str = "surface::cone::p1::Cone::transform";
 
 use crate::error::surface::SurfaceFailure;
@@ -242,20 +256,14 @@ pub struct Cone {
     pub(crate) cylinder: bool,
 }
 
-/// With `Kernel::fixes.cone_unbounded_parameterized_as_nurb` (WR-713, #2313), whether an
-/// unbounded cone's height maps onto its NURB's linear interval as a bounded cone's does
-/// (reversed when inside out) instead of upstream's negation: when inside out and the
-/// negated STEP height interval is not the NURB's. An inside-out unbounded cone's NURB
-/// runs over the STEP heights reversed, so negation holds only for an interval symmetric
-/// about 0 (the infinite cylinder's), where it is kept.
-fn unbounded_maps_linearly(
-    k: &Kernel,
-    inside_out: bool,
-    step_ivl: &Extent1d,
-    nurb_ivl: &Extent1d,
-) -> bool {
-    k.fixes.cone_unbounded_parameterized_as_nurb
-        && inside_out
+/// Whether an unbounded cone's height maps onto its NURB's linear interval as a bounded
+/// cone's does (reversed when inside out) instead of upstream's negation (WR-713, #2313):
+/// when inside out and the negated STEP height interval is not the NURB's. An inside-out
+/// unbounded cone's NURB runs over the STEP heights reversed, so negation holds only for
+/// an interval symmetric about 0 (the infinite cylinder's), where it is kept. Upstream
+/// negates every inside-out unbounded height, which names another height on the NURB.
+fn unbounded_maps_linearly(inside_out: bool, step_ivl: &Extent1d, nurb_ivl: &Extent1d) -> bool {
+    inside_out
         && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
 }
@@ -292,14 +300,14 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step_exact(
     };
 
     // convert sweep coordinate
-    let circle = rev.polar_curve().ok_or_else(|| {
-        SolidError::surface_missing(OP_TO_STEP, "the polar curve of the surface of revolution")
-    })?;
+    let circle = rev
+        .polar_curve()
+        .ok_or_else(|| SolidError::surface(OP_TO_STEP, SurfaceFailure::NoPolarConverter))?;
     let (x, exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
 
     // convert linear coordinate
     // (WR-713: see `unbounded_maps_linearly`)
-    let y = if rev.is_bounded()? || unbounded_maps_linearly(k, inside_out, &step_ivl, &nurb_ivl) {
+    let y = if rev.is_bounded()? || unbounded_maps_linearly(inside_out, &step_ivl, &nurb_ivl) {
         if inside_out {
             step_ivl.min() + ((nurb_uv.y - nurb_ivl.max()) / -nurb_ivl.length() * step_ivl.length())
         } else {
@@ -466,7 +474,7 @@ pub(crate) fn cone_iso_curve(
         if length < scaled_zero {
             return Err(SolidError::surface(
                 OP_ISO,
-                SurfaceFailure::InvalidValue("the iso line has zero length"),
+                SurfaceFailure::DegenerateIsoCurve,
             ));
         }
         let scale = length / line_vec.dot(cone_z_axis);
@@ -533,6 +541,42 @@ impl Cone {
         }
     }
 
+    /// The canonical placement of `origin` and the axes taken as directions: their own
+    /// when `SetCanonical` makes a frame of them, else theirs scaled by their largest
+    /// coordinate (a tiny axis such as `(0, -1e-300, 0)` is a direction its unit length
+    /// underflows, a huge one such as `(0, -1e300, 1)` one its length overflows);
+    /// `None` when a direction is zero or not finite (the inputs define no frame; a `Y`
+    /// parallel to `X` takes `SetCanonical`'s perpendicular).
+    ///
+    /// (WR-713: upstream's `SetCanonical` status is ignored, so axes it refuses left a
+    /// placement that is no frame (a zero axis becomes `Z`, a tiny one stays tiny) and a
+    /// cone whose STEP form, generator and NURB disagree.)
+    fn canonical_frame(origin: Point3, x_axis: Vec3, y_axis: Vec3) -> Option<Axis2Placement> {
+        // `SetCanonical` can succeed without a frame: an axis whose squared length
+        // overflows (a coordinate of 1e300) unitizes to zero
+        let unit = |a: Vec3| {
+            a.x.is_finite()
+                && a.y.is_finite()
+                && a.z.is_finite()
+                && (a.dot(a) - 1.0).abs() <= EFF_ZERO
+        };
+        let framed = |f: &Axis2Placement| {
+            unit(f.x_axis()) && unit(f.y_axis()) && f.x_axis().dot(f.y_axis()).abs() <= EFF_ZERO
+        };
+        let mut frame = Axis2Placement::IDENTITY;
+        if frame.set_canonical(origin, x_axis, y_axis).is_ok() && framed(&frame) {
+            return Some(frame);
+        }
+        let dir = |a: Vec3| {
+            let m = a.x.abs().max(a.y.abs()).max(a.z.abs());
+            (m > 0.0 && m.is_finite()).then(|| a * (1.0 / m))
+        };
+        let (x, y) = (dir(x_axis)?, dir(y_axis)?);
+        let mut frame = Axis2Placement::IDENTITY;
+        frame.set_canonical(origin, x, y).ok()?;
+        framed(&frame).then_some(frame)
+    }
+
     /// The `SmSurfOfRevolution(NULL, origin, x, y, domain, swap_uv)` base object.
     fn rev_base(
         origin: Point3,
@@ -543,7 +587,8 @@ impl Cone {
     ) -> SurfOfRevolution {
         let mut rev = SurfOfRevolution::empty();
         rev.planar_generator = true;
-        rev.position = Axis2Placement::new(origin, x_axis, y_axis);
+        rev.position = Self::canonical_frame(origin, x_axis, y_axis)
+            .unwrap_or_else(|| Axis2Placement::new(origin, x_axis, y_axis));
         rev.anal_uv_domain = domain;
         rev.swap_uv = swap_uv;
 
@@ -557,15 +602,24 @@ impl Cone {
     /// `semi_angle_deg` (protected constructor `SmCone(Origin, XAxis, YAxis,
     /// BotRadius, SemiAngleDeg, bSwapUV, bInsideOut)`), without NURB: angles `[0,
     /// 360]` by heights `[apex, SM_INFINITE_PARAMETER]` (`[-SM_INFINITE_PARAMETER,
-    /// SM_INFINITE_PARAMETER]` for a cylinder). The generator line starts at `origin +
+    /// apex]` for a negative semi-angle, `[-SM_INFINITE_PARAMETER,
+    /// SM_INFINITE_PARAMETER]` for a cylinder; an apex beyond `SM_INFINITE_PARAMETER`
+    /// leaves that end there). With `X`, `Y` the axes of the canonical
+    /// placement made from `x_axis`, `y_axis`, the generator line starts at `origin +
     /// base_radius X`, along `X x Y` rotated about `Y` by the semi-angle, with speed
     /// `1 / cos(semi_angle)` so that its parameter is the height. Adjusting a cone's
     /// line to its apex makes the cone's NURB (see the module notes).
     ///
     /// # Errors
     ///
-    /// Those of the apex (the generator's inversion), and [`SolidError::Unported`]
-    /// from the NURB made for the line's owner.
+    /// [`SolidError::InvalidInput`] for inputs that define no cone: axes with no
+    /// canonical frame (a zero or non-finite axis; tiny axes are directions, and a `Y`
+    /// parallel to `X` takes a perpendicular, as `SetCanonical` does), a
+    /// semi-angle of 90 degrees modulo 180 (a plane) or not finite, a non-finite origin or
+    /// radius. A semi-angle outside `(-90, 90)` is taken modulo 180 into it (the same
+    /// cone). Those of
+    /// the apex (the generator's inversion), and [`SolidError::Unported`] from the NURB
+    /// made for the line's owner.
     pub fn new_unbounded(
         k: &Kernel,
         origin: Point3,
@@ -576,6 +630,53 @@ impl Cone {
         swap_uv: bool,
         inside_out: bool,
     ) -> Result<Self> {
+        // (WR-713: inputs that define no cone are refused: axes with no canonical frame
+        // (a zero axis has no direction, so there is no axis `Z`), a semi-angle of
+        // 90 degrees modulo 180 (below), and non-finite numbers. Upstream built them, with
+        // a placement, generator and NURB that disagree.)
+        let finite = origin.x.is_finite()
+            && origin.y.is_finite()
+            && origin.z.is_finite()
+            && base_radius.is_finite();
+        if !finite {
+            return Err(SolidError::invalid_input(
+                OP_NEW_UNBOUNDED,
+                "the origin or the base radius is not finite",
+            ));
+        }
+        // (WR-713: `Rad(V) = BaseRadius + tan(SemiAngle) V` and the generator line depend
+        // on the semi-angle only through its value modulo 180 degrees: `s` and `s - 180`
+        // give the same tangent, and generator directions that are each other's negatives,
+        // so the same line. A semi-angle outside (-90, 90) is taken to its representative
+        // inside, which the class holds (`m_dSemiAngleDeg` is documented between -90 and
+        // 90, its sign the side of the apex). Upstream kept it, so a semi-angle of 120 ran
+        // its domain from the apex up, on the nappe that does not hold the base circle.
+        // `%` is IEEE `fmod`, exact; the `-+ 180` of a remainder past 90 is exact
+        // (Sterbenz). A semi-angle of 90 modulo 180 has no tangent: the generator is
+        // perpendicular to the axis and sweeps a plane, every point at height 0, which no
+        // height parameterises; NaN and infinities have no remainder. Both are refused.)
+        let semi_angle_deg = {
+            let r = semi_angle_deg % 180.0;
+            if r > 90.0 {
+                r - 180.0
+            } else if r < -90.0 {
+                r + 180.0
+            } else {
+                r
+            }
+        };
+        if semi_angle_deg.is_nan() || semi_angle_deg.abs() >= 90.0 {
+            return Err(SolidError::invalid_input(
+                OP_NEW_UNBOUNDED,
+                "the semi-angle is 90 degrees modulo 180 (the plane) or not a number",
+            ));
+        }
+        let Some(frame) = Self::canonical_frame(origin, x_axis, y_axis) else {
+            return Err(SolidError::invalid_input(
+                OP_NEW_UNBOUNDED,
+                "the axes define no frame (a zero or non-finite axis)",
+            ));
+        };
         let mut cone = Self {
             rev: Self::rev_base(origin, x_axis, y_axis, Extent2d::new(), swap_uv),
             base_radius,
@@ -585,24 +686,28 @@ impl Cone {
         };
 
         // Create generator curve (SmLine)
+        // (WR-713: in the canonical placement the STEP form evaluates in; upstream takes
+        // the caller's axes as given, so axes that are not orthonormal gave a generator off
+        // the cone, skew to its axis for a non-zero semi-angle.)
+        let (x_axis, y_axis) = (frame.x_axis(), frame.y_axis());
         let line_pnt = origin + cone.base_radius * x_axis;
         let z_axis = x_axis.cross(y_axis);
         let mut line_vec = z_axis;
         let angle_rad = deg2rad(cone.semi_angle_deg);
         let scale = 1.0 / angle_rad.cos();
-        // (WR-713: upstream rotates for a positive semi-angle only, leaving the generator
-        // of a negative one parallel to the axis)
-        let rotate = if k.fixes.cone_unbounded_parameterized_as_nurb {
-            angle_rad.abs() > EFF_ZERO
-        } else {
-            angle_rad > EFF_ZERO
-        };
-        if rotate {
-            let pnt = origin + z_axis * scale;
+        // (WR-713: upstream rotates for a semi-angle above `SM_EFF_ZERO` radians only,
+        // leaving the generator of a negative one, and of a positive one below that
+        // (`5.7e-11` degrees) that is no cylinder (`SM_IS_ZERO` of the degrees), parallel
+        // to the axis: off the cone by `v tan(semi)`, up to 1e-6 at the infinite end. The
+        // generator follows the cone whenever it is one, the cone's own cylinder test.)
+        // (WR-713: the direction rotates as a vector; upstream rotates the point `origin +
+        // Z scale` about the axis through `origin` and subtracts `origin` again, which for
+        // an origin far from 0 cancels to its rounding: 1e-11 radians at 1e5, 1e-5 off at
+        // the infinite end)
+        if !is_zero(cone.semi_angle_deg) {
             let mut rf = Axis2Placement::IDENTITY; // m_vPosition leads to bug
-            rf.rotate_about_axis_at_point(angle_rad, origin, y_axis);
-            let pnt = rf.transform_point(pnt);
-            line_vec = pnt - origin;
+            rf.rotate_about_axis(angle_rad, y_axis);
+            line_vec = rf.transform_vector(z_axis * scale);
         }
         // unitize LineVec (status ignored)
         let line_vec = line_vec.unitize_or_z();
@@ -635,14 +740,17 @@ impl Cone {
 
         // infinite cylinders run between +/- infinity
         // infinite cones     run between apex and +infinity
-        // (WR-713: a negative semi-angle's cone runs from -infinity up to its apex)
+        // (WR-713: a negative semi-angle's cone runs from -infinity up to its apex. An
+        // apex beyond SM_INFINITE_PARAMETER (a semi-angle below about `r0 / 1234567`
+        // radians) leaves that end at the infinite parameter, as a cylinder's: upstream ran such a
+        // cone out to its apex, up to 1e14 radii away, and its NURB's linear map then
+        // rounded every height near the base circle by up to 1e-3 of a radius.)
         if !apex.is_cylinder {
-            let (min, max) =
-                if k.fixes.cone_unbounded_parameterized_as_nurb && cone.semi_angle_deg < 0.0 {
-                    (-INFINITE_PARAMETER, apex.param)
-                } else {
-                    (apex.param, INFINITE_PARAMETER)
-                };
+            let (min, max) = if cone.semi_angle_deg < 0.0 {
+                (-INFINITE_PARAMETER, apex.param.min(INFINITE_PARAMETER))
+            } else {
+                (apex.param.max(-INFINITE_PARAMETER), INFINITE_PARAMETER)
+            };
             let _ = cone
                 .rev
                 .anal_uv_domain
@@ -659,10 +767,15 @@ impl Cone {
     /// (whose query makes the cone's NURB when missing).
     fn adjust_gen_line_with_owner(&mut self, k: &Kernel, ivl: &Extent1d) -> Result<()> {
         let Some(CurveKind::Line(line)) = self.rev.gen_curve.as_mut().map(Curve::kind_mut) else {
-            return Err(SolidError::surface_missing(
+            return Err(Failure::new(
                 OP_GEN,
-                "the cone's generator line",
-            ));
+                SurfaceFailure::Defect {
+                    why: "the cone's generator is not a line, though its one caller, the cone's \
+                          construction, set it to a line just before",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
         };
         let dom = line.step_interval();
         if ivl.is_contained_by(&dom, EFF_ZERO) && dom.is_contained_by(ivl, EFF_ZERO) {
@@ -733,6 +846,12 @@ impl Cone {
         }
 
         // The parameterization of the generator is the height from the origin.
+        // (WR-713: in the canonical placement the STEP form evaluates in, when the axes
+        // have one; upstream takes the caller's axes as given, so axes that are not
+        // orthonormal gave a generator off the cone. Axes with no frame define no cone;
+        // this constructor cannot refuse, and keeps upstream's generator for them.)
+        let (x_axis, y_axis) = Self::canonical_frame(origin, x_axis, y_axis)
+            .map_or((x_axis, y_axis), |f| (f.x_axis(), f.y_axis()));
         let z_axis = x_axis.cross(y_axis).unitize_or_z();
         let line_vec = height * z_axis + (top_radius - bot_radius) * x_axis;
         let length = line_vec.length();
@@ -826,18 +945,16 @@ impl Cone {
         // Build NURB; fail cleanly if degenerate (single zero-radius apex is valid).
         match self.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    operation,
-                    "the cone's NURB could not be made",
-                ))
-            }
+            Err(e) => return Err(SolidError::surface_nurb_not_made(operation, SM_ERR, Err(e))),
             Ok(()) => {}
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 operation,
-                "the cone has no NURB",
+                SurfaceFailure::Defect {
+                    why: "the cone's make_nurb returned success yet left no NURB, though on \
+                          success it sets the NURB of the revolution it builds",
+                },
             ));
         }
         Ok(self)
@@ -965,9 +1082,9 @@ impl Cone {
     ) -> Result<Self> {
         // Reject non-positive radius (ctor assert is a no-op in release).
         if radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CYL_CANONICAL,
-                "the cylinder's radius is not positive",
+                SurfaceFailure::RadiusNotPositive,
             ));
         }
         let cylinder = Self::new_cylinder_unbounded(
@@ -1127,7 +1244,7 @@ impl Cone {
         self.rev
             .gen_curve
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the cone's generator curve"))
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))
     }
 
     // ---- equality -------------------------------------------------------------------
@@ -1169,16 +1286,10 @@ impl Cone {
         // Method: just call the parent's version,
         // unless the new domain would result in going past the apex.
         let v_domain = new_step_uv_domain.v_interval();
-        if self.radius(v_domain.min()) < -EFF_ZERO {
+        if self.radius(v_domain.min()) < -EFF_ZERO || self.radius(v_domain.max()) < -EFF_ZERO {
             return Err(SolidError::surface(
                 OP_ADJUST,
-                SurfaceFailure::InvalidValue("the domain reaches past the apex"),
-            ));
-        }
-        if self.radius(v_domain.max()) < -EFF_ZERO {
-            return Err(SolidError::surface(
-                OP_ADJUST,
-                SurfaceFailure::InvalidValue("the domain reaches past the apex"),
+                SurfaceFailure::DomainPastApex,
             ));
         }
 
@@ -1317,25 +1428,22 @@ impl Cone {
     /// The sweep iso circle through the height of `reference_point`
     /// (`CreateIsoCircleFromPoint`): `None` when the point's projection onto the axis
     /// is not within `tol_3d` of the height interval; otherwise the iso curve (circle,
-    /// or degenerate B-spline at the apex) through the cone point at that height in the
-    /// point's direction (the X axis for a point on the axis).
+    /// or degenerate B-spline at the apex) at that height clamped to the interval.
     ///
-    /// With `Kernel::fixes.cone_iso_circle_at_axial_height` (WR-704) the function is the
-    /// SolidCraft fork's (tangency-labs/smlib 1279539, with the `SER` of 672a437 on the NURB
-    /// conversion): the circle's STEP point is the sweep start and the point's projection
-    /// onto the axis, clamped to the height interval, with no inversion, and a failed NURB
-    /// conversion is returned. A point within `tol_3d` past either end gives that end's
-    /// circle. Upstream inverts the point moved onto the cone at that height; past the apex
-    /// end of a cone with its apex at an end, that point is on the far nappe, the inversion
-    /// mirrors it through the apex and succeeds with a height outside the interval, and the
-    /// iso curve there fails with `SM_ERR`.
+    /// The circle's STEP point is the sweep start and the point's projection onto the
+    /// axis, clamped to the height interval (the cone's STEP v is its height along the
+    /// axis), with no inversion, and a failed NURB conversion is returned (WR-704; the
+    /// SolidCraft fork's tangency-labs/smlib 1279539, with the `SER` of 672a437). A point
+    /// within `tol_3d` past either end gives that end's circle. Upstream inverts the point
+    /// moved onto the cone at that height; past the apex end of a cone with its apex at an
+    /// end, that point is on the far nappe, the inversion mirrors it through the apex and
+    /// succeeds with a height outside the interval, and the iso curve there fails with
+    /// `SM_ERR`.
     ///
     /// # Errors
     ///
-    /// Those of [`Self::step_inversion`] that leave no parameters (status ignored
-    /// upstream), [`Self::convert_uv_from_step_to_nurbs`] (status ignored upstream;
-    /// returned unless `swap_uv` is set and the polar converter wrote the value used)
-    /// and [`Self::create_iso_parametric_curve`].
+    /// Those of [`Self::convert_uv_from_step_to_nurbs`] (status ignored upstream) and
+    /// [`Self::create_iso_parametric_curve`].
     pub fn create_iso_circle_from_point(
         &self,
         k: &Kernel,
@@ -1353,59 +1461,22 @@ impl Cone {
             return Ok(None);
         }
 
-        let step_uv = if k.fixes.cone_iso_circle_at_axial_height {
-            // the circle's StepV is its height (the cone's v is the distance along its
-            // axis, see GetRadius): a point within d3DTolerance beyond an end is on that
-            // end's circle (WR-704; tangency-labs/smlib 1279539)
-            Point2::new(
-                self.rev.anal_uv_domain.min().x,
-                height_step_ivl.clamp_value(param),
-            )
+        // the circle's StepV is its height (the cone's v is the distance along its axis,
+        // see GetRadius): a point within d3DTolerance beyond an end is on that end's
+        // circle (WR-704; tangency-labs/smlib 1279539)
+        let step_uv = Point2::new(
+            self.rev.anal_uv_domain.min().x,
+            height_step_ivl.clamp_value(param),
+        );
+
+        // map StepUV to NurbUV (upstream ignores the status and reads what a failed polar
+        // conversion wrote; the status is passed on, as the fork's SER does,
+        // tangency-labs/smlib 672a437)
+        let nurb_uv = self.convert_uv_from_step_to_nurbs(k, step_uv)?;
+        let (param_type, iso) = if self.rev.swap_uv {
+            (SurfParamType::U, nurb_uv.x)
         } else {
-            // build Step Point on Surface for Point
-            let radius = self.radius(param);
-            let center = origin + param * z_axis;
-            let mut vec = reference_point - center;
-            if vec.length_squared() < 2.0 * EFF_ZERO_SQ {
-                // Given point is on our axis.
-                vec = self.rev.position.x_axis();
-            }
-            let vec = vec.unitize_or_z();
-            let point_on_surface = center + radius * vec;
-
-            // map Point to StepUV. Upstream ignores the status. When the generator drop finds
-            // no solution (a point beyond the end by up to `tol_3d`, #1067) the height of its
-            // StepUV is never written and the circle is built there (UB-87); the port uses
-            // the height of the point, clamped to the end, which is where the point lies
-            // within `tol_3d`. Every point whose inversion succeeds is unchanged.
-            match self.step_inversion(k, point_on_surface, tol_3d, None) {
-                Ok(inv) => inv.uv,
-                Err(e) if e.upstream_status() == Some(SM_ERR) => Point2::new(
-                    self.rev.anal_uv_domain.min().x,
-                    height_step_ivl.clamp_value(param),
-                ),
-                Err(e) => return Err(e),
-            }
-        };
-
-        // map StepUV to NurbUV (status ignored: after a failed polar conversion
-        // rNURBSUV.x holds what the converter wrote and rNURBSUV.y is unset; with the
-        // fork's rule the status is passed on, as the fork's SER does, tangency-labs/smlib
-        // 672a437)
-        let (param_type, iso) = match self.convert_uv_from_step_to_nurbs(k, step_uv) {
-            Ok(nurb_uv) if self.rev.swap_uv => (SurfParamType::U, nurb_uv.x),
-            Ok(nurb_uv) => (SurfParamType::V, nurb_uv.y),
-            Err(e)
-                if e.is_unported_or_cancelled()
-                    || !self.rev.swap_uv
-                    || k.fixes.cone_iso_circle_at_axial_height =>
-            {
-                return Err(e)
-            }
-            Err(e) => match self.sweep_nurbs_param_written(k, step_uv.x)? {
-                Some(x) => (SurfParamType::U, x),
-                None => return Err(e),
-            },
+            (SurfParamType::V, nurb_uv.y)
         };
 
         // build and return the isoParametercurve
@@ -1419,8 +1490,9 @@ impl Cone {
 
     /// The NURB parameters of the STEP parameters `step_uv` (`ConvertUVFromSTEPToNURBS`):
     /// the sweep through the polar converter, the height mapped linearly onto the
-    /// NURB's linear interval (reversed when inside out) for a bounded cone, else
-    /// equal (negated when inside out); swapped with `swap_uv`.
+    /// NURB's linear interval (reversed when inside out) for a bounded cone and an
+    /// inside-out unbounded one (WR-713; negated only where that is the same map, an
+    /// interval symmetric about 0), else equal; swapped with `swap_uv`.
     ///
     /// # Errors
     ///
@@ -1450,7 +1522,7 @@ impl Cone {
         // convert linear coordinate
         // (WR-713: see `unbounded_maps_linearly`)
         nurbs_uv.y = if self.rev.is_bounded()?
-            || unbounded_maps_linearly(k, self.inside_out, &step_ivl, &nurb_ivl)
+            || unbounded_maps_linearly(self.inside_out, &step_ivl, &nurb_ivl)
         {
             if self.inside_out {
                 nurb_ivl.max()
@@ -1470,24 +1542,6 @@ impl Cone {
             nurbs_uv = Point2::new(nurbs_uv.y, nurbs_uv.x);
         }
         Ok(nurbs_uv)
-    }
-
-    /// The sweep NURB parameter `ConvertUVFromSTEPToNURBS` leaves in `rNURBSUV.x` for
-    /// the STEP angle `step_u` when a caller ignores its status: the converted value,
-    /// or after a failed conversion the value the polar converter had already written
-    /// (`None`: nothing written, an uninitialised value upstream).
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` without polar curve; [`SolidError::Unported`].
-    fn sweep_nurbs_param_written(&self, k: &Kernel, step_u: f64) -> Result<Option<f64>> {
-        let circle = self.rev.polar_curve().ok_or(SolidError::invalid_input(
-            OP_TO_NURBS,
-            "polar converter has no curve",
-        ))?;
-        self.rev
-            .polar
-            .convert_to_nurbs_parameter_or_written(k, circle, step_u, 0.0)
     }
 
     /// The STEP parameters of the NURB parameters `nurbs_uv`
@@ -1564,11 +1618,10 @@ impl Cone {
                     rows
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {
-                    return Err(SolidError::surface_failed(
-                        OP_EVAL,
-                        "the cone's NURB evaluation failed",
-                    ))
+                Err(e) => {
+                    return Err(Failure::new(OP_EVAL, SurfaceFailure::NurbEvaluationFailed)
+                        .caused_by(e)
+                        .into_error())
                 }
             }
         } else {
@@ -1637,9 +1690,9 @@ impl Cone {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL_STEP,
-                "the STEP form evaluates derivatives up to order 3 only",
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
             )); // Not implemented
         }
 
@@ -1919,9 +1972,9 @@ impl Cone {
         if let Some(s) = opt_scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
                 // Unable to scale analytical surfaces non-uniformly
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "an analytic surface cannot be scaled non-uniformly",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             scale = s.x;
@@ -1956,11 +2009,18 @@ impl Cone {
         let semi_angle_deg = self.semi_angle_deg;
         if let Some(CurveKind::Line(gen_line)) = self.rev.gen_curve.as_mut().map(Curve::kind_mut) {
             let mut scaled_zero = EFF_ZERO * (1.0 + v_ivl.length());
-            if !are_same_to_tol(
-                v_ivl.length(),
-                gen_line.step_interval().length(),
-                scaled_zero,
-            ) {
+            // (WR-713: also when the transform scales: an interval whose ends are both
+            // infinite parameters keeps its length (`Extent1d::scale` leaves them), so
+            // upstream left the scaled line's speed, and the generator's parameter was no
+            // longer the height (an unbounded cylinder, or a cone whose apex lies beyond
+            // the infinite parameter: its apex parameter off by the scale))
+            if (scale - 1.0).abs() > EFF_ZERO
+                || !are_same_to_tol(
+                    v_ivl.length(),
+                    gen_line.step_interval().length(),
+                    scaled_zero,
+                )
+            {
                 let angle_rad = deg2rad(semi_angle_deg);
                 let speed = 1.0 / angle_rad.cos();
                 let line_scale = gen_line.line_scale();
@@ -2357,10 +2417,9 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(
             e.surface_failure(),
-            Some(&SurfaceFailure::Failed(
-                "the cylinder's radius is not positive"
-            ))
+            Some(&SurfaceFailure::RadiusNotPositive)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let c = Cone::create_canonical_cylinder(&k(), &std_placement(), 2.0).unwrap();
         assert!(c.is_cylinder() && c.is_cylinder_class());
         assert_eq!(c.type_code(), CYLINDER_TYPE);
@@ -2426,9 +2485,11 @@ mod tests {
         let e = c
             .convert_uv_from_nurbs_to_step(&k(), Point2::new(0.5, 0.5))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP_TO_STEP);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        // the degenerate sweep iso curve left no polar converter after a successful make
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NoPolarConverter));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
     }
 
     #[test]
@@ -2460,12 +2521,7 @@ mod tests {
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(e.operation(), OP_ADJUST);
-        assert_eq!(
-            e.surface_failure(),
-            Some(&SurfaceFailure::InvalidValue(
-                "the domain reaches past the apex"
-            ))
-        );
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::DomainPastApex));
         // the parent's AdjustSTEPUVDomain is ported (surf_of_revolution_p2)
         assert!(c
             .adjust_step_uv_domain(&k(), &Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0))
@@ -2480,7 +2536,8 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(c
             .transform(
                 &k(),
@@ -2806,7 +2863,17 @@ mod tests {
                         inside_out,
                     )
                     .unwrap();
-                    assert_eq!(def_cone.top_height(), INFINITE_PARAMETER);
+                    // The unbounded nappe through radius 1 at height 0 has its apex
+                    // at -1/tan(semi); WR-713: a positive semi-angle runs from the apex
+                    // up to +infinity, a negative one from -infinity up to the apex.
+                    let apex = -1.0 / top_radius.to_radians().tan();
+                    if top_radius > 0.0 {
+                        assert!((def_cone.bot_height() - apex).abs() < 1e-12);
+                        assert_eq!(def_cone.top_height(), INFINITE_PARAMETER);
+                    } else {
+                        assert_eq!(def_cone.bot_height(), -INFINITE_PARAMETER);
+                        assert!((def_cone.top_height() - apex).abs() < 1e-12);
+                    }
                     assert!((def_cone.semi_angle_deg() - top_radius).abs() < 1e-12);
                     assert_eq!(def_cone.inside_out(), inside_out);
 
@@ -2911,29 +2978,61 @@ mod tests {
         }
     }
 
-    /// The cone's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// A cone without generator (an empty one, whose data was never read) is the caller's,
+    /// with upstream's `SM_ERR_NULL_POINTER`.
+    #[test]
+    fn a_cone_without_generator_is_the_callers() {
+        let e = Cone::empty(true).max_analytic_domain(&k()).unwrap_err();
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// A STEP evaluation past order 3 is the caller's argument, refused by name with
+    /// upstream's `SM_ERR`.
+    #[test]
+    fn a_derivative_past_order_3_is_the_callers() {
+        let e = cone123()
+            .evaluate_step(Point2::new(10.0, 1.0), 4, 0)
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::DerivativeOrderTooHigh { max: 3 })
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// The cone's failures keep the operation, status and entity of the bare `Upstream`
+    /// statuses they replace (a sample); their class is the cause's.
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_GEN,
-                SurfaceFailure::Missing("the cone's generator curve"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::SurfaceWithoutGenerator,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_ISO,
-                SurfaceFailure::InvalidValue("the iso line has zero length"),
+                SurfaceFailure::DegenerateIsoCurve,
                 crate::error::SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_EVAL_STEP,
-                SurfaceFailure::Failed("the STEP form evaluates derivatives up to order 3 only"),
-                crate::error::SM_ERR,
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -2942,7 +3041,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

@@ -70,7 +70,7 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(Some(left(with_history(body, history, a, b), step, r)))
+        Ok(Some(left(with_history(body, history, a, b), step, r, &[a, b])))
     }
 
     /// The union of `bodies` in one SMLib call, each tagged as its own operand, checked once:
@@ -127,18 +127,18 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r))
+        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r, bodies))
     }
 
-    /// `body`, decoded from `r`, keeping `r` for the check at the end of its feature when the
-    /// step left it there.
-    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep) -> Body {
-        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r) } else { body }
+    /// `body`, decoded from `r`, the result of combining `operands`, keeping `r` for the check at
+    /// the end of its feature when the step left it there.
+    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
+        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r, operands) } else { body }
     }
 
-    /// An error unless SMLib's check accepts `r`, the result of combining `operands` (checked
-    /// here unless the evaluation's validation mode leaves it to the feature's end,
-    /// `crate::validation`): what was done with the check.
+    /// An error when SMLib's check refuses `r`, the result of combining `operands`, where the
+    /// evaluation's validation mode checks each step (left to the feature's end, or not checked,
+    /// otherwise: `crate::validation`): what was done with the check.
     fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<Step> {
         let step = crate::validation::step();
         if step != Step::Check {
@@ -152,23 +152,7 @@ mod smlib {
         if check.is_valid() {
             return Ok(step);
         }
-        // Whether an operand failed it already says whose the fault is.
-        let failing: Vec<String> = operands
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.check(CheckLevel::All).is_ok_and(|c| !c.is_valid()))
-            .map(|(i, _)| match (operands.len(), i) {
-                (2, 0) => "the first operand".to_string(),
-                (2, _) => "the second operand".to_string(),
-                _ => format!("operand {i}"),
-            })
-            .collect();
-        let what = if failing.is_empty() {
-            "SMLib's check refuses the result".to_string()
-        } else {
-            format!("SMLib's check refuses the result ({} already fails it)", failing.join(" and "))
-        };
-        Err(failed(&what, check))
+        Err(failed(&crate::validation::refuses(operands.iter().map(|s| s.check(CheckLevel::All))), check))
     }
 
     /// `body` with `history` where it describes `body` made from `a` and `b`.

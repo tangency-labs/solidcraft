@@ -118,6 +118,44 @@ fn the_dimension_survives_a_round_trip_and_a_renumbering() {
     assert!(!k.remap(&|p| Some(p), &|_| None));
 }
 
+/// A circle tangent to both lines of an angle and drawn inside it must stay inside when a length
+/// dimension is added to one of the lines (#18364). The new dimension has no entry in the old
+/// driving values, so the solve cannot compare the circle's side with the one it was drawn on.
+#[test]
+fn adding_a_length_dimension_keeps_a_tangent_circle_inside_the_angle() {
+    let mut sk = Sketch::new();
+    let bottom_left = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let top_left = sk.add_point(v(0.0, 200.0), None).unwrap();
+    let top_mid = sk.add_point(v(35.0, 200.0), None).unwrap();
+    let bottom_right = sk.add_point(v(71.24, 0.0), None).unwrap();
+    let _left = sk.add_line(v(0.0, 0.0), v(0.0, 200.0), Some(bottom_left), Some(top_left), None).unwrap();
+    let _top = sk.add_line(v(0.0, 200.0), v(35.0, 200.0), Some(top_left), Some(top_mid), None).unwrap();
+    let diagonal = sk.add_line(v(35.0, 200.0), v(71.24, 0.0), Some(top_mid), Some(bottom_right), None).unwrap();
+    let bottom = sk.add_line(v(0.0, 0.0), v(71.24, 0.0), Some(bottom_left), Some(bottom_right), None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: bottom_left }, None).unwrap();
+    sk.add_constraint(ConstraintKind::VerticalPoints { p: bottom_left, q: top_left }, None).unwrap();
+    sk.add_constraint(ConstraintKind::HorizontalPoints { p: top_left, q: top_mid }, None).unwrap();
+    sk.add_constraint(ConstraintKind::HorizontalPoints { p: bottom_left, q: bottom_right }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Distance { p: bottom_left, q: top_left, value: 200.0 }, None).unwrap();
+    let centre = sk.add_point(v(59.27, 10.0), None).unwrap();
+    let c = sk.add_circle(v(59.27, 10.0), 10.0, Some(centre), None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c, value: 10.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: bottom, b: c }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: diagonal, b: c }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[centre].pos.x < 71.24, "{:?}", sk.points[centre].pos);
+
+    // Assigning 60mm to the bottom edge moves its far end and must keep the circle inside the
+    // angle, i.e. to the left of the diagonal.
+    let old = sk.driving_values();
+    sk.add_constraint(ConstraintKind::Distance { p: bottom_left, q: bottom_right, value: 60.0 }, None).unwrap();
+    let rep = solve_after_edit(&mut sk, &old, None);
+    eprintln!("report: {rep:?}");
+    eprintln!("centre after: {:?}", sk.points[centre].pos);
+    assert!(rep.ok(), "{rep:?}");
+    assert!(sk.points[centre].pos.x < 60.0, "the circle jumped outside the angle: {:?}", sk.points[centre].pos);
+}
+
 /// With the centre's x set too, the seed places the centre exactly (its offset line from the
 /// dimension crossing the line of its x), before the numerical solver runs.
 #[test]

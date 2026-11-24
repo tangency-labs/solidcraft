@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Base drawing view</title>
+  <path d="M9.5 10L54.5 10A2.5 2.5 0 0 1 57 12.5L57 51.5A2.5 2.5 0 0 1 54.5 54L9.5 54A2.5 2.5 0 0 1 7 51.5L7 12.5A2.5 2.5 0 0 1 9.5 10Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.5 19L42.5 19A2.5 2.5 0 0 1 45 21.5L45 39.5A2.5 2.5 0 0 1 42.5 42L17.5 42A2.5 2.5 0 0 1 15 39.5L15 21.5A2.5 2.5 0 0 1 17.5 19Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="30" cy="30.5" r="6" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47 46L53 46M50 43L50 49" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

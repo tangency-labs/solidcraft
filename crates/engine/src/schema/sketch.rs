@@ -25,6 +25,10 @@ use super::types::{IdOrName, Point3, present};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     pub sketch: IdOrName,
     /// A position (or null, the end of the timeline): temporarily roll to this sketch and
     /// restore that position when the edit ends. Left out, a sketch with features after it is
@@ -87,6 +91,7 @@ pub struct ExitParams {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
+    pub sketching_view: u64,
     pub sketch: u64,
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -449,7 +454,7 @@ pub struct CoincidentResult {
 pub enum CoincidentMade {
     /// A coincident (or point-on-curve) constraint was added.
     Added(Constrained),
-    /// The two points (or two lines' closest ends) were already coincident: nothing was added.
+    /// The two points were already coincident, or the two lines already collinear: nothing was added.
     Existing {
         /// The constraint that already joins them.
         constraint: String,
@@ -672,8 +677,8 @@ impl<'de> Deserialize<'de> for EqualParams {
     }
 }
 
-/// Make two points coincident, put a point on a curve or a sketch axis, join the closest ends of
-/// two lines, or put one circle or arc on another (concentric and equal).
+/// Make two points coincident, put a point on a curve or a sketch axis, make two lines collinear,
+/// or put one circle or arc on another (concentric and equal).
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = a_and_b_required)]
 pub struct CoincidentParams {
@@ -683,7 +688,7 @@ pub struct CoincidentParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointOperand")]
     pub a: Option<PointOperand>,
-    /// The other one, as `a`. Two lines join their closest ends; two circles or arcs make the
+    /// The other one, as `a`. Two lines become collinear; two circles or arcs make the
     /// second lie on the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointOperand")]
@@ -773,12 +778,13 @@ impl<'de> Deserialize<'de> for HorizontalVerticalParams {
     }
 }
 
-/// Tie a point to the middle of a line, or make two lines' middles meet (the first stays, the
-/// second moves), by `point` and `line` or by `a` and `b`.
+/// Tie a point to the middle of a line or of an arc (halfway along the arc, not the middle of its
+/// chord), or make two lines' middles meet (the first stays, the second moves), by `point` and
+/// `line` or by `a` and `b`.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = midpoint_required)]
 pub struct MidpointParams {
-    /// A point or a line, in pick order (a point and a line either way round, or two lines). When
+    /// A point or a line or arc, in pick order (a point and a line or arc either way round, or two lines). When
     /// `a` or `b` is given (`null` too), `point` and `line` are ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
@@ -791,7 +797,7 @@ pub struct MidpointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
     pub point: Option<Operand>,
-    /// The line it goes to the middle of. Read when neither `a` nor `b` is given.
+    /// The line or arc it goes to the middle of. Read when neither `a` nor `b` is given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
     pub line: Option<Operand>,

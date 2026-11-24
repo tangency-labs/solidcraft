@@ -8,7 +8,10 @@ publish = false
 default-run = "solidcraft"
 
 [features]
-default = ["raytrace-cpu", "bundled-render-library", "profile"]
+default = ["raytrace-cpu", "bundled-render-library", "profile", "usage-stats"]
+# Anonymous usage statistics (docs/privacy.md). A build without it (`--no-default-features`, or
+# leaving it out) has no counting, no notice, no network code for them and no endpoint.
+usage-stats = ["solidcraft-ui-egui/usage-stats"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
@@ -67,20 +70,24 @@ interprocess = "2.4"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 quick-xml = { workspace = true }
+# The window events eframe asks the app about before painting (`App::repaint_on_window_event`);
+# already in the tree through eframe.
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }
 # The main window's handle for src/native_frame.rs (already in the tree through eframe and winit).
 raw-window-handle = "0.6"
 # Native crash capture (src/native_crash.rs): the exception filter, the faulting module, a minidump.
-# The window's resize border, DPI size and class icon (src/native_frame.rs): the window procedure, hit
-# test, DPI, the exe's icon.
+# The window's resize border, DPI size, class icon and DWM frame (src/native_frame.rs): the window
+# procedure, hit test, DPI, the exe's icon, the shadow.
 # Finding 3D mice through Plug and Play without asking other devices anything (src/space_mouse/windows_hid.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_HumanInterfaceDevice",
     "Win32_Devices_Properties",
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
@@ -90,7 +97,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Threading",
+    "Win32_UI_Controls",
     "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56"
@@ -116,6 +125,11 @@ block2 = "0.6"
 # (already in the tree through many crates).
 libc = "0.2"
 
+[target.'cfg(unix)'.dependencies]
+# A shutdown's SIGTERM closes the app cleanly (src/system_quit.rs), through a safe API (no unsafe);
+# its signal-hook-registry is already in the tree.
+signal-hook = { version = "0.4.5", default-features = false, features = ["iterator"] }
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }
 # Bringing the window forward on X11 when a close asks about unsaved designs (src/come_forward.rs):
@@ -131,3 +145,8 @@ zbus = { version = "5", default-features = false, features = ["async-io", "block
 
 [build-dependencies]
 embed-resource = "3.0.11"
+
+[dev-dependencies]
+# Protocol-to-UI regression coverage belongs in the app, above both layer-five crates.
+solidcraft-mcp = { workspace = true }
+solidcraft-ui-kit = { workspace = true, features = ["test-support"] }

@@ -10,6 +10,7 @@
 //! options record was first co-ported by `boolean.api_brep`. Topology mutations
 //! awaiting other units return `Unported`.
 
+pub mod coincident_edges;
 pub mod p1;
 pub mod p2;
 pub mod p3;

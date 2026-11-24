@@ -49,10 +49,16 @@
 //! Debug drawing/assertions are omitted. Ignored ordinary Trim failures stay ignored;
 //! failed Copy returns an error rather than dereferencing a null native result.
 //! `insert_topology_intersections` rejects `object_index > 1`, which upstream accepts.
+//! With tangency ignored, `sm_InsertSolutions` drops a run shorter than a twentieth of
+//! the classified interval as a tangent touch; a run that reaches an end of the
+//! classified interval or of the edge at each of its ends is inserted instead: the curve
+//! runs along the edge there ([`run_reaches_ends`]; SolidCraft #17345's lobes).
 //! `p5_closed` errors on an unresolved curve, where upstream returns FALSE.
 //! The differential runner's face zone tolerance of zero is not compared against C++.
 
-use super::p1::{out_of_bounds, set_xsect_curve_through_point};
+use super::p1::{
+    missing_defect, out_of_bounds, set_xsect_curve_through_point, EDGE_NO_VERTEX, EVAL_1ST,
+};
 use super::p2::{refine_cci_to_surfaces_in, refine_cci_to_surfaces_mut, RefineCci};
 use super::p6::{
     FilletPeer, Imprint, MergeIntervalBrep, Mutable as MutableImprint, ReadOnly as ReadOnlyImprint,
@@ -62,6 +68,7 @@ use super::{
 };
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -631,10 +638,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut out = ExtractedGeometry::default();
         self.cleanup_and_validate(k, geometry, other)?;
         if self.size() != other.size() {
-            return Err(SolidError::intersect_failed(
-                OP,
-                "the two classifications have different numbers of intervals",
-            ));
+            return Err(counts_differ(self, other));
         }
         let mut found = Vec::new();
         for i in 0..self.size() {
@@ -665,15 +669,10 @@ impl<O: ClassObject> CurveClassification<O> {
             found.push(common);
         }
         let mut found_last = self.p5_closed(k, geometry)? && found.last().copied().unwrap_or(false);
-        for j in 0..self.size() {
+        // one flag for each interval: the loop above pushed one per index
+        for (j, &found_current) in found.iter().enumerate() {
             let (this, _) = Self::p5_point_class_by_index(self, j)?;
             let (that, _) = Self::p5_point_class_by_index(other, j)?;
-            let found_current = found.get(j).copied().ok_or_else(|| {
-                SolidError::intersect_failed(
-                    OP,
-                    "the classification has no found flag for the interval",
-                )
-            })?;
             if contained_point(this.point_class())
                 && contained_point(that.point_class())
                 && !found_current
@@ -706,7 +705,8 @@ impl<O: ClassObject> CurveClassification<O> {
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
     ) -> Result<()> {
-        let mut restarts = self.size().saturating_mul(3).saturating_add(1);
+        let allowed = self.size().saturating_mul(3).saturating_add(1);
+        let mut restarts = allowed;
         'restart: loop {
             for i in 0..self.size() {
                 if self.at(i)?.mid.point_class() == PointClassType::Unknown {
@@ -720,9 +720,9 @@ impl<O: ClassObject> CurveClassification<O> {
                     || self.fix_end_point_class(k, geometry, i + 1, end)?
                 {
                     restarts = restarts.checked_sub(1).ok_or_else(|| {
-                        SolidError::intersect_failed(
+                        SolidError::intersect(
                             OP,
-                            "fixing the interval end classes did not settle",
+                            IntersectFailure::RepairDidNotSettle { restarts: allowed },
                         )
                     })?;
                     continue 'restart;
@@ -929,7 +929,14 @@ impl<O: ClassObject> CurveClassification<O> {
             // whether a contact is held to the curve's region: at a pole, for every curve
             // but the face's own seam curve (checked as upstream does)
             let mut regional = false;
-            let tolerance = if pole_of_face(geometry, vertex, self.face())? {
+            // (#18705) on a face known to have no seam no vertex is a pole
+            let pole = if self.face_known_seam_free() {
+                false
+            } else {
+                k.work_counters.add_seam_test();
+                pole_of_face(geometry, vertex, self.face())?
+            };
+            let tolerance = if pole {
                 let working = match &wrapped {
                     Some(lifted) => lifted,
                     None => self.curve_geometry(geometry)?,
@@ -1457,10 +1464,7 @@ impl<O: ClassObject> CurveClassification<O> {
         link: PairLink,
     ) -> Result<(MergedTopology<O>, MergedTopology<O>)> {
         if self.size() != other.size() {
-            return Err(SolidError::intersect_failed(
-                OP,
-                "the two classifications have different numbers of intervals",
-            ));
+            return Err(counts_differ(self, other));
         }
         let mut out = MergedTopology::default();
         let mut out_other = MergedTopology::default();
@@ -1630,6 +1634,9 @@ impl<O: ClassObject> CurveClassification<O> {
 /// Converts sub-tolerance ranges to points and inserts curve/edge/plane intersections,
 /// over a read-only adapter: where an edge-end vertex tolerance would be raised to the
 /// edge's (`SmVertex::SetTolerance`), this defers ([`insert_solutions_mut`] raises it).
+/// With tangency ignored, a run under a twentieth of the classified interval is a tangent
+/// touch (only its ends on the interval's ends are inserted) unless it reaches an end of
+/// the interval or of the edge at each of its ends ([`run_reaches_ends`]).
 ///
 /// `xsect_tolerance` defaults to the sum of source and target zones. Solutions are
 /// modified in place when a range collapses; their end records are preserved.
@@ -1719,10 +1726,11 @@ fn insert_solutions_in<O: ClassObject>(
         && geometry
             .surface(object)
             .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
+    // an edge without a curve was refused in target_curve, so this is any other object
     if !has_target && !plane {
-        return Err(SolidError::intersect_failed(
+        return Err(SolidError::intersect(
             OP,
-            "the object is neither an edge with a curve nor a plane",
+            IntersectFailure::UnsupportedObjectKind,
         ));
     }
     for sol in solutions {
@@ -1771,18 +1779,12 @@ fn insert_solutions_in<O: ClassObject>(
                 if let Some(target) = target {
                     let a = source.evaluate(k, sol.start.param(0)?, 1, true, true)?;
                     let b = target.evaluate(k, sol.start.param(1)?, 1, true, true)?;
-                    let ta = a.get(1).copied().ok_or_else(|| {
-                        SolidError::intersect_failed(
+                    let (Some(&ta), Some(&tb)) = (a.get(1), b.get(1)) else {
+                        return Err(SolidError::intersect(
                             OP,
-                            "the source curve's first derivative was not evaluated",
-                        )
-                    })?;
-                    let tb = b.get(1).copied().ok_or_else(|| {
-                        SolidError::intersect_failed(
-                            OP,
-                            "the target curve's first derivative was not evaluated",
-                        )
-                    })?;
+                            IntersectFailure::Defect { why: EVAL_1ST },
+                        ));
+                    };
                     let mut angle = tb.angle_between(ta).unwrap_or(1.0);
                     if angle > PI / 2.0 {
                         angle = PI - angle;
@@ -1844,12 +1846,20 @@ fn insert_solutions_in<O: ClassObject>(
                 // cancel the scheduled insertion; check for end point intersections and
                 // insert them here (upstream maps the tolerance on pEdgeCurve, which a
                 // curve or plane target leaves NULL)
-                let (Some(_), Some(e_curve)) = (edge, target) else {
+                let (Some(e), Some(e_curve)) = (edge, target) else {
                     return Err(SolidError::invalid_input(
                         OP,
                         "native short-range tangency filtering requires an edge",
                     ));
                 };
+                // Not upstream: a run that reaches an end of the classified interval or of
+                // the edge at each of its ends is the curve running along the edge, not a
+                // tangent touch, and is inserted whatever its length
+                // ([`run_reaches_ends`]).
+                if run_reaches_ends(k, geometry, classification, sol, e, e_curve, tol)? {
+                    classification.insert_curve_interval(k, geometry, &ivl)?;
+                    continue;
+                }
                 let cc_ivl = classification.interval();
                 let start_tol = map_to_1d_on_curve(k, tol, sol.start.param(0)?, e_curve)?;
                 if cc_ivl
@@ -1882,6 +1892,63 @@ fn insert_solutions_in<O: ClassObject>(
         }
     }
     Ok(())
+}
+
+/// Not upstream: whether the run `sol` (a range of the classification's curve within `tol`
+/// of `edge`, whose curve is `edge_curve`) runs along the edge: its pieces of both curves are
+/// longer than `tol` end to end, and each of its ends lies on an end of the classification's
+/// interval or of the edge's interval, within `tol` mapped to that curve's parameter there.
+///
+/// The intersector reports a run where the two curves lie within `tol` of each other, and
+/// ends it where they part or where one of the two intervals ends. A tangent touch parts
+/// the curves at both ends of its run, inside both intervals: there the distance between
+/// them reaches `tol`. A run that ends at each end on an end of one of the intervals has no
+/// end where the curves part: over its whole extent the curve runs within `tol` along the
+/// edge (an arc of a circle split at a seam vertex and at a rail's vertex, along the edge
+/// between those vertices), so it is the edge's coincidence, not a tangency, whatever its
+/// length against the classified interval's. A run whose piece of either curve has its ends
+/// within `tol` of each other (both ends dropping onto one end of the edge) is a touch at a
+/// point, not a run along the edge.
+///
+/// # Errors
+///
+/// Those of the edge's interval lookup and of the curves' evaluations.
+fn run_reaches_ends<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    sol: &Solution<O>,
+    edge: O,
+    edge_curve: &Curve,
+    tol: f64,
+) -> Result<bool> {
+    let source = classification.curve_geometry(geometry)?;
+    let source_ivl = classification.interval();
+    let edge_ivl = super::p3::edge_interval(geometry, edge)?;
+    for (curve, i) in [(source, 0), (edge_curve, 1)] {
+        let a = curve.evaluate_point(k, sol.start.param(i)?)?;
+        let b = curve.evaluate_point(k, sol.end.param(i)?)?;
+        let length = a.distance(b);
+        if length.is_nan() || length <= tol {
+            return Ok(false);
+        }
+    }
+    for end in [&sol.start, &sol.end] {
+        let (t, s) = (end.param(0)?, end.param(1)?);
+        let on_source = source_ivl
+            .is_value_on_boundary(t, map_to_1d_on_curve(k, tol, t, source)?)
+            .0;
+        if on_source {
+            continue;
+        }
+        let on_edge = edge_ivl
+            .is_value_on_boundary(s, map_to_1d_on_curve(k, tol, s, edge_curve)?)
+            .0;
+        if !on_edge {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The vertex check of `sm_InsertSolutions` for an edge target: a point solution within
@@ -1926,8 +1993,7 @@ fn edge_end_vertex_snap<O: ClassObject>(
         } else {
             start_vertex
         };
-        let vertex =
-            vertex.ok_or_else(|| SolidError::intersect_missing(OP, "the edge's vertex"))?;
+        let vertex = vertex.ok_or_else(|| missing_defect(OP, EDGE_NO_VERTEX))?;
         let vtx = geometry
             .topology_handle_in(eb, EntityRef::Vertex(vertex))
             .ok_or(SolidError::invalid_input(OP, "vertex without handle"))?;
@@ -2027,6 +2093,22 @@ fn collapse_short_range<O: ClassObject>(
         }
     }
     Ok(())
+}
+
+/// The two classifications combined interval by interval have different numbers of
+/// intervals (upstream's `SER(SM_ERR)`).
+#[track_caller]
+fn counts_differ<O: ClassObject>(
+    this: &CurveClassification<O>,
+    other: &CurveClassification<O>,
+) -> SolidError {
+    SolidError::intersect(
+        OP,
+        IntersectFailure::IntervalCountsDiffer {
+            this: this.size(),
+            other: other.size(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -2353,10 +2435,12 @@ mod tests {
             let other_before = other.intervals().to_vec();
             assert!(matches!(
                 cc.merge_classifications(&k, &g, &mut other, true),
-                Err(ref e) if matches!(
-                    e.intersect_failure(),
-                    Some(crate::error::intersect::IntersectFailure::Failed(_))
-                ) && e.sm_status() == Some(1001)
+                Err(ref e) if e.intersect_failure()
+                    == Some(&IntersectFailure::IntervalCountsDiffer {
+                        this: 2,
+                        other: other_count,
+                    })
+                    && e.sm_status() == Some(1001)
             ));
             assert_eq!(cc.intervals(), before);
             assert_eq!(other.intervals(), other_before);
