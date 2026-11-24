@@ -240,6 +240,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             source_item: source as u64,
             face_origin: part.face_origin,
             name: r.name.clone(),
+            common_face_name: None,
             body,
             color,
             path: r.path.clone(),
@@ -414,7 +415,7 @@ fn mesh_part(mesh: &RecordMesh) -> std::result::Result<Part, String> {
     }
     let body = crate::mesh_body(&positions, &mesh.triangles).map_err(|e| e.to_string())?;
     let closed = body.is_closed_mesh();
-    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None })
+    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None, split_edges: 0 })
 }
 
 /// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that

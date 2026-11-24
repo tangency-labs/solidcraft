@@ -8,6 +8,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   sketch of lines and circular arcs, or an edge flange from a part edge. A contour flange along an ellipse, a conic or a
   spline is not supported yet ([#15743](https://github.com/tangency-labs/solidcraft/issues/15743)): the free-form panel it
   would make has no closed-form flat, so the flange is refused, naming the curve.
+- **Tab** (`sheet.tab`) adds a flat piece of material to a sheet from a closed sketch on one of
+  its flat faces.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
@@ -323,6 +325,30 @@ refused, and so is a line too short for its bend. Arcs are not supported yet.
 ```json
 {"command":"sheet.path_flange","params":{"edge":[1,0,20],"sketch":"Path","curves":["p1","p2"]}}
 ```
+
+**Tab** (`sheet.tab`) adds a flat piece of material to a sheet in its own plane: a mounting ear,
+a tongue that goes through a slot in another part, more room round a hole, or a lug added after
+the walls are folded. Sketch a closed profile on a flat face of the sheet (either side, or in a
+plane level with one) so that it touches or overlaps the face's outline, and pick it in the Tab
+dialog (SHEET METAL → CREATE). The profile's area joins that panel through the sheet's thickness,
+as part of its outline: no second body and no seam, and where the profile overlaps the sheet it
+simply merges. The thickness is always the body's rule's. The tab unfolds with its panel, so the
+flat pattern and its DXF carry it, and later flanges, hems and folds use its edges like any other
+edge of the sheet. A tab on a wall that is already folded works the same way, sketched on that
+wall's face.
+
+A tab is refused, with a message saying why, when its profile does not meet the face's outline
+(touching it at a corner only does not count), adds nothing to it, reaches into a bend zone, or
+would overlap another panel of the sheet once folded or in the flat pattern, would join more
+than one panel (two faces side by side in one plane, both touched by the profile), and while the
+sheet is unfolded. Flange on a sketch on the sheet's face still makes a new sheet body of its own.
+
+```json
+{"command":"sheet.tab","params":{"sketch":"Ear"}}
+```
+
+(A 100 x 60 sheet with `Ear` a 40 x 40 rectangle on its top face, 10 mm on the sheet and 30 mm past its long edge:
+one body with a 40 x 30 tab out of that edge, and a flat pattern in one piece.)
 
 A flange can also stand on the far edge of another flange: a return, such as a lip turned in
 along the top of a tray's walls. It runs along that edge from end to end, so it follows the

@@ -34,6 +34,13 @@ use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
 
+/// Whether a generated cubic matches a trimmed interval of a source cubic, in either direction.
+/// Other segment kinds give false.
+#[must_use]
+pub fn cubic_contains(source: &Seg2, piece: &Seg2) -> bool {
+    convert::seg2(source).cubic_contains(&convert::seg2(piece))
+}
+
 /// The tolerance (mm) the planar booleans take: at least this.
 pub const MIN_TOLERANCE: f64 = 1e-9;
 /// ... and at most this.

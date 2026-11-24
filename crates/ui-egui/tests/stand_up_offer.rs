@@ -52,6 +52,10 @@ fn opened_boxes(size: [f64; 3], corners: &[[f64; 3]], programs: &str, prepare: i
     let mut h = Harness::new();
     prepare(&mut h);
     h.app.open_path_async(&path);
+    // The file's import options come first, and leave the up axis to the offer (`import_options`).
+    h.frames(2);
+    assert!(h.app.import_options.is_some(), "a STEP file opened from the window asks its options");
+    h.step(&json!({"key": "Enter"})).unwrap();
     h.settle();
     h
 }
