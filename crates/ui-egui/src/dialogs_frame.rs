@@ -585,7 +585,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     if id == "frame.trim" {
         return Some((
             Kind::FrameTrim(Trim::default()),
-            vec![SelInput::new("Members", BODIES, true), SelInput::new("Trim to", BODIES | PLANAR_FACES | PLANES, true)],
+            vec![SelInput::new("Members", BODIES, true), SelInput::new("ui.frame_trim.to", BODIES | PLANAR_FACES | PLANES, true)],
         ));
     }
     (id == "frame.member").then(|| {
