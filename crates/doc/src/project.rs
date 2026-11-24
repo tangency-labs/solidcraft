@@ -418,23 +418,11 @@ fn resolve_uncached(
             let ss = st.sketch(*sketch).ok_or_else(|| lost(&format!("sketch {sketch}")))?;
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             match kind {
-                LinkKind::Intersect
-                    if matches!(
-                        ss.sketch.curves.get(ci).map(|c| &c.kind),
-                        Some(CurveKind::Line { .. } | CurveKind::Circle { .. } | CurveKind::Arc { .. })
-                    ) =>
-                {
-                    let mut points = Vec::new();
-                    for piece in sketch_curves(ss, ci) {
-                        let hits = solidcore_ops::curve::plane_crossings(&piece.curve, piece.interval, plane)
-                            .map_err(|e| DocError::Invalid(e.to_string()))?;
-                        points.extend(hits.into_iter().map(LinkGeom::Point));
-                    }
-                    points
-                }
                 LinkKind::Intersect => {
-                    let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
-                    section_of_polyline(plane, &pts)
+                    let curves = sketch_curves(ss, ci);
+                    let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
+                    let hits = solidcore_ops::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
@@ -1521,19 +1509,7 @@ fn placement_frame(doc: &Document, component: u64, path: &[u64], what: &str) -> 
 
 /// Is `m` a rotation (or a reflection) and a translation, as a placement is?
 fn is_rigid(m: &Mat) -> bool {
-    let col = |c: &[f64; 4]| Vec3::new(c[0], c[1], c[2]);
-    let [x, y, z, t] = m;
-    let unit = |v: Vec3| (v.len() - 1.0).abs() < 1e-6;
-    let affine = [x, y, z].iter().all(|c| c[3].abs() < 1e-12) && (t[3] - 1.0).abs() < 1e-12;
-    let (x, y, z) = (col(x), col(y), col(z));
-    m.iter().flatten().all(|v| v.is_finite())
-        && affine
-        && unit(x)
-        && unit(y)
-        && unit(z)
-        && x.dot(y).abs() < 1e-6
-        && y.dot(z).abs() < 1e-6
-        && z.dot(x).abs() < 1e-6
+    solidcore_ops::affine::is_rigid(m, 1e-6, 1e-12)
 }
 
 /// The transform from the source's own frame (its body's frame, or its sketch's component
@@ -1679,19 +1655,9 @@ impl Motion2 {
 /// the sketch plane: a turn about the plane's normal and any shift. `None` when it has not
 /// moved, or when it tilts against the plane (its projection then changes shape).
 fn in_plane_motion(seen: &Mat, now: &Mat, plane: &Plane) -> Option<Motion2> {
-    let moved = crate::mat_mul(now, &crate::mat_inverse(seen)?);
-    if crate::is_identity(&moved) {
-        return None;
-    }
-    let n = plane.normal();
-    if crate::apply_vector(&moved, n).dist(n) > 1e-9 {
-        return None;
-    }
-    let (rx, ry) = (crate::apply_vector(&moved, plane.x), crate::apply_vector(&moved, plane.y));
-    let shift = crate::apply_point(&moved, plane.origin) - plane.origin;
-    let a = [[rx.dot(plane.x), ry.dot(plane.x)], [rx.dot(plane.y), ry.dot(plane.y)]];
-    let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
-    ((det - 1.0).abs() < 1e-9).then_some(Motion2 { a, b: Vec2::new(shift.dot(plane.x), shift.dot(plane.y)) })
+    let coordinates = |v: Vec3| [v.x, v.y, v.z];
+    let (a, [x, y]) = solidcore_ops::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
+    Some(Motion2 { a, b: Vec2::new(x, y) })
 }
 
 /// One source edge of a face link: its persistent name, whether the names of the faces it

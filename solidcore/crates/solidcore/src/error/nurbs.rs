@@ -183,6 +183,12 @@ pub enum BSplineFailure {
         /// The tolerance they must agree within.
         tolerance: f64,
     },
+    /// The arc's sweep of `angle` radians is (nearly) zero or half a turn, where the centre
+    /// and the two points are on one line. [`ErrorKind::Degenerate`].
+    ArcSweepDegenerate {
+        /// The sweep, in radians.
+        angle: f64,
+    },
     /// The arcs do not meet end to end: with three, the largest arc and its larger
     /// neighbour share no end; with four, an end does not meet exactly one other arc's end.
     /// [`ErrorKind::InvalidInput`].
@@ -280,6 +286,9 @@ pub enum BSplineFailure {
         /// The curve's degree.
         degree: usize,
     },
+    /// A Coons patch that is not bilinear needs four derivative curves, and none are given.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeCurvesMissing,
     /// The points are said to be of dimension `dim`; the method takes 2 or 3.
     /// [`ErrorKind::InvalidInput`].
     DimensionNot2Or3 {
@@ -311,9 +320,20 @@ pub enum BSplineFailure {
     },
     /// The curve's ends coincide (it is closed), so no scaling takes one end to the other.
     EndsCoincide,
+    /// Expanding the surface's boundary span changed its control point or knot counts,
+    /// which the expansion is to keep; the surface is left unchanged. Class `failed`.
+    ExpansionChangesCounts,
     /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
     /// not yet converted to a typed cause.
     Failed(&'static str),
+    /// The blend's derivatives are faired for two points with a tangent each, and `points`
+    /// points and `tangents` tangents are given. [`ErrorKind::InvalidInput`].
+    FairBlendInputs {
+        /// The points given.
+        points: usize,
+        /// The tangents given.
+        tangents: usize,
+    },
     /// A boundary curve without a neighbouring surface is taken only when it is degenerate
     /// (a point), and this one is not. [`ErrorKind::InvalidInput`].
     FreeBoundaryNotDegenerate,
@@ -335,6 +355,10 @@ pub enum BSplineFailure {
     /// An end weight of the curves to join is zero, so no scaling makes the weights at the
     /// joint agree. [`ErrorKind::InvalidInput`].
     JoinEndWeightZero,
+    /// Joining the curves into one failed after the join's own check of the gap passed; the
+    /// failure's cause says why (for example ends farther apart than the construction takes).
+    /// Class `failed`; whether it is a defect or a refusal is its cause's.
+    JoinNotBuilt,
     /// Something the method needs is missing, as the phrase says (e.g. "the boundary
     /// curve").
     Missing(&'static str),
@@ -352,8 +376,19 @@ pub enum BSplineFailure {
     },
     /// The fit is asked for no control points (a count of 0). [`ErrorKind::InvalidInput`].
     NoControlPoints,
+    /// The point's search found no point of the surface within `tolerance` of it.
+    /// [`ErrorKind::NotWithinTolerance`].
+    NoFootWithinTolerance {
+        /// The distance searched within.
+        tolerance: f64,
+    },
+    /// No NURB is given to take the curve from. [`ErrorKind::InvalidInput`].
+    NoNurbGiven,
     /// The curve or surface holds no NURBS form to work on.
     NoNurbsForm,
+    /// The evaluation's output has no slot, not even one for the point.
+    /// [`ErrorKind::InvalidInput`].
+    NoOutputSlot,
     /// A curve given as an arc is not one (within the tolerance). [`ErrorKind::InvalidInput`].
     NotAnArc,
     /// The method works only on a surface-intersection approximation (a piecewise C0 curve
@@ -452,6 +487,9 @@ pub enum BSplineFailure {
     },
     /// The trim domain is not inside the surface's domain. [`ErrorKind::InvalidInput`].
     TrimDomainOutside,
+    /// A weight is given for the end of a curve that is not rational.
+    /// [`ErrorKind::InvalidInput`].
+    WeightOnNonRational,
     /// The axis direction is a zero vector.
     ZeroAxis,
 }
@@ -492,15 +530,19 @@ impl BSplineFailure {
             | Self::DegreeBelowCurrent { .. }
             | Self::DegreeTooLarge { .. }
             | Self::DegreeTooLowToReduce { .. }
+            | Self::DerivativeCurvesMissing
             | Self::DimensionNot2Or3 { .. }
             | Self::DirectionNotUOrV { .. }
             | Self::EmptyGrid { .. }
             | Self::EndTangentNotGiven
+            | Self::FairBlendInputs { .. }
             | Self::FreeBoundaryNotDegenerate
             | Self::IntervalSelectsNoControlPoints
             | Self::JoinEndWeightZero
             | Self::NetIndexOutside { .. }
             | Self::NoControlPoints
+            | Self::NoNurbGiven
+            | Self::NoOutputSlot
             | Self::NotAnArc
             | Self::RailIntersectionsMissing
             | Self::SphereArcCount { .. }
@@ -509,14 +551,17 @@ impl BSplineFailure {
             | Self::TooFewBoundaryCurves { .. }
             | Self::TooFewBreakpoints { .. }
             | Self::TooManyVectors { .. }
-            | Self::TrimDomainOutside => ErrorKind::InvalidInput,
+            | Self::TrimDomainOutside
+            | Self::WeightOnNonRational => ErrorKind::InvalidInput,
             Self::ArcLoopDegenerate { .. }
+            | Self::ArcSweepDegenerate { .. }
             | Self::GeneratorOnAxis
             | Self::PatchTooCoarse { .. }
             | Self::PatchWithoutSpan
             | Self::TangentsVanish => ErrorKind::Degenerate,
             Self::DegreeNotReducible { .. }
             | Self::IntervalNotSplittable { .. }
+            | Self::NoFootWithinTolerance { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
@@ -554,6 +599,10 @@ impl core::fmt::Display for BSplineFailure {
             } => write!(
                 f,
                 "the arcs have radii {radius} and {other}, farther apart than {tolerance}"
+            ),
+            Self::ArcSweepDegenerate { angle } => write!(
+                f,
+                "the arc's sweep of {angle} radians is nearly zero or half a turn"
             ),
             Self::ArcsDoNotMeet => f.write_str("the arcs do not meet end to end"),
             Self::BoundaryCurveMissing => f.write_str("a boundary curve is missing"),
@@ -602,6 +651,7 @@ impl core::fmt::Display for BSplineFailure {
             Self::DegreeTooLowToReduce { degree } => {
                 write!(f, "a curve of degree {degree} has no lower degree")
             }
+            Self::DerivativeCurvesMissing => f.write_str("the derivative curves are missing"),
             Self::DimensionNot2Or3 { dim } => {
                 write!(f, "the points are of dimension {dim}, not 2 or 3")
             }
@@ -620,7 +670,14 @@ impl core::fmt::Display for BSplineFailure {
                 "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
             ),
             Self::EndsCoincide => f.write_str("the curve's ends coincide"),
+            Self::ExpansionChangesCounts => {
+                f.write_str("expanding the boundary span changes the surface's counts")
+            }
             Self::Failed(what) => f.write_str(what),
+            Self::FairBlendInputs { points, tangents } => write!(
+                f,
+                "{points} points and {tangents} tangents are given, not two of each"
+            ),
             Self::FreeBoundaryNotDegenerate => {
                 f.write_str("a boundary curve without a surface is not degenerate")
             }
@@ -635,6 +692,7 @@ impl core::fmt::Display for BSplineFailure {
                 f.write_str("the interval selects no control point")
             }
             Self::JoinEndWeightZero => f.write_str("an end weight of the curves to join is zero"),
+            Self::JoinNotBuilt => f.write_str("the curves could not be joined into one"),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NetIndexOutside {
                 u_index,
@@ -646,7 +704,15 @@ impl core::fmt::Display for BSplineFailure {
                 "control point ({u_index}, {v_index}) is past the last, ({u_last}, {v_last})"
             ),
             Self::NoControlPoints => f.write_str("no control points are asked for"),
+            Self::NoFootWithinTolerance { tolerance } => {
+                write!(
+                    f,
+                    "no point of the surface was found within {tolerance} of the point"
+                )
+            }
+            Self::NoNurbGiven => f.write_str("no NURB is given"),
             Self::NoNurbsForm => f.write_str("it holds no NURBS form"),
+            Self::NoOutputSlot => f.write_str("the output has no slot for the point"),
             Self::NotAnArc => f.write_str("a boundary curve is not an arc"),
             Self::NotIntersectionCurve => {
                 f.write_str("the curve is not a piecewise degree-3 intersection curve")
@@ -707,6 +773,9 @@ impl core::fmt::Display for BSplineFailure {
             }
             Self::TrimDomainOutside => {
                 f.write_str("the trim domain is not inside the surface's domain")
+            }
+            Self::WeightOnNonRational => {
+                f.write_str("a weight is given for a curve that is not rational")
             }
             Self::ZeroAxis => f.write_str("the axis direction is a zero vector"),
         }
@@ -879,12 +948,15 @@ impl crate::SolidError {
     /// Maps the error of a failed NLib call inside a B-spline method (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`) to a [`BSplineFailure::RoutineFailed`] of
     /// `operation` that keeps the call's error as its cause. [`crate::SolidError::Unported`],
-    /// [`crate::SolidError::Cancelled`] and [`crate::SolidError::PreparationRequired`] pass
-    /// through unchanged: no upstream status stands for them, and callers match them at
-    /// the top. Use as `.map_err(SolidError::nurbs_routine(OP))`.
+    /// [`crate::SolidError::Cancelled`], [`crate::SolidError::PreparationRequired`] and a
+    /// blend certificate past its budget pass through unchanged, as through
+    /// `SolidError::nl_ser`, which this replaces: no upstream status stands for
+    /// them, and callers match them at the top. Use as
+    /// `.map_err(SolidError::nurbs_routine(OP))`.
     pub(crate) fn nurbs_routine(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            e if e.is_not_certified() => e,
             _ => Failure::new(
                 operation,
                 NurbsFailure::BSpline(BSplineFailure::RoutineFailed),
@@ -997,6 +1069,14 @@ mod tests {
             BSplineFailure::TooFewBoundaryCurves { given: 3 },
             BSplineFailure::TrimDomainOutside,
             BSplineFailure::FreeBoundaryNotDegenerate,
+            BSplineFailure::NoOutputSlot,
+            BSplineFailure::WeightOnNonRational,
+            BSplineFailure::NoNurbGiven,
+            BSplineFailure::FairBlendInputs {
+                points: 2,
+                tangents: 1,
+            },
+            BSplineFailure::DerivativeCurvesMissing,
         ];
         let unsupported = [
             BSplineFailure::NotRational,
@@ -1018,6 +1098,7 @@ mod tests {
                 u_degree: 3,
                 v_degree: 3,
             },
+            BSplineFailure::ArcSweepDegenerate { angle: 0.0 },
         ];
         let tolerance = [
             BSplineFailure::DegreeNotReducible {
@@ -1030,7 +1111,10 @@ mod tests {
             },
             BSplineFailure::SubdivisionCap { limit: 8192 },
             BSplineFailure::IntervalNotSplittable { lo: 1.0, hi: 1.0 },
+            BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 },
         ];
+        // a result the method could not build from valid input: class `failed`
+        let failed = [BSplineFailure::ExpansionChangesCounts];
         // the caller's missing inputs keep upstream's `NER` status
         for cause in [
             BSplineFailure::BoundaryWithoutSurface,
@@ -1047,6 +1131,7 @@ mod tests {
             (&unsupported[..], ErrorKind::Unsupported),
             (&degenerate[..], ErrorKind::Degenerate),
             (&tolerance[..], ErrorKind::NotWithinTolerance),
+            (&failed[..], ErrorKind::Failed),
         ] {
             for &cause in causes {
                 let e = SolidError::b_spline("nurbs::op", cause);
@@ -1102,7 +1187,7 @@ mod tests {
     fn the_nurbs_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("nurbs", 60),
-            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+            Vec::<(String, usize)>::new()
         );
     }
 
@@ -1123,8 +1208,6 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
-            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
         ];
         assert_pinned(
             "B-spline phrase-cause sites",

@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod cancel;
 mod construct;
 mod curves;
 mod decompose;
@@ -42,6 +43,7 @@ mod profiles3d;
 pub mod profiling;
 mod shape;
 mod solver;
+mod sparse;
 mod spline_points;
 mod text;
 mod thin;

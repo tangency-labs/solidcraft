@@ -199,9 +199,10 @@ pub(super) fn touched_links(sk: &Sketch, ids: &[String]) -> Vec<String> {
 
 /// Distance from `p` to the segment `a`–`b`.
 fn seg_dist(p: Vec2, a: Vec2, b: Vec2) -> f64 {
-    let ab = b - a;
-    let t = if ab.len2() > 0.0 { ((p - a).dot(ab) / ab.len2()).clamp(0.0, 1.0) } else { 0.0 };
-    p.dist(a + ab * t)
+    solidcore_ops::measure::polyline_2d_closest_point([p.x, p.y], &[[a.x, a.y], [b.x, b.y]])
+        .ok()
+        .flatten()
+        .map_or(f64::INFINITY, |(distance, _)| distance)
 }
 
 /// Is `p` on curve `ci` of `sk`, within `tol`: on a line's segment, on an arc between its

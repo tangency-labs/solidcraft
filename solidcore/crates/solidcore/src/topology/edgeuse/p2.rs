@@ -1870,10 +1870,15 @@ mod tests {
         let uninit_err =
             is_convex_radial_sector(&opt_in_k, &mut b_uninit, concave_eu, 1, false, 0.0)
                 .unwrap_err();
-        assert!(matches!(
-            uninit_err,
-            SolidError::Upstream { code: 1001, .. }
-        ));
+        // the B-spline curve without its NURB, status 1001 kept
+        assert!(
+            uninit_err.upstream_status() == Some(1001)
+                && uninit_err.nurbs_failure()
+                    == Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                        crate::error::nurbs::BSplineFailure::NoNurbsForm
+                    )),
+            "{uninit_err:?}"
+        );
 
         // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007): `Ok(true)`
         // by default, `Err(Upstream { code: 1007 })` under opt-in.

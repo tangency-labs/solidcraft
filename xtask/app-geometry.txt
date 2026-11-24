@@ -83,7 +83,6 @@ crates/doc/src/eval.rs:centered_extrude dot
 crates/doc/src/eval.rs:curved_face cross
 crates/doc/src/eval.rs:edge_dir normalized
 crates/doc/src/eval.rs:entry_face_rise dot
-crates/doc/src/eval.rs:eval_feature_kind dot
 crates/doc/src/eval.rs:face_plane closest_on_triangle,dot,triangles
 crates/doc/src/eval.rs:face_samples triangles
 crates/doc/src/eval.rs:face_through dot,normalized
@@ -639,7 +638,6 @@ crates/engine/src/mesh_lines/coincide.rs:disk dot
 crates/engine/src/mesh_lines/coincide.rs:within dot
 crates/engine/src/mesh_lines/meshes.rs:Scene::triangle_count triangles
 crates/engine/src/mesh_lines/meshes.rs:buffer_bytes triangles
-crates/engine/src/mesh_lines/meshes.rs:prepare triangles
 crates/engine/src/mesh_lines/meshes.rs:rigid cross,dot
 crates/engine/src/mesh_lines/projection.rs:View::project dot
 crates/engine/src/mesh_lines/projection.rs:merge_lines dot

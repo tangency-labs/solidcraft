@@ -8,6 +8,17 @@ use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, LinkGeom, Sketch};
 
+#[test]
+fn projection_member_distance_stays_on_the_segment_and_handles_collapsed_edges() {
+    let a = Vec2::ZERO;
+    let b = Vec2::new(4.0, 0.0);
+    assert_eq!(super::seg_dist(Vec2::new(2.0, 3.0), a, b), 3.0);
+    assert_eq!(super::seg_dist(Vec2::new(7.0, 4.0), a, b), 5.0);
+    assert_eq!(super::seg_dist(Vec2::new(-3.0, 4.0), a, b), 5.0);
+    assert_eq!(super::seg_dist(Vec2::new(3.0, 4.0), a, a), 5.0);
+    assert_eq!(super::seg_dist(Vec2::new(f64::NAN, 0.0), a, b), f64::INFINITY);
+}
+
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {
     s.execute(cmd, &params).unwrap_or_else(|e| panic!("{cmd} {params}: {e}"))
 }
