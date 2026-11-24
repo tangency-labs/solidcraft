@@ -137,7 +137,7 @@ fn edit_sketch(s: &mut Session, body: &str, stretches: &[AxisStretch]) -> std::r
         expected = solidcraft_kernel::stretch(&expected, n * (base + at), n, distance).map_err(|e| e.to_string())?;
         planned.push(stretch_sketch::Planned { direction: one.direction, level: base + at, distance });
     }
-    let changes = stretch_sketch::changes(s, &state, body, &planned)?;
+    let (edited, changes) = stretch_sketch::changes(s, &state, body, &planned)?;
     let errors_before = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let saved = s.doc.clone();
     let solved = s.solved_sketches();
@@ -146,6 +146,7 @@ fn edit_sketch(s: &mut Session, body: &str, stretches: &[AxisStretch]) -> std::r
         s.refresh();
         Err(why)
     };
+    *s.doc_mut() = edited;
     if let Err(e) = s.doc_mut().change_params_atomic(&changes) {
         return undo(s, e.to_string());
     }

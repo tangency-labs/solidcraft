@@ -185,3 +185,26 @@ fn edit_sketch_falls_back_to_a_stretch_step_and_says_why() {
     assert_eq!(v["made_by"], json!("step"), "{v}");
     assert_eq!(stretch_steps(&s), 1);
 }
+
+#[test]
+fn edit_sketch_moves_a_hole_drawn_beyond_the_cut_in_another_sketch() {
+    let mut s = plate();
+    // A 10 mm hole at (80, 30), drawn in its own sketch and cut through the plate.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [80, 30], "radius": 5, "id": "bore"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "distance": 10, "operation": "cut", "targets": ["Plate"]}));
+    let before = solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap().volume;
+    let v = run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "+x", "at": 50, "distance": 15, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("sketch"), "{v}");
+    assert_eq!(stretch_steps(&s), 0);
+    let (_, max) = plate_box(&s);
+    assert!((max.x - 115.0).abs() < 1e-6, "{max:?}");
+    let after = solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap().volume;
+    assert!((after - (before + 15.0 * 60.0 * 10.0)).abs() < 1e-6, "{after} vs {before}");
+    // The hole's sketch moved its circle with the part: its centre is at x = 95 now.
+    let st = s.model.state();
+    let hole = st.sketches.iter().find(|k| k.name == "Hole").unwrap();
+    let centre = hole.sketch.points.iter().map(|p| p.pos.x).fold(f64::NEG_INFINITY, f64::max);
+    assert!((centre - 95.0).abs() < 1e-6, "{centre}");
+}

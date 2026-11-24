@@ -7,7 +7,7 @@
 
 use solidcore_record::Vec2;
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::{FeatureKind, ModelState, StretchDirection};
+use solidcraft_doc::{Document, FeatureKind, ModelState, StretchDirection};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
@@ -21,21 +21,27 @@ pub(super) struct Planned {
     pub distance: f64,
 }
 
-/// The parameter changes that make the sketch and Extrude that built `body` give the stretched
-/// part, as `(name, new expression)`; or why they cannot.
-pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Planned]) -> Result<Vec<(String, String)>, String> {
+/// The design changed so the sketches and Extrude that built `body` give the stretched part, and
+/// the parameter changes to make on it, as `(name, new expression)`; or why they cannot.
+///
+/// Every sketch whose plane runs along a stretch's direction has the points beyond the cut moved
+/// by the distance and the driving dimensions that span the cut grown by it, so later features
+/// drawn on those sketches (holes, bosses, cuts) move with the part. Faces picked beyond the cut
+/// by later features move too. Along the Extrude's own direction, its depth grows.
+pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Planned]) -> Result<(Document, Vec<(String, String)>), String> {
     let source = state.body(body).ok_or("the body is gone")?;
-    let feature = s.doc.feature(source.feature).ok_or("the feature that made the body is gone")?;
+    let made_by = source.feature;
+    let feature = s.doc.feature(made_by).ok_or("the feature that made the body is gone")?;
     let FeatureKind::Extrude { sketch, extent, thin: None, .. } = &feature.kind else {
         return Err("the body was not made by an Extrude of a sketch".into());
     };
     if extent.distance2.is_some() {
         return Err("the Extrude goes both ways".into());
     }
-    let solved = state.sketch(sketch.0).ok_or("the Extrude's sketch is gone")?;
-    let plane = solved.plane;
-    let normal = plane.normal();
+    let base_sketch = sketch.0;
+    let normal = state.sketch(base_sketch).ok_or("the Extrude's sketch is gone")?.plane.normal();
     let exprs = s.doc.all_param_exprs();
+    let mut doc: Document = (*s.doc).clone();
     let mut out: Vec<(String, String)> = Vec::new();
     for p in planned {
         let n = p.direction.vector();
@@ -51,23 +57,46 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             }
             let name = input_param(feature, "Distance").ok_or("the Extrude's depth has no parameter")?;
             out.push(grown(s, &exprs, &name, p.distance)?);
-            continue;
-        }
-        if n.dot(normal).abs() > 1e-9 {
+        } else if n.dot(normal).abs() > 1e-9 {
             return Err("the direction is neither in the sketch's plane nor along the Extrude".into());
         }
-        // In the sketch: the direction and the cut in sketch coordinates.
-        let u = Vec2::new(n.dot(plane.x), n.dot(plane.y));
-        let level = p.level - plane.origin.dot(n);
-        let found = spanning_dimensions(&solved.sketch, u, level);
-        if found.is_empty() {
+        let mut base_spanned = false;
+        for f in &mut doc.features {
+            // Faces later features picked beyond the cut move with the part.
+            if f.id > made_by && !matches!(f.kind, FeatureKind::Sketch { .. }) {
+                for point in f.kind.face_points_mut() {
+                    if point.dot(n) > p.level {
+                        *point += n * p.distance;
+                    }
+                }
+            }
+            let FeatureKind::Sketch { sketch, .. } = &mut f.kind else { continue };
+            let Some(solved) = state.sketch(f.id) else { continue };
+            let plane = solved.plane;
+            if plane.normal().dot(n).abs() > 1e-9 {
+                continue;
+            }
+            // The direction and the cut in this sketch's coordinates.
+            let u = Vec2::new(n.dot(plane.x), n.dot(plane.y));
+            let level = p.level - plane.origin.dot(n);
+            let spanning = spanning_dimensions(&solved.sketch, u, level);
+            if f.id == base_sketch && !spanning.is_empty() {
+                base_spanned = true;
+            }
+            for name in spanning {
+                out.push(grown(s, &exprs, &name, p.distance)?);
+            }
+            for (point, now) in sketch.points.iter_mut().zip(&solved.sketch.points) {
+                if point.link.is_none() && now.pos.dot(u) > level {
+                    point.pos = now.pos + u * p.distance;
+                }
+            }
+        }
+        if 1.0 - n.dot(normal).abs() >= 1e-9 && !base_spanned {
             return Err("no dimension of the sketch spans the cut".into());
         }
-        for name in found {
-            out.push(grown(s, &exprs, &name, p.distance)?);
-        }
     }
-    // The same parameter twice (two dimensions that share one): grown once per stretch.
+    // The same parameter twice (two dimensions that share one) cannot grow twice.
     let mut merged: Vec<(String, String)> = Vec::new();
     for (name, e) in out {
         if merged.iter().any(|(n, _)| *n == name) {
@@ -75,7 +104,7 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
         }
         merged.push((name, e));
     }
-    Ok(merged)
+    Ok((doc, merged))
 }
 
 /// The parameter of `feature`'s input labelled `label`.
