@@ -1772,4 +1772,197 @@ mod tests {
         assert!(inner.periodic_boundary_ends.is_empty());
         Ok(())
     }
+
+    /// What [`trim_seam_piece`] returns.
+    struct SeamTrim {
+        /// The "same point" tolerance of the trim (10 x approx tol).
+        same_tol: f64,
+        /// The trim on the whole circle.
+        trimmed: Option<Extent1d>,
+        /// The piece's ends carried radially onto the whole circle, in the order of
+        /// the piece's own interval.
+        want: [Point3; 2],
+        /// The whole circle's points at the ends of the trim.
+        got: Option<[Point3; 2]>,
+    }
+
+    /// Trims, at offset `dist`, the short piece of a cylinder rim (radius 5) split
+    /// `chord` from its seam vertex (after the seam when `after`, else before it), onto
+    /// the rim's whole closed circle grown by `dist` (its seam where the rim's is), from
+    /// the edge use that starts at the seam vertex.
+    fn trim_seam_piece(after: bool, chord: f64, dist: f64) -> Result<SeamTrim> {
+        use crate::primitive::api_primitives::create_cylinder;
+        use crate::surface::surface::SurfaceKind;
+
+        let mut k = Kernel::default();
+        let mut original = create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)?;
+        let tolerance = original.tolerance();
+        let side = original
+            .faces()
+            .ids()
+            .find(|&f| {
+                matches!(
+                    original.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let rim = original
+            .edges()
+            .ids()
+            .find(|&e| edge::is_closed(&original, e).unwrap())
+            .unwrap();
+        let rim_ivl = edge::interval(&original, rim)?;
+        let circle = edge::curve(&original, rim)?.unwrap().clone();
+        let seam = circle.evaluate_point(&k, rim_ivl.min())?;
+        // the parameter `chord` along the rim (radius 5) from the seam
+        let step = 2.0 * (chord / 10.0).asin() / (2.0 * std::f64::consts::PI) * rim_ivl.length();
+        let at = if after {
+            rim_ivl.min() + step
+        } else {
+            rim_ivl.max() - step
+        };
+        original.set_editing_enabled(true);
+        let (first, second, _) =
+            crate::heal::stitch::p1::make_vertex_split_edge(&mut k, &mut original, rim, at)?;
+        let short = [first.unwrap(), second.unwrap()]
+            .into_iter()
+            .min_by(|&a, &b| {
+                let la = edge::interval(&original, a).unwrap().length();
+                let lb = edge::interval(&original, b).unwrap().length();
+                la.total_cmp(&lb)
+            })
+            .unwrap();
+        let piece = edge::interval(&original, short)?;
+        let up = edge::upward_edgeuse_of_face(&original, short, Some(side))?.unwrap();
+        let down = eu::radial(&original, up)?.unwrap();
+        let mut offset = original.clone_standing_for_self()?;
+        let marked: BTreeSet<_> = original.edgeuses().ids().collect();
+        let mut inner = OffsetExecutive::new(OffsetOperation::SolidOffset, dist, tolerance);
+        for &u in &marked {
+            inner.relate_edgeuses(u, u);
+        }
+        let mut executive = Executive {
+            inner: &mut inner,
+            original_key_of: &dummy_key,
+            offset_key_of: &dummy_key,
+            made: BTreeMap::new(),
+        };
+        // the whole circle grown by `dist` about its centre (the origin: the rim at
+        // the cylinder's base), its parameter that of the rim
+        let center = Point3::ZERO;
+        let rim_mid = circle.evaluate_point(&k, rim_ivl.evaluate(0.5))?;
+        assert!((seam + rim_mid).length() < 1e-12, "{seam:?} {rim_mid:?}");
+        let s = (5.0 + dist) / 5.0;
+        let grown = |p: Point3| center + (p - center) * s;
+        let mut whole = circle.copy(&k)?;
+        if dist != 0.0 {
+            whole.transform(
+                &k,
+                &crate::geom::axis2_placement::Axis2Placement::IDENTITY,
+                Some(Vec3::new(s, s, s)),
+            )?;
+        }
+        assert_eq!(whole.natural_interval(), rim_ivl);
+        let want = [
+            grown(circle.evaluate_point(&k, piece.min())?),
+            grown(circle.evaluate_point(&k, piece.max())?),
+        ];
+        let whole_copy = whole.copy(&k)?;
+        let uv_up = eu3::create_uv_trim_curve(&k, &mut original, up, false, None)?.curve;
+        let uv_down = eu3::create_uv_trim_curve(&k, &mut original, down, false, None)?.curve;
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut backend = EdgeBrep {
+            kernel: &k,
+            original: &mut original,
+            offset: &mut offset,
+            curves: Vec::new(),
+            surfaces: Vec::new(),
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            original_key_of: &dummy_key,
+            offset_key_of: &dummy_key,
+            marks: MarkSource::Set(&marked),
+        };
+        let use_of = |u| Handle::topology(Arena::Original, EntityRef::Edgeuse(u));
+        // the edge use that starts at the seam vertex is the base
+        let starts_at_seam = |b: &EdgeBrep<'_>, u| -> Result<bool> {
+            let v = b.edgeuse_vertex(use_of(u))?.unwrap();
+            Ok(b.vertex_point(v)?.distance(seam) <= tolerance)
+        };
+        let (base, other, uv_base, uv_other) = if starts_at_seam(&backend, up)? {
+            (up, down, uv_up, uv_down)
+        } else {
+            assert!(starts_at_seam(&backend, down)?);
+            (down, up, uv_down, uv_up)
+        };
+        let circle_h = backend.insert_curve(whole).unwrap();
+        let uv_base = backend.insert_curve(uv_base).unwrap();
+        let uv_other = backend.insert_curve(uv_other).unwrap();
+        let creation = OffsetGeometryCreation::new(dist, tolerance);
+        let same_tol = 10.0 * creation.this_approx_tol_3d();
+        let trimmed = creation.trim_extended_edge(
+            &k,
+            &mut backend,
+            &mut executive,
+            use_of(base),
+            Some(use_of(other)),
+            None,
+            None,
+            circle_h,
+            Some(uv_base),
+            Some(uv_other),
+            MarkType::Mark,
+        )?;
+        let got = match trimmed {
+            Some(t) => Some([
+                whole_copy.evaluate_point(&k, t.min())?,
+                whole_copy.evaluate_point(&k, t.max())?,
+            ]),
+            None => None,
+        };
+        Ok(SeamTrim {
+            same_tol,
+            trimmed,
+            want,
+            got,
+        })
+    }
+
+    /// Follow-up to #17806 (WR-673): a short open piece of a cylinder rim, on either side
+    /// of the rim circle's seam, trims at zero offset onto the whole circle to its own
+    /// interval, the short arc between its vertices. Before the fix the piece just before
+    /// the seam whose vertices lie within the "same point" tolerance (chord 5e-5) lost its
+    /// second trim point: the span from it round to the first point at the natural end
+    /// was taken for the first point again, and the trim gave no interval, while its
+    /// mirror just after the seam kept `[0, 5e-5]`. With that fixed, the piece with a
+    /// chord of 1.5e-5 before the seam (its other arc's middle within approx tol of the
+    /// trim points) took the long way round, `[0, 2*pi*5 - 1.5e-5]`. The same holds onto a
+    /// circle grown or shrunk by the offset, where the base edge lies off the curve.
+    #[test]
+    fn a_short_open_edge_beside_a_closed_curves_seam_keeps_its_trim_interval() -> Result<()> {
+        for dist in [0.0, 0.5, -0.5] {
+            for after in [true, false] {
+                for chord in [0.5, 1e-3, 5e-5, 1.5e-5] {
+                    let r = trim_seam_piece(after, chord, dist)?;
+                    if chord < 1e-3 {
+                        // the case the fix is about: the vertices within the tolerance
+                        assert!(chord < r.same_tol, "{chord} {}", r.same_tol);
+                    }
+                    let case = format!("{dist} {after} {chord}: {:?}", r.trimmed);
+                    let got = r.got.unwrap_or_else(|| panic!("{case}: no trim"));
+                    // the trim runs from the piece's first end to its second, the short
+                    // arc, up to the projection's last digits
+                    for (g, w) in got.into_iter().zip(r.want) {
+                        assert!(g.distance(w) <= 1e-9, "{case}: {g:?} {w:?}");
+                    }
+                    let t = r.trimmed.unwrap();
+                    assert!(t.length() < 1.0, "{case}");
+                }
+            }
+        }
+        Ok(())
+    }
 }

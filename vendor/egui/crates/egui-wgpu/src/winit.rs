@@ -877,9 +877,10 @@ impl Painter {
         // SolidCraft: however this frame ends (presented, dropped by an early return below, or
         // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
         // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
+        // wgpu marks the loss (the lost callback) inside the present or discard that meets it.
         let output_frame = frame.map(|frame| {
             let texture = frame.texture.clone();
-            crate::AcquiredFrame::new(frame, texture)
+            crate::AcquiredFrame::new(frame, texture, render_state.device_lost.flag())
         });
 
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
