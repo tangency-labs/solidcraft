@@ -1353,10 +1353,14 @@ impl ModelState {
                     b.bytes = if x.bytes > 0 { x.bytes } else { b.body.retained_bytes() };
                 }
                 None => {
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    (key, &b.name).hash(&mut h);
-                    b.key = h.finish();
-                    if !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
+                    let stamped = made_body_key(key, &b.name);
+                    // A body a saved model kept, given back by what its feature read
+                    // ([`Model::adopt`]), was stamped with this key when it was made: it keeps the
+                    // names it was saved with, as the whole state taken back does, since its record
+                    // holds no lineage to trace them from again.
+                    let saved = b.key == stamped && b.lineage().is_none() && b.names.is_saved();
+                    b.key = stamped;
+                    if !saved && !matches!(f.kind, FeatureKind::BodyTransfer { .. }) {
                         b.names = crate::naming::NameCell::traced(Some(origin.clone()), b.lineage());
                     }
                     // Faces split on purpose stay split through later features (for export).
@@ -1390,6 +1394,14 @@ impl ModelState {
             self.sketch_keys.insert(feature, h.finish());
         }
     }
+}
+
+/// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
+/// made or changed.
+fn made_body_key(key: u64, name: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (key, name).hash(&mut h);
+    h.finish()
 }
 
 /// Evaluation results by cache key, shared by a model and its copies (previews, scratch

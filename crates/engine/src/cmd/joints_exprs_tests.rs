@@ -69,9 +69,10 @@ fn an_offset_and_an_angle_typed_as_expressions_follow_their_parameters() {
     assert!(s.doc.assembly.joints.first().is_some_and(|j| j.exprs.offset.is_none() && j.exprs.angle.is_some()));
 }
 
-/// X/Y keep the dialog's evaluation-once behavior while Z keeps following its expression.
+/// X and Y lateral offsets typed as expressions follow their parameters, survive save/open,
+/// rename with parameters, block deleting parameters they use, and drop when given a plain number.
 #[test]
-fn lateral_joint_offset_expressions_are_evaluated_once() {
+fn lateral_joint_offset_expressions_follow_their_parameters() {
     let mut s = cubes();
     run(
         &mut s,
@@ -79,13 +80,47 @@ fn lateral_joint_offset_expressions_are_evaluated_once() {
         json!({"type":"rigid", "name":"Seat", "a":{"face":[5,5,10]}, "b":{"face":[25,5,0]},
             "offset_x":"gap * 2", "offset_y":"-gap", "offset":"gap"}),
     );
+    let pos = |s: &Session| place(s, "B", Vec3::new(25.0, 5.0, 0.0));
     assert_eq!(s.doc.assembly.joints[0].offset_xy, [10.0, -5.0]);
+    // Face [5, 5, 10] has normal +Z; its frame axes are x = +Y and y = -X.
+    assert!(near(pos(&s), Vec3::new(10.0, 15.0, 15.0)), "{:?}", pos(&s));
+
+    // Parameter changes move B along X, Y and Z together.
     run(&mut s, "parameters.change", json!({"name":"gap","expression":"12 mm"}));
-    assert_eq!(s.doc.assembly.joints[0].offset_xy, [10.0, -5.0]);
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [24.0, -12.0]);
     assert_eq!(s.doc.assembly.joints[0].offset, 12.0);
-    run(&mut s, "joint.edit", json!({"joint":"Seat","offset_x":"gap / 2"}));
-    assert_eq!(s.doc.assembly.joints[0].offset_xy, [6.0, -5.0]);
-    assert_eq!(s.doc.assembly.joints[0].exprs.offset.as_deref(), Some("gap"));
+    assert!(near(pos(&s), Vec3::new(17.0, 29.0, 22.0)), "{:?}", pos(&s));
+
+    // Expressions are kept in the document and reported by joint.list.
+    let j = &s.doc.assembly.joints[0];
+    assert_eq!((j.exprs.offset_x.as_deref(), j.exprs.offset_y.as_deref(), j.exprs.offset.as_deref()), (Some("gap * 2"), Some("-gap"), Some("gap")));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["joints"][0]["expressions"]["offset_x"], json!("gap * 2"), "{listed}");
+    assert_eq!(listed["joints"][0]["expressions"]["offset_y"], json!("-gap"), "{listed}");
+
+    // Renaming carries into offset_x and offset_y, and deleting a referenced parameter is refused.
+    run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "shift"}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("shift * 2"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_y.as_deref(), Some("-shift"));
+    let err = s.execute("parameters.delete", &json!({"name": "shift"})).unwrap_err().to_string();
+    assert!(err.contains("joint Seat (offset_x)"), "{err}");
+
+    // Editing offset_x to a new expression updates it; a plain number drops only that expression.
+    run(&mut s, "joint.edit", json!({"joint":"Seat","offset_x":"shift / 2"}));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [6.0, -12.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("shift / 2"));
+    run(&mut s, "joint.edit", json!({"joint":"Seat","offset_x": 3}));
+    run(&mut s, "parameters.change", json!({"name":"shift","expression":"10 mm"}));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [3.0, -10.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x, None);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_y.as_deref(), Some("-shift"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset.as_deref(), Some("shift"));
+
+    // An expression that stops working out (wrong unit) leaves the joint out with a reason.
+    run(&mut s, "parameters.change", json!({"name": "shift", "expression": "30 deg", "unit": "deg"}));
+    let solve = run(&mut s, "joint.solve", json!({}));
+    let why = solve["errors"][0]["why"].as_str().unwrap_or_default().to_string();
+    assert!(why.contains("Seat") && why.contains("offset_y"), "{solve}");
 }
 
 #[test]
