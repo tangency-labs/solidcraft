@@ -6502,6 +6502,19 @@ fn apply_traced_with(
         }
         return Ok(());
     }
+    // A mesh body is no solid to cut or intersect either (#615). A cut that names no body leaves
+    // the mesh bodies alone when it has a solid to cut, as it leaves surfaces; otherwise, and for
+    // a mesh named as a target, it is refused with the way to make the mesh a solid.
+    if matches!(op, Operation::Cut | Operation::Intersect) {
+        let mesh = |i: &usize| state.bodies.get(*i).is_some_and(|b| b.body.is_mesh());
+        let solid = |i: &usize| !mesh(i) && state.bodies.get(*i).is_some_and(ModelBody::is_closed);
+        if op == Operation::Cut && !named && target_idx.iter().any(solid) {
+            target_idx.retain(|i| !mesh(i));
+        } else if let Some(b) = target_idx.iter().copied().find(|i| mesh(i)).and_then(|i| state.bodies.get(i)) {
+            let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
+            return Err(DocError::Invalid(format!("{} is a mesh body, and {verb} needs a solid: use Convert Mesh to make it a solid first", b.name)));
+        }
+    }
     // A surface body is no solid to cut or intersect, including automatic targets (#17587).
     // Automatic cuts with solid targets leave surfaces intact. Keep Thicken's sources too.
     // Surface-only cuts leave a surface alone when exact bounds prove every tool is clear of
