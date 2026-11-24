@@ -213,7 +213,7 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::{
     prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
 };
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::topology::proto_topology::p2::exactly_placed;
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
@@ -4259,19 +4259,7 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
                      handle was made for that surface's face",
             )
         })?;
-        match self.0.caches.built.get(&face) {
-            Some(Ok(cache)) => {
-                self.0.caches.tree_requested.borrow_mut().insert(face);
-                cache.map_handles(Ok)
-            }
-            Some(Err(e)) => Err(e.clone()),
-            None => {
-                self.0.caches.pending.set(Some((face, true)));
-                Err(SolidError::PreparationRequired {
-                    operation: OP_FACE_CACHES,
-                })
-            }
-        }
+        self.built_cache(face)?.map_handles(Ok)
     }
 
     fn surface_cache_without_get_tree(
@@ -4279,12 +4267,12 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
+    ) -> Result<SurfaceCacheState<O>> {
         let Some(handle) = handle else {
-            return self.build_surface_cache(k, surface, None);
+            return self.build_surface_cache(k, surface, None)?.state();
         };
         if surface.face()?.is_none() {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.build_surface_cache(k, surface, Some(handle))?.state();
         }
         let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
             SolidError::boolean_null_defect(
@@ -4297,10 +4285,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         // after the attempt's first GetTree of the face's cache, upstream's cache has
         // its tree
         if self.0.caches.tree_requested.borrow().contains(&face) {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.built_cache(face)?.mapped_state(|o| o);
         }
         match self.0.caches.states.get(&face) {
-            Some(Ok(cache)) => cache.map_handles(Ok),
+            Some(Ok(cache)) => cache.mapped_state(|o| o),
             Some(Err(e)) => Err(e.clone()),
             None => {
                 self.0.caches.pending.set(Some((face, false)));
@@ -4319,6 +4307,24 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
 impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized>
     FaceCacheContext<'_, '_, O, G>
 {
+    /// The built cache of `face` a solve's `GetTree` gets (recording that the
+    /// attempt's tree of it was requested), or the request to build it.
+    fn built_cache(&self, face: O) -> Result<&SurfaceCache<O>> {
+        match self.0.caches.built.get(&face) {
+            Some(Ok(cache)) => {
+                self.0.caches.tree_requested.borrow_mut().insert(face);
+                Ok(cache)
+            }
+            Some(Err(e)) => Err(e.clone()),
+            None => {
+                self.0.caches.pending.set(Some((face, true)));
+                Err(SolidError::PreparationRequired {
+                    operation: OP_FACE_CACHES,
+                })
+            }
+        }
+    }
+
     /// `f` on the read-only queries of `face` (its B-rep holds the UV trim curves its
     /// cache build created).
     fn with_queries<R>(
@@ -4389,6 +4395,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
 {
     fn face_zone_tol_3d(&self, face: O) -> Result<f64> {
         self.with_queries(face, |q| q.face_zone_tol_3d(face))
+    }
+
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.with_queries(face, |q| q.face_has_loopuses(face))
     }
 
     fn face_point_classify(

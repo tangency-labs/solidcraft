@@ -43,7 +43,9 @@ impl Document {
         if !self.components.iter().any(|c| c.id == root) {
             return Err(DocError::Unknown(format!("component {root}")));
         }
-        let components: Vec<u64> = self.components.iter().filter(|c| self.component_within(c.id, root)).map(|c| c.id).collect();
+        let tree: BTreeSet<u64> = self.components.iter().filter(|c| self.component_within(c.id, root)).map(|c| c.id).collect();
+        let kept = self.components_kept_by_outside_placements(root, &tree);
+        let components: Vec<u64> = self.components.iter().map(|c| c.id).filter(|c| tree.contains(c) && !kept.contains(c)).collect();
         let inside: BTreeSet<u64> = components.iter().copied().collect();
         if self.features.iter().any(|feature| {
             !inside.contains(&feature.component)
@@ -58,18 +60,71 @@ impl Document {
 
         let occurrences: BTreeSet<u64> =
             self.occurrences.iter().filter(|o| inside.contains(&o.component) || inside.contains(&o.parent)).map(|o| o.id).collect();
+        // Linked parts this removal leaves without a placement: they go too.
+        let orphans: Vec<u64> = self
+            .links
+            .keys()
+            .copied()
+            .filter(|c| !inside.contains(c))
+            .filter(|c| {
+                let mut placed = self.occurrences.iter().filter(|o| o.component == *c).peekable();
+                placed.peek().is_some() && placed.all(|o| occurrences.contains(&o.id))
+            })
+            .collect();
         let joints = self.remove_occurrences(&occurrences);
 
         let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
         self.body_offsets.retain(|name, _| !bodies.contains(name));
+        // A kept component sat under the tree it was made in: it moves up to the component the
+        // removed root sat in, which is left (read before the root goes).
+        let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);
         self.components.retain(|c| !inside.contains(&c.id));
+        for c in self.components.iter_mut().filter(|c| kept.contains(&c.id) && inside.contains(&c.parent)) {
+            c.parent = up;
+        }
         self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
         self.parts.retain(|c, _| !inside.contains(c));
         self.gears.retain(|c, _| !inside.contains(c));
         self.links.retain(|c, _| !inside.contains(c));
         self.remove_configuration_components(&components);
-        Ok(RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() })
+        let mut removed =
+            RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() };
+        for orphan in orphans {
+            if !self.components.iter().any(|x| x.id == orphan) {
+                continue;
+            }
+            let more = self.remove_component_tree(orphan)?;
+            removed.components.extend(more.components);
+            removed.features.extend(more.features);
+            removed.deleted.extend(more.deleted);
+            removed.occurrences.extend(more.occurrences);
+            removed.joints.extend(more.joints);
+        }
+        Ok(removed)
+    }
+
+    /// The components of `tree` (the tree under `root`) that stay when it is removed: a part
+    /// that was made inside it (a linked design's component) but that a component outside it
+    /// still places, with everything inside such a part. They go with the last placement.
+    fn components_kept_by_outside_placements(&self, root: u64, tree: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut kept: BTreeSet<u64> = BTreeSet::new();
+        loop {
+            let before = kept.len();
+            let removed = |c: u64| tree.contains(&c) && !kept.contains(&c);
+            let placed: Vec<u64> = self
+                .occurrences
+                .iter()
+                .filter(|o| o.component != root && tree.contains(&o.component) && !removed(o.parent))
+                .map(|o| o.component)
+                .collect();
+            kept.extend(placed);
+            let inner: Vec<u64> = tree.iter().copied().filter(|c| kept.iter().any(|k| self.component_within(*c, *k))).collect();
+            kept.extend(inner);
+            if kept.len() == before {
+                return kept;
+            }
+        }
     }
 
     /// Remove these occurrences and every assembly record that refers to them: the joints with

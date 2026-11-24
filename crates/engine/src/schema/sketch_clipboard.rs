@@ -87,7 +87,8 @@ pub struct Copied {
     pub points: usize,
     /// How many texts.
     pub texts: usize,
-    /// How many constraints and dimensions among them came along.
+    /// How many constraints and dimensions among them (plus external `Equal` constraints to
+    /// curves in the same sketch) came along.
     pub constraints: usize,
     /// The centre of what was copied, in sketch coordinates: where `at` puts it.
     pub center: [f64; 2],

@@ -341,6 +341,7 @@ macro_rules! circle_size {
 
 circle_size!(CircleRadius, "radius", "A circle's `radius`: a number or an expression.");
 circle_size!(CircleDiameter, "diameter", "A circle's `diameter`: a number or an expression.");
+circle_size!(PolygonSides, "sides", "A polygon's `sides`: a number or an expression over the design's parameters.");
 
 /// An arc's `sweep`, as `params::num` reads it: a number below 1e9 in size. That it is between
 /// -360 and 360 and not 0 is the handler's to check.
@@ -941,17 +942,20 @@ pub struct PolygonCircumscribedParams {
     pub sketch: Option<SketchTarget>,
     /// The centre, as [x, y] or {x, y} in mm. An expression, a point's id or a snap is not taken.
     pub center: PlainPoint,
-    /// The distance from the centre to the middle of each side, in mm. Positive. Wins over
-    /// `diameter`. Give one of the two.
+    /// The distance from the centre to the middle of each side, in mm: a number, or an
+    /// expression over the design's parameters, which makes the size a dimension driven by them
+    /// so the polygon follows them. Positive. Wins over `diameter`. Give one of the two.
     #[serde(default)]
-    pub radius: Option<PlainNumber>,
+    pub radius: Option<CircleRadius>,
     /// Twice the distance from the centre to the middle of each side (the width across flats), in
-    /// mm. Used when `radius` is not.
+    /// mm, as `radius` is given. Used when `radius` is not.
     #[serde(default)]
-    pub diameter: Option<PlainNumber>,
-    /// The number of sides: a whole number from 3 to 200. Default: 6.
+    pub diameter: Option<CircleDiameter>,
+    /// The number of sides: a whole number from 3 to 200, or an expression over the design's
+    /// parameters that comes to one. It is read when the polygon is drawn and does not follow a
+    /// later change of the parameter. Default: 6.
     #[serde(default)]
-    pub sides: Option<PlainNumber>,
+    pub sides: Option<PolygonSides>,
     /// The direction of the middle of the first side from the centre, in degrees counter-clockwise
     /// from the sketch's x axis. Default: 90 (straight up).
     #[serde(default)]

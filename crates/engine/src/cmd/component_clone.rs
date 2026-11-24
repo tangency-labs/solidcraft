@@ -552,8 +552,10 @@ pub(super) fn build(
             face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
         if let (
-            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane },
-            FeatureKind::Sketch { plane: old_plane, .. } | FeatureKind::ConstructionPlane { plane: old_plane },
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::FramePlate { plane, .. },
+            FeatureKind::Sketch { plane: old_plane, .. }
+            | FeatureKind::ConstructionPlane { plane: old_plane }
+            | FeatureKind::FramePlate { plane: old_plane, .. },
         ) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
         {
@@ -713,7 +715,7 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &feature.kind
+        if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } | FeatureKind::FramePlate { plane, .. } = &feature.kind
             && let Some(anchor) = super::sketch::face::anchor(plane)
             && !bodies.contains_key(&anchor.target.body)
         {
@@ -912,6 +914,13 @@ fn transfer_into_copy(kind: &mut FeatureKind, components: &BTreeMap<u64, u64>) -
             *from = *to;
             *transform = solidcraft_doc::IDENTITY;
         }
+    }
+    if let FeatureKind::Pattern { components: patterned, occurrences, .. } = kind {
+        for id in patterned.iter_mut() {
+            *id = *components.get(id).ok_or_else(|| bad(CMD, "patterned component is outside the copied graph"))?;
+        }
+        // Occurrence ids are of the source design; the copy's reconcile makes its own.
+        occurrences.clear();
     }
     Ok(())
 }

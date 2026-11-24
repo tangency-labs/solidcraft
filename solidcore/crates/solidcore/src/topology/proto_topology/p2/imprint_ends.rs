@@ -202,13 +202,24 @@ fn de_casteljau(pts: &[[f64; 4]], u: f64, upper: bool) -> Vec<[f64; 4]> {
 /// `d + r >= max(r_min, 2 r_min - |d - r|)`, so `|d - r| (2 r_min - |d - r|) <= f_over`.
 /// Where `f_over < r_min^2` that is `|d - r| <= f_over / (r_min + sqrt(r_min^2 - f_over))`
 /// (the other root exceeds `r_min`, where `|f| >= |d - r| r_min > r_min^2`), about
-/// `f_over / 2 r_min`; else `f_over / r_min`. Returns the bound, raised by `gamma(6)` for
-/// the rounding of its five operations and that raise, and whether `|d - r| < r_min`.
+/// `f_over / 2 r_min`; else `f_over / r_min`. Returns the bound and whether
+/// `|d - r| < r_min`.
+///
+/// Rounding (#20854). The computed `disc = fl(fl(r_min^2) - f_over)` is within
+/// `gamma(2) (r_min^2 + |disc|)` of `r_min^2 - f_over`, an error `sqrt` would amplify where
+/// `disc` is near zero; `below`, `disc` less `gamma(4)` of that (enough to cover the
+/// rounding of `below`'s own two operations and its subtraction), is at most
+/// `r_min^2 - f_over`, so its root, and the bound with it, can only err upward. The root,
+/// the sum, the quotient and the product each round by at most `u`, which the raise by
+/// `gamma(6)` (itself rounded) covers. Where `below` is not positive, `f_over / r_min`.
 fn radial_off(f_over: f64, r_min: f64) -> (f64, bool) {
-    let disc = r_min * r_min - f_over;
-    let raise = 1.0 + crate::nurbs::math::gamma(6);
-    if disc > 0.0 {
-        (f_over / (r_min + disc.sqrt()) * raise, true)
+    use crate::nurbs::math::gamma;
+    let r2 = r_min * r_min;
+    let disc = r2 - f_over;
+    let below = disc - gamma(4) * (r2 + disc.abs());
+    let raise = 1.0 + gamma(6);
+    if below > 0.0 {
+        (f_over / (r_min + below.sqrt()) * raise, true)
     } else {
         (f_over / r_min * raise, false)
     }
@@ -1274,6 +1285,29 @@ mod tests {
             // coefficients (2% here), well under the doubled bound
             assert!((off..=off * 1.05).contains(&bound), "{bound:e} for {off:e}");
         }
+    }
+
+    /// #20854: where `r^2 - f` is near zero the bound still encloses every `d` with
+    /// `|d^2 - r^2| <= f`: at `r = 1.2`, `f = 1.4399999999999997` that includes
+    /// `d = 1.3e-8` (`r^2 - d^2 <= f` exactly, on these doubles), `|d - r| = 1.199999987`,
+    /// which the discriminant rounded to `2.2e-16` (exactly `1.69e-16`) put over the bound,
+    /// `1.1999999851`. Far from that limit, at the M1 groove's root circle (`r = 0.36468`,
+    /// 2.94e-6 off), it is the closed form `r - sqrt(r^2 - f)` to rounding.
+    #[test]
+    fn the_radial_bound_encloses_its_distance_near_its_limit() {
+        let (r, f, d) = (1.2_f64, 1.439_999_999_999_999_7_f64, 1.3e-8_f64);
+        assert!((d * d - r * r).abs() <= f);
+        let (bound, _) = radial_off(f, r);
+        assert!(bound >= r - d, "{bound} under {}", r - d);
+        let (r, off) = (0.364_683_530_658_681_5_f64, 2.94e-6_f64);
+        let f = (r + off) * (r + off) - r * r;
+        let (bound, near) = radial_off(f, r);
+        let exact = r - (r * r - f).sqrt();
+        assert!(near && bound >= off, "{bound:e}");
+        assert!(
+            (bound - exact).abs() <= 1e-9 * exact,
+            "{bound:e} for {exact:e}"
+        );
     }
 
     /// A clamped cubic with three spans (inner knots 1 and 2) over `[0, 3]`.

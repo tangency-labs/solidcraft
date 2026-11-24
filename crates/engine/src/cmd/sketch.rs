@@ -229,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter; on a sheet sketch the dimension keeps the expression and reads source parameters without defining any), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -337,7 +337,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::sketch_selection::midpoint)
         .contract(&MIDPOINT_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("point, line | a, b in pick order: a point and a line (either way round), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
+        .params(concat!("point, line | a, b in pick order: a point and a line or an arc (either way round; on an arc the point sits halfway along it, not at the middle of its chord), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.concentric", "Concentric", crate::checked!("sketch.constraint.concentric", c_concentric))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -1407,7 +1407,7 @@ pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) ->
     Ok(Some(about_y))
 }
 
-/// Used only by face Extrude/Revolve/PressPull, preserving pre-certificate linked profiles.
+/// Used only by face Extrude/Revolve/Sweep/PressPull, preserving pre-certificate linked profiles.
 pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index: usize) -> Result<Value> {
     let value = p.get("plane").ok_or_else(|| bad("face profile", "missing picked face plane"))?;
     let plane = face::capture_internal(s, value, "face profile")?;
@@ -1634,18 +1634,25 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if s.sheet_sketching() {
         return super::drawing_sketch::finish(s, p);
     }
-    finish_model_edit(s, restore)
+    finish_model_edit(s, restore, true)
 }
 
-/// Finish the model receiver even when another window has a drawing open.
-pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value> {
+/// Finish the model receiver even when another window has a drawing open. `fold` groups the
+/// sketch's own steps into one undo step, as Finish Sketch does. Another edit that finishes
+/// the sketch leaves them apart (#15414): one Undo then takes back one change of the sketch,
+/// not the whole session the person had drawn.
+pub(crate) fn finish_model_edit(s: &mut Session, restore: bool, fold: bool) -> Result<Value> {
     let id = s.active_sketch.take();
     s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
     if let Some(entry) = s.sketch_entry.take().filter(|entry| Some(entry.sketch) == id)
         && let Some(marker) = entry.restore_marker
     {
-        finish_edit_history(s, &entry, marker);
+        if fold {
+            finish_edit_history(s, &entry, marker);
+        } else {
+            keep_edit_history(s, &entry, marker);
+        }
         if restore {
             let marker = marker.filter(|m| *m < s.doc.features.len());
             if s.doc.marker != marker {
@@ -1667,19 +1674,53 @@ pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value>
     Ok(json!({"sketch": id, "profiles": profiles}))
 }
 
+/// Where the steps of this sketch's edit begin in the history: the step after the one that held
+/// the design as it was when the sketch was opened. The anchor may have moved when the undo
+/// limit trimmed older steps; if it is gone, only a stack entirely from this sketch counts.
+fn edit_history_start(s: &Session, entry: &SketchEntry) -> Option<usize> {
+    use std::sync::Arc;
+    match &entry.undo_top {
+        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        None => Some(0),
+    }
+    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0))
+    .filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+}
+
+/// Another edit finished the sketch (#15414): the steps of its edit stay in the history, one
+/// change each, and each of them describes the complete design, with the temporary rollback
+/// undone with it. One Undo then takes back one change of the sketch, not the whole session.
+fn keep_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
+    let Some(start) = edit_history_start(s, entry) else { return };
+    for step in s.undo.get_mut(start..).unwrap_or_default() {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+    for step in &mut s.redo {
+        if step.active_sketch == Some(entry.sketch) {
+            complete_edit_step(step, marker);
+        }
+    }
+}
+
+/// A step of a finished sketch's edit describes the whole design: the temporary rollback the
+/// edit used is undone with it, and the sketch is closed, as another edit left it.
+fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
+    use std::sync::Arc;
+    let doc = Arc::make_mut(&mut step.doc);
+    doc.marker = marker.filter(|m| *m < doc.features.len());
+    step.active_sketch = None;
+    step.sketching_view = None;
+    step.sketch_restore_marker = None;
+}
+
 /// Fold only the steps still belonging to this edit. Its snapshots describe the complete
 /// design, never the temporary marker. The anchor may have moved when the undo limit trimmed
 /// older steps; if it is gone, only a stack entirely from this sketch can be folded safely.
 fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
     use std::sync::Arc;
-    let start = match &entry.undo_top {
-        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
-        None => Some(0),
-    }
-    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
-    let Some(start) =
-        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
-    else {
+    let Some(start) = edit_history_start(s, entry) else {
         return;
     };
     let mut before = (*entry.doc).clone();
@@ -2469,6 +2510,38 @@ pub(super) fn slot_width_dimension(
     Ok(Some(sk.add_constraint(ConstraintKind::Diameter { c: cap, value: w }, Some(pname))?))
 }
 
+/// The radius or diameter dimension on round curve `c` (radius `r` now) for a size typed as the
+/// expression `e` over parameters. A model sketch defines a model parameter holding `e`. A sheet
+/// sketch never changes the source design, so it keeps `e` on the dimension as its authored paper
+/// expression, as a sheet dimension does, and `e` may only read source parameters.
+#[allow(clippy::too_many_arguments)]
+fn size_dimension(
+    sk: &mut Sketch,
+    doc: &mut solidcraft_doc::Document,
+    paper: bool,
+    cmd: &str,
+    e: &str,
+    diameter: bool,
+    c: usize,
+    r: f64,
+) -> Result<String> {
+    let value = if diameter { 2.0 * r } else { r };
+    let mk = |v: f64| if diameter { ConstraintKind::Diameter { c, value: v } } else { ConstraintKind::Radius { c, value: v } };
+    if !paper {
+        let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+        let pname = doc.new_model_param(e, &unit);
+        return Ok(sk.add_constraint(mk(value), Some(pname))?);
+    }
+    if e.len() > 4096 || e.trim().is_empty() || e.chars().any(char::is_control) {
+        return Err(bad(cmd, "sheet dimension expression must be nonempty, at most 4096 bytes and contain no controls"));
+    }
+    if solidcraft_doc::expr::definition(e).is_some() {
+        return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+    }
+    let wanted = doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("value: {err}")))?;
+    Ok(sk.add_constraint(mk(wanted), Some(e.to_string()))?)
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let paper = s.sheet_sketching();
@@ -2494,10 +2567,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // A size typed as an expression is a dimension driven by the parameters it names.
         if let Some((e, diameter)) = &size {
-            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
-            let pname = doc.new_model_param(e, &unit);
-            let kind = if *diameter { ConstraintKind::Diameter { c: ci, value: 2.0 * r } } else { ConstraintKind::Radius { c: ci, value: r } };
-            cons.push(sk.add_constraint(kind, Some(pname))?);
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, ci, r)?);
         }
         Ok((ids_of(sk, &[ci]), cons))
     })?;
@@ -2650,9 +2720,24 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     draw_reply(out, info)
 }
 
-fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
+/// A polygon's corners on a circle of `r_vertex` round `center`, `n` of them, the first at angle
+/// `start`. `size` is the expression the size was typed as when it names parameters (with whether
+/// it is a diameter): the construction circle that holds the polygon to its centre then gets a
+/// dimension driven by it, so the polygon follows the parameters (#20920).
+fn polygon(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    center: Vec2,
+    r_vertex: f64,
+    start: f64,
+    n: usize,
+    inscribed: bool,
+    size: Option<(String, bool)>,
+) -> Result<Value> {
     let mut support_circle = String::new();
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let paper = s.sheet_sketching();
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -2689,6 +2774,9 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
+        if let Some((e, diameter)) = &size {
+            cons.push(size_dimension(sk, doc, paper, cmd, e, *diameter, circ, rc)?);
+        }
         Ok((ids_of(sk, &l), cons))
     })?;
     let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
@@ -2696,7 +2784,22 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
 }
 
 fn sides(p: &Value, cmd: &str) -> Result<usize> {
-    let n = num(p, "sides").unwrap_or(6.0);
+    sides_count(num(p, "sides").unwrap_or(6.0), cmd)
+}
+
+/// `sides` of a polygon typed as an expression over the design's parameters, or as a number. The
+/// count is read when the polygon is drawn: the sketch has no way to add or remove sides when a
+/// parameter changes later (a circular sketch pattern's `count` is what follows one).
+fn sides_expr(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    if !p.get("sides").is_some_and(Value::is_string) {
+        return sides(p, cmd);
+    }
+    let e = req_expr(cmd, p, "sides")?;
+    let n = s.doc.eval(&e, Kind::Unitless).map_err(|e| bad(cmd, format!("sides: {e}")))?;
+    sides_count(n, cmd)
+}
+
+fn sides_count(n: f64, cmd: &str) -> Result<usize> {
     if !(3.0..=200.0).contains(&n) || n.fract() != 0.0 {
         return Err(bad(cmd, "sides must be an integer from 3 to 200"));
     }
@@ -2709,16 +2812,16 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r, a, n, true)
+    polygon(s, p, cmd, c, r, a, n, true, None)
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
-    let r = radius_arg(p, cmd)?;
-    let n = sides(p, cmd)?;
+    let (r, size) = circle_size(s, p, cmd)?;
+    let n = sides_expr(s, p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false)
+    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false, size)
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2735,7 +2838,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = (b - a).normalized().unwrap_or(Vec2::X);
     let center = mid + dir.perp() * apothem;
     let start = (a - center).angle();
-    polygon(s, p, cmd, center, rv, start, n, true)
+    polygon(s, p, cmd, center, rv, start, n, true, None)
 }
 
 /// The centre point of arc `a` (`None`: not an arc).
@@ -3698,8 +3801,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         let is_line = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_arc = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. }));
         match (entity("a")?, entity("b")?) {
-            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) => Ok(ConstraintKind::Midpoint { p: q, l }),
+            (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) || is_arc(sk, l) => {
+                Ok(ConstraintKind::Midpoint { p: q, l })
+            }
             // Two lines: their midpoints meet. One point sits at the middle of both, reusing
             // a midpoint either line already has, so nothing new is saved in the design.
             (Ent::Curve(a), Ent::Curve(b)) if is_line(sk, a) && is_line(sk, b) => {
@@ -3716,7 +3822,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 Ok(ConstraintKind::Midpoint { p: q, l })
             }
-            _ => Err(bad(cmd, "MidPoint needs a point and a line, or two lines")),
+            _ => Err(bad(cmd, "MidPoint needs a point and a line or an arc, or two lines")),
         }
     };
     constrain_reply(s, p, cmd, |sk| {
@@ -3729,6 +3835,11 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(cmd, "a line's own end can't be its midpoint: the line would shrink to a point"));
         }
+        if let ConstraintKind::Midpoint { p: q, l } = k
+            && matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { a, b, .. }) if *a == q || *b == q)
+        {
+            return Err(bad(cmd, "an arc's own end can't be its midpoint: the arc would shrink to a point"));
+        }
         Ok(k)
     })
 }
@@ -3739,10 +3850,31 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
 /// end of another line clicked, then the line it should sit in the middle of). The line still
 /// moves when the point can't.
 fn line_stays(s: &Session, p: &Value, cmd: &str) -> Value {
+    // `point` and `line` naming an arc (the context menu's form): the arc stays and the point goes
+    // to its middle, as if the arc had been picked first. Without an order the solver moved
+    // whichever was cheaper, and brought the arc to the point.
+    let arc_first = (|| {
+        if p.get("a").is_some() || p.get("b").is_some() {
+            return None;
+        }
+        let (point, line) = (p.get("point")?, p.get("line")?);
+        let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
+        sk.curve_index(line.as_str()?).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Arc { .. })))?;
+        let mut q = p.clone();
+        let object = q.as_object_mut()?;
+        object.remove("point");
+        object.remove("line");
+        object.insert("a".into(), line.clone());
+        object.insert("b".into(), point.clone());
+        Some(q)
+    })();
+    if let Some(q) = arc_first {
+        return q;
+    }
     let swapped = (|| {
         let sk = sketch_store::read_for_command(s, p, cmd).ok()?;
         let (a, b) = (p.get("a")?.as_str()?, p.get("b")?.as_str()?);
-        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. })));
+        let line = sk.curve_index(b).filter(|c| matches!(sk.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. } | CurveKind::Arc { .. })));
         (sk.curve_index(a).is_none() && sk.resolve_point(a).is_some() && line.is_some()).then(|| {
             let mut q = p.clone();
             q["a"] = json!(b);

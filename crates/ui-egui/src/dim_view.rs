@@ -1020,7 +1020,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let model = EDIT.with(|e| {
             let mut e = e.borrow_mut();
             let keep = e.as_ref().and_then(|x| x.sketch).is_some_and(|s| app.session.active_sketch.is_none() && st.sketch(s).is_some());
-            if !keep {
+            // A box open on a drawing's sheet belongs to the sheet page, which paints beside a Model
+            // card in the same frame: this view neither closes it nor paints it.
+            let on_sheet = e.as_ref().is_some_and(|x| x.sheet.is_some());
+            if !keep && !on_sheet {
                 *e = None;
             } else if let Some(x) = e.as_mut()
                 && let Some(d) = MODEL.with(|m| m.borrow().iter().find(|d| d.param.as_deref() == Some(x.param.as_str())).cloned())
@@ -1125,17 +1128,24 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             lay = dim_layout_reaching(&frame, text, px, half, reach);
         }
         let stroke = Stroke::new(1.0, col);
+        let rim = app.preferences.dimension_rim.then_some(tk.sketch_halo);
         let mut segs = Vec::new();
         for line in &lay.lines {
             let pts: Vec<Pos2> = line.iter().filter_map(|q| to(*q)).collect();
             for w in pts.windows(2) {
                 segs.push([w[0], w[1]]);
             }
+            if let Some(rim) = rim {
+                crate::icons::markers::rounded_rim_line(painter, &pts, 3.0, rim);
+            }
             painter.add(Shape::line(pts, stroke));
         }
         for (tip, dir) in &lay.arrows {
             if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
-                crate::icons::markers::dimension_arrow(painter, t, back, col);
+                match rim {
+                    Some(rim) => crate::icons::markers::dimension_arrow_rimmed(painter, t, back, col, rim),
+                    None => crate::icons::markers::dimension_arrow(painter, t, back, col),
+                }
             }
         }
         let Some(tc) = to(lay.text) else { continue };
@@ -1816,6 +1826,41 @@ mod tests {
             assert_ne!(c, tk.sketch, "{name}");
             assert_ne!(c, tk.sketch_fixed, "{name}");
         }
+        cancel();
+    }
+
+    /// #17575: a dimension's lines draw over a rim in the theme's halo colour, so they read on a
+    /// lit face in the Dark theme; the `dimension_rim` preference turns the rim off.
+    #[test]
+    fn dimension_lines_carry_a_rim_unless_the_preference_is_off() {
+        fn rims(s: &Shape, rim: egui::Color32, out: &mut usize) {
+            match s {
+                Shape::Path(p) if matches!(p.stroke.color, egui::epaint::ColorMode::Solid(c) if c == rim) => *out += 1,
+                Shape::Vec(v) => v.iter().for_each(|s| rims(s, rim, out)),
+                _ => {}
+            }
+        }
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let l = h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        h.app.run("sketch.dimension", json!({"entities":[l],"value":30})).unwrap();
+        h.app.session.selection.clear();
+        h.call("ui.view", json!({"view":"top"}));
+        let rim = Tokens::get().sketch_halo;
+        for (on, expect) in [(true, true), (false, false)] {
+            h.call("ui.prefs", json!({"dimension_rim": on}));
+            h.settle();
+            h.frames(2);
+            let mut n = 0;
+            h.shapes.iter().for_each(|s| rims(&s.shape, rim, &mut n));
+            assert_eq!(n > 0, expect, "dimension_rim {on}: {n} rim strokes");
+        }
+        assert!(crate::prefs::Prefs::default().dimension_rim, "the rim is on by default");
         cancel();
     }
 
