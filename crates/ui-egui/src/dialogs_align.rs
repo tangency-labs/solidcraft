@@ -111,32 +111,39 @@ pub(crate) fn command(app: &SolveApp, d: &Dialog) -> Result<(&'static str, Value
     if !*components && !angle.trim().is_empty() {
         p["angle"] = json!(angle.trim());
     }
+    // Flip has nothing to turn over between two points: sent off, the ticked value kept for when
+    // a side faces a way again.
+    if !faces_a_way(&p, "from") && !faces_a_way(&p, "to") {
+        p["flip"] = json!(false);
+    }
     Ok((if *components { "occurrence.align" } else { "solid.align" }, p))
 }
 
-/// Why Flip is refused, as a message id: as the command decides, a face, a face or circle centre,
-/// a plane or a frame faces a way and a point, a vertex or an edge's middle none, and Flip needs
-/// one side that does. `None` while either side is unpicked or the command cannot be built yet
-/// (it says why).
-pub(crate) fn flip_blocked(app: &SolveApp, d: &Dialog) -> Option<&'static str> {
-    let (_, p) = command(app, d).ok()?;
-    let faces = |key: &str| {
-        ["face", "plane", "frame"].iter().any(|k| p.get(format!("{key}_{k}")).is_some())
-            || matches!(p.get(key).and_then(|v| v.get("snap")).and_then(Value::as_str), Some("face_center" | "circle_center"))
-    };
-    (!faces("from") && !faces("to")).then_some("dialog.align_flip_needs")
+/// Whether side `key` of command `p` faces a way, as the command decides: a face, a face or
+/// circle centre, a plane or a frame does; a point, a vertex or an edge's middle does not.
+fn faces_a_way(p: &Value, key: &str) -> bool {
+    ["face", "plane", "frame"].iter().any(|k| p.get(format!("{key}_{k}")).is_some())
+        || matches!(p.get(key).and_then(|v| v.get("snap")).and_then(Value::as_str), Some("face_center" | "circle_center"))
 }
 
-/// Align's Options: Flip, disabled with `blocked`'s reason, then `rest`.
+/// Why Flip has no effect, as a message id: it needs one side that faces a way. `None` while
+/// either side is unpicked or the command cannot be built yet (it says why).
+pub(crate) fn flip_blocked(app: &SolveApp, d: &Dialog) -> Option<&'static str> {
+    let (_, p) = command(app, d).ok()?;
+    (!faces_a_way(&p, "from") && !faces_a_way(&p, "to")).then_some("dialog.align_flip_needs")
+}
+
+/// Align's Options: Flip and `rest` in one grid, Flip shown off and disabled with `blocked`'s
+/// reason (its ticked value kept).
 pub(crate) fn options(ui: &mut egui::Ui, flip: &mut bool, rest: &mut [(&str, &mut bool)], blocked: Option<&'static str>) {
     use crate::ui_kit::{self, BackingTooltipExt as _};
     ui_kit::section(ui, "feature_options", "Options", true, |ui| {
-        let flip_row = ui.add_enabled_ui(blocked.is_none(), |ui| ui_kit::checkbox_grid(ui, &mut [("Flip", flip)], 2)).response;
-        if let Some(why) = blocked {
-            flip_row.backing_on_disabled_hover_text(solidcraft_ui_text::tr(why));
-        }
-        if !rest.is_empty() {
-            ui_kit::checkbox_grid(ui, rest, 2);
+        let mut off = false;
+        let mut items = vec![("Flip", if blocked.is_some() { &mut off } else { flip })];
+        items.extend(rest.iter_mut().map(|(label, value)| (*label, &mut **value)));
+        let cells = ui_kit::checkbox_grid_enabled(ui, &mut items, 2, |label| blocked.is_none() || label != "Flip");
+        if let (Some(why), Some(cell)) = (blocked, cells.into_iter().next()) {
+            cell.backing_on_disabled_hover_text(solidcraft_ui_text::tr(why));
         }
     });
 }
