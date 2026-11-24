@@ -1289,7 +1289,7 @@ impl Sketch {
             parameters_agree
                 && old
                     .zip(fresh)
-                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+                    .is_some_and(|(old, fresh)| solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
         } else {
             false
         };
