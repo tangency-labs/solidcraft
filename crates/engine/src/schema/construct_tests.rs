@@ -4,8 +4,7 @@ use super::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, CoordinateSystemParams,
     MidplaneParams, PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams,
     PlaneTwoEdgesParams, PointAlongPathParams, PointAverageParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams,
-    PointTwoEdgesParams,
-    PointVertexParams,
+    PointTwoEdgesParams, PointVertexParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;

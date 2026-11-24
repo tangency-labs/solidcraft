@@ -2520,7 +2520,8 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id);
             }
         }
-        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str()))) {
+        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
+        {
             if !seen.insert(c.id) {
                 continue;
             }
