@@ -80,11 +80,19 @@
 //! one the trace builds without this rule. The drop's reported deviation stays the
 //! trace's measure of the spans it tested. A first span left out is likewise added back
 //! where no span follows it, and before the trace stops at a failing span or end point,
-//! so the end shortcut and the failure record see the curve the trace built.
+//! so the end shortcut and the failure record see the curve the trace built. The end
+//! shortcut (a trace that walks off the domain just short of the curve's end moves the
+//! last knot to the end) moves a stretched last span's end only where the stretch is
+//! proved over that longer range too; else the span keeps the range it was proved on.
+//! The quantity proved is the gap between the stretched span's image and the curve at
+//! the same parameter (`<=` the tolerance); the drop's reported deviation stays the
+//! trace's measure against the drop points.
 //!
 //! Deviations: not upstream (above). The centred enclosure bisects with an explicit
 //! stack (no recursion) and gives up past [`MAX_ENCLOSURE_PIECES`] pieces, keeping the
 //! sliver.
+
+use core::cmp::Ordering;
 
 use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
@@ -158,7 +166,7 @@ pub(crate) fn is_clamped_sliver(
 /// The Bezier polygon `sm_AddToCurve` makes of the span from `start` to `end`, before its
 /// clamp, made the same way; `None` for a span of no length.
 fn polygon(start: &DropPt, end: &DropPt, scale: f64) -> Option<[Point2; 4]> {
-    if scale.is_nan() || scale <= 0.0 || !(end.t > start.t) {
+    if scale.is_nan() || scale <= 0.0 || end.t.partial_cmp(&start.t) != Some(Ordering::Greater) {
         return None;
     }
     let p1 = start.uv_pd[0];
@@ -251,6 +259,9 @@ pub(crate) struct Span {
     pub end: DropPt,
     /// The polygon's tangent scale.
     pub tangent_scale: f64,
+    /// Whether the span was stretched ([`Span::stretch`]): a stretched span's range
+    /// moves only where the stretch is proved over the new range.
+    pub stretched: bool,
 }
 
 /// The most pieces [`gap_within`] encloses before it gives up (module docs, the stretch
@@ -266,6 +277,7 @@ impl Span {
             start,
             end,
             tangent_scale: end.t - start.t,
+            stretched: false,
         }
     }
 
@@ -291,7 +303,8 @@ impl Span {
         tol_3d: f64,
     ) -> Option<Self> {
         let one_end_common = (from == self.start.t) != (to == self.end.t);
-        if !one_end_common || !(from <= self.start.t && self.end.t <= to) {
+        let contains_own = from <= self.start.t && self.end.t <= to;
+        if !one_end_common || !contains_own {
             return None;
         }
         let polygon = polygon_in_domain(uv_domain, &self.start, &self.end, self.tangent_scale)?;
@@ -318,6 +331,7 @@ impl Span {
             start,
             end,
             tangent_scale: self.tangent_scale,
+            stretched: true,
         })
     }
 }
@@ -475,15 +489,20 @@ impl<'a> CurveNet<'a> {
             Self::Net(cn) => curve_derivs_over(cn, t, 1, None).ok()?.get(1).copied(),
             Self::Line(line) => {
                 // P + s(t) scale V with s affine in t (`ConvertTFromNURBSToSTEP`): its
-                // slope A / L, -A / L inside out, on a bounded line with L not zero, else
-                // 1 or -1
+                // slope A / L, -A / L inside out, on a bounded line with L not zero; 1 on
+                // a bounded line with L zero (s(t) = t); 1, -1 inside out, on an
+                // unbounded line
                 let nurb_ivl = line.natural_interval();
                 let sign = if line.inside_out() { -1.0 } else { 1.0 };
-                let slope = if line.step_interval().is_bounded() && !is_zero(nurb_ivl.length()) {
-                    let a = Ivl::from(line.step_interval().max())
-                        - Ivl::from(line.step_interval().min());
-                    let l = Ivl::from(nurb_ivl.max()) - Ivl::from(nurb_ivl.min());
-                    Ivl::from(sign) * a / l
+                let slope = if line.is_bounded() {
+                    if is_zero(nurb_ivl.length()) {
+                        Ivl::from(1.0)
+                    } else {
+                        let a = Ivl::from(line.step_interval().max())
+                            - Ivl::from(line.step_interval().min());
+                        let l = Ivl::from(nurb_ivl.max()) - Ivl::from(nurb_ivl.min());
+                        Ivl::from(sign) * a / l
+                    }
                 } else {
                     Ivl::from(sign)
                 };
@@ -598,7 +617,11 @@ pub(crate) fn gap_within(
     to: f64,
     tol_3d: f64,
 ) -> bool {
-    if !(from < to) || !from.is_finite() || !to.is_finite() || !(tol_3d > 0.0) {
+    if from.partial_cmp(&to) != Some(Ordering::Less)
+        || !from.is_finite()
+        || !to.is_finite()
+        || tol_3d.partial_cmp(&0.0) != Some(Ordering::Greater)
+    {
         return false;
     }
     if !polygon.iter().all(|p| p.x.is_finite() && p.y.is_finite()) {
@@ -702,11 +725,11 @@ mod tests {
     fn only_a_polygon_in_the_domain_takes_over() {
         let start = pt(0.0, Point2::new(0.0, 0.0), Vec2::new(-0.3, 0.6));
         let end = pt(0.1, Point2::new(0.0, 0.05), Vec2::new(0.0, 0.5));
-        assert!(!polygon_in_domain(&unit(), &start, &end, 0.1).is_some());
+        assert!(polygon_in_domain(&unit(), &start, &end, 0.1).is_none());
         let start = pt(0.0, Point2::new(0.0, 0.0), Vec2::new(0.3, 0.6));
         assert!(polygon_in_domain(&unit(), &start, &end, 0.1).is_some());
         // a span of no length has no polygon
-        assert!(!polygon_in_domain(&unit(), &start, &start, 0.0).is_some());
+        assert!(polygon_in_domain(&unit(), &start, &start, 0.0).is_none());
     }
 
     /// A span on the boundary that runs along it is kept: its clamped image is long.
@@ -967,5 +990,43 @@ mod tests {
         let s = unit_plane();
         assert!(gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-5));
         assert!(!gap_within(&k, &s, &c, &unit(), q, 0.0, 1.0, 1e-300));
+    }
+
+    /// The line's derivative enclosure holds its slope in every parameterisation
+    /// `ConvertTFromNURBSToSTEP` has: bounded or not, inside out or not, and a bounded
+    /// line with a zero-length NURB domain (which maps a parameter to itself). The
+    /// difference quotient over `[0, 1]` is exact here (`P = 0`, `V = X`, speed 2).
+    #[test]
+    fn a_line_derivative_holds_its_slope_in_every_parameterisation() {
+        let bounded = |lo: f64, hi: f64, inside_out: bool| {
+            Line::bounded(
+                Vec3::ZERO,
+                Vec3::X,
+                &Extent1d::from_min_max(lo, hi),
+                &BoundedLineOptions {
+                    scale: 2.0,
+                    inside_out,
+                    ..BoundedLineOptions::default()
+                },
+            )
+        };
+        let unbounded = |inside_out: bool| Line::infinite(Vec3::ZERO, Vec3::X, 3, inside_out);
+        let lines = [
+            bounded(0.0, 1.0, false),
+            bounded(0.0, 1.0, true),
+            bounded(0.5, 0.5, false),
+            bounded(0.5, 0.5, true),
+            unbounded(false),
+            unbounded(true),
+        ];
+        for line in &lines {
+            let quotient = line.evaluate_point(1.0) - line.evaluate_point(0.0);
+            let d = CurveNet::Line(line).derivative(Ivl::new(0.0, 1.0)).unwrap();
+            assert!(
+                d.x.lo <= quotient.x && quotient.x <= d.x.hi,
+                "{line:?}: {quotient:?} not in {d:?}"
+            );
+            assert!(d.x.lo > 0.0 || d.x.hi < 0.0, "{line:?}: {d:?}");
+        }
     }
 }

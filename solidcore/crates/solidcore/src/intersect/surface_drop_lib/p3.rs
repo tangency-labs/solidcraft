@@ -1602,7 +1602,31 @@ impl Surface {
                         if approx_length < approx_tol_3d {
                             let curve_end = curve.evaluate_point(k, s_interval.max())?;
                             let end_gap_length = start.pd_3d[0].distance(curve_end);
-                            if end_gap_length < approx_tol_3d {
+                            // (not upstream: a stretched last span runs on to the end only
+                            // where its stretch is proved over the longer range, else it
+                            // ends where it was proved; see `clamped_sliver`)
+                            let proved = end_gap_length < approx_tol_3d
+                                && match last_span {
+                                    Some(s)
+                                        if s.stretched
+                                            && knots.last() == Some(&s.end.t)
+                                            && s.end.t < s_interval.max() =>
+                                    {
+                                        s.stretch(
+                                            k,
+                                            this,
+                                            curve,
+                                            &s_uv_domain,
+                                            s.start.t,
+                                            s_interval.max(),
+                                            (uv_tol_x, uv_tol_y),
+                                            approx_tol_3d,
+                                        )
+                                        .is_some()
+                                    }
+                                    _ => true,
+                                };
+                            if proved {
                                 if let Some(last) = knots.last_mut() {
                                     *last = s_interval.max();
                                 }
