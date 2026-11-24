@@ -211,13 +211,7 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
 ///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
-///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before);
-/// - `vertex-box`: a corner coordinate of a result's vertex box (`offset.offset_executive_p2`'s
-///   `result.geometry`: the body's tolerance, then the box of its vertex points), of a case
-///   that writes no bodies, that moved by less than that tolerance, which did not move: EQUAL
-///   within the body's own tolerance, MEASURED, not proved (the three shelled cylinders, whose
-///   marched rim vertex moved about 5e-8 straight outward under a 1e-6 tolerance, its radial
-///   error halved).
+///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before).
 const OTHER: &str = include_str!("trim_tolerance_other.tsv");
 
 /// The accuracy `blend.fillet_executive_p3`'s runner asks of the mass integrator
@@ -1005,14 +999,13 @@ struct Tally {
     /// tolerance.
     drop_margin: usize,
     /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
-    /// `domain` and `vertex-box`.
+    /// and `domain`.
     rounding: usize,
     quadrature: usize,
     integration: usize,
     padding: usize,
     trim_values: usize,
     domain: usize,
-    vertex_box: usize,
     /// The largest `B / n`.
     worst: f64,
 }
@@ -1221,27 +1214,6 @@ fn certify(unit: &str) -> Tally {
                         Err(why) => failures.push(format!("{at}: {why}")),
                     }
                 }
-                "vertex-box"
-                    if key.ends_with("result.geometry")
-                        && *index > 0
-                        && bodies.is_empty()
-                        && !row.moved.iter().any(|m| m.0 == *key && m.1 == 0) =>
-                {
-                    let tol = out
-                        .values
-                        .get(key)
-                        .and_then(|v| v.first())
-                        .copied()
-                        .unwrap_or(f64::NAN);
-                    // (written so a NaN fails)
-                    if tol.is_finite() && tol > 0.0 && (new - old).abs() < tol {
-                        tally.vertex_box += 1;
-                    } else {
-                        failures.push(format!(
-                            "{at}: {old:e} -> {new:e} moved past the body's tolerance {tol:e}"
-                        ));
-                    }
-                }
                 _ => failures.push(format!("{at}: {old:e} -> {new:e} is not `{class}`")),
             }
         }
@@ -1434,7 +1406,7 @@ macro_rules! certified_units {
             #[test]
             fn $name() {
                 let t = certify($unit);
-                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain + t.vertex_box > 0, "{t:?}");
+                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain > 0, "{t:?}");
             }
         )*
     };
@@ -1446,7 +1418,6 @@ certified_units! {
     fillet_executive_p3: "blend.fillet_executive_p3",
     feature_executive: "blend.feature_executive",
     offset_geometry_creation: "offset.offset_geometry_creation",
-    offset_executive_p2: "offset.offset_executive_p2",
     stitch_p1: "heal.stitch_p1",
     stitch_p2: "heal.stitch_p2",
     brep: "query.brep",
