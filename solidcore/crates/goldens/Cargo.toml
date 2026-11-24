@@ -23,8 +23,8 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 toml = "0.8"
 
 [dev-dependencies]
-# The seam of the WR-57 substitution replay (`src/wr57_replay.rs`, #17856), for its tests
-# only: a dev-dependency feature is not in the `goldens` binary's build (resolver 2).
+# The replay seam (`src/replay_seam.rs`: the WR-587 replay's and the target bound's), for
+# its tests only: a dev-dependency feature is not in the `goldens` binary's build (resolver 2).
 solidcore = { path = "../solidcore", features = ["wr57-replay"] }
 
 [lints]
