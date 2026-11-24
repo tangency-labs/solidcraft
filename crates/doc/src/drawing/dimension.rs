@@ -730,16 +730,16 @@ impl Document {
             .find(|b| b.name == body && !b.body.is_mesh())
             .ok_or_else(|| DocError::Invalid(format!("no body `{body}` to measure (a mesh body has no exact faces)")))?;
         let frame = self.body_frame_at(b, path)?;
-        let axis = if vertical { basis.y } else { basis.x };
-        let axis = axis.normalized().ok_or_else(|| DocError::Invalid("the view's axis is zero".into()))?;
+        let axis: [f64; 3] = (if vertical { basis.y } else { basis.x }).into();
         let tol = surface_tolerance(b);
         // The flat faces square to the axis, by where they cut it.
         let mut square: Vec<(usize, f64)> = Vec::new();
         for f in 0..b.body.face_count() {
             let Some(plane) = b.body.planar_face(f) else { continue };
-            let Some(normal) = apply_vector(&frame, plane.normal()).normalized() else { continue };
-            if normal.cross(axis).len() <= 1e-9 {
-                square.push((f, solidcore_ops::affine::distance_along([0.0; 3], axis.into(), apply_point(&frame, plane.origin).into())));
+            match solidcore_ops::affine::square_plane_offset(&frame, plane.origin.into(), plane.normal().into(), axis) {
+                Ok(Some(offset)) => square.push((f, offset)),
+                Ok(None) => {}
+                Err(why) => return Err(axis_refusal(why)),
             }
         }
         let way = if vertical { "height" } else { "width" };
@@ -772,9 +772,8 @@ impl Document {
         let state = model.state();
         let b = state.bodies.iter().find(|b| b.name == body && !b.body.is_mesh())?;
         let frame = self.body_frame_at(b, path).ok()?;
-        let own = apply_vector(&mat_inverse(&frame)?, axis).normalized()?;
-        let along_one = [own.x, own.y, own.z].iter().any(|c| c.abs() >= 1.0 - 1e-9);
-        if along_one { body_extent(b, &frame, axis.normalized()?).ok() } else { None }
+        let along_one = solidcore_ops::affine::along_own_axes(&frame, axis.into()).ok()?;
+        if along_one { body_extent(b, &frame, axis.into()).ok() } else { None }
     }
 
     /// What a dimension between silhouettes `a` and `b` is on `model` (this design's): when both
@@ -1529,16 +1528,24 @@ impl<'a> Lookup<'a> {
     }
 }
 
-/// How far `b`'s exact box, placed by `frame`, reaches along the unit vector `axis`: its 8 corners
-/// moved into the design's frame and projected. Tight when `axis` runs along the body's own axes.
-fn body_extent(b: &ModelBody, frame: &Mat, axis: Vec3) -> Result<f64> {
+/// How far `b`'s exact box, placed by `frame`, reaches along `axis`, a direction of the design's
+/// frame (any length), by solidcore's `extent_along`. Tight when `axis` runs along the body's own axes.
+fn body_extent(b: &ModelBody, frame: &Mat, axis: [f64; 3]) -> Result<f64> {
     let bounds = b.body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-    // The box is the body's own, so it is read along the axis as the body has it, by solidcore's `span_along`.
-    let inverse = mat_inverse(frame).ok_or_else(|| DocError::Invalid("the occurrence its body is placed through flattens it".into()))?;
-    let own = apply_vector(&inverse, axis).normalized().ok_or_else(|| DocError::Invalid("the view's axis is zero".into()))?;
-    let [lo, hi] = solidcore_ops::affine::span_along(bounds.min.into(), bounds.max.into(), [0.0; 3], own.into())
-        .map_err(|_| DocError::Invalid("the body's box is not finite".into()))?;
-    Ok(hi - lo)
+    solidcore_ops::affine::extent_along(bounds.min.into(), bounds.max.into(), frame, axis).map_err(axis_refusal)
+}
+
+/// The refusal of one of solidcore's axis ops, in the words of a dimension on a view.
+fn axis_refusal(why: solidcore_ops::Error) -> DocError {
+    use solidcore_ops::affine::{REFUSED_FLAT_MAP, REFUSED_ZERO_AXIS};
+    DocError::Invalid(
+        match why {
+            solidcore_ops::Error::Refused { reason: REFUSED_ZERO_AXIS, .. } => "the view's axis is zero",
+            solidcore_ops::Error::Refused { reason: REFUSED_FLAT_MAP, .. } => "the occurrence its body is placed through flattens it",
+            _ => "the body's box is not finite",
+        }
+        .into(),
+    )
 }
 
 /// The faces of `b` that `name` finds: the ones with that name, else the pieces of it; and whether

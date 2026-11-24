@@ -451,6 +451,7 @@ crates/engine/src/cmd/contact_sweep.rs:contact_mesh cross,dot,normalized,triangl
 crates/engine/src/cmd/contact_sweep.rs:segment_closest dot
 crates/engine/src/cmd/contact_sweep.rs:segment_hits_triangle cross,dot
 crates/engine/src/cmd/drawing_dimension.rs:diameter_by_default dot
+crates/engine/src/cmd/drawing_dimension.rs:short_edge_warning dot,normalized (warns that an edge is too short to dimension; builds no geometry)
 crates/engine/src/cmd/drawing_dimension.rs:side_by_default dot
 crates/engine/src/cmd/drawing_model_dimensions.rs:along dot
 crates/engine/src/cmd/drawing_model_dimensions.rs:arc_middle atan2
