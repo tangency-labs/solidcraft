@@ -100,7 +100,7 @@ use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::Nurbs;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::{native_failure, Result};
+use crate::error::Result;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::is_dog_leg;
@@ -116,14 +116,14 @@ use super::p1::DropPt;
 /// Whether the span from `start` to `end` is a clamped sliver (module docs): its polygon
 /// leaves `uv_domain`, clamped into it spans at most `uv_tol_x` by `uv_tol_y`, and the curve piece
 /// over it is proved within `tol_3d` across. `false` for a span of no length, a span with
-/// an end on a pole, and a curve with no certified box (including one whose box fails
-/// with an error that may stand for an ordinary failure, [`native_failure`]: the span
-/// is then added as before).
+/// an end on a pole, and a curve with no certified box, or whose box fails with any
+/// error but a cancellation: the span is then added as before, so input main traces
+/// still traces.
 ///
 /// # Errors
 ///
-/// Those of the curve's certified box that [`native_failure`] passes on (unported,
-/// cancelled and port-invariant errors).
+/// [`SolidError::Cancelled`](crate::error::SolidError::Cancelled) from the curve's
+/// certified box.
 #[allow(clippy::too_many_arguments)] // the span, the domain and the drop's tolerances
 pub(crate) fn is_clamped_sliver(
     k: &Kernel,
@@ -147,11 +147,12 @@ pub(crate) fn is_clamped_sliver(
     if !clamped_box_within(uv_domain, polygon, uv_tol_x, uv_tol_y) {
         return Ok(false);
     }
-    let piece =
-        native_failure(curve.certified_bounding_box(k, &Extent1d::from_min_max(start.t, end.t)))?
-            .flatten();
-    let Some(piece) = piece else {
-        return Ok(false);
+    // an optional test: any failure of the box but a cancellation leaves the span to
+    // main's path
+    let piece = match curve.certified_bounding_box(k, &Extent1d::from_min_max(start.t, end.t)) {
+        Ok(Some(piece)) => piece,
+        Err(e) if e.is_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(false),
     };
     // the box's diagonal in rounded interval arithmetic: its upper end bounds the length
     let (lo, hi) = (piece.min(), piece.max());
