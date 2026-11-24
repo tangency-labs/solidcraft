@@ -864,3 +864,156 @@ fn a_large_assemblys_placements_are_named_beside_the_window() {
     let placement = h.app.session.occurrence_placement(&path).unwrap();
     assert!(placement.bodies.iter().any(|b| b.world == placed), "{placed} is named at {path:?}");
 }
+
+#[test]
+fn clicking_a_nested_occurrence_in_the_viewport_reveals_its_row_without_opening_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let sub_a = h.app.run("component.create", json!({"name": "SubA"})).unwrap()["occurrence"].as_u64().unwrap();
+    let part_a = h.app.run("component.create", json!({"name": "PartA"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "PlateA"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let sub_b = h.app.run("component.create", json!({"name": "SubB"})).unwrap()["occurrence"].as_u64().unwrap();
+    let part_b = h.app.run("component.create", json!({"name": "PartB"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "PlateB"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+
+    let path_a = vec![sub_a, part_a];
+    let path_b = vec![sub_b, part_b];
+    let key_sub_a = super::occurrence_key(&[sub_a]);
+    let key_part_a = super::occurrence_key(&path_a);
+    let key_sub_b = super::occurrence_key(&[sub_b]);
+    let key_part_b = super::occurrence_key(&path_b);
+    let body_a = h.app.session.occurrence_bodies(&path_a, false).unwrap()[0].clone();
+    h.frames(2);
+    assert!(!super::is_open(&h.app, &key_sub_a, true) && !super::is_open(&h.app, &key_sub_b, true));
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_a.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path_a));
+    assert!(h.app.tree.reveal.is_none());
+    assert!(super::is_open(&h.app, &key_sub_a, true), "ancestor placement opens");
+    assert!(!super::is_open(&h.app, &key_part_a, true), "clicked placement itself stays closed");
+    assert!(!h.app.tree.expanded.contains(&format!("{key_part_a}/bodies")), "target Bodies folder is not expanded");
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none(), "occurrence reveal acknowledged once presented");
+    assert!(
+        super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_a && !*open),
+        "clicked nested placement row is drawn closed"
+    );
+    assert!(
+        !h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body_a}")),
+        "body inside the clicked placement stays hidden"
+    );
+    let sub_a_comp = h.app.session.doc.occurrences.iter().find(|o| o.id == sub_a).unwrap().component;
+    let lit = super::Lit::of(&mut h.app);
+    assert_eq!(lit.placement(&h.app.session.doc, &[sub_a], sub_a_comp), super::Mark::Branch);
+
+    // Selecting another nested component closes the previously auto-opened ancestor cleanly.
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_b.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path_b));
+    assert!(!super::is_open(&h.app, &key_sub_a, true), "previous auto-opened ancestor closes again");
+    assert!(!h.app.tree.collapsed.contains(&key_sub_a), "auto-closing does not mark an untouched ancestor as user-collapsed");
+    assert!(super::is_open(&h.app, &key_sub_b, true), "new ancestor opens");
+    assert!(!super::is_open(&h.app, &key_part_b, true), "new target stays closed");
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &path_b && !*open));
+    assert!(!super::drawn_occurrences().iter().any(|(path, ..)| path == &path_a));
+
+    // An ancestor opened by hand stays open across later viewport component picks.
+    click(&mut h, &format!("fold:occurrence:{sub_a}"));
+    assert!(super::is_open(&h.app, &key_sub_a, true));
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path_b }), false, false);
+    assert!(super::is_open(&h.app, &key_sub_a, true), "hand-opened ancestor stays open");
+}
+
+#[test]
+fn clicking_an_off_screen_occurrence_scrolls_it_into_view() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let first = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let mut last = first;
+    for i in 1..=80 {
+        last = h.app.run("occurrence.copy", json!({"occurrence": first, "translate": [20.0 * f64::from(i), 0, 0]})).unwrap()["occurrence"]
+            .as_u64()
+            .unwrap();
+    }
+    h.frames(2);
+    let target = vec![last];
+    assert!(!super::drawn_occurrences().iter().any(|(path, ..)| path == &target), "target placement starts below the scroll clip");
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: target.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&target));
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&target), true), "target placement stays closed");
+
+    let arrived = (0..240).any(|_| {
+        h.frames(1);
+        super::drawn_occurrences().iter().any(|(path, _, _, open)| path == &target && !*open) && h.app.tree.reveal_occurrence.is_none()
+    });
+    assert!(arrived, "the off-screen placement row was never scrolled into view and acknowledged");
+}
+
+#[test]
+fn reveal_pick_follows_shared_panel_open_state_over_show_browser_flag() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = true;
+    let outer = h.app.run("component.create", json!({"name": "Outer"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let path = vec![outer, inner];
+    let outer_key = super::occurrence_key(&[outer]);
+    h.frames(2);
+    assert!(super::panel_open(&h.app));
+
+    // Shared panel host still reports the Browser open even if the legacy window flag differs.
+    h.app.ui.show_browser = false;
+    assert!(super::panel_open(&h.app));
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path.clone() }), false, false);
+    assert_eq!(h.app.tree.reveal_occurrence.as_ref(), Some(&path));
+    assert!(super::is_open(&h.app, &outer_key, true));
+    assert!(!super::is_open(&h.app, &super::occurrence_key(&path), true));
+
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+
+    // Closing the shared panel prevents reveal_pick even if show_browser is still true.
+    super::close_shared_panel(&mut h.app, "browser");
+    assert!(!super::panel_open(&h.app));
+    h.app.tree.close_row(&outer_key);
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path }), false, false);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(!super::is_open(&h.app, &outer_key, true));
+}
+
+#[test]
+fn clicking_an_occurrence_leaves_the_browser_alone_while_rows_start_closed() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let outer = h.app.run("component.create", json!({"name": "Outer"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Inner"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let path = vec![outer, inner];
+    let outer_key = super::occurrence_key(&[outer]);
+    let body = h.app.session.occurrence_bodies(&path, false).unwrap()[0].clone();
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    let (collapsed, expanded) = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone());
+
+    crate::viewport::select(&mut h.app, Some(Sel::Occurrence { path: path.clone() }), false, false);
+    assert!(h.app.tree.reveal_occurrence.is_none());
+    assert!(!super::is_open(&h.app, &outer_key, true));
+    assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded));
+    assert!(super::Lit::of(&mut h.app).paths.is_empty());
+
+    // Explicit Find in Browser still opens the path to the body and acknowledges it.
+    super::reveal_body(&mut h.app, &body);
+    h.frames(2);
+    assert!(h.app.tree.reveal.is_none());
+    assert!(super::is_open(&h.app, &outer_key, true));
+    assert!(super::is_open(&h.app, &super::occurrence_key(&path), true));
+}

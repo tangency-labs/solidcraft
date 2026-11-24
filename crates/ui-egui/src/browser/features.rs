@@ -37,6 +37,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
+    app.tree.reveal_occurrence = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.open_row(&scope);
@@ -68,6 +69,7 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     set_open(app, &scope, path.is_empty() || start_open, true);
     set_open(app, &format!("{scope}/history"), true, true);
+    app.tree.reveal_occurrence = None;
     app.tree.reveal_feature = Some(Reveal { id, path, history: true });
 }
 
