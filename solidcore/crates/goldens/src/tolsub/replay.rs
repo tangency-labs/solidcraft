@@ -869,7 +869,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0x0abafafb0e5def7a,
+        0x50fca59ea3c3d0cc,
     ),
     (
         "topology.face_p3",
