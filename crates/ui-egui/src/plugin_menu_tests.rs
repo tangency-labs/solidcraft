@@ -164,9 +164,11 @@ fn optional_stored_selections_can_be_explicitly_unset() {
         if !empty {
             assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["body"], saved);
             h.app.dialog.as_mut().unwrap().inputs[1].items.clear();
-            h.frames(2);
+            // The cleared picker reaches the field on a frame; check the values it then holds.
+            h.frames(4);
             checked_prefill(&h.app);
         }
+        checked_prefill(&h.app);
         assert!(h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("body"), "stored values stay present until explicitly unset");
         h.frames(3);
         h.step(&json!({"click":{"handle":"plugin_dialog:unset:body"}})).unwrap();
