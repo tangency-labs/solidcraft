@@ -166,6 +166,23 @@ pub(crate) fn items(app: &SolveApp, slot: Slot) -> Vec<Item> {
         .collect()
 }
 
+/// The File menu's Export rows for the installed, enabled plugins' export slots (RFC 0015 §4):
+/// each slot's `plugin_id.entry` and its row label, "Export <label> (.ext)…", where the label is
+/// the slot's own or the plugin's name. From the discovered inventory: no file is read here.
+pub(crate) fn export_slots(app: &SolveApp) -> Vec<(String, String)> {
+    let Some(inventory) = app.plugin_slots.inventory.as_ref() else { return Vec::new() };
+    let mut rows = Vec::new();
+    for plugin in inventory.plugins.iter().filter(|p| plugins::enabled(app, &p.id)) {
+        for entry in plugin.entries.iter().filter(|e| e.kind == solidcraft_engine::plugin::EntryKind::Exporter) {
+            let label = if entry.label.is_empty() { plugin.name.as_str() } else { entry.label.as_str() };
+            let extensions = entry.extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
+            let label = solidcraft_ui_text::format("plugin_export.menu", &[("format", label), ("extensions", &extensions)]);
+            rows.push((format!("{}.{}", plugin.id, entry.name), label));
+        }
+    }
+    rows
+}
+
 /// Open the same input-schema dialog as the Plugins menu, resolving the namespaced entry id.
 pub(crate) fn begin(app: &mut SolveApp, command: &str) {
     if solidcraft_engine::find_command(command).is_some() {

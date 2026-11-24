@@ -1,0 +1,1 @@
+finds a dimension's named edges on the display mesh (drawings branch only: clear before landing on main)

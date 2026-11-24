@@ -818,7 +818,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "design_reuse_views",
         "design_sub_tab_render",
         "design_sub_tab_sheets",
-        "design_sub_tab_sketches",
         "design_views_as_tabs",
         "dialog_buttons",
         "direct_interaction",
@@ -850,6 +849,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "nav",
         "nav_bridge_enabled",
         "nav_bridge_port",
+        "nav_button_map",
         "navigation_bar",
         "navigator_fit",
         "navigator_style",
@@ -922,6 +922,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
+    // Test change: one more portable key, nav_button_map (what each mouse button drags).
     assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
@@ -1137,7 +1138,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
-    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported["view_gizmo"]["v"].is_array(), "the body is carried in the profile as plain numbers: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
     // Elsewhere: a design without that body, the signed axes, and no custom body yet.

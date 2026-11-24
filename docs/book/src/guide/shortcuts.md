@@ -88,6 +88,9 @@ Enter. With Preferences › Design › Step values with the arrow keys and the w
 value box, or the wheel over it, step a plain number by 1 (with Shift by 10, with Alt by 0.1);
 see [Parameters and expressions](parameters.md).
 
+In an Extrude that is being made, Shift+Enter applies it as a new body, whatever it would have joined
+or cut; Enter alone applies it as the dialog shows.
+
 Mouse and touch:
 
 | Action | Result |

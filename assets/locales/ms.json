@@ -1012,6 +1012,7 @@
   "cmd.motion_list": "Senarai Kajian Gerakan",
   "cmd.motion_play": "Mainkan Kajian Gerakan",
   "cmd.motion_plot": "Plot Kajian Gerakan",
+  "cmd.motion_simulate": "Simulasikan gerakan",
   "cmd.motion_study": "Kajian Gerakan",
   "cmd.motion_trace": "Jejak Gerakan",
   "cmd.motion_trace_edit": "Sunting Jejak Gerakan",
