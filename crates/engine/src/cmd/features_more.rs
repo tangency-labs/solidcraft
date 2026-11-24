@@ -652,12 +652,18 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         picked.map(|(world, ..)| world).chain(bodies.clone()).collect()
     };
     // A face or snap picked for the start lies on a body that moves, and for the target on one that
-    // does not (`at`: the pick and where it snaps to); a typed point is a coordinate, wherever it lies.
-    let on_side = |st: &solidcraft_doc::ModelState, key: &str, at: &[Vec3]| -> Result<()> {
+    // does not; a typed point is a coordinate, wherever it lies.
+    let mine = |from: bool| {
+        let moved = &moved;
+        move |b: &solidcraft_doc::ModelBody| moved.contains(&b.name) == from
+    };
+    // The planar normal of the face of the side of `key` that the first of `at` on one lies on
+    // (the pick and where it snaps to): `Err` when they lie only on faces of the other bodies.
+    let side_face = |st: &solidcraft_doc::ModelState, key: &str, at: &[Vec3]| -> Result<Option<Vec3>> {
         let from = key.starts_with("from");
-        let Some((b, ..)) = at.iter().find_map(|&q| face_pick(st, q)) else { return Ok(()) };
-        if at.iter().any(|&q| face_pick_on(st, q, |b| moved.contains(&b.name) == from).is_some()) {
-            return Ok(());
+        let Some((b, ..)) = at.iter().find_map(|&q| face_pick(st, q)) else { return Ok(None) };
+        if let Some((.., n)) = at.iter().find_map(|&q| face_pick_on(st, q, mine(from))) {
+            return Ok(n);
         }
         if from {
             Err(bad(cmd, format!("`{key}` is on `{}`, which is not moved: pick the start on a body in `bodies`", b.name)))
@@ -675,15 +681,22 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         let world = s.world_state()?;
         let st = &*world;
         if let Some(fp) = p.get(fk).and_then(vec3) {
-            on_side(st, fk, &[fp])?;
-            let n = planar_face_normal(st, fp).ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
+            let n = side_face(st, fk, &[fp])?.ok_or_else(|| bad(cmd, format!("`{fk}` must be on a planar face of a solid body")))?;
             return Ok((fp, Some(n)));
         }
-        let (at, way) = side_pick(st, p.get(pk), pk, fk).map_err(|why| bad(cmd, why))?;
-        if let Ok(SidePoint::Snap { at: near, .. }) = side_point(p.get(pk), pk, fk) {
-            on_side(st, pk, &[near, at])?;
-        }
-        Ok((at, way))
+        let SidePoint::Snap { at: near, kind } = side_point(p.get(pk), pk, fk).map_err(|why| bad(cmd, why))? else {
+            return side_pick(st, p.get(pk), pk, fk).map_err(|why| bad(cmd, why));
+        };
+        // A face or circle is taken on the side's own bodies; a vertex or an edge's middle is
+        // the same point on whichever body has it, of the solid bodies the check reads.
+        let (side, solid) = (mine(pk == "from"), |b: &solidcraft_doc::ModelBody| !b.body.is_mesh());
+        let keep: &dyn Fn(&solidcraft_doc::ModelBody) -> bool = match kind.as_str() {
+            "face_center" | "circle_center" => &side,
+            _ => &solid,
+        };
+        let got = snap_pick(st, &kind, near, keep).map_err(|why| bad(cmd, why))?;
+        side_face(st, pk, &std::iter::once(near).chain(got.map(|g| g.0)).collect::<Vec<_>>())?;
+        got.ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")))
     };
     let pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
         let (at, n) = world_pick(s, pk, fk, held)?;
@@ -941,20 +954,26 @@ pub(crate) fn side_pick(st: &solidcraft_doc::ModelState, v: Option<&Value>, pk: 
     match side_point(v, pk, fk)? {
         SidePoint::Origin => Ok((Vec3::ZERO, None)),
         SidePoint::Point(v) => Ok((v, None)),
-        SidePoint::Snap { at, kind } => snap_pick(st, &kind, at)?.ok_or_else(|| format!("no {kind} to snap to near `{pk}`")),
+        SidePoint::Snap { at, kind } => snap_pick(st, &kind, at, &|_| true)?.ok_or_else(|| format!("no {kind} to snap to near `{pk}`")),
     }
 }
 
 /// A snap near `at` on the placed model `st` and the way it faces ([`side_pick`]): the nearest
 /// vertex or edge midpoint (no way), the centre of the planar face `at` lies on ([`face_pick`]:
 /// its outward normal; `Err` for a face that is not planar), or the centre of the circle `at`
-/// picks ([`circle_pick`]). `None` when there is none to snap to.
-pub(crate) fn snap_pick(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> std::result::Result<Option<(Vec3, Option<Vec3>)>, String> {
+/// picks ([`circle_pick`]), on the bodies `keep` takes. `None` when there is none to snap to.
+pub(crate) fn snap_pick(
+    st: &solidcraft_doc::ModelState,
+    kind: &str,
+    at: Vec3,
+    keep: &dyn Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> std::result::Result<Option<(Vec3, Option<Vec3>)>, String> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
         "vertex" => Ok(near(
             st.bodies
                 .iter()
+                .filter(|b| keep(b))
                 .flat_map(|b| b.mesh().edges.iter().flat_map(|e| [e.first().copied(), e.last().copied()]).flatten().collect::<Vec<_>>())
                 .collect(),
         )
@@ -964,25 +983,31 @@ pub(crate) fn snap_pick(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -
             Ok(st
                 .bodies
                 .iter()
+                .filter(|b| keep(b))
                 .filter_map(|b| b.body.edges(solidcraft_doc::pick_reach(b)).ok())
                 .flatten()
                 .min_by(|a, b| d(a).total_cmp(&d(b)))
                 .map(|e| (e.mid, None)))
         }
         "face_center" => {
-            let Some((b, i, normal)) = face_pick(st, at) else { return Ok(None) };
+            let Some((b, i, normal)) = face_pick_on(st, at, keep) else { return Ok(None) };
             let normal = normal.ok_or("face_center snaps to the centre of a planar face: the face there is curved")?;
             let faces = b.body.faces(solidcraft_doc::pick_reach(b)).map_err(|e| e.to_string())?;
             Ok(faces.into_iter().find(|f| f.index == i).map(|f| (f.centroid, Some(normal))))
         }
-        "circle_center" => Ok(circle_pick(st, at)?.map(|(centre, axis)| (centre, Some(axis)))),
+        "circle_center" => Ok(circle_pick(st, at, keep)?.map(|(centre, axis)| (centre, Some(axis)))),
         _ => Ok(None),
     }
 }
 
 /// What Align says when the target `key` is on the bodies it moves.
 fn on_moving(key: &str) -> String {
-    format!("`{key}` is on a body that moves: pick the target on another body or on a sketch")
+    let instead = if key == "to_frame" {
+        "pick the target on another body or on a sketch"
+    } else {
+        "pick the target on another body, or use `to_frame` for a sketch"
+    };
+    format!("`{key}` is on a body that moves: {instead}")
 }
 
 /// The face a pick at `at` lies on in the placed model `st`, found on the exact geometry, never
@@ -1028,10 +1053,14 @@ pub(crate) fn planar_face_normal(st: &solidcraft_doc::ModelState, at: Vec3) -> O
 /// circular edge (on it or at its centre), else the cylindrical face it lies on (that face's
 /// nearer rim). Its centre, and its axis pointing out of its body. `None` when the pick lies on
 /// neither; `Err` for a circle that faces out of its body neither way (between two walls).
-fn circle_pick(st: &solidcraft_doc::ModelState, at: Vec3) -> std::result::Result<Option<(Vec3, Vec3)>, String> {
+fn circle_pick(
+    st: &solidcraft_doc::ModelState,
+    at: Vec3,
+    keep: &dyn Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> std::result::Result<Option<(Vec3, Vec3)>, String> {
     use solidcraft_doc::kernel::{FaceSurface, circle_edge_at, face_edge_indices, face_surface, rim_circle};
     let failed = |e: solidcraft_doc::kernel::KernelError| e.to_string();
-    let bodies: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
+    let bodies: Vec<&solidcraft_doc::ModelBody> = st.bodies.iter().filter(|b| !b.body.is_mesh() && keep(b)).collect();
     // A pick lies on what is within the reach references take picks at (`pick_reach`).
     let mut on_edge: Option<(f64, &solidcraft_doc::ModelBody, usize)> = None;
     for &b in &bodies {

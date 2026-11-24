@@ -131,7 +131,7 @@ fn world_pick(
             Some(Value::String(k)) if matches!(k.as_str(), "vertex" | "edge_mid" | "face_center" | "circle_center") => k.as_str(),
             _ => return Err(bad(cmd, format!("`{pk}.snap` must be vertex, edge_mid, face_center or circle_center"))),
         };
-        return super::super::features_more::snap_pick(&*s.world_state()?, kind, at)
+        return super::super::features_more::snap_pick(&*s.world_state()?, kind, at, &|_| true)
             .map_err(|why| bad(cmd, why))?
             .ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
     }
