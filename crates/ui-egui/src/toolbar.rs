@@ -2218,7 +2218,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             ui.set_width(row_w);
                             // Up and Down move the keyboard focus through the enabled rows (from none
                             // focused: the first or the last), instead of egui's own spatial move.
-                            let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
+                            let (down, up) = if app.viewport.context_menu.is_some() {
+                                (false, false)
+                            } else {
+                                ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)))
+                            };
                             if down || up {
                                 let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
                                 let focused = ui.ctx().memory(|m| m.focused());
@@ -2268,8 +2272,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 crate::scenario::publish_rect("toolbar_dropdown", area.response.rect);
                 // A drag out of the drop-down ends with a release elsewhere: not a click elsewhere.
+                // Keep the drop-down open while a right-click menu from it is open.
                 let dragging = ribbon::dragging(ui.ctx());
+                let context_menu_open = menu.is_some() || app.viewport.context_menu.is_some();
                 if open
+                    && !context_menu_open
                     && ((area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging)
                         || ui.input(|i| i.key_pressed(egui::Key::Escape)))
                 {
@@ -2285,16 +2292,17 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if follow_panel_hover {
             let ribbon = Rect::from_min_max(pos2(ribbon_left, r.top()), r.max);
             let pointer = ui.input(|i| i.pointer.hover_pos());
+            let context_menu_open = menu.is_some() || app.viewport.context_menu.is_some();
             let changed = ui.ctx().data_mut(|d| {
                 let key = egui::Id::unique("sc_panel_open");
                 let Some(open) = d.get_temp::<egui::Id>(key) else { return false };
-                let menu = open_panel_menu.filter(|(id, _)| *id == open).map(|(_, rect)| rect);
-                let stays_open =
-                    pointer.zip(menu).is_some_and(|(p, menu)| ribbon.expand(t.space_4).contains(p) || menu.expand(t.space_4).contains(p));
+                let menu_rect = open_panel_menu.filter(|(id, _)| *id == open).map(|(_, rect)| rect);
+                let stays_open = context_menu_open
+                    || pointer.zip(menu_rect).is_some_and(|(p, menu)| ribbon.expand(t.space_4).contains(p) || menu.expand(t.space_4).contains(p));
                 if !stays_open {
                     d.remove::<egui::Id>(key);
                     true
-                } else if let Some(hovered) = hovered_panel_menu.filter(|hovered| *hovered != open) {
+                } else if !context_menu_open && let Some(hovered) = hovered_panel_menu.filter(|hovered| *hovered != open) {
                     // Change the id after drawing all panels, so only one menu is drawn per pass.
                     d.insert_temp(key, hovered);
                     true
@@ -2320,7 +2328,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             crate::toolbar_custom::toggle(app, &tab, id);
         }
         if let Some((at, id)) = menu {
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
         tab_click
@@ -2412,7 +2419,11 @@ pub(crate) fn assistant_state(app: &SolveApp) -> crate::ui_kit::AssistantEntrySt
 }
 
 /// SolidCraft's group menus: the search's accent, its pin tips and where rows publish.
-fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
+fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'_> {
+    let selected = match &app.menu.target {
+        crate::context_menu::Target::ToolbarCommand { id } if app.viewport.context_menu.is_some() => Some(id.as_str()),
+        _ => None,
+    };
     ribbon::MenuStyle {
         pin_tip: solidcraft_ui_text::tr_label("Pin to Toolbar"),
         unpin_tip: solidcraft_ui_text::tr_label("Remove from Toolbar"),
@@ -2422,6 +2433,7 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
         pin: "dropdown_pin:",
         hot: "dropdown_hot:",
         reveal: "ribbon:reveal",
+        selected,
     }
 }
 
@@ -4809,11 +4821,17 @@ mod dropdown_tests {
             h.app.preferences.ribbon_icon_grid = grid;
             let pick = |h: &mut crate::scenario::Harness, item: &str| {
                 h.frames(4);
-                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
-                h.frames(4);
+                if crate::scenario::rect_of("toolbar_dropdown").is_none() {
+                    h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                    h.frames(4);
+                }
                 h.step(&json!({"click":{"handle":"dropdown:solid.box"},"button":"right"})).unwrap();
                 h.frames(4);
                 assert!(h.app.viewport.context_menu.is_some(), "grid {grid}: the right-click opens the command's menu");
+                assert!(crate::scenario::rect_of("toolbar_dropdown").is_some(), "grid {grid}: drop-down stays open while context menu is open");
+                h.step(&json!({"move":[5, 5]})).unwrap();
+                h.frames(2);
+                assert!(crate::scenario::handle_at("dropdown_hot:solid.box").is_some(), "grid {grid}: right-clicked command stays highlighted");
                 h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("grid {grid}: {item}: {e}"));
                 h.frames(4);
             };
@@ -4826,8 +4844,10 @@ mod dropdown_tests {
             // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
             // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
             for pinned in [true, false] {
-                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
-                h.frames(4);
+                if crate::scenario::rect_of("toolbar_dropdown").is_none() {
+                    h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                    h.frames(4);
+                }
                 h.step(&json!({"move":{"handle":"dropdown:solid.box"}})).unwrap();
                 h.frames(3);
                 if grid {

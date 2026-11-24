@@ -1245,6 +1245,9 @@ pub struct MenuStyle<'a> {
     pub pin: &'a str,
     pub hot: &'a str,
     pub reveal: &'a str,
+    /// A command whose right-click menu is open, kept highlighted even when the pointer moves
+    /// onto the menu.
+    pub selected: Option<&'a str>,
 }
 
 impl MenuStyle<'_> {
@@ -1377,7 +1380,7 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     for prefix in style.entry {
         solidcraft_ui_registry::publish_handle(&handle(prefix, entry.id), rect.center());
     }
-    let hot = entry.enabled && (pointer_on || resp.has_focus());
+    let hot = (entry.enabled && (pointer_on || resp.has_focus())) || style.selected == Some(entry.id);
     let mut row = crate::MenuItem::new(entry.id, entry.label, entry.icon);
     row.enabled = entry.enabled;
     row.checked = entry.checked;
@@ -1755,7 +1758,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         solidcraft_ui_registry::publish_handle(&handle(prefix, entry.id), rect.center());
     }
     let pointer_on = (resp.hovered() || pin_hovered) && !dragging;
-    let hot = entry.enabled && (pointer_on || resp.has_focus());
+    let hot = (entry.enabled && (pointer_on || resp.has_focus())) || style.selected == Some(entry.id);
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
     let cell = rect.shrink(2.0);
     let mut neutral = Vec::new();
