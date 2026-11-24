@@ -1879,39 +1879,19 @@ mod tests {
         let island =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-0.5, 6.5), Vec2::new(0.5, 6.5), Vec2::new(0.5, 8.5), Vec2::new(-0.5, 8.5)]), holes: vec![] };
         let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
-        for depth in [1., -1.] {
-            for regions in [vec![ring.clone(), island.clone()], vec![island.clone(), ring.clone()]] {
-                let result = emboss_cylinder(&body, &plane(), &regions, depth).unwrap();
-                assert_eq!(result.shell_count(), 1);
-                assert!(result.validity().is_empty());
-                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
-                let expected = 16. * (depth + depth * depth / 20.);
-                assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
-                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
-                for (s, raised) in [(0., true), (0.75, false), (1.5, true)] {
-                    let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
-                    let radius = if depth > 0. { 10.5 } else { 9.5 };
-                    assert_eq!(mesh.contains(radial * radius + Vec3::Z * 7.5), if depth > 0. { raised } else { !raised });
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn exact_wrapped_rectangle_is_connected_and_has_radial_depth() {
-        let body = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
-        for depth in [1., -1.] {
-            let result = emboss_cylinder(&body, &plane(), &[profile()], depth).unwrap();
+        // Raised and sunk, the regions in either order.
+        for (depth, regions) in [(1., [ring.clone(), island.clone()]), (-1., [island, ring])] {
+            let result = emboss_cylinder(&body, &plane(), &regions, depth).unwrap();
             assert_eq!(result.shell_count(), 1);
             assert!(result.validity().is_empty());
-            let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
             let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
-            let expected = if depth > 0. { 21. } else { -19. };
+            let expected = 16. * (depth + depth * depth / 20.);
             assert!((after - before - expected).abs() < 0.02, "{} vs {expected}", after - before);
             let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
-            for s in [-1.5, 0., 1.5] {
+            for (s, raised) in [(0., true), (0.75, false), (1.5, true)] {
                 let radial = -Vec3::X * (s / 10.0_f64).sin() + Vec3::Y * (s / 10.0_f64).cos();
-                assert_eq!(mesh.contains(radial * (if depth > 0. { 10.5 } else { 9.5 }) + Vec3::Z * 7.5), depth > 0.);
+                let radius = if depth > 0. { 10.5 } else { 9.5 };
+                assert_eq!(mesh.contains(radial * radius + Vec3::Z * 7.5), if depth > 0. { raised } else { !raised });
             }
         }
     }
@@ -1937,36 +1917,35 @@ mod tests {
             ]),
             holes: vec![],
         };
-        for profile in [holed, concave] {
-            for depth in [1., -1.] {
-                let result = emboss_cylinder_at(&body, origin + radial * 10.0 + axis * 7.5, &plane, std::slice::from_ref(&profile), depth).unwrap();
-                assert_eq!(result.shell_count(), 1);
-                let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
-                let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
-                let want = profile.area().abs() * (depth + depth * depth / 20.0);
-                assert!((after - before - want).abs() < 0.02, "{} vs {want}", after - before);
-                let point = |s: f64, z: f64, r: f64| origin + axis * z + (radial * (s / 10.0).cos() + tangent * (s / 10.0).sin()) * r;
-                let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
-                for (s, z) in [(-1.5, 7.5), (1.5, 7.5), (0.5, 6.5)] {
-                    let material = profile.contains(Vec2::new(s, z));
-                    assert_eq!(mesh.contains(point(s, z, if depth > 0. { 10.5 } else { 9.5 })), if depth > 0. { material } else { !material });
-                }
-                let imported = crate::step_import(&crate::step_export(&[&result], "wrapped cylinder").unwrap()).unwrap();
-                assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
-                assert_eq!(imported.bodies.len(), 1);
-                let round = imported.bodies.first().unwrap();
-                assert!(round.body.validity().is_empty());
-                let roundmesh = round.body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
-                assert_eq!(roundmesh.contains(point(-1.5, 7.5, if depth > 0. { 10.5 } else { 9.5 })), depth > 0.);
-                let cut = crate::boolean(
-                    &round.body,
-                    &crate::box_solid(origin + Vec3::new(5., -20., -20.), origin + Vec3::new(10., 20., 20.)).unwrap(),
-                    crate::BoolOp::Cut,
-                )
-                .unwrap()
-                .unwrap();
-                assert!(!cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(point(-1.5, 7.5, 9.0)));
+        let before = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        // The holed profile raised, the concave one sunk.
+        for (profile, depth) in [(holed, 1.), (concave, -1.)] {
+            let result = emboss_cylinder_at(&body, origin + radial * 10.0 + axis * 7.5, &plane, std::slice::from_ref(&profile), depth).unwrap();
+            assert_eq!(result.shell_count(), 1);
+            let after = result.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+            let want = profile.area().abs() * (depth + depth * depth / 20.0);
+            assert!((after - before - want).abs() < 0.02, "{} vs {want}", after - before);
+            let point = |s: f64, z: f64, r: f64| origin + axis * z + (radial * (s / 10.0).cos() + tangent * (s / 10.0).sin()) * r;
+            let mesh = result.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
+            for (s, z) in [(-1.5, 7.5), (1.5, 7.5), (0.5, 6.5)] {
+                let material = profile.contains(Vec2::new(s, z));
+                assert_eq!(mesh.contains(point(s, z, if depth > 0. { 10.5 } else { 9.5 })), if depth > 0. { material } else { !material });
             }
+            let imported = crate::step_import(&crate::step_export(&[&result], "wrapped cylinder").unwrap()).unwrap();
+            assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
+            assert_eq!(imported.bodies.len(), 1);
+            let round = imported.bodies.first().unwrap();
+            assert!(round.body.validity().is_empty());
+            let roundmesh = round.body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
+            assert_eq!(roundmesh.contains(point(-1.5, 7.5, if depth > 0. { 10.5 } else { 9.5 })), depth > 0.);
+            let cut = crate::boolean(
+                &round.body,
+                &crate::box_solid(origin + Vec3::new(5., -20., -20.), origin + Vec3::new(10., 20., 20.)).unwrap(),
+                crate::BoolOp::Cut,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(!cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(point(-1.5, 7.5, 9.0)));
         }
     }
 

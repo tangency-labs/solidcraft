@@ -274,10 +274,10 @@ fn a_radius_far_below_the_tolerance_keeps_its_chord_facets() {
 
 #[test]
 fn a_face_crowded_with_holes_gets_a_coarser_angle_and_bounded_work() {
-    // 1000 holes of diameter 4 in a 3 m plate. At the full angle the top and bottom faces
-    // would each be bounded by more than 20 000 segments, and the work of triangulating a
-    // face grows faster than its boundary.
-    let centres: Vec<Vec2> = (0..50).flat_map(|i| (0..20).map(move |j| Vec2::new(30.0 + 60.0 * i as f64, 25.0 + 50.0 * j as f64))).collect();
+    // 500 holes of diameter 4 in a 3 m plate. At the full angle (18 segments a rim) the top and
+    // bottom faces would each be bounded by 9 000 segments, over twice the budget of 4096,
+    // and the work of triangulating a face grows faster than its boundary.
+    let centres: Vec<Vec2> = (0..25).flat_map(|i| (0..20).map(move |j| Vec2::new(30.0 + 60.0 * i as f64, 25.0 + 50.0 * j as f64))).collect();
     let b = plate_with_holes(&centres, 2.0);
     let tol = display_tol(&b);
     let coarse = b.mesh(&crate::MeshTolerance::chord(tol)).unwrap();

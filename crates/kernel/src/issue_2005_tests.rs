@@ -41,9 +41,11 @@ fn tube(body: &Body, volume: f64, genus: usize) {
     assert!(h.faces.iter().all(|f| f.origins.iter().all(|o| matches!(o, crate::history::FaceOrigin::Profile { .. }))));
 }
 
+/// No twist, a turn of one vertex, and a negative twist (a half turn is
+/// `half_turn_sweep_cuts_a_torus`'s and `closed_holed_sweep_joins_every_loop`'s).
 #[test]
 fn closed_circle_sweeps_have_no_caps() {
-    for twist in [0.0, FRAC_PI_2, PI, TAU, -PI] {
+    for twist in [0.0, FRAC_PI_2, -PI] {
         let ctl = SweepControl { twist, ..SweepControl::default() };
         let b = sweep_with(&profile_plane(), &square(4.0), &circle_path(), &ctl).unwrap();
         tube(&b, 64.0 * TAU * 30.0, 1);
@@ -59,9 +61,14 @@ fn one_full_arc_closes_like_a_sketch_circle() {
     }
 }
 
+/// The circle as a closed 36-gon, as a sketch circle's polyline is drawn (its half arcs within
+/// 0.12 mm of their chords: 18 chords each, the last point computed). The sweep is 0.13 % short
+/// of the tube along the 36-gon's length, and 0.38 % more (cos 5°) if the profile is taken in the
+/// mitre plane at a corner: inside the tube's 1 %.
 #[test]
 fn closed_polyline_sweep_shares_its_starting_section() {
-    let path = crate::path_polyline(&circle_path()).unwrap();
+    let path = crate::build::path_polyline_within(&circle_path(), 0.12).unwrap();
+    assert_eq!(path.len(), 37);
     let b = crate::sweep_path(&profile_plane(), &square(4.0), &path).unwrap();
     tube(&b, 64.0 * TAU * 30.0, 1);
 }

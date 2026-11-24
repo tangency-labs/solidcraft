@@ -76,10 +76,15 @@ fn save_frame(h: &mut Harness, textures: &mut HashMap<TextureId, ColorImage>, mu
     raster::raster(h, textures, out).save(path).unwrap();
 }
 
+/// The Move handles' heads are large, in each theme's manipulator colour, and dragging one shows
+/// the relative readout. The pictures over the model render are reviewer evidence, written to
+/// the folder SOLIDCRAFT_JOINT_MOVE_EVIDENCE names, when it is set.
 #[test]
 fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
-    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/joint-move-review");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::env::var_os("SOLIDCRAFT_JOINT_MOVE_EVIDENCE").map(std::path::PathBuf::from);
+    if let Some(dir) = &dir {
+        std::fs::create_dir_all(dir).unwrap();
+    }
     solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
     for dark in [false, true] {
         for (kind, name) in [("revolute", "rotation"), ("slider", "translation"), ("cylindrical", "combined")] {
@@ -113,7 +118,9 @@ fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
                 let v = p[2] - p[0];
                 assert!((u.x * v.y - u.y * v.x).abs() * 0.5 >= 400.0, "legible arrowhead, independent of arc tessellation");
             }
-            save_frame(&mut h, &mut textures, idle, &dir.join(format!("{}-{name}-idle.png", if dark { "dark" } else { "light" })));
+            if let Some(dir) = &dir {
+                save_frame(&mut h, &mut textures, idle, &dir.join(format!("{}-{name}-idle.png", if dark { "dark" } else { "light" })));
+            }
             let from = scenario::handle_at(&format!("joint-move:{joint}:0")).expect("Move handle");
             let rect = h.app.viewport.rect.unwrap();
             let proj = viewport::projection(&h.app, rect);
@@ -144,7 +151,9 @@ fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
                 out.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.text().contains(readout))),
                 "visible relative readout"
             );
-            save_frame(&mut h, &mut textures, out, &dir.join(format!("{}-{name}.png", if dark { "dark" } else { "light" })));
+            if let Some(dir) = &dir {
+                save_frame(&mut h, &mut textures, out, &dir.join(format!("{}-{name}.png", if dark { "dark" } else { "light" })));
+            }
         }
     }
 }

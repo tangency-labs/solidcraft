@@ -5619,21 +5619,21 @@ mod corner_tests {
         // `corner: rolling` is the default: the same body, to the last bit of its area.
         assert_eq!(solidcraft_kernel::measure(&ball).unwrap().area, solidcraft_kernel::measure(&same).unwrap().area);
         assert!(solidcraft_kernel::measure(&ball).unwrap().volume > 7000.0);
-        // `corner: g2`: the corner set back (1.5 r by default, or as `setbacks` says) and filled
-        // with the G2 patch: one closed solid of the box's faces, the rounds and the patch, a
-        // little fuller than the ball's corner (its patch spans the setback, not the ball).
+        // `corner: g2`: the corner set back (as `setbacks` says here; the default 1.5 r and its
+        // patch are the kernel's `corner_g2` tests) and filled with the G2 patch: one closed solid
+        // of the box's faces, the rounds and the patch, a little fuller than the ball's corner (its
+        // patch spans the setback, not the ball).
         let ball_volume = solidcraft_kernel::measure(&ball).unwrap().volume;
-        for setbacks in [json!([]), json!([{"vertex": [0, 0, 0], "distance": 7}])] {
-            let mut s = Session::default();
-            run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"}));
-            run(&mut s, "solid.fillet", &json!({"edges": [[10, 0, 0], [0, 10, 0], [0, 0, 10]], "radius": 4, "corner": "g2", "setbacks": setbacks}));
-            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
-            assert!(body.validity().is_empty(), "{:?}", body.validity());
-            let m = solidcraft_kernel::measure(&body).unwrap();
-            eprintln!("corner g2, setbacks {setbacks}: {} faces, volume {:.4} (ball {:.4})", m.faces, m.volume, ball_volume);
-            assert_eq!(m.faces, 10);
-            assert!((m.volume - ball_volume).abs() < 1e-3 * ball_volume, "{} vs {}", m.volume, ball_volume);
-        }
+        let setbacks = json!([{"vertex": [0, 0, 0], "distance": 7}]);
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"}));
+        run(&mut s, "solid.fillet", &json!({"edges": [[10, 0, 0], [0, 10, 0], [0, 0, 10]], "radius": 4, "corner": "g2", "setbacks": setbacks}));
+        let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        let m = solidcraft_kernel::measure(&body).unwrap();
+        eprintln!("corner g2, setbacks {setbacks}: {} faces, volume {:.4} (ball {:.4})", m.faces, m.volume, ball_volume);
+        assert_eq!(m.faces, 10);
+        assert!((m.volume - ball_volume).abs() < 1e-3 * ball_volume, "{} vs {}", m.volume, ball_volume);
         let mut s = Session::default();
         run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"}));
         // An unknown word, and a style the G2 corner has no patch for, are refused as parameters.

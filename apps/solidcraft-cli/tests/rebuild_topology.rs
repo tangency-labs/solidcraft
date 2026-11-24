@@ -67,7 +67,13 @@ fn errors(s: &Session) -> Vec<u64> {
     s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect()
 }
 
-/// The corpus's designs, as sessions.
+/// Designs [`designs`] leaves out: the Raspberry Pi case, whose edit
+/// `pi_case_sides_stay_whole_at_both_heights` compares with fresh builds feature by feature, and
+/// the same case as 0.8 saved it.
+const LEFT_OUT: [&str; 2] = ["pi-case", "pi-case-0.8"];
+
+/// The corpus's designs that may take a length edit, as sessions: a design file with no length
+/// parameter is left unbuilt (a script's parameters are known once it has run).
 fn designs() -> Vec<(String, Session)> {
     let root = root();
     let mut out = Vec::new();
@@ -84,7 +90,14 @@ fn designs() -> Vec<(String, Session)> {
         files.sort();
         for p in files {
             let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            if LEFT_OUT.contains(&name.as_str()) {
+                continue;
+            }
             let s = if solidcraft_engine::io::is_design_container_path(&p) {
+                let doc = solidcraft_engine::io::read_design(&std::fs::read(&p).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
+                if !doc.params.iter().any(|q| q.unit == "mm") {
+                    continue;
+                }
                 open(&p)
             } else {
                 let mut s = Session::default();

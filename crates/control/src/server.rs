@@ -1102,7 +1102,7 @@ mod tests {
     fn the_token_has_a_time_limit_and_an_authenticated_client_may_idle() {
         use std::io::Read;
         let token = "0123456789abcdef0123456789abcdef";
-        let limit = Duration::from_millis(500);
+        let limit = Duration::from_millis(200);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = channel::<ControlRequest>();

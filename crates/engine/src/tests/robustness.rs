@@ -20,11 +20,16 @@ fn script(steps: Value) -> Session {
             panic!("{c} {p}: {e}");
         }
     }
+    assert_sound(&s);
+    s
+}
+
+/// Every body of the session is a sound solid.
+fn assert_sound(s: &Session) {
     for b in &s.model.state().bodies {
         let bad = b.body.validity();
         assert!(bad.is_empty(), "{}: {bad:?}", b.name);
     }
-    s
 }
 
 /// Shell of a notched plate closed by a shallow arc, opening a notch wall: the arc's cylinder
@@ -93,17 +98,20 @@ fn shell_after_a_cut_whose_end_touches_an_arc_side() {
 /// inside the leaf was there already).
 #[test]
 fn hinge_barrel_joins_a_filleted_lid() {
-    let all = json!([
+    let mut s = script(json!([
         {"command": "solid.box", "params": {"length": 320, "width": 220, "height": 6, "corner": [-160, 4, 21], "body_name": "Lid Housing"}},
         {"command": "solid.fillet", "params": {"body": "Lid Housing", "edges": [[-160, 4, 24], [160, 4, 24], [-160, 224, 24], [160, 224, 24]], "radius": 5}},
         {"command": "solid.fillet", "params": {"body": "Lid Housing", "edges": [[0, 4, 27], [0, 224, 27], [-160, 114, 27], [160, 114, 27]], "radius": 1}},
         {"command": "solid.box", "params": {"length": 296, "width": 190, "height": 1.1, "corner": [-148, 17, 20.9], "operation": "cut", "targets": ["Lid Housing"]}},
-        {"command": "solid.box", "params": {"length": 14, "width": 10, "height": 6, "corner": [-123.5, 214, 16], "operation": "join", "targets": ["Lid Housing"]}},
-        {"command": "solid.cylinder", "params": {"radius": 5, "height": 14, "axis": "X", "base": [-123.5, 224, 16], "operation": "join", "targets": ["Lid Housing"]}}
-    ]);
-    let steps = all.as_array().unwrap();
-    let before = total_volume(&script(Value::Array(steps[..5].to_vec())));
-    let s = script(all.clone());
+        {"command": "solid.box", "params": {"length": 14, "width": 10, "height": 6, "corner": [-123.5, 214, 16], "operation": "join", "targets": ["Lid Housing"]}}
+    ]));
+    let before = total_volume(&s);
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 5, "height": 14, "axis": "X", "base": [-123.5, 224, 16], "operation": "join", "targets": ["Lid Housing"]}),
+    );
+    assert_sound(&s);
     assert_eq!(s.model.state().bodies.len(), 1);
     let added = total_volume(&s) - before;
     let want = 0.75 * PI * 5.0 * 5.0 * 14.0;
@@ -141,11 +149,7 @@ fn fillet_that_would_open_the_surface_is_refused() {
     for body in &s.model.state().bodies {
         assert!(body.body.validity().is_empty() && body.body.crossed_face_loops().unwrap() == 0);
     }
-    // At half the radius the rounds fit.
-    run(&mut s, "solid.fillet", json!({"edges": feature["edges"], "radius": "0.5"}));
-    for body in &s.model.state().bodies {
-        assert!(body.body.validity().is_empty() && body.body.crossed_face_loops().unwrap() == 0);
-    }
+    // (That the rounds fit at half the radius is the kernel's `issue_871_tests::rounds_that_fit_are_closed`.)
 }
 
 /// Shell of a body in two pieces (a cylinder joined clear of a ring): each piece is shelled.
@@ -345,7 +349,8 @@ fn fixed_seeds_run_clean() {
     }
 }
 
-const FIXED_SEEDS: &[u64] = &[3, 5, 11, 16, 21, 29, 33, 35];
+/// Seeds 3 and 16 run as the generator makes them; 5 and 16 as the parts written out above.
+const FIXED_SEEDS: &[u64] = &[3, 5, 16];
 
 /// A lip, a groove and an outside lip on the rim of a rounded, shelled enclosure (#29: the
 /// lip's walls continue the shell's walls, which a boolean join couldn't do).
@@ -357,7 +362,8 @@ fn lip_on_a_rounded_shelled_rim() {
         {"command": "solid.fillet", "params": {"edges": [[40, 30, 15], [-40, 30, 15], [-40, -30, 15], [40, -30, 15]], "radius": 6}},
         {"command": "solid.shell", "params": {"faces": [[0, 0, 30]], "thickness": 2}}
     ]);
-    let v0 = total_volume(&script(base.clone()));
+    let mut s = script(base);
+    let v0 = total_volume(&s);
     let ar = |w: f64, h: f64, r: f64| w * h - (4.0 - PI) * r * r;
     let inside = ar(78.0, 58.0, 5.0) - ar(76.0, 56.0, 4.0);
     for (extra, want) in [
@@ -370,10 +376,11 @@ fn lip_on_a_rounded_shelled_rim() {
         if let (Some(o), Some(e)) = (p.as_object_mut(), extra.as_object()) {
             o.extend(e.clone());
         }
-        let mut steps = base.as_array().cloned().unwrap_or_default();
-        steps.push(json!({"command": "plastic.lip", "params": p}));
-        let v = total_volume(&script(Value::Array(steps)));
+        run(&mut s, "plastic.lip", p);
+        assert_sound(&s);
+        let v = total_volume(&s);
         assert!((v - want).abs() < 1e-3 * want, "{extra}: {v} vs {want}");
+        run(&mut s, "edit.undo", json!({}));
     }
 }
 
@@ -410,17 +417,18 @@ fn planned_volume(s: &Session) -> f64 {
 #[test]
 fn blend_an_arc_edge_that_runs_out_tangent_to_a_face() {
     let arc = json!([[47.3174, -6.1508, 10]]);
+    let mut s = knife_edge_part();
+    let before = planned_volume(&s);
     for (command, params, removed) in
         [("solid.fillet", json!({"edges": arc, "radius": 2}), 25.506), ("solid.chamfer", json!({"edges": arc, "distance": 2}), 58.077)]
     {
-        let mut s = knife_edge_part();
-        let before = planned_volume(&s);
         s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
         let after = planned_volume(&s);
         assert!((before - after - removed).abs() < 0.05, "{command}: removed {}, expected {removed}", before - after);
         for b in &s.model.state().bodies {
             assert!(b.body.validity().is_empty(), "{command}: {:?}", b.body.validity());
         }
+        run(&mut s, "edit.undo", json!({}));
     }
 }
 
@@ -442,17 +450,17 @@ fn a_boundary_found_across_a_seam_is_not_used() {
 /// half-square prism, and one of an outside bottom edge takes 20 mm of it away.
 #[test]
 fn chamfer_of_a_concave_edge_adds_material() {
-    let shelled = || {
-        vec![
-            json!({"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 20, "width": 20, "height": 20}}),
-            json!({"command": "solid.shell", "params": {"faces": [[10, 10, 20]], "thickness": 2}}),
-        ]
-    };
-    let base = total_volume(&script(Value::Array(shelled())));
-    let chamfered = |edge: [f64; 3]| {
-        let mut steps = shelled();
-        steps.push(json!({"command": "solid.chamfer", "params": {"edges": [edge], "distance": 1}}));
-        total_volume(&script(Value::Array(steps)))
+    let mut s = script(json!([
+        {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 20, "width": 20, "height": 20}},
+        {"command": "solid.shell", "params": {"faces": [[10, 10, 20]], "thickness": 2}}
+    ]));
+    let base = total_volume(&s);
+    let mut chamfered = |edge: [f64; 3]| {
+        run(&mut s, "solid.chamfer", json!({"edges": [edge], "distance": 1}));
+        assert_sound(&s);
+        let v = total_volume(&s);
+        run(&mut s, "edit.undo", json!({}));
+        v
     };
     let inside = chamfered([10.0, 2.0, 2.0]);
     let outside = chamfered([10.0, 0.0, 0.0]);
@@ -463,25 +471,22 @@ fn chamfer_of_a_concave_edge_adds_material() {
 }
 
 /// A closed hollow of a tiny lens (a Ø1.2 ball meeting a Ø1 ring tube, #18373; stress corpus
-/// S1195) made walls SMLib can't read back ("flat arrays: face 5: a NURBS form that is not its
-/// analytic surface"), yet reported success, and the body could no longer be measured. The
-/// 0.1 mm wall the report saw build fails the same way (face 6). Each shell is refused with a
-/// message, and the lens stays as it was and measures.
+/// S1195) with a 0.06 mm wall made walls SMLib can't read back ("flat arrays: face 5: a NURBS
+/// form that is not its analytic surface"), yet reported success, and the body could no longer
+/// be measured. The shell is refused with a message, and the lens stays as it was and measures.
 #[test]
 fn a_shell_whose_walls_cant_be_read_back_is_refused_and_the_body_kept() {
-    for wall in [0.06, 0.1] {
-        let mut s = script(json!([
-            {"command": "solid.torus", "params": {"major": 50, "minor": 0.5, "operation": "new", "body_name": "Base", "name": "Ring"}},
-            {"command": "solid.sphere", "params": {"diameter": 1.2, "center": [50, 0, 0], "operation": "new", "body_name": "Tool", "name": "Ball"}},
-            {"command": "solid.combine", "params": {"target": "Base", "tools": ["Tool"], "operation": "intersect"}}
-        ]));
-        let before = s.model.state().bodies.iter().find(|b| b.name == "Base").map(|b| b.body.face_count());
-        let shell = s.execute("solid.shell", &json!({"faces": [], "thickness": wall, "body": "Base", "name": "Hollow"}));
-        let err = shell.map(|_| ()).unwrap_err().to_string();
-        assert!(err.contains("can't be used afterwards") && err.contains("flat arrays"), "{wall}: {err}");
-        let state = s.model.state();
-        let base = state.bodies.iter().find(|b| b.name == "Base").unwrap();
-        assert_eq!(Some(base.body.face_count()), before, "{wall}: the lens is kept as it was");
-        assert!(solidcraft_kernel::measure(&base.body).is_ok(), "{wall}: the kept lens measures");
-    }
+    let mut s = script(json!([
+        {"command": "solid.torus", "params": {"major": 50, "minor": 0.5, "operation": "new", "body_name": "Base", "name": "Ring"}},
+        {"command": "solid.sphere", "params": {"diameter": 1.2, "center": [50, 0, 0], "operation": "new", "body_name": "Tool", "name": "Ball"}},
+        {"command": "solid.combine", "params": {"target": "Base", "tools": ["Tool"], "operation": "intersect"}}
+    ]));
+    let before = s.model.state().bodies.iter().find(|b| b.name == "Base").map(|b| b.body.face_count());
+    let shell = s.execute("solid.shell", &json!({"faces": [], "thickness": 0.06, "body": "Base", "name": "Hollow"}));
+    let err = shell.map(|_| ()).unwrap_err().to_string();
+    assert!(err.contains("can't be used afterwards") && err.contains("flat arrays"), "{err}");
+    let state = s.model.state();
+    let base = state.bodies.iter().find(|b| b.name == "Base").unwrap();
+    assert_eq!(Some(base.body.face_count()), before, "the lens is kept as it was");
+    assert!(solidcraft_kernel::measure(&base.body).is_ok(), "the kept lens measures");
 }

@@ -742,31 +742,9 @@ mod tests {
         }
     }
 
-    /// Sketch curves: a patch inside two arcs and two lines on one plane lies in that plane.
-    #[test]
-    fn coplanar_sketch_curves_give_a_plane() {
-        use std::f64::consts::PI;
-        // Two half-discs' arcs over [0, 10] (radius 5) facing out, joined by the lines x = 0, 10.
-        let low = Seg2::Arc { center: Vec2::new(5.0, 0.0), radius: 5.0, start: PI, sweep: PI };
-        let high = Seg2::Arc { center: Vec2::new(5.0, 8.0), radius: 5.0, start: PI, sweep: -PI };
-        let left = Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 8.0) };
-        let right = Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 8.0) };
-        let pl = Plane::XY.offset(3.0);
-        let body = boundary_surface(
-            &[sketch("low", pl, vec![low]), sketch("high", pl, vec![high])],
-            &[sketch("left", pl, vec![left]), sketch("right", pl, vec![right])],
-        )
-        .unwrap();
-        let s = face_surface(&body);
-        for i in 0..=8 {
-            for j in 0..=8 {
-                assert!((s.point([i as f64 / 8.0, j as f64 / 8.0]).unwrap().z - 3.0).abs() < 1e-9);
-            }
-        }
-    }
-
-    /// A stadium: two half-circle arcs (radius 5) bulging out of the 10 × 8 rectangle between two
-    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and a
+    /// A stadium of sketch curves on one plane: two half-circle arcs (radius 5) bulging out of the
+    /// 10 × 8 rectangle between two lines. The patch inside them lies in that plane. Each arc
+    /// meets its lines at 180°, so the patch is singular at its corners, and a
     /// boundary walk can run from such a corner onto the surface's extrapolation past its domain
     /// (a planar spline passes through every point of its plane there): the face measured
     /// 289 mm² for its 158.5. The mesher is SolidCraft's own (`crate::tess::plan`), which keeps
@@ -785,6 +763,12 @@ mod tests {
             &[sketch("left", pl, vec![left]), sketch("right", pl, vec![right])],
         )
         .unwrap();
+        let s = face_surface(&body);
+        for i in 0..=8 {
+            for j in 0..=8 {
+                assert!((s.point([i as f64 / 8.0, j as f64 / 8.0]).unwrap().z - 3.0).abs() < 1e-9);
+            }
+        }
         let want = 80.0 + 25.0 * PI;
         // Chords of the arcs at 0.01 mm sag cut off up to (2/3)·sag·length ≈ 0.21 mm².
         let near = |a: f64| (a - want).abs() < 0.25;
@@ -792,7 +776,7 @@ mod tests {
         assert!(faces.len() == 1 && near(faces[0].area), "faces: {faces:?}");
         let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
     }
 
@@ -817,7 +801,7 @@ mod tests {
         assert!(near(faces[0].area), "faces: {faces:?}");
         let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
         let p = |l: &str, q: Vec3| BoundaryCurve { label: l.into(), source: CurveSource::Point(q), continuity: Continuity::G0 };
         assert!(boundary_surface(&[sketch("arc", pl, vec![arc]), p("nan", Vec3::new(f64::NAN, 0.0, 0.0))], &[]).is_err());

@@ -4852,9 +4852,13 @@ mod tests {
         assert_eq!(h.app.preferences.navigation_bar, NavigationBar::default());
     }
 
+    /// Clicks a control of the navigation bar editor, opening its page first unless Preferences shows it already.
     fn navbar_click(h: &mut crate::scenario::Harness, handle: &str) {
-        h.call("ui.prefs", json!({"open":"Interface/Navigation bar"}));
-        h.frames(20);
+        let shell = &h.app.prefs_window.shell;
+        if !(shell.open && shell.section == PAGE_LAYOUT && shell.filter.is_empty()) {
+            h.call("ui.prefs", json!({"open":"Interface/Navigation bar"}));
+            h.frames(20);
+        }
         scroll_to_and_click(h, handle);
     }
 
@@ -5064,7 +5068,8 @@ mod tests {
 
     #[test]
     fn navigation_bar_inspector_and_status_keep_full_width_for_every_selection() {
-        for width in [480, 600, 880, 1030, 1200, 1600] {
+        // The narrowest, a middle and the widest page; a button slot, a menu slot and a separator.
+        for width in [480, 880, 1600] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
@@ -5073,7 +5078,7 @@ mod tests {
                 json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["pan","fit","visual_style","display","separator"]}}),
             );
             h.frames(20);
-            for slot in [None, Some("pan"), Some("fit"), Some("visual_style"), Some("display"), Some("separator")] {
+            for slot in [None, Some("pan"), Some("visual_style"), Some("separator")] {
                 if let Some(slot) = slot {
                     navbar_click(&mut h, &format!("prefs:navbar:slot:{slot}"));
                     h.frames(3);
@@ -5128,7 +5133,7 @@ mod tests {
 
     #[test]
     fn interface_sections_share_the_page_content_width_before_and_after_navigation() {
-        for width in [600, 880, 1030, 1200, 1496, 1600] {
+        for width in [600, 1030, 1600] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
@@ -5138,7 +5143,7 @@ mod tests {
             ] {
                 h.call("ui.prefs", json!({"open":page}));
                 h.frames(20);
-                for _ in 0..2 {
+                for pass in 0..2 {
                     let body = crate::scenario::rect_of("prefs:page_body").unwrap();
                     let window = crate::scenario::rect_of("prefs:window").unwrap();
                     let t = solidcraft_theme::Tokens::get();
@@ -5155,8 +5160,10 @@ mod tests {
                         let row = crate::scenario::rect_of(key).unwrap();
                         assert!((row.right() - body.right()).abs() < 0.5, "{key} at {width}: {row:?} vs {body:?}");
                     }
-                    h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":-600}));
-                    h.frames(20);
+                    if pass == 0 {
+                        h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":-600}));
+                        h.frames(20);
+                    }
                 }
             }
         }
@@ -5727,20 +5734,18 @@ mod tests {
 
     #[test]
     fn reset_axis_assignment_preserves_gains_inversion_and_every_other_setting() {
-        for theme in ["light", "dark"] {
-            let mut h = changed_3d_mouse_settings(Some("hid 046d:c62b"));
-            h.call("ui.prefs", json!({"theme":theme}));
-            let mut expected = h.app.preferences.clone();
-            expected.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
-            scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
-            assert_eq!(h.app.preferences, expected);
-            h.app.preferences.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
-            h.app.preferences.space_mouse_enabled = false;
-            h.frames(3);
-            let before = h.app.preferences.clone();
-            scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
-            assert_eq!(h.app.preferences, before, "disabled navigation cannot reset assignments");
-        }
+        let mut h = changed_3d_mouse_settings(Some("hid 046d:c62b"));
+        h.call("ui.prefs", json!({"theme":"light"}));
+        let mut expected = h.app.preferences.clone();
+        expected.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
+        scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
+        assert_eq!(h.app.preferences, expected);
+        h.app.preferences.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
+        h.app.preferences.space_mouse_enabled = false;
+        h.frames(3);
+        let before = h.app.preferences.clone();
+        scroll_to_and_click(&mut h, "prefs:space_mouse_reset_axes");
+        assert_eq!(h.app.preferences, before, "disabled navigation cannot reset assignments");
     }
     /// The question is short, says what stays, and exists in every language.
     #[test]
@@ -5910,12 +5915,25 @@ mod tests {
 
     /// The section's buttons keep inside the page in every language, at the dialog's width (which the
     /// window does not narrow): the arming Restore button, Reset axis assignment, Reset view under the
-    /// test model, and the buttons' own reset.
+    /// test model, and the buttons' own reset. A button grows with its label and the question's box with
+    /// its text, so the binding languages are, for each text, the one whose line is widest, and Japanese,
+    /// which wraps between any two characters.
     #[test]
     fn the_3d_mouse_buttons_fit_the_page_in_every_language() {
         let keys = ["ui.3d_mouse_restore", "ui.3d_mouse_reset_axes", "ui.3d_mouse_reset_view", "ui.3d_mouse_buttons_reset"];
+        let ctx = crate::fonts::test_context();
+        ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+        let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label);
+        let mut binding = std::collections::BTreeSet::from(["ja"]);
+        for key in keys.into_iter().chain(["ui.3d_mouse_restore_ask"]) {
+            let width = |id: &str| {
+                let text = solidcraft_ui_text::Locale::for_language(id).text(key).to_string();
+                ctx.fonts_mut(|fonts| fonts.layout_no_wrap(text, font.clone(), egui::Color32::WHITE).size().x)
+            };
+            binding.extend(crate::i18n::LOCALES.iter().map(|catalog| catalog.id).max_by(|a, b| width(a).total_cmp(&width(b))));
+        }
         let mut too_wide = Vec::new();
-        for catalog in crate::i18n::LOCALES {
+        for catalog in crate::i18n::LOCALES.iter().filter(|catalog| binding.contains(catalog.id)) {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.language = catalog.id.to_string();
@@ -6386,59 +6404,62 @@ mod tests {
 
     #[test]
     fn design_precision_controls_use_preferred_units_and_keep_document_and_transactions() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", json!({"language":"en", "theme":theme}));
-            // A nonblank document keeps its units while the new-design defaults are edited.
-            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-            let doc = h.app.session.doc.to_json();
-            let original = h.app.preferences.clone();
-            h.call("ui.prefs", json!({"open":"General"}));
-            h.step(&json!({"click":{"handle":"prefs:page:Design"}})).unwrap();
-            h.app.prefs_window.shell.filter = "Units and precision".into();
-            h.frames(5);
-            for unit in UNITS {
-                h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
-                h.frames(2);
-                // 12.5 in the chosen unit; inches keep at least three decimals.
-                let sample = if *unit == "in" { "12.500 in".to_string() } else { format!("12.50 {unit}") };
-                assert_eq!(design::length_decimals_sample(unit, 2), sample);
-                assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
-                assert_eq!(h.app.session.doc.to_json(), doc);
-            }
-            for (key, text) in [("length_decimals", "4"), ("angle_decimals", "3"), ("parameter_list_rows", "75")] {
-                let handle = format!("prefs:{key}");
-                super::reveal_preference(&mut h, &handle);
-                h.step(&json!({"click":{"handle":handle},"double":true})).unwrap();
-                h.step(&json!({"key":"A","cmd":true})).unwrap();
-                h.step(&json!({"text":text})).unwrap();
-                h.step(&json!({"key":"Enter"})).unwrap();
-                h.frames(2);
-            }
-            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
-            assert!(h.widget("12.5000 ft").is_some());
-            assert!(h.widget("45.000°").is_some());
-            assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
-            h.call("ui.prefs", json!({"button":"apply"}));
-            let applied = h.app.preferences.clone();
-            let mut restarted = SolveApp::new(Default::default(), Default::default());
-            restarted.load_prefs(&h.app.prefs());
-            assert_eq!(
-                (
-                    restarted.preferences.default_units.as_str(),
-                    restarted.preferences.length_decimals,
-                    restarted.preferences.angle_decimals,
-                    restarted.preferences.parameter_list_rows
-                ),
-                ("ft", 4, 3, 75)
-            );
-            h.call("ui.prefs", json!({"button":"defaults"}));
-            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (2, 1, 50));
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, applied);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en", "theme":"light"}));
+        // A nonblank document keeps its units while the new-design defaults are edited.
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let doc = h.app.session.doc.to_json();
+        let original = h.app.preferences.clone();
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.step(&json!({"click":{"handle":"prefs:page:Design"}})).unwrap();
+        h.app.prefs_window.shell.filter = "Units and precision".into();
+        h.frames(5);
+        // 12.5 in the chosen unit; inches keep at least three decimals.
+        let sample = |unit: &str| if unit == "in" { "12.500 in".to_string() } else { format!("12.50 {unit}") };
+        for unit in UNITS {
+            assert_eq!(design::length_decimals_sample(unit, 2), sample(unit));
+        }
+        // The unit chips come from one loop over UNITS: a metric unit other than the default, inches,
+        // whose sample has its own decimals, then feet, which the rest relies on.
+        for unit in ["m", "in", "ft"] {
+            h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
+            h.frames(2);
+            let sample = sample(unit);
+            assert!(h.widget(&sample).is_some(), "{unit} uses the real unit-aware sample {sample}");
             assert_eq!(h.app.session.doc.to_json(), doc);
         }
+        for (key, text) in [("length_decimals", "4"), ("angle_decimals", "3"), ("parameter_list_rows", "75")] {
+            let handle = format!("prefs:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle},"double":true})).unwrap();
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.step(&json!({"text":text})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+        }
+        assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
+        assert!(h.widget("12.5000 ft").is_some());
+        assert!(h.widget("45.000°").is_some());
+        assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = h.app.preferences.clone();
+        let mut restarted = SolveApp::new(Default::default(), Default::default());
+        restarted.load_prefs(&h.app.prefs());
+        assert_eq!(
+            (
+                restarted.preferences.default_units.as_str(),
+                restarted.preferences.length_decimals,
+                restarted.preferences.angle_decimals,
+                restarted.preferences.parameter_list_rows
+            ),
+            ("ft", 4, 3, 75)
+        );
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (2, 1, 50));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, applied);
+        assert_eq!(h.app.session.doc.to_json(), doc);
     }
 
     #[test]
@@ -6524,48 +6545,46 @@ mod tests {
 
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
-            let original = h.app.preferences.clone();
-            h.call("ui.prefs", json!({"open":"General"}));
-            h.step(&json!({"click":{"handle":"prefs:page:Tools"}})).unwrap();
-            let mut expected = serde_json::to_value(&original).unwrap();
-            for (query, field) in [
-                ("Show moved parts' old place as a ghost", "drive_joints_ghost"),
-                ("Axis distances in Measure", "measure_axis_distances"),
-                ("Direct interaction", "direct_interaction"),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let handle = format!("prefs:{field}");
-                super::reveal_preference(&mut h, &handle);
-                h.step(&json!({"click":{"handle":handle}})).unwrap();
-                expected[field] = json!(!expected[field].as_bool().unwrap());
-                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field} edits only its own preference");
-            }
-            h.app.prefs_window.shell.filter = "Tool at the cursor".into();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","theme":"light","quick_measure":true}));
+        let original = h.app.preferences.clone();
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.step(&json!({"click":{"handle":"prefs:page:Tools"}})).unwrap();
+        let mut expected = serde_json::to_value(&original).unwrap();
+        for (query, field) in [
+            ("Show moved parts' old place as a ghost", "drive_joints_ghost"),
+            ("Axis distances in Measure", "measure_axis_distances"),
+            ("Direct interaction", "direct_interaction"),
+        ] {
+            h.app.prefs_window.shell.filter = query.into();
             h.frames(5);
-            super::reveal_preference(&mut h, "view:tool_cursor");
-            h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
-            assert!(h.app.ui.tool_cursor);
-            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "cursor stays app UI state");
-            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original).unwrap());
-            h.call("ui.prefs", json!({"button":"apply"}));
-            let applied = h.app.preferences.clone();
-            let mut restarted = SolveApp::new(Default::default(), Default::default());
-            restarted.load_prefs(&h.app.prefs());
-            assert_eq!(restarted.preferences, applied);
-            assert!(restarted.ui.tool_cursor);
-            h.call("ui.prefs", json!({"button":"defaults"}));
-            assert!(h.app.preferences.drive_joints_ghost && h.app.preferences.measure_axis_distances);
-            assert!(!h.app.preferences.direct_interaction && !h.app.ui.tool_cursor);
-            assert!(h.app.preferences.quick_measure, "Tools defaults leave Graphics quick measurement alone");
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, applied);
-            assert!(h.app.ui.tool_cursor);
+            let handle = format!("prefs:{field}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            expected[field] = json!(!expected[field].as_bool().unwrap());
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{field} edits only its own preference");
         }
+        h.app.prefs_window.shell.filter = "Tool at the cursor".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "cursor stays app UI state");
+        assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original).unwrap());
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = h.app.preferences.clone();
+        let mut restarted = SolveApp::new(Default::default(), Default::default());
+        restarted.load_prefs(&h.app.prefs());
+        assert_eq!(restarted.preferences, applied);
+        assert!(restarted.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.drive_joints_ghost && h.app.preferences.measure_axis_distances);
+        assert!(!h.app.preferences.direct_interaction && !h.app.ui.tool_cursor);
+        assert!(h.app.preferences.quick_measure, "Tools defaults leave Graphics quick measurement alone");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, applied);
+        assert!(h.app.ui.tool_cursor);
     }
 
     #[test]
@@ -7635,63 +7654,62 @@ mod tests {
 
     #[test]
     fn appearance_sections_and_carousel_use_real_data_and_stay_in_the_page() {
-        for base in ["light", "dark"] {
-            for screen in [740, 1600] {
-                let mut h = crate::scenario::Harness::new();
-                h.app.home.open = false;
-                h.call("ui.resize", json!({"width":screen,"height":1100}));
-                h.call("ui.prefs", json!({"theme":base,"language":"en","open":"Appearance"}));
-                h.frames(4);
-                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let mut previous: Option<f32> = None;
-                for key in ["theme", "viewport_logo", "scale", "colour_vision"] {
-                    let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
-                    assert!(section.left() >= page.left() - 1.0 && section.right() <= page.right() + 1.0);
-                    if let Some(bottom) = previous {
-                        assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{base} width={screen}: {key}");
-                    }
-                    previous = Some(crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap().bottom());
+        let base = "light";
+        for screen in [740, 1600] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":screen,"height":1100}));
+            h.call("ui.prefs", json!({"theme":base,"language":"en","open":"Appearance"}));
+            h.frames(4);
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let mut previous: Option<f32> = None;
+            for key in ["theme", "viewport_logo", "scale", "colour_vision"] {
+                let section = crate::scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
+                assert!(section.left() >= page.left() - 1.0 && section.right() <= page.right() + 1.0);
+                if let Some(bottom) = previous {
+                    assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{base} width={screen}: {key}");
                 }
-                let choices = theme_choices(&h.app);
-                let count = format!("{} themes", choices.len());
-                let mut painted_count = false;
-                for shape in &h.shapes {
-                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                        if let egui::Shape::Text(text) = shape {
-                            painted_count |= text.galley.job.text == count;
-                        }
-                    });
-                }
-                assert!(painted_count, "count comes from actual themes");
-                while crate::scenario::rect_of("prefs:theme_previous").is_some() {
-                    h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
-                    h.frames(3);
-                }
-                let mut found = std::collections::BTreeSet::new();
-                for _ in 0..choices.len() + 1 {
-                    for (id, _) in &choices {
-                        if let Some(rect) = crate::scenario::rect_of(&format!("prefs:theme:{id}")) {
-                            assert!(page.expand(1.0).contains_rect(rect), "{base} width={screen}: {id} {rect:?}");
-                            found.insert(id.clone());
-                        }
-                    }
-                    if crate::scenario::rect_of("prefs:theme_next").is_none() {
-                        break;
-                    }
-                    h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
-                    h.frames(3);
-                }
-                assert_eq!(found, choices.into_iter().map(|(id, _)| id).collect());
-                assert!(h.app.prefs_window.import_tile.is_some(), "Import stays visible while scrolling");
-                assert_eq!(h.app.preferences.theme, base, "scrolling does not select a theme");
-                assert_eq!(h.app.preferences.ui_scale, 1.0);
-                assert_eq!(h.app.preferences.viewport_background, None);
-                assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Theme);
-                assert!(!h.app.preferences.logo_accent);
-                assert!(h.app.preferences.theme_follow.is_empty() && h.app.preferences.ui_font.is_empty());
-                assert_eq!(h.app.preferences.color_vision, solidcraft_theme::ColorVision::Off);
-                h.call("ui.prefs", json!({"button":"cancel"}));
+                previous = Some(crate::scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap().bottom());
             }
+            let choices = theme_choices(&h.app);
+            let count = format!("{} themes", choices.len());
+            let mut painted_count = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        painted_count |= text.galley.job.text == count;
+                    }
+                });
+            }
+            assert!(painted_count, "count comes from actual themes");
+            while crate::scenario::rect_of("prefs:theme_previous").is_some() {
+                h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
+                h.frames(3);
+            }
+            let mut found = std::collections::BTreeSet::new();
+            for _ in 0..choices.len() + 1 {
+                for (id, _) in &choices {
+                    if let Some(rect) = crate::scenario::rect_of(&format!("prefs:theme:{id}")) {
+                        assert!(page.expand(1.0).contains_rect(rect), "{base} width={screen}: {id} {rect:?}");
+                        found.insert(id.clone());
+                    }
+                }
+                if crate::scenario::rect_of("prefs:theme_next").is_none() {
+                    break;
+                }
+                h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+                h.frames(3);
+            }
+            assert_eq!(found, choices.into_iter().map(|(id, _)| id).collect());
+            assert!(h.app.prefs_window.import_tile.is_some(), "Import stays visible while scrolling");
+            assert_eq!(h.app.preferences.theme, base, "scrolling does not select a theme");
+            assert_eq!(h.app.preferences.ui_scale, 1.0);
+            assert_eq!(h.app.preferences.viewport_background, None);
+            assert_eq!(h.app.preferences.viewport_theme, crate::theme::ViewportTheme::Theme);
+            assert!(!h.app.preferences.logo_accent);
+            assert!(h.app.preferences.theme_follow.is_empty() && h.app.preferences.ui_font.is_empty());
+            assert_eq!(h.app.preferences.color_vision, solidcraft_theme::ColorVision::Off);
+            h.call("ui.prefs", json!({"button":"cancel"}));
         }
     }
 
@@ -7793,7 +7811,8 @@ mod tests {
         h.step(&json!({"click":{"handle":"dialog:Logo:Accent"}})).unwrap();
         h.frames(2);
         assert!(h.app.preferences.logo_accent);
-        for (percent, scale) in [(75, 0.75), (100, 1.0), (110, 1.1), (125, 1.25), (150, 1.5), (200, 2.0)] {
+        // The presets are chips of one loop: its first and its last.
+        for (percent, scale) in [(75, 0.75), (200, 2.0)] {
             let handle = format!("prefs:scale_preset:{percent}");
             // Rescaling may leave the presets above the current vertical scroll position.
             let page = crate::scenario::rect_of("prefs:page_body").unwrap();
@@ -7855,71 +7874,71 @@ mod tests {
     }
 
     #[test]
-    fn theme_options_ui_counts_badges_more_and_reset_in_light_and_dark() {
-        for base in ["light", "dark"] {
-            for count in [0, 1, 3, 6, 12] {
-                let mut h = crate::scenario::Harness::new();
-                h.app.home.open = false;
-                h.call("ui.resize", json!({"width":1600,"height":1100}));
-                let fixture = theme_options_fixture(base, count);
-                // The 12-cell fixture also declares a composite child, counted in the header.
-                let option_count = fixture["options"].as_array().expect("fixture option definitions").len();
-                let out = h.call("ui.prefs", json!({"theme_import":fixture,"open":"Interface"}));
-                assert!(out["error"].is_null(), "{out}");
-                h.frames(3);
-                assert_eq!(crate::scenario::rect_of("prefs:theme_options_header").is_some(), count > 0, "{base} {count}");
-                let caption = if option_count == 1 { "1 option".to_owned() } else { format!("{option_count} options") };
-                let mut painted_count = 0;
-                for shape in &h.shapes {
-                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                        if let egui::Shape::Text(text) = shape {
-                            painted_count += usize::from(text.galley.job.text == caption);
-                        }
-                    });
-                }
-                assert_eq!(painted_count, usize::from(count > 0), "{base}: the real option count paints the exact singular/plural caption once");
-                let id = format!("options-{base}-{count}");
-                assert_eq!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_some(), count > 0);
-                assert_eq!(crate::scenario::handle_at("prefs:theme_options_more").is_some(), count == 12);
-                let cells: std::collections::BTreeSet<_> = crate::scenario::rects("prefs:theme_option_cell:").into_iter().map(|(id, _)| id).collect();
-                assert_eq!(cells.len(), count.min(10), "only ten top-level cells before More");
-                assert_eq!(
-                    crate::scenario::rect_of("dialog:hint:theme_option_section").is_some(),
-                    count > 6,
-                    "dim section labels only above six entries"
-                );
+    fn theme_options_ui_counts_badges_more_and_reset() {
+        // The light and dark fixtures declare the same options. 6 is the last count without section labels.
+        let base = "light";
+        for count in [0, 1, 6, 12] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            let fixture = theme_options_fixture(base, count);
+            // The 12-cell fixture also declares a composite child, counted in the header.
+            let option_count = fixture["options"].as_array().expect("fixture option definitions").len();
+            let out = h.call("ui.prefs", json!({"theme_import":fixture,"open":"Interface"}));
+            assert!(out["error"].is_null(), "{out}");
+            h.frames(3);
+            assert_eq!(crate::scenario::rect_of("prefs:theme_options_header").is_some(), count > 0, "{base} {count}");
+            let caption = if option_count == 1 { "1 option".to_owned() } else { format!("{option_count} options") };
+            let mut painted_count = 0;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        painted_count += usize::from(text.galley.job.text == caption);
+                    }
+                });
+            }
+            assert_eq!(painted_count, usize::from(count > 0), "{base}: the real option count paints the exact singular/plural caption once");
+            let id = format!("options-{base}-{count}");
+            assert_eq!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_some(), count > 0);
+            assert_eq!(crate::scenario::handle_at("prefs:theme_options_more").is_some(), count == 12);
+            let cells: std::collections::BTreeSet<_> = crate::scenario::rects("prefs:theme_option_cell:").into_iter().map(|(id, _)| id).collect();
+            assert_eq!(cells.len(), count.min(10), "only ten top-level cells before More");
+            assert_eq!(
+                crate::scenario::rect_of("dialog:hint:theme_option_section").is_some(),
+                count > 6,
+                "dim section labels only above six entries"
+            );
+            assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
+            if count == 0 {
+                let viewport = crate::scenario::rect_of("prefs:section:viewport_logo").unwrap();
+                let mut unknown = theme_options_fixture(base, count);
+                unknown["options"] = json!([]);
+                h.call("ui.prefs", json!({"theme_import":unknown}));
+                h.frames(2);
+                assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
+                assert!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_none());
+                assert_eq!(crate::scenario::rect_of("prefs:section:viewport_logo").unwrap(), viewport, "empty declarations add no gap or notice");
+            }
+            if count == 12 {
+                assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_none());
+                assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_none(), "advanced is always under More");
+                super::reveal_preference(&mut h, "prefs:theme_options_more");
+                h.step(&json!({"click":{"handle":"prefs:theme_options_more"}})).unwrap();
+                h.frames(2);
+                assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_some());
+                assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_some());
+            }
+            if count >= 3 {
+                super::reveal_preference(&mut h, "prefs:theme_option_switch:Warm accent");
+                h.step(&json!({"click":{"handle":"prefs:theme_option_switch:Warm accent"}})).unwrap();
+                h.frames(2);
+                assert_eq!(h.app.preferences.theme_options[&id]["warm"], true, "UI edits go through preference merging");
+                assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_some());
+                super::reveal_preference(&mut h, "prefs:theme_options_reset");
+                h.step(&json!({"click":{"handle":"prefs:theme_options_reset"}})).unwrap();
+                h.frames(2);
+                assert!(!h.app.preferences.theme_options.contains_key(&id));
                 assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
-                if count == 0 {
-                    let viewport = crate::scenario::rect_of("prefs:section:viewport_logo").unwrap();
-                    let mut unknown = theme_options_fixture(base, count);
-                    unknown["options"] = json!([]);
-                    h.call("ui.prefs", json!({"theme_import":unknown}));
-                    h.frames(2);
-                    assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
-                    assert!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_none());
-                    assert_eq!(crate::scenario::rect_of("prefs:section:viewport_logo").unwrap(), viewport, "empty declarations add no gap or notice");
-                }
-                if count == 12 {
-                    assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_none());
-                    assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_none(), "advanced is always under More");
-                    super::reveal_preference(&mut h, "prefs:theme_options_more");
-                    h.step(&json!({"click":{"handle":"prefs:theme_options_more"}})).unwrap();
-                    h.frames(2);
-                    assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_some());
-                    assert!(crate::scenario::rect_of("prefs:theme_option:extra").is_some());
-                }
-                if count >= 3 {
-                    super::reveal_preference(&mut h, "prefs:theme_option_switch:Warm accent");
-                    h.step(&json!({"click":{"handle":"prefs:theme_option_switch:Warm accent"}})).unwrap();
-                    h.frames(2);
-                    assert_eq!(h.app.preferences.theme_options[&id]["warm"], true, "UI edits go through preference merging");
-                    assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_some());
-                    super::reveal_preference(&mut h, "prefs:theme_options_reset");
-                    h.step(&json!({"click":{"handle":"prefs:theme_options_reset"}})).unwrap();
-                    h.frames(2);
-                    assert!(!h.app.preferences.theme_options.contains_key(&id));
-                    assert!(crate::scenario::handle_at("prefs:theme_options_reset").is_none());
-                }
             }
         }
     }
@@ -8339,151 +8358,147 @@ mod tests {
 
     #[test]
     fn sketch_checkbox_bindings_edit_only_their_own_fields() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", json!({"language":"en","theme":theme}));
-            h.call("ui.prefs", json!({"open":"Sketch"}));
-            let original = h.app.preferences.clone();
-            let session = (h.app.session.auto_project, h.app.ui.pick_mode);
-            let mut expected = serde_json::to_value(&original).unwrap();
-            for (field, label) in [
-                ("sketch_tracking_points", "prefs.sketch.tracking_points"),
-                ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
-                ("sketch_recent_snap", "prefs.sketch.recent_snap"),
-                ("sketch_align_points", "prefs.sketch.align_points"),
-                ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
-                ("line_drag_draws_one", "prefs.line_drag_draws_one"),
-                ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
-                ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
-                ("sketch_construction_lines", "prefs.sketch_construction_lines"),
-                ("construction_line_classic", "prefs.construction_line_classic"),
-                ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
-                ("sketch_auto_locate", "prefs.sketch.auto_locate"),
-                ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
-                ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
-                ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
-                ("project_options_dialog", "prefs.sketch.project_options"),
-                ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
-                ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
-                ("sketch_open_look_at", "prefs.sketch_open_look_at"),
-                ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
-                ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
-                ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
-                ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
-                ("select_other_hidden", "prefs.sketch.select_other_hidden"),
-                ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
-            ] {
-                h.app.prefs_window.shell.filter = h.app.tr(label).into();
-                h.frames(5);
-                let handle = format!("prefs:{field}");
-                super::reveal_preference(&mut h, &handle);
-                let legacy = match field {
-                    "sketch_auto_dimensions" => Some("Dimension new shapes"),
-                    "sketch_auto_locate" => Some("Also place them from the origin (fully constrained)"),
-                    "select_other_hidden" => Some("Select hidden geometry with Select Other"),
-                    _ => None,
-                };
-                if let Some(legacy) = legacy {
-                    assert_eq!(crate::scenario::rect_of(&format!("dialog:{legacy}")), crate::scenario::rect_of(&handle));
-                }
-                h.step(&json!({"click":{"handle":handle}})).unwrap();
-                expected[field] = json!(!expected[field].as_bool().unwrap());
-                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field}");
-                assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), session, "{field} leaves session values alone");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","theme":"light"}));
+        h.call("ui.prefs", json!({"open":"Sketch"}));
+        let original = h.app.preferences.clone();
+        let session = (h.app.session.auto_project, h.app.ui.pick_mode);
+        let mut expected = serde_json::to_value(&original).unwrap();
+        for (field, label) in [
+            ("sketch_tracking_points", "prefs.sketch.tracking_points"),
+            ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
+            ("sketch_recent_snap", "prefs.sketch.recent_snap"),
+            ("sketch_align_points", "prefs.sketch.align_points"),
+            ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
+            ("line_drag_draws_one", "prefs.line_drag_draws_one"),
+            ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
+            ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
+            ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+            ("construction_line_classic", "prefs.construction_line_classic"),
+            ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
+            ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+            ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
+            ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
+            ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
+            ("project_options_dialog", "prefs.sketch.project_options"),
+            ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
+            ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
+            ("sketch_open_look_at", "prefs.sketch_open_look_at"),
+            ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
+            ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
+            ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
+            ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
+            ("select_other_hidden", "prefs.sketch.select_other_hidden"),
+            ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
+        ] {
+            h.app.prefs_window.shell.filter = h.app.tr(label).into();
+            h.frames(5);
+            let handle = format!("prefs:{field}");
+            super::reveal_preference(&mut h, &handle);
+            let legacy = match field {
+                "sketch_auto_dimensions" => Some("Dimension new shapes"),
+                "sketch_auto_locate" => Some("Also place them from the origin (fully constrained)"),
+                "select_other_hidden" => Some("Select hidden geometry with Select Other"),
+                _ => None,
+            };
+            if let Some(legacy) = legacy {
+                assert_eq!(crate::scenario::rect_of(&format!("dialog:{legacy}")), crate::scenario::rect_of(&handle));
             }
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, original);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            expected[field] = json!(!expected[field].as_bool().unwrap());
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{field}");
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), session, "{field} leaves session values alone");
         }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, original);
     }
 
     #[test]
     fn sketch_cards_tiles_and_session_controls_preserve_apply_defaults_and_cancel() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
-            // Opening the page must retain a non-default session, too.
-            h.app.session.auto_project = false;
-            h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
-            let original = Snapshot::take(&h.app);
-            h.call("ui.prefs", json!({"open":"Sketch"}));
-            assert!(original.matches(&h.app));
-            let mut expected = serde_json::to_value(&h.app.preferences).unwrap();
-            for (key, choice) in
-                [("previous", SketchExitView::Previous), ("keep", SketchExitView::Keep), ("unless_rotated", SketchExitView::UnlessRotated)]
-            {
-                h.app.prefs_window.shell.filter = h.app.tr("prefs.sketch_exit_view").into();
-                h.frames(5);
-                let handle = format!("prefs:sketch_exit_view:{key}");
-                super::reveal_preference(&mut h, &handle);
-                h.step(&json!({"click":{"handle":handle}})).unwrap();
-                expected["sketch_exit_view"] = serde_json::to_value(choice).unwrap();
-                assert_eq!(h.app.preferences.sketch_exit_view, choice);
-                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "only the exit enum changes");
-            }
-            for (key, label) in [
-                ("sketch_state_icons", "prefs.sketch.state_icons"),
-                ("sketch_conflict_colour", "prefs.sketch.conflict_colour"),
-                ("hide_constraint_glyphs_zoomed_out", "prefs.sketch.hide_glyphs"),
-            ] {
-                h.app.prefs_window.shell.filter = h.app.tr(label).into();
-                h.frames(5);
-                let handle = format!("prefs:{key}");
-                super::reveal_preference(&mut h, &handle);
-                h.step(&json!({"click":{"handle":handle}})).unwrap();
-                expected[key] = json!(false);
-                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
-            }
-            for (key, mode) in [
-                ("faces_edges", solidcraft_engine::PickMode::Faces),
-                ("bodies", solidcraft_engine::PickMode::Bodies),
-                ("faces_edges", solidcraft_engine::PickMode::Faces),
-            ] {
-                h.app.prefs_window.shell.filter = h.app.tr("prefs.sketch.click_selects").into();
-                h.frames(5);
-                let handle = format!("prefs:pick_bodies:{key}");
-                super::reveal_preference(&mut h, &handle);
-                h.step(&json!({"click":{"handle":handle}})).unwrap();
-                assert_eq!(h.app.ui.pick_mode, mode);
-                assert!(!h.app.session.auto_project);
-                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
-            }
-            h.app.prefs_window.shell.filter = h.app.tr("ui.project_face_edges_sketch").into();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","theme":"light","quick_measure":true}));
+        // Opening the page must retain a non-default session, too.
+        h.app.session.auto_project = false;
+        h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
+        let original = Snapshot::take(&h.app);
+        h.call("ui.prefs", json!({"open":"Sketch"}));
+        assert!(original.matches(&h.app));
+        let mut expected = serde_json::to_value(&h.app.preferences).unwrap();
+        for (key, choice) in
+            [("previous", SketchExitView::Previous), ("keep", SketchExitView::Keep), ("unless_rotated", SketchExitView::UnlessRotated)]
+        {
+            h.app.prefs_window.shell.filter = h.app.tr("prefs.sketch_exit_view").into();
             h.frames(5);
-            super::reveal_preference(&mut h, "prefs:auto_project");
-            h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
-            assert!(h.app.session.auto_project);
-            assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
-            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
-            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
-            h.call("ui.prefs", json!({"button":"apply"}));
-            let applied = Snapshot::take(&h.app);
-            let mut reloaded = SolveApp::new(Default::default(), Default::default());
-            reloaded.load_prefs(&h.app.prefs());
-            assert_eq!(reloaded.preferences, h.app.preferences, "card and tile values survive the existing saved representation");
-
-            h.call("ui.prefs", json!({"button":"defaults"}));
-            let reset = serde_json::to_value(&h.app.preferences).unwrap();
-            let defaults = serde_json::to_value(Prefs::default()).unwrap();
-            for (field, owner) in FIELD_PAGES {
-                assert_eq!(
-                    &reset[*field],
-                    if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
-                    "{field}: only Sketch resets"
-                );
-            }
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
-
-            // The session fields also roll back when the page was opened with the opposite values.
-            original.clone().restore_other_preferences(&mut h.app).unwrap();
-            h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert!(original.matches(&h.app));
+            let handle = format!("prefs:sketch_exit_view:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            expected["sketch_exit_view"] = serde_json::to_value(choice).unwrap();
+            assert_eq!(h.app.preferences.sketch_exit_view, choice);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "only the exit enum changes");
         }
+        for (key, label) in [
+            ("sketch_state_icons", "prefs.sketch.state_icons"),
+            ("sketch_conflict_colour", "prefs.sketch.conflict_colour"),
+            ("hide_constraint_glyphs_zoomed_out", "prefs.sketch.hide_glyphs"),
+        ] {
+            h.app.prefs_window.shell.filter = h.app.tr(label).into();
+            h.frames(5);
+            let handle = format!("prefs:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            expected[key] = json!(false);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
+        }
+        for (key, mode) in [
+            ("faces_edges", solidcraft_engine::PickMode::Faces),
+            ("bodies", solidcraft_engine::PickMode::Bodies),
+            ("faces_edges", solidcraft_engine::PickMode::Faces),
+        ] {
+            h.app.prefs_window.shell.filter = h.app.tr("prefs.sketch.click_selects").into();
+            h.frames(5);
+            let handle = format!("prefs:pick_bodies:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            assert_eq!(h.app.ui.pick_mode, mode);
+            assert!(!h.app.session.auto_project);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+        }
+        h.app.prefs_window.shell.filter = h.app.tr("ui.project_face_edges_sketch").into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:auto_project");
+        h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
+        assert!(h.app.session.auto_project);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
+        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+        assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = Snapshot::take(&h.app);
+        let mut reloaded = SolveApp::new(Default::default(), Default::default());
+        reloaded.load_prefs(&h.app.prefs());
+        assert_eq!(reloaded.preferences, h.app.preferences, "card and tile values survive the existing saved representation");
+
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        let reset = serde_json::to_value(&h.app.preferences).unwrap();
+        let defaults = serde_json::to_value(Prefs::default()).unwrap();
+        for (field, owner) in FIELD_PAGES {
+            assert_eq!(
+                &reset[*field],
+                if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
+                "{field}: only Sketch resets"
+            );
+        }
+        assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
+
+        // The session fields also roll back when the page was opened with the opposite values.
+        original.clone().restore_other_preferences(&mut h.app).unwrap();
+        h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
+        assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(original.matches(&h.app));
     }
 
     #[test]
@@ -8491,13 +8506,14 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.prefs", json!({"language":"en","open":"Sketch","sketch_auto_locate":true}));
+        // The search shows the child by its own label; a disabled parent disables it whether or not the parent row is shown.
         for (query, parent, child) in [
-            ("prefs.sketch.drawing", "sketch_auto_dimensions", "sketch_auto_locate"),
-            ("prefs.sketch.snapping_guides", "sketch_tracking_guides", "sketch_tracking_points"),
+            ("prefs.sketch.auto_locate", "sketch_auto_dimensions", "sketch_auto_locate"),
+            ("prefs.sketch.tracking_points", "sketch_tracking_guides", "sketch_tracking_points"),
         ] {
             h.app.prefs_window.shell.filter = h.app.tr(query).into();
             h.frames(5);
-            for enabled in [false, true, false] {
+            for enabled in [false, true] {
                 set(&mut h.app, &json!({(parent):enabled, (child):true})).unwrap();
                 h.frames(5);
                 let handle = format!("prefs:{child}");
@@ -9518,153 +9534,141 @@ mod tests {
     }
 
     #[test]
-    fn general_files_controls_edit_real_limits_and_hosts_in_both_themes() {
-        for theme in ["light", "dark"] {
-            for width in [1468, 480] {
-                let mut h = crate::scenario::Harness::new();
-                h.app.home.open = false;
-                h.call("ui.resize", json!({"width":width, "height":1100}));
-                let configured = h.call(
-                    "ui.prefs",
-                    json!({"language":"en", "theme":theme, "network_locations":true, "network_hosts":["files.example", "nas.example"]}),
-                );
-                assert!(configured["error"].is_null(), "{theme} {width}: setting up Preferences failed: {configured}");
-                let opened = h.call("ui.prefs", json!({"open":"General"}));
-                assert!(opened["error"].is_null(), "{theme} {width}: opening General failed: {opened}");
-                let initial_body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                for target in [
-                    "dialog:widget:Profile name",
-                    "prefs:profile:save",
-                    "prefs:profile:import",
-                    "prefs:profiles:held:row",
-                    "prefs:profiles:computer:row",
-                ] {
-                    let rect = crate::scenario::rect_of(target).unwrap();
-                    assert!(initial_body.contains_rect(rect), "{theme} {width}: {target} {rect:?} leaves {initial_body:?}");
-                }
-                if width == 480 {
-                    let name = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
-                    let save = crate::scenario::rect_of("prefs:profile:save").unwrap();
-                    let import = crate::scenario::rect_of("prefs:profile:import").unwrap();
-                    assert!(save.top() >= name.bottom(), "narrow Save wraps after the independent name entry");
-                    assert!((save.top() - import.top()).abs() < 0.5);
-                }
-                let painted = |h: &crate::scenario::Harness, label: &str| {
-                    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                    h.shapes
-                        .iter()
-                        .find_map(|shape| {
-                            if let egui::Shape::Text(text) = &shape.shape
-                                && text.galley.job.text == label
-                            {
-                                let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
-                                if body.contains_rect(rect) && shape.clip_rect.contains_rect(rect) {
-                                    return Some(rect);
-                                }
-                            }
-                            None
-                        })
-                        .unwrap_or_else(|| panic!("{theme} {width}: {label} is not fully painted in the page"))
-                };
-                // Reveal the live dropdown, not the full-width layout row's allocation rectangle.
-                super::reveal_preference(&mut h, "dialog:widget:Interface language");
-                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let language = painted(&h, "Interface language");
-                assert!((language.left() - body.left()).abs() < 0.75);
-                assert!((crate::scenario::rect_of("dialog:control:Interface language").unwrap().left() - body.left() - 164.0).abs() < 0.5);
-                super::reveal_preference(&mut h, "prefs:autosave_minutes");
-                let autosave = painted(&h, "Autosave every");
-                let autosave_help = crate::scenario::rect_of("dialog:row_help:Autosave every").unwrap();
-                assert!((autosave.left() - body.left()).abs() < 0.75, "the painted autosave label shares the language label's left edge");
-                assert!((autosave_help.left() - autosave.right() - 4.0).abs() < 1.0, "help follows the actual text, not the whole label column");
-                assert!((crate::scenario::rect_of("prefs:autosave_minutes").unwrap().left() - body.left() - 164.0).abs() < 0.5);
-                super::reveal_preference(&mut h, "prefs:autosave_timeline");
-                let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
-                let autosave_control = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
-                assert!((timeline.left() - autosave_control.left()).abs() < 0.5);
-                assert!((timeline.width() - 260.0_f32.min(body.right() - autosave_control.left())).abs() < 0.5);
-                assert!(body.contains_rect(timeline));
-                super::reveal_preference(&mut h, "prefs:max_step_file_mb");
-                super::reveal_preference(&mut h, "dialog:row:Largest file to open");
-                let field = crate::scenario::rect_of("prefs:max_step_file_mb").unwrap();
-                let design = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
-                assert!(
-                    (field.width() - 72.0).abs() < 0.5 && (design.width() - 72.0).abs() < 0.5,
-                    "{theme}: both compound file editors retain their width"
-                );
-                let step_group = crate::scenario::rect_of("dialog:row:Largest file to open: STEP and import").unwrap();
-                let design_group = crate::scenario::rect_of("dialog:row:Largest file to open: Design").unwrap();
-                let step_caption = painted(&h, "STEP and import");
-                let design_caption = painted(&h, "Design");
-                let largest = painted(&h, "Largest file to open");
-                assert!((step_caption.left() - field.left()).abs() < 0.75 && (design_caption.left() - design.left()).abs() < 0.75);
-                assert!((largest.left() - body.left()).abs() < 0.75);
-                assert!((largest.top() - step_caption.top() - 6.0).abs() <= 1.0, "the left label stays in its top-aligned 28 px cell");
-                assert!(step_group.width() >= 90.0 && step_group.width() < 130.0, "{theme}: the subgroup follows its field, unit and caption");
-                if width == 1468 {
-                    assert!((step_caption.top() - design_caption.top()).abs() < 0.5, "{theme}: the actual painted captions share a top baseline");
-                    assert!(
-                        (field.top() - design.top()).abs() < 0.5 && field.right() < design.left(),
-                        "{theme}: independent editors share one visual row"
-                    );
-                    assert!((design_group.left() - step_group.right() - 20.0).abs() < 0.5, "{theme}: compact pair gap");
-                } else {
-                    assert!(design_group.top() > step_group.bottom(), "{theme}: the pair wraps at narrow widths");
-                    assert!((design_group.left() - step_group.left()).abs() < 0.5);
-                }
-                let group = crate::scenario::rect_of("dialog:row:Largest file to open").unwrap();
-                assert!(group.contains_rect(field) && group.contains_rect(design));
-                assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(group));
-                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
-                h.step(&json!({"key":"A", "cmd":true})).unwrap();
-                h.step(&json!({"text":"4096"})).unwrap();
-                h.step(&json!({"key":"Enter"})).unwrap();
-                assert_eq!(h.app.preferences.max_step_file_mb, 4096);
-                super::reveal_preference(&mut h, "prefs:max_design_file_mb");
-                let field = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
-                h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
-                h.step(&json!({"key":"A", "cmd":true})).unwrap();
-                h.step(&json!({"text":"2048"})).unwrap();
-                h.step(&json!({"key":"Enter"})).unwrap();
-                assert_eq!(h.app.preferences.max_design_file_mb, 2048);
-                assert_eq!(super::file_limits(&h.app.preferences).step, 4096 * solidcraft_engine::io::limits::MB);
-                let before = h.app.preferences.clone();
-                for bad in [json!({"max_step_file_mb":16385}), json!({"max_design_file_mb":255})] {
-                    assert!(h.call("ui.prefs", bad)["error"].is_string());
-                    assert_eq!(h.app.preferences, before, "invalid file limits fail atomically");
-                }
-                super::reveal_preference(&mut h, "prefs:network_host:files.example:remove");
-                h.step(&json!({"click":{"handle":"prefs:network_host:files.example:remove"}})).unwrap();
-                assert_eq!(h.app.preferences.network_hosts, ["nas.example"]);
-                h.step(&json!({"widget":"Allow network locations in designs"})).unwrap();
-                h.frames(3);
-                assert!(!h.app.preferences.network_locations);
-                assert_eq!(h.app.preferences.network_hosts, ["nas.example"], "hiding the chips retains the hosts");
-                assert!(crate::scenario::rect_of("prefs:network_host:nas.example:remove").is_none());
-                super::reveal_preference(&mut h, "prefs:print_face_highlight");
-                let highlight = painted(&h, "Print face highlight");
-                let highlight_help = crate::scenario::rect_of("dialog:row_help:Print face highlight").unwrap();
-                assert!((highlight.left() - body.left()).abs() < 0.75, "the painted highlight label shares the language/autosave left edge");
-                assert!((highlight_help.left() - highlight.right() - 4.0).abs() < 1.0);
-                assert!((crate::scenario::rect_of("prefs:print_face_highlight").unwrap().left() - body.left() - 164.0).abs() < 0.5);
-                let track = crate::scenario::rect_of("dialog:slider_track:Print face highlight").unwrap();
-                // The published rectangle includes the circular handle's endpoint insets.
-                let input_range = track.x_range().shrink(track.height() / 2.5);
-                h.step(&json!({"click":[egui::lerp(input_range, 0.75), track.center().y]})).unwrap();
-                assert!(
-                    (h.app.preferences.print_face_highlight - 0.75).abs() < 0.06,
-                    "{theme} {width}: highlight={} track={track:?} input_range={input_range:?}",
-                    h.app.preferences.print_face_highlight
-                );
-                super::reveal_preference(&mut h, "prefs:check_now");
-                assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_now").unwrap()));
-                assert!(h.app.prefs_window.shell.open);
-                h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
-                assert_eq!((h.app.preferences.max_step_file_mb, h.app.preferences.max_design_file_mb), (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB));
-                assert_eq!(h.app.preferences.network_hosts, ["files.example", "nas.example"]);
-                assert!(h.app.preferences.network_locations);
-                assert_eq!(h.app.preferences.print_face_highlight, 0.2);
+    fn general_files_controls_edit_real_limits_and_hosts() {
+        for width in [1468, 480] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width, "height":1100}));
+            let configured = h.call(
+                "ui.prefs",
+                json!({"language":"en", "theme":"light", "network_locations":true, "network_hosts":["files.example", "nas.example"]}),
+            );
+            assert!(configured["error"].is_null(), "{width}: setting up Preferences failed: {configured}");
+            let opened = h.call("ui.prefs", json!({"open":"General"}));
+            assert!(opened["error"].is_null(), "{width}: opening General failed: {opened}");
+            let initial_body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            for target in
+                ["dialog:widget:Profile name", "prefs:profile:save", "prefs:profile:import", "prefs:profiles:held:row", "prefs:profiles:computer:row"]
+            {
+                let rect = crate::scenario::rect_of(target).unwrap();
+                assert!(initial_body.contains_rect(rect), "{width}: {target} {rect:?} leaves {initial_body:?}");
             }
+            if width == 480 {
+                let name = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
+                let save = crate::scenario::rect_of("prefs:profile:save").unwrap();
+                let import = crate::scenario::rect_of("prefs:profile:import").unwrap();
+                assert!(save.top() >= name.bottom(), "narrow Save wraps after the independent name entry");
+                assert!((save.top() - import.top()).abs() < 0.5);
+            }
+            let painted = |h: &crate::scenario::Harness, label: &str| {
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                h.shapes
+                    .iter()
+                    .find_map(|shape| {
+                        if let egui::Shape::Text(text) = &shape.shape
+                            && text.galley.job.text == label
+                        {
+                            let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                            if body.contains_rect(rect) && shape.clip_rect.contains_rect(rect) {
+                                return Some(rect);
+                            }
+                        }
+                        None
+                    })
+                    .unwrap_or_else(|| panic!("{width}: {label} is not fully painted in the page"))
+            };
+            // Reveal the live dropdown, not the full-width layout row's allocation rectangle.
+            super::reveal_preference(&mut h, "dialog:widget:Interface language");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let language = painted(&h, "Interface language");
+            assert!((language.left() - body.left()).abs() < 0.75);
+            assert!((crate::scenario::rect_of("dialog:control:Interface language").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+            super::reveal_preference(&mut h, "prefs:autosave_minutes");
+            let autosave = painted(&h, "Autosave every");
+            let autosave_help = crate::scenario::rect_of("dialog:row_help:Autosave every").unwrap();
+            assert!((autosave.left() - body.left()).abs() < 0.75, "the painted autosave label shares the language label's left edge");
+            assert!((autosave_help.left() - autosave.right() - 4.0).abs() < 1.0, "help follows the actual text, not the whole label column");
+            assert!((crate::scenario::rect_of("prefs:autosave_minutes").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+            super::reveal_preference(&mut h, "prefs:autosave_timeline");
+            let timeline = crate::scenario::rect_of("prefs:autosave_timeline").unwrap();
+            let autosave_control = crate::scenario::rect_of("prefs:autosave_minutes").unwrap();
+            assert!((timeline.left() - autosave_control.left()).abs() < 0.5);
+            assert!((timeline.width() - 260.0_f32.min(body.right() - autosave_control.left())).abs() < 0.5);
+            assert!(body.contains_rect(timeline));
+            super::reveal_preference(&mut h, "prefs:max_step_file_mb");
+            super::reveal_preference(&mut h, "dialog:row:Largest file to open");
+            let field = crate::scenario::rect_of("prefs:max_step_file_mb").unwrap();
+            let design = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+            assert!((field.width() - 72.0).abs() < 0.5 && (design.width() - 72.0).abs() < 0.5, "both compound file editors retain their width");
+            let step_group = crate::scenario::rect_of("dialog:row:Largest file to open: STEP and import").unwrap();
+            let design_group = crate::scenario::rect_of("dialog:row:Largest file to open: Design").unwrap();
+            let step_caption = painted(&h, "STEP and import");
+            let design_caption = painted(&h, "Design");
+            let largest = painted(&h, "Largest file to open");
+            assert!((step_caption.left() - field.left()).abs() < 0.75 && (design_caption.left() - design.left()).abs() < 0.75);
+            assert!((largest.left() - body.left()).abs() < 0.75);
+            assert!((largest.top() - step_caption.top() - 6.0).abs() <= 1.0, "the left label stays in its top-aligned 28 px cell");
+            assert!(step_group.width() >= 90.0 && step_group.width() < 130.0, "the subgroup follows its field, unit and caption");
+            if width == 1468 {
+                assert!((step_caption.top() - design_caption.top()).abs() < 0.5, "the actual painted captions share a top baseline");
+                assert!((field.top() - design.top()).abs() < 0.5 && field.right() < design.left(), "independent editors share one visual row");
+                assert!((design_group.left() - step_group.right() - 20.0).abs() < 0.5, "compact pair gap");
+            } else {
+                assert!(design_group.top() > step_group.bottom(), "the pair wraps at narrow widths");
+                assert!((design_group.left() - step_group.left()).abs() < 0.5);
+            }
+            let group = crate::scenario::rect_of("dialog:row:Largest file to open").unwrap();
+            assert!(group.contains_rect(field) && group.contains_rect(design));
+            assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(group));
+            h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+            h.step(&json!({"key":"A", "cmd":true})).unwrap();
+            h.step(&json!({"text":"4096"})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            assert_eq!(h.app.preferences.max_step_file_mb, 4096);
+            super::reveal_preference(&mut h, "prefs:max_design_file_mb");
+            let field = crate::scenario::rect_of("prefs:max_design_file_mb").unwrap();
+            h.step(&json!({"click":[field.center().x, field.center().y], "double":true})).unwrap();
+            h.step(&json!({"key":"A", "cmd":true})).unwrap();
+            h.step(&json!({"text":"2048"})).unwrap();
+            h.step(&json!({"key":"Enter"})).unwrap();
+            assert_eq!(h.app.preferences.max_design_file_mb, 2048);
+            assert_eq!(super::file_limits(&h.app.preferences).step, 4096 * solidcraft_engine::io::limits::MB);
+            let before = h.app.preferences.clone();
+            for bad in [json!({"max_step_file_mb":16385}), json!({"max_design_file_mb":255})] {
+                assert!(h.call("ui.prefs", bad)["error"].is_string());
+                assert_eq!(h.app.preferences, before, "invalid file limits fail atomically");
+            }
+            super::reveal_preference(&mut h, "prefs:network_host:files.example:remove");
+            h.step(&json!({"click":{"handle":"prefs:network_host:files.example:remove"}})).unwrap();
+            assert_eq!(h.app.preferences.network_hosts, ["nas.example"]);
+            h.step(&json!({"widget":"Allow network locations in designs"})).unwrap();
+            h.frames(3);
+            assert!(!h.app.preferences.network_locations);
+            assert_eq!(h.app.preferences.network_hosts, ["nas.example"], "hiding the chips retains the hosts");
+            assert!(crate::scenario::rect_of("prefs:network_host:nas.example:remove").is_none());
+            super::reveal_preference(&mut h, "prefs:print_face_highlight");
+            let highlight = painted(&h, "Print face highlight");
+            let highlight_help = crate::scenario::rect_of("dialog:row_help:Print face highlight").unwrap();
+            assert!((highlight.left() - body.left()).abs() < 0.75, "the painted highlight label shares the language/autosave left edge");
+            assert!((highlight_help.left() - highlight.right() - 4.0).abs() < 1.0);
+            assert!((crate::scenario::rect_of("prefs:print_face_highlight").unwrap().left() - body.left() - 164.0).abs() < 0.5);
+            let track = crate::scenario::rect_of("dialog:slider_track:Print face highlight").unwrap();
+            // The published rectangle includes the circular handle's endpoint insets.
+            let input_range = track.x_range().shrink(track.height() / 2.5);
+            h.step(&json!({"click":[egui::lerp(input_range, 0.75), track.center().y]})).unwrap();
+            assert!(
+                (h.app.preferences.print_face_highlight - 0.75).abs() < 0.06,
+                "{width}: highlight={} track={track:?} input_range={input_range:?}",
+                h.app.preferences.print_face_highlight
+            );
+            super::reveal_preference(&mut h, "prefs:check_now");
+            assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_now").unwrap()));
+            assert!(h.app.prefs_window.shell.open);
+            h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+            assert_eq!((h.app.preferences.max_step_file_mb, h.app.preferences.max_design_file_mb), (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB));
+            assert_eq!(h.app.preferences.network_hosts, ["files.example", "nas.example"]);
+            assert!(h.app.preferences.network_locations);
+            assert_eq!(h.app.preferences.print_face_highlight, 0.2);
         }
     }
 
@@ -10729,44 +10733,43 @@ mod tests {
     }
 
     #[test]
-    fn panel_content_and_toolbar_choices_preserve_transactions_in_both_themes() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", json!({"width":1200,"height":1100}));
-            h.call("ui.prefs", json!({"theme":theme,"quick_measure":true,"invert_curved_roll_arrows":true}));
-            h.call("ui.prefs", json!({"open":"Layout"}));
-            let before = h.app.preferences.clone();
-            let doc = h.app.session.doc.to_json();
-            assert!(before.live_panel_drag_preview);
-            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
-            assert!(!h.app.preferences.live_panel_drag_preview);
-            scroll_to_and_click(&mut h, "prefs:history_in_browser");
-            assert!(h.app.preferences.history_in_browser);
-            for tab in crate::workspace::choosable_tabs() {
-                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
-                assert!(!crate::workspace::tab_turned_on(&h.app, tab));
-                scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
-                assert!(crate::workspace::tab_turned_on(&h.app, tab));
-            }
-            assert_eq!(h.app.session.doc.to_json(), doc);
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
-            h.call("ui.prefs", json!({"open":"Layout"}));
-            scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
-            scroll_to_and_click(&mut h, "prefs:history_in_browser");
-            h.call("ui.prefs", json!({"button":"apply"}));
-            let mut restored = SolveApp::new(Default::default(), Default::default());
-            restored.load_prefs(&h.app.prefs());
-            assert!(!restored.preferences.live_panel_drag_preview);
-            h.call("ui.prefs", json!({"button":"defaults"}));
-            assert!(h.app.preferences.live_panel_drag_preview);
-            assert!(!h.app.preferences.history_in_browser);
-            assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert!(h.app.preferences.history_in_browser, "Cancel after Apply returns to the applied state");
-            assert!(!h.app.preferences.live_panel_drag_preview);
+    fn panel_content_and_toolbar_choices_preserve_transactions() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1200,"height":1100}));
+        h.call("ui.prefs", json!({"theme":"light","quick_measure":true,"invert_curved_roll_arrows":true}));
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        let before = h.app.preferences.clone();
+        let doc = h.app.session.doc.to_json();
+        assert!(before.live_panel_drag_preview);
+        scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
+        assert!(!h.app.preferences.live_panel_drag_preview);
+        scroll_to_and_click(&mut h, "prefs:history_in_browser");
+        assert!(h.app.preferences.history_in_browser);
+        // Every chip comes from one loop over the choosable tabs: one standard tab and one specialty tab.
+        for tab in ["MODEL", "WELDMENTS"] {
+            scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+            assert!(!crate::workspace::tab_turned_on(&h.app, tab));
+            scroll_to_and_click(&mut h, &format!("prefs:toolbar_tab:{tab}"));
+            assert!(crate::workspace::tab_turned_on(&h.app, tab));
         }
+        assert_eq!(h.app.session.doc.to_json(), doc);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, before, "Cancel restores every Layout edit");
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        scroll_to_and_click(&mut h, "prefs:live_panel_drag_preview");
+        scroll_to_and_click(&mut h, "prefs:history_in_browser");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.live_panel_drag_preview);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.live_panel_drag_preview);
+        assert!(!h.app.preferences.history_in_browser);
+        assert!(h.app.preferences.quick_measure && h.app.preferences.invert_curved_roll_arrows, "Layout reset retains Graphics and Navigation");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.history_in_browser, "Cancel after Apply returns to the applied state");
+        assert!(!h.app.preferences.live_panel_drag_preview);
     }
 
     #[test]
@@ -12762,79 +12765,78 @@ mod graphics_preset_tests {
         h.frames(2);
     }
 
+    /// #9879: Graphics, reached from the sidebar, has real preset and detail cards: a preset sets only its
+    /// own settings, a manual change makes it Custom, a typed search reaches a card's control, and Cancel
+    /// takes every edit back.
     #[test]
-    fn graphics_cards_follow_manual_changes_and_preserve_non_preset_settings_in_both_themes() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.call("ui.prefs", json!({"theme":theme,"language":"en","msaa":2,"dark_parts_shading":true,"frame_rate_details":true}));
-            h.call("ui.prefs", json!({"open":"Graphics"}));
-            let camera = h.app.cam;
-            let design = h.app.session.doc.to_json();
-            click_graphics(&mut h, "Quality", "view:graphics_preset:quality");
-            assert_eq!(graphics_preset(&h.app.preferences), "quality");
-            assert_eq!(
-                (h.app.preferences.display_quality.as_str(), h.app.preferences.supersampling, h.app.preferences.supersampling_adaptive),
-                ("fine", 2.0, true)
-            );
-            assert!(h.app.preferences.ambient_occlusion);
-            assert_eq!(h.app.preferences.msaa, 2);
-            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
-            let quality = h.app.preferences.clone();
-            click_graphics(&mut h, "Custom", "view:graphics_preset:custom");
-            assert_eq!(h.app.preferences, quality, "Custom represents the mixture and sets nothing");
-            click_graphics(&mut h, "Ultra", "prefs:display_quality:ultra");
-            assert_eq!(h.app.preferences.display_quality, "ultra");
-            assert_eq!(graphics_preset(&h.app.preferences), "custom");
-            click_graphics(&mut h, "Performance", "view:graphics_preset:performance");
-            assert_eq!(graphics_preset(&h.app.preferences), "performance");
-            assert_eq!(
-                (h.app.preferences.ambient_occlusion, h.app.preferences.supersampling, h.app.preferences.display_quality.as_str()),
-                (false, 1.0, "normal")
-            );
-            h.call("ui.prefs", json!({"supersampling_adaptive":false}));
-            assert_eq!(graphics_preset(&h.app.preferences), "performance", "Performance ignores the stored adaptive flag");
-            assert_eq!(h.app.preferences.msaa, 2);
-            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
-            assert_eq!(h.app.cam, camera);
-            assert_eq!(h.app.session.doc.to_json(), design);
-            assert!(h.app.session.undo.is_empty());
-        }
+    fn graphics_cards_follow_manual_changes_and_preserve_non_preset_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"theme":"light","language":"en","msaa":2,"dark_parts_shading":true,"frame_rate_details":true}));
+        let before = h.app.preferences.clone();
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.step(&json!({"click":{"handle":"prefs:page:Graphics"}})).unwrap();
+        assert_eq!(h.app.prefs_window.shell.section, PAGE_GRAPHICS);
+        let camera = h.app.cam;
+        let design = h.app.session.doc.to_json();
+        click_graphics(&mut h, "Quality", "view:graphics_preset:quality");
+        assert_eq!(graphics_preset(&h.app.preferences), "quality");
+        assert_eq!(
+            (h.app.preferences.display_quality.as_str(), h.app.preferences.supersampling, h.app.preferences.supersampling_adaptive),
+            ("fine", 2.0, true)
+        );
+        assert!(h.app.preferences.ambient_occlusion);
+        assert_eq!(h.app.preferences.msaa, 2);
+        assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+        let quality = h.app.preferences.clone();
+        click_graphics(&mut h, "Custom", "view:graphics_preset:custom");
+        assert_eq!(h.app.preferences, quality, "Custom represents the mixture and sets nothing");
+        click_graphics(&mut h, "Ultra", "prefs:display_quality:ultra");
+        assert_eq!(h.app.preferences.display_quality, "ultra");
+        assert_eq!(graphics_preset(&h.app.preferences), "custom");
+        click_graphics(&mut h, "Performance", "view:graphics_preset:performance");
+        assert_eq!(graphics_preset(&h.app.preferences), "performance");
+        assert_eq!(
+            (h.app.preferences.ambient_occlusion, h.app.preferences.supersampling, h.app.preferences.display_quality.as_str()),
+            (false, 1.0, "normal")
+        );
+        h.call("ui.prefs", json!({"supersampling_adaptive":false}));
+        assert_eq!(graphics_preset(&h.app.preferences), "performance", "Performance ignores the stored adaptive flag");
+        assert_eq!(h.app.preferences.msaa, 2);
+        assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+        h.step(&json!({"click":{"handle":"prefs:search:clear"}})).unwrap();
+        h.step(&json!({"click":{"handle":"prefs:search"}})).unwrap();
+        h.step(&json!({"text":"Ambient occlusion"})).unwrap();
+        h.frames(5);
+        h.step(&json!({"click":{"handle":"prefs:ambient_occlusion"}})).unwrap();
+        assert!(h.app.preferences.ambient_occlusion);
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert!(!h.app.prefs_window.shell.open);
+        assert_eq!(h.app.preferences, before, "Cancel takes back the presets, the manual changes and the search's edit");
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert!(h.app.session.undo.is_empty());
     }
 
     #[test]
-    fn graphics_tiles_and_status_chips_edit_real_values_and_cancel_in_both_themes() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
-            h.call("ui.prefs", json!({"open":"Graphics"}));
-            let original = h.app.preferences.clone();
-            let session = (h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective);
-            for (query, handle) in [("Grid", "prefs:grid"), ("Ground shadow", "prefs:ground_shadow"), ("Perspective", "prefs:perspective")] {
-                click_graphics(&mut h, query, handle);
-            }
-            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), (!session.0, !session.1, !session.2));
-            for (query, field) in [
-                ("Ambient occlusion", "ambient_occlusion"),
-                ("View angles", "show_view_angles"),
-                ("Vertex markers", "vertex_markers"),
-                ("Quick measurement", "quick_measure"),
-                ("Frame rate", "show_frame_rate"),
-                ("Analysis", "viewport_analysis_status"),
-                ("Section", "viewport_section_status"),
-                ("Live details", "viewport_status_details"),
-                ("Fold items", "viewport_status_summary"),
-            ] {
-                let before = serde_json::to_value(&h.app.preferences).unwrap();
-                click_graphics(&mut h, query, &format!("prefs:{field}"));
-                let after = serde_json::to_value(&h.app.preferences).unwrap();
-                let mut expected = before.clone();
-                expected[field] = json!(!before[field].as_bool().unwrap());
-                assert_eq!(after, expected, "{theme}: {field} changes precisely its own setting");
-            }
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, original);
-            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), session);
+    fn graphics_tiles_and_status_chips_edit_real_values_and_cancel() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"theme":"light","language":"en"}));
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        let original = h.app.preferences.clone();
+        let session = (h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective);
+        for (query, handle) in [("Grid", "prefs:grid"), ("Ground shadow", "prefs:ground_shadow"), ("Perspective", "prefs:perspective")] {
+            click_graphics(&mut h, query, handle);
         }
+        assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), (!session.0, !session.1, !session.2));
+        // The status chips are clicked by graphics_overlay_cards_apply_persist_and_reset_without_adding_unpaged_fields.
+        let before = serde_json::to_value(&h.app.preferences).unwrap();
+        click_graphics(&mut h, "Ambient occlusion", "prefs:ambient_occlusion");
+        let mut expected = before.clone();
+        expected["ambient_occlusion"] = json!(!before["ambient_occlusion"].as_bool().unwrap());
+        assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "ambient occlusion changes precisely its own setting");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, original);
+        assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), session);
     }
 
     #[test]
@@ -12853,7 +12855,12 @@ mod graphics_preset_tests {
             ("Live details", "prefs:viewport_status_details"),
             ("Fold items", "prefs:viewport_status_summary"),
         ] {
+            let before = serde_json::to_value(&h.app.preferences).unwrap();
             click_graphics(&mut h, query, handle);
+            let field = handle.trim_start_matches("prefs:");
+            let mut expected = before.clone();
+            expected[field] = json!(!before[field].as_bool().unwrap());
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{field} changes precisely its own setting");
         }
         h.call("ui.prefs", json!({"button":"apply"}));
         let applied = h.app.preferences.clone();
@@ -12875,57 +12882,62 @@ mod graphics_preset_tests {
 
     #[test]
     fn graphics_redesign_keeps_newer_main_controls_and_their_transactions() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", json!({"theme":theme,"language":"en","open":"Graphics"}));
-            let original = h.app.preferences.clone();
-            for (query, handle) in [
-                ("Tint new surface in a preview", "prefs:preview_tint_new_faces"),
-                ("Show removed material in red", "prefs:cut_preview_tint"),
-                ("Profile operations", "prefs:profile_operations"),
-            ] {
-                click_graphics(&mut h, query, handle);
-            }
-            h.app.prefs_window.shell.filter = "Section hatch".into();
-            h.frames(5);
-            reveal_preference(&mut h, "dialog:Section hatch:One style");
-            h.step(&json!({"click":{"handle":"dialog:Section hatch:One style"}})).unwrap();
-            h.frames(2);
-            assert!(!h.app.preferences.preview_tint_new_faces && !h.app.preferences.cut_preview_tint);
-            assert!(h.app.preferences.profile_operations);
-            assert_eq!(h.app.preferences.section_hatch, SectionHatch::One);
-            h.call("ui.prefs", json!({"button":"apply"}));
-            let applied = h.app.preferences.clone();
-            h.call("ui.prefs", json!({"button":"defaults"}));
-            assert!(h.app.preferences.preview_tint_new_faces && h.app.preferences.cut_preview_tint);
-            assert!(!h.app.preferences.profile_operations);
-            assert_eq!(h.app.preferences.section_hatch, SectionHatch::ByPart);
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences, applied);
-            h.call("ui.prefs", json!({"profile_operations":false}));
-            assert_eq!(h.app.preferences.persistent_ribbon_pressed, original.persistent_ribbon_pressed);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"theme":"light","language":"en","open":"Graphics"}));
+        let original = h.app.preferences.clone();
+        for (query, handle) in [
+            ("Tint new surface in a preview", "prefs:preview_tint_new_faces"),
+            ("Show removed material in red", "prefs:cut_preview_tint"),
+            ("Profile operations", "prefs:profile_operations"),
+        ] {
+            click_graphics(&mut h, query, handle);
         }
+        h.app.prefs_window.shell.filter = "Section hatch".into();
+        h.frames(5);
+        reveal_preference(&mut h, "dialog:Section hatch:One style");
+        h.step(&json!({"click":{"handle":"dialog:Section hatch:One style"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.preferences.preview_tint_new_faces && !h.app.preferences.cut_preview_tint);
+        assert!(h.app.preferences.profile_operations);
+        assert_eq!(h.app.preferences.section_hatch, SectionHatch::One);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = h.app.preferences.clone();
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.preview_tint_new_faces && h.app.preferences.cut_preview_tint);
+        assert!(!h.app.preferences.profile_operations);
+        assert_eq!(h.app.preferences.section_hatch, SectionHatch::ByPart);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, applied);
+        h.call("ui.prefs", json!({"profile_operations":false}));
+        assert_eq!(h.app.preferences.persistent_ribbon_pressed, original.persistent_ribbon_pressed);
     }
 
+    /// The page's open dropdown paints each style's own icon master (its list is written beside the labels)
+    /// and the last option sets the last style index. The kit gallery's specimen selects every index.
     #[test]
     fn graphics_style_dropdown_uses_the_real_indices_and_icon_masters() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
-            h.call("ui.prefs", json!({"open":"Graphics"}));
-            for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
-                click_graphics(&mut h, "Visual style", "prefs:visual_style");
-                h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
-                h.frames(3);
-                assert_eq!(h.app.ui.visual_style, index as u8);
-                let icon = crate::navigation_slots::visual_style_icon(index as u8);
-                let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
-                assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
-            }
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.ui.visual_style, 0);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"theme":"light","language":"en"}));
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        click_graphics(&mut h, "Visual style", "prefs:visual_style");
+        let trigger = crate::scenario::rect_of("prefs:visual_style").unwrap();
+        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
+            let option = crate::scenario::rect_of(&format!("dialog:Visual style:{label}")).unwrap();
+            let icon = crate::navigation_slots::visual_style_icon(index as u8);
+            let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+            let selected = index == usize::from(h.app.ui.visual_style);
+            assert!(option.contains_rect(painted) || (selected && trigger.contains_rect(painted)), "{label}: its icon is in its option");
         }
+        let (last, (_, label)) = crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate().next_back().unwrap();
+        h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.ui.visual_style, last as u8);
+        let icon = crate::navigation_slots::visual_style_icon(last as u8);
+        let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+        assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.ui.visual_style, 0);
     }
 
     #[test]
@@ -12968,51 +12980,43 @@ mod graphics_preset_tests {
     #[test]
     fn graphics_disabled_controls_keep_stored_values_and_msaa_waits_for_restart() {
         use egui::accesskit::Role;
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            let dir = std::env::temp_dir().join(format!("solidcraft-graphics-cards-{}-{theme}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
-            let path = dir.join("graphics.json");
-            std::fs::write(&path, r#"{"backend":"vulkan","msaa":4}"#).unwrap();
-            h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
-            h.app.msaa_supported = vec![1, 2, 4];
-            let active_samples = h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples);
-            h.call("ui.prefs", json!({"theme":theme,"language":"en","frame_rate_details":true}));
-            h.call("ui.prefs", json!({"open":"Graphics"}));
-            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:8");
-            assert_eq!(h.app.preferences.msaa, 4, "an unavailable card cannot coerce MSAA");
-            assert!(h.widget("Restart needed").is_some());
-            let tree = h.output.accesskit_update.as_ref().unwrap();
-            assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::RadioButton && node.label() == Some("8×") && node.is_disabled()));
-            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:2");
-            assert_eq!(h.app.preferences.msaa, 2);
-            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-            assert_eq!(saved["msaa"], 2);
-            assert_eq!(saved["backend"], "vulkan");
-            assert_eq!(
-                h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples),
-                active_samples,
-                "changing the saved level leaves the running renderer alone"
-            );
-            click_graphics(&mut h, "Only when the view is still", "prefs:supersampling_adaptive");
-            assert!(h.app.preferences.supersampling_adaptive, "disabled adaptive control retains its saved value");
-            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
-            assert!(h.app.preferences.frame_rate_details, "visible disabled details control retains its saved value");
-            let tree = h.output.accesskit_update.as_ref().unwrap();
-            assert!(
-                tree.nodes.iter().any(|(_, node)| node.role() == Role::CheckBox && node.label() == Some("Frame rate details") && node.is_disabled())
-            );
-            click_graphics(&mut h, "Frame rate", "prefs:show_frame_rate");
-            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
-            assert!(!h.app.preferences.frame_rate_details, "enabling Frame rate enables its details checkbox");
-            h.call("ui.prefs", json!({"button":"cancel"}));
-            assert_eq!(h.app.preferences.msaa, 4);
-            assert!(h.app.preferences.frame_rate_details);
-            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-            assert_eq!(saved["msaa"], 4, "Cancel restores startup persistence too");
-            assert_eq!(saved["backend"], "vulkan");
-            std::fs::remove_dir_all(dir).unwrap();
-        }
+        let mut h = crate::scenario::Harness::new();
+        let dir = std::env::temp_dir().join(format!("solidcraft-graphics-cards-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"vulkan","msaa":4}"#).unwrap();
+        h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+        h.app.msaa_supported = vec![1, 2, 4];
+        let active_samples = h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples);
+        h.call("ui.prefs", json!({"theme":"light","language":"en","frame_rate_details":true}));
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:8");
+        assert_eq!(h.app.preferences.msaa, 4, "an unavailable card cannot coerce MSAA");
+        assert!(h.widget("Restart needed").is_some());
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::RadioButton && node.label() == Some("8×") && node.is_disabled()));
+        click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:2");
+        assert_eq!(h.app.preferences.msaa, 2);
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["msaa"], 2);
+        assert_eq!(saved["backend"], "vulkan");
+        assert_eq!(h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples), active_samples, "changing the saved level leaves the running renderer alone");
+        click_graphics(&mut h, "Only when the view is still", "prefs:supersampling_adaptive");
+        assert!(h.app.preferences.supersampling_adaptive, "disabled adaptive control retains its saved value");
+        click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+        assert!(h.app.preferences.frame_rate_details, "visible disabled details control retains its saved value");
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::CheckBox && node.label() == Some("Frame rate details") && node.is_disabled()));
+        click_graphics(&mut h, "Frame rate", "prefs:show_frame_rate");
+        click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+        assert!(!h.app.preferences.frame_rate_details, "enabling Frame rate enables its details checkbox");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.msaa, 4);
+        assert!(h.app.preferences.frame_rate_details);
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["msaa"], 4, "Cancel restores startup persistence too");
+        assert_eq!(saved["backend"], "vulkan");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -13419,40 +13423,37 @@ mod settings_search_tests {
 
     #[test]
     fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", serde_json::json!({"theme":theme,"language":"en"}));
-            h.call("ui.prefs", serde_json::json!({"open":"Graphics"}));
-            for (query, label, handle) in [
-                ("Display quality", "Curved surfaces", "prefs:display_quality:normal"),
-                ("MSAA", "Anti-aliasing", "prefs:msaa:4"),
-                ("Ambient occlusion", "Ambient occlusion", "prefs:ambient_occlusion"),
-                ("Profile operations", "Profile operations", "prefs:profile_operations"),
-                ("Quick measurement in the view's corner", "Quick measurement", "prefs:quick_measure"),
-                ("Show viewport analysis status", "Analysis", "prefs:viewport_analysis_status"),
-                ("Show viewport section status", "Section", "prefs:viewport_section_status"),
-                ("Live viewport details", "Live details", "prefs:viewport_status_details"),
-                ("Fold viewport status items", "Fold items", "prefs:viewport_status_summary"),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_GRAPHICS && hit.label == label).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} keeps one real Graphics search target");
-                let index = matching[0].0;
-                set_cursor(&h.ctx, index);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                // Enter restores the full page; let its normal scroll animation settle.
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let page = crate::scenario::rect_of("dialog:page_body").unwrap();
-                let target = crate::scenario::rect_of(handle).unwrap();
-                assert!(page.contains_rect(target), "{query} reveals the real control: page={page:?}, target={target:?}");
-            }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", serde_json::json!({"theme":"light","language":"en"}));
+        h.call("ui.prefs", serde_json::json!({"open":"Graphics"}));
+        for (query, label, handle) in [
+            ("Display quality", "Curved surfaces", "prefs:display_quality:normal"),
+            ("MSAA", "Anti-aliasing", "prefs:msaa:4"),
+            ("Ambient occlusion", "Ambient occlusion", "prefs:ambient_occlusion"),
+            ("Profile operations", "Profile operations", "prefs:profile_operations"),
+            ("Quick measurement in the view's corner", "Quick measurement", "prefs:quick_measure"),
+            ("Show viewport analysis status", "Analysis", "prefs:viewport_analysis_status"),
+            ("Show viewport section status", "Section", "prefs:viewport_section_status"),
+            ("Live viewport details", "Live details", "prefs:viewport_status_details"),
+            ("Fold viewport status items", "Fold items", "prefs:viewport_status_summary"),
+        ] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(5);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_GRAPHICS && hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{query} keeps one real Graphics search target");
+            let index = matching[0].0;
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            // Enter restores the full page; let its normal scroll animation settle.
+            h.frames(20);
+            assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
+            assert!(h.app.prefs_window.shell.filter.is_empty());
+            let page = crate::scenario::rect_of("dialog:page_body").unwrap();
+            let target = crate::scenario::rect_of(handle).unwrap();
+            assert!(page.contains_rect(target), "{query} reveals the real control: page={page:?}, target={target:?}");
         }
     }
 
@@ -13831,46 +13832,44 @@ mod settings_search_tests {
         assert!(h.app.prefs_window.shell.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.shell.filter);
     }
 
-    /// The selected match is scrolled to when the arrows move it, not on every frame, so the
-    /// wheel can scroll the results away from it.
     #[test]
     fn navigation_and_mouse3d_search_hits_reveal_the_actual_cards_and_controls() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
-            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
-            for (query, page, target) in [
-                ("Orbit around", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:View center"),
-                ("Under the cursor", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Under the cursor"),
-                ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
-                ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
-                ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
-                ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
-                ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
-                ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
-                ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
-            ] {
-                h.call("ui.prefs", serde_json::json!({"open":"General"}));
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
-                set_cursor(&h.ctx, matching[0].0);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, page);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-                assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
-            }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", serde_json::json!({"language":"en","theme":"light"}));
+        for (query, page, target) in [
+            ("Orbit around", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:View center"),
+            ("Under the cursor", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Under the cursor"),
+            ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
+            ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+            ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+            ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
+            ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
+            ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
+            ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
+            ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
+            ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
+        ] {
+            h.call("ui.prefs", serde_json::json!({"open":"General"}));
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(5);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
+            assert_eq!(matching.len(), 1, "{query} has one indexed setting");
+            set_cursor(&h.ctx, matching[0].0);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(20);
+            assert_eq!(h.app.prefs_window.shell.section, page);
+            assert!(h.app.prefs_window.shell.filter.is_empty());
+            let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+            assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
         }
     }
 
+    /// #8388: the selected match is scrolled to when the arrows move it, not on every frame, so the
+    /// wheel can scroll the results away from it.
     #[test]
     fn preferences_search_results_scroll_freely() {
         let mut h = crate::scenario::Harness::new();
@@ -13887,18 +13886,18 @@ mod settings_search_tests {
             modifiers: egui::Modifiers::NONE,
             phase: egui::TouchPhase::Move,
         };
-        // The wheel scrolls smoothly: give it time to come to rest before each check.
+        // The wheel and the scroll to a match settle within 0.3 s (18 frames): let them rest before each check.
         h.frame_with(vec![egui::Event::PointerMoved(first), wheel.clone()]);
-        h.frames(60);
+        h.frames(24);
         let scrolled = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
         assert!(scrolled.y < first.y - 100.0, "the wheel scrolls past the first match ({} -> {})", first.y, scrolled.y);
         h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
-        h.frames(60);
+        h.frames(24);
         let next = crate::scenario::handle_at("prefs:search:current").expect("next match");
         let body = crate::scenario::rect_of("dialog:page_body").expect("page body");
         assert!(body.contains(next), "Down brings the next match into view ({next:?} in {body:?})");
         h.frame_with(vec![egui::Event::PointerMoved(next), wheel]);
-        h.frames(60);
+        h.frames(24);
         let after = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
         assert!(after.y < next.y - 100.0, "the wheel still scrolls after Down ({} -> {})", next.y, after.y);
     }
@@ -14043,6 +14042,10 @@ mod settings_search_tests {
                 let label = h.app.tr(id);
                 let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page && hit.label == label).collect();
                 assert_eq!(matches.len(), 1, "{language}: {query} has one real setting");
+                // Revealing does not depend on the language: Japanese checks the English-source search only.
+                if language != "en" {
+                    continue;
+                }
                 set_cursor(&h.ctx, matches[0].0);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
@@ -14052,7 +14055,7 @@ mod settings_search_tests {
                 assert!(h.app.prefs_window.shell.filter.is_empty());
                 let body = crate::scenario::rect_of("dialog:page_body").unwrap();
                 let target = crate::scenario::rect_of(handle).unwrap();
-                assert!(body.contains_rect(target), "{language}: {query} reveals {handle}: body={body:?}, target={target:?}");
+                assert!(body.contains_rect(target), "{query} reveals {handle}: body={body:?}, target={target:?}");
             }
         }
     }

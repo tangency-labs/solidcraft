@@ -152,16 +152,18 @@ fn rollers_and_flat_faces_ride_their_offset_circles() {
 /// design the same way.
 #[test]
 fn picked_edges_give_the_sketch_s_table() {
+    // The cam's session and its table.
     let table = |profile: Value| {
         let mut s = cam_on_base();
         tappet(&mut s, 0.0, E + R);
         run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": profile}));
-        s.doc.assembly.links.first().map(|l| (l.lift.clone(), l.offset)).unwrap_or_default()
+        let (lift, offset) = s.doc.assembly.links.first().map(|l| (l.lift.clone(), l.offset)).unwrap_or_default();
+        (s, lift, offset)
     };
-    let (sketch, a) = table(json!({"sketch": "CamSketch"}));
+    let (_, sketch, a) = table(json!({"sketch": "CamSketch"}));
     // Picked on the rim a quarter turn from where the extruded circle's seam meets it: a pick on
     // that vertex could be either edge.
-    let (edges, b) = table(json!({"edges": [[E, R, 5]]}));
+    let (mut picked, edges, b) = table(json!({"edges": [[E, R, 5]]}));
     assert_eq!((sketch.len(), edges.len()), (360, 360));
     assert!(sketch.iter().zip(&edges).all(|(x, y)| close(*x, *y, 1e-3)) && close(a, b, 1e-3));
     // A second disc of the cam's component touching it in the same plane is not part of its loop.
@@ -172,21 +174,20 @@ fn picked_edges_give_the_sketch_s_table() {
     run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"edges": [[E - R, 0, 5]]}}));
     let touching = s.doc.assembly.links.first().map(|l| l.lift.clone()).unwrap_or_default();
     assert!(touching.len() == 360 && touching.iter().zip(&sketch).all(|(x, y)| close(*x, *y, 1e-3)), "{touching:?}");
-    let mut s = cam_on_base();
-    tappet(&mut s, 0.0, E + R);
-    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"edges": [[E, R, 5]]}}));
+    // The picked edge's cam follows the design.
+    let s = &mut picked;
     assert!(matches!(
         s.doc.assembly.links.first().and_then(|l| l.coupling.clone()),
         Some(Coupling::Cam(c)) if matches!(&c.profile, CamProfile::Edges { names, .. } if names.first().is_some_and(|n| !n.is_empty()))
     ));
-    run(&mut s, "parameters.change", json!({"name": "rc", "expression": "32 mm"}));
+    run(s, "parameters.change", json!({"name": "rc", "expression": "32 mm"}));
     // A thicker cam: the picked edge is found at its new height, and its loop with it.
-    run(&mut s, "parameters.change", json!({"name": "th", "expression": "7 mm"}));
-    let l = run(&mut s, "joint.list", json!({"quiet": true}));
+    run(s, "parameters.change", json!({"name": "th", "expression": "7 mm"}));
+    let l = run(s, "joint.list", json!({"quiet": true}));
     assert!(l["links"][0].get("error").is_none(), "{l}");
-    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 90}));
+    run(s, "joint.drive", json!({"joint": "Cam", "value": 90}));
     let want = knife(90.0, 0.0, 32.0) - (E + R);
-    assert!(close(shown(&mut s, "Tappet"), want, 1e-3), "{} vs {want}", shown(&mut s, "Tappet"));
+    assert!(close(shown(s, "Tappet"), want, 1e-3), "{} vs {want}", shown(s, "Tappet"));
 }
 
 /// An arm of 50 about (−50, 40) with a roller of 5: its roller's centre is where the arm's circle

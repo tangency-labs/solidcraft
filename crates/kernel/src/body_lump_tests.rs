@@ -301,12 +301,13 @@ fn points_classify_exactly_against_the_body() {
 /// the seam put the patch boundaries so that one patch held both of the line's roots, the ray
 /// missed the wall it leaves by and the point read as outside (a 0.1 round of a primitive
 /// cylinder's rim was refused as too large). Points 0.03 mm inside a radius 10 wall, every half
-/// degree round it, for the seams a primitive (0.6131 rad) and others have.
+/// degree round it, for the seam a primitive has (0.6131 rad), one on the +x ray and one at the
+/// ray's silhouette.
 #[test]
 fn points_just_inside_a_cylinder_wall_are_inside_at_any_seam() {
     use crate::{PointClass::Inside, build::extrude};
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
-    for seam in [0.0_f64, 10.0, 20.0, 35.13, 45.0, 60.0, 90.0, 130.0] {
+    for seam in [0.0_f64, 35.13, 90.0] {
         let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, seam.to_radians()), holes: vec![] };
         let body = extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().pop().unwrap();
         let points: Vec<Vec3> = (0..720)

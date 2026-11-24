@@ -2,8 +2,12 @@ use crate::{FaceSource, extrude, transform_matrix};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
+/// Every face with a certified plane lies on it: its mesh's vertices, and its own plane's normal.
+/// A planar face's mesh vertices lie on its plane at any chord, so a coarse one does.
 fn assert_exact_planes(body: &crate::Body) {
-    let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
+    let chord = 0.05;
+    let mesh = body.mesh(&crate::MeshTolerance::chord(chord)).unwrap();
+    let faces = body.faces(chord).unwrap();
     for (index, _) in body.face_sources().unwrap().iter().enumerate() {
         let Some(plane) = body.face_plane(index) else { continue };
         let mut count = 0;
@@ -17,7 +21,7 @@ fn assert_exact_planes(body: &crate::Body) {
             }
         }
         assert!(count > 0);
-        let normal = body.faces(0.001).unwrap()[index].plane_normal.unwrap();
+        let normal = faces[index].plane_normal.unwrap();
         assert!(normal.dot(plane.normal()) > 0.999999);
     }
 }

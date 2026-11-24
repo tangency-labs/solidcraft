@@ -4,6 +4,15 @@ use super::*;
 use serde_json::json;
 use solidcraft_render::job::{JobId, Phase};
 
+/// The resources rendered on every run. All 48 surfaces carry the same five map roles in the same
+/// encodings, so the first and last stand for them; the studios are an HDR alone (001) or an HDR
+/// with RIG-002 (004 with its creative gain, 025 on a black environment). The CPU path renders all
+/// 25 studios (`cpu_native_studios_preserve_full_job_and_exact_hdr_rig_authority_for_all_twenty_five`);
+/// `SOLIDCRAFT_RESOURCE_EVIDENCE_DIR` renders all 73 here.
+const RENDERED: [&str; 5] = ["SURF-001", "SURF-048", "NATIVE-STUDIO-001", "NATIVE-STUDIO-004", "NATIVE-STUDIO-025"];
+
+/// Every surface and studio binds, survives a reopen and preflights to the GPU executor; the
+/// representatives in `RENDERED` (all 73 with an evidence directory) also render a full frame.
 #[test]
 fn all_authored_surfaces_and_native_studios_render_from_saved_exact_bindings() {
     let Some(executor) = executor() else { return };
@@ -55,6 +64,9 @@ fn all_authored_surfaces_and_native_studios_render_from_saved_exact_bindings() {
             assert_eq!(session.doc.materials, materials);
             let check = session.execute("render.preflight", &json!({"setup":"Smoke"})).unwrap();
             assert_eq!(check["resolved"]["executor"], "gpu-path");
+            if output.is_none() && !RENDERED.contains(&identity.as_str()) {
+                continue;
+            }
             let start = session.execute("render.start", &json!({"setup":"Smoke"})).unwrap();
             let id: JobId = serde_json::from_value(start["job"].clone()).unwrap();
             let handle = session.render_job_handle(id).unwrap();
@@ -77,8 +89,8 @@ fn all_authored_surfaces_and_native_studios_render_from_saved_exact_bindings() {
             receipts.push(receipt);
         }
     }
-    assert_eq!(receipts.len(), 73);
-    eprintln!("authored resource GPU smoke: 48 surfaces and 25 native compositions, 73 completed images");
+    assert_eq!(receipts.len(), if output.is_some() { 73 } else { RENDERED.len() });
+    eprintln!("authored resource GPU smoke: 48 surfaces and 25 native compositions bound, {} completed images", receipts.len());
     if let Some(folder) = output {
         std::fs::write(folder.join("summary.json"), serde_json::to_vec_pretty(&json!({"status":"PASS","surfaces":48,"studios":25,
             "scope":"individual low-resolution GPU execution, exact portable bindings and engineering preservation; not all pairs or final visual certification", "receipts":receipts})).unwrap()).unwrap();

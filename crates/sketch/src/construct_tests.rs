@@ -11,6 +11,9 @@ use crate::solver::points_on_curves;
 use crate::tests::{Lcg, given, seed_of, seeded, v};
 use crate::*;
 
+/// Kept edits per fan row.
+const FAN_EDITS: usize = 100;
+
 fn orientation(a: Vec2, b: Vec2, c: Vec2) -> f64 {
     (b - a).cross(c - a).signum()
 }
@@ -18,10 +21,10 @@ fn orientation(a: Vec2, b: Vec2, c: Vec2) -> f64 {
 /// Fan-triangulated k-gon (diagonals from vertex 0), vertices 0 and 1 fixed, every other
 /// dimension scaled by a factor in `lo..hi`; only edits where every fan triangle still exists
 /// are kept, so an orientation-preserving solution always exists. Returns (failed, mirrored)
-/// over 500 edits.
+/// over `FAN_EDITS` edits.
 fn fan(rnd: &mut Lcg, k: usize, lo: f64, hi: f64, on: bool) -> (usize, usize) {
     let (mut failed, mut mirrored, mut kept) = (0, 0, 0);
-    while kept < 500 {
+    while kept < FAN_EDITS {
         let mut sk = Sketch::new();
         let ids: Vec<usize> = (0..k)
             .map(|i| {
@@ -71,36 +74,29 @@ fn fan(rnd: &mut Lcg, k: usize, lo: f64, hi: f64, on: bool) -> (usize, usize) {
     (failed, mirrored)
 }
 
-fn fan_table(on: bool) -> Vec<(f64, f64, usize, usize, usize)> {
-    let mut rnd = Lcg(99);
-    let mut out = Vec::new();
-    for (lo, hi) in [(0.9, 1.15), (0.7, 1.6), (0.5, 2.5)] {
-        for k in [4usize, 5, 6, 8, 12] {
-            let (failed, mirrored) = fan(&mut rnd, k, lo, hi, on);
-            out.push((lo, hi, k, failed, mirrored));
-        }
-    }
-    out
-}
-
+/// With the seed, no fan triangle fails or mirrors, for a 4-gon and a 12-gon at three ranges of
+/// edits.
 #[test]
 fn fan_polygons_keep_every_triangle_on_dimension_edits() {
-    let table = fan_table(true);
-    for (lo, hi, k, failed, mirrored) in &table {
-        eprintln!("seed on  {lo}–{hi}× {k:>2}-gon: {failed} failed, {mirrored}/500 mirrored");
+    let mut rnd = Lcg(99);
+    let mut table = Vec::new();
+    for (lo, hi) in [(0.9, 1.15), (0.7, 1.6), (0.5, 2.5)] {
+        for k in [4usize, 12] {
+            let (failed, mirrored) = fan(&mut rnd, k, lo, hi, true);
+            eprintln!("seed on  {lo}–{hi}× {k:>2}-gon: {failed} failed, {mirrored}/{FAN_EDITS} mirrored");
+            table.push((lo, hi, k, failed, mirrored));
+        }
     }
     assert!(table.iter().all(|row| row.3 == 0 && row.4 == 0), "{table:?}");
 }
 
-/// The measurement the seed is judged against: without it, LM mirrors fan triangles.
+/// The measurement the seed is judged against: without it, LM mirrors fan triangles of a
+/// 12-gon edited by 0.5–2.5× in more than one edit in five.
 #[test]
 fn fan_polygons_mirror_without_the_seed() {
-    let table = fan_table(false);
-    for (lo, hi, k, failed, mirrored) in &table {
-        eprintln!("seed off {lo}–{hi}× {k:>2}-gon: {failed} failed, {mirrored}/500 mirrored");
-    }
-    let wide_12 = table.iter().find(|r| r.0 == 0.5 && r.2 == 12).map(|r| r.4).unwrap();
-    assert!(wide_12 > 100, "{table:?}");
+    let (failed, mirrored) = fan(&mut Lcg(99), 12, 0.5, 2.5, false);
+    eprintln!("seed off 0.5–2.5× 12-gon: {failed} failed, {mirrored}/{FAN_EDITS} mirrored");
+    assert!(mirrored > FAN_EDITS / 5, "{mirrored}/{FAN_EDITS} mirrored");
 }
 
 /// Base fixed, apex near the base, both sides edited; also far from the origin.

@@ -2628,24 +2628,22 @@ mod tests {
     /// file too, before the arrays are deserialised.
     #[test]
     fn oversized_sketches_are_refused_before_typed_decoding() {
-        use solidcraft_sketch::{CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, MAX_POINTS, Sketch};
+        use solidcraft_sketch::{CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, Sketch};
 
-        // A sketch right at the point cap, chained by coincident constraints.
+        // Two points joined by a coincident constraint: the entries the ceilings are grown from.
+        // (A sketch past the default caps opens: `a_sketch_past_the_default_limit_opens`.)
         let mut sketch = Sketch::new();
-        let mut previous = 0;
-        while sketch.points.len() < MAX_POINTS {
-            let i = sketch.add_point(solidcore_record::Vec2::new(0.001 * sketch.points.len() as f64, 0.0), None).unwrap();
-            sketch.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: previous, q: i }, None).unwrap();
-            previous = i;
-        }
-        let mut doc = Document::new("big sketch");
+        let p = sketch.add_point(solidcore_record::Vec2::new(0.0, 0.0), None).unwrap();
+        let q = sketch.add_point(solidcore_record::Vec2::new(0.001, 0.0), None).unwrap();
+        sketch.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p, q }, None).unwrap();
+        let mut doc = Document::new("small sketch");
         doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
-        let at_cap: Value = serde_json::from_str(&doc.to_json()).unwrap();
-        assert!(read(&at_cap.to_string()).is_ok(), "a sketch at the caps must still load");
+        let base: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        assert!(read(&base.to_string()).is_ok(), "the sketch loads");
 
         // One past each ceiling, grown at the JSON level: no typed array is ever built.
         for (key, cap) in [("points", CEILING_POINTS), ("constraints", CEILING_CONSTRAINTS), ("curves", CEILING_CURVES)] {
-            let mut value = at_cap.clone();
+            let mut value = base.clone();
             let slot = &mut value["features"][0]["sketch"][key];
             let first = slot.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
             *slot = Value::Array(vec![first; cap + 1]);

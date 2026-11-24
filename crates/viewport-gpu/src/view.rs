@@ -7373,29 +7373,70 @@ mod glass_tests {
         middle_pixel_cut(scene, sketch, oit, samples, [0.0; 4])
     }
 
+    /// The headless device the middle pixels of this process are drawn on, opened once. `None`
+    /// without one.
+    fn middle_pixel_device() -> Option<&'static (wgpu::Device, wgpu::Queue)> {
+        static DEVICE: std::sync::OnceLock<Option<(wgpu::Device, wgpu::Queue)>> = std::sync::OnceLock::new();
+        DEVICE.get_or_init(|| crate::open_headless(crate::test_env::policy()).ok().map(|(_, device, queue)| (device, queue))).as_ref()
+    }
+
+    thread_local! {
+        /// This thread's renderers for [`middle_pixel_on`], one per (format, samples, oit), and the last
+        /// scene key it gave out. Opening a device and building a renderer (every pipeline compiled)
+        /// took most of each picture's time. Each picture gets fresh scene keys, so it uploads its
+        /// own scenes, as a new design does in the app's renderer.
+        static MIDDLE_PIXEL_RENDERERS: std::cell::RefCell<(u64, std::collections::HashMap<(wgpu::TextureFormat, u32, bool), Renderer>)> =
+            std::cell::RefCell::new((0, std::collections::HashMap::new()));
+    }
+
     /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
     fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
-        middle_pixel_on(wgpu::TextureFormat::Rgba8Unorm, scene, sketch, oit, samples, clip)
+        middle_pixel_on(MIDDLE_PIXEL_FORMAT, scene, sketch, oit, samples, clip)
     }
+
+    /// The colour format of [`middle_pixel_cut`]'s pictures.
+    const MIDDLE_PIXEL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
     /// [`middle_pixel_cut`] into a target of `format`.
     fn middle_pixel_on(format: wgpu::TextureFormat, scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
+        let (device, queue) = middle_pixel_device()?;
+        MIDDLE_PIXEL_RENDERERS.with_borrow_mut(|(last_key, renderers)| {
+            *last_key += 2;
+            let r = renderers.entry((format, samples, oit)).or_insert_with(|| {
+                let target = GpuTarget { format, depth: Some(crate::depth_format(device, true)), samples, tess: false, oit: false, edges: false };
+                let mut r = Renderer::new(device, target, None);
+                assert!(r.oit.is_some(), "this device does order-independent transparency");
+                if !oit {
+                    r.oit = None;
+                }
+                r
+            });
+            middle_pixel_drawn(r, device, queue, (*last_key - 1, *last_key), scene, sketch, clip)
+        })
+    }
+
+    /// The middle pixel of `scene` and `sketch` drawn by `r` under the scene keys `keys`, into a
+    /// target of `r`'s format and samples.
+    fn middle_pixel_drawn(
+        r: &mut Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        keys: (u64, u64),
+        scene: GpuScene,
+        sketch: GpuScene,
+        clip: [f32; 4],
+    ) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
-        let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
-        let depth = crate::depth_format(&device, true);
-        let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
-        assert!(r.oit.is_some(), "this device does order-independent transparency");
-        if !oit {
-            r.oit = None;
-        }
+        let depth = crate::depth_format(device, true);
+        let GpuTarget { format, samples, .. } = r.target;
         let none = || Arc::new(Mutex::new(None));
         let frame = Frame {
             product_lights: None,
             product: false,
             upload_error: None,
-            key: 1,
+            key: keys.0,
             slot: Arc::new(Mutex::new(Some(scene))),
-            sketch_key: 2,
+            sketch_key: keys.1,
             sketch_slot: Arc::new(Mutex::new(Some(sketch))),
             hl_key: 0,
             hl_slot: none(),
@@ -7450,9 +7491,10 @@ mod glass_tests {
         let depth_tex = texture(depth, wgpu::TextureUsages::RENDER_ATTACHMENT, samples);
         let (color_view, depth_view) = (color.create_view(&Default::default()), depth_tex.create_view(&Default::default()));
         let mut encoder = device.create_command_encoder(&Default::default());
-        r.prepare(&device, &queue, &mut encoder, &frame);
+        r.prepare(device, queue, &mut encoder, &frame);
         if !r.pic.model.see_through() {
-            assert!(r.pic.ss.is_none(), "opaque geometry and the ground shadow use the direct path");
+            // A reused renderer keeps the offscreen target an earlier see-through picture drew in.
+            assert!(!r.pic.ss_ready, "opaque geometry and the ground shadow use the direct path");
         }
         {
             let mut pass = encoder
@@ -7731,169 +7773,163 @@ mod glass_tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let background = wgpu::Color { r: 17.0 / 255.0, g: 33.0 / 255.0, b: 65.0 / 255.0, a: 1.0 };
         let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.8, 0.1, 0.1), 0.0, 0.6, 1.5).unwrap();
-        for depth in [wgpu::TextureFormat::Depth24PlusStencil8, crate::depth_format(&device, true)] {
-            for samples in [1, 4] {
-                let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false };
-                let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
-                let mut renderer = Renderer::with_window_target(&device, target, window, None);
-                // Preserve the original built/PBR cases, and exercise the new
-                // upstream open-body batch with the same independent pixels.
-                for layout in 0_u64..3 {
-                    let pbr = layout == 1;
-                    let open = layout == 2;
+        // Each depth format and each sample count once: the fixed 24-bit format single-sampled, the
+        // device's own (float where it has one) multisampled.
+        for (depth, samples) in [(wgpu::TextureFormat::Depth24PlusStencil8, 1), (crate::depth_format(&device, true), 4)] {
+            let target = GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false };
+            let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
+            let mut renderer = Renderer::with_window_target(&device, target, window, None);
+            // Preserve the original built/PBR cases, and exercise the new
+            // upstream open-body batch with the same independent pixels.
+            for layout in 0_u64..3 {
+                let pbr = layout == 1;
+                let open = layout == 2;
+                let mut scene = GpuScene::default();
+                let red = scene.color([255, 0, 0, 255]);
+                for p in [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]] {
+                    if pbr {
+                        scene.pbr_tri(p, [0.0, 0.0, 1.0], surface);
+                    } else if open {
+                        scene.open_tri(p, [0.0; 3], red);
+                    } else {
+                        scene.tri(p, [0.0; 3], red);
+                    }
+                }
+                let mut highlight = GpuScene::default();
+                let green = highlight.color([0, 255, 0, 128]);
+                let red = highlight.color([255, 0, 0, 255]);
+                for p in [[-8.0, -4.0, 1.0], [-1.0, -4.0, 1.0], [-4.5, 4.0, 1.0]] {
+                    if open {
+                        highlight.open_tri(p, [0.0; 3], green);
+                    } else {
+                        highlight.tri(p, [0.0; 3], green);
+                    }
+                }
+                for p in [[1.0, -4.0, -1.0], [8.0, -4.0, -1.0], [4.5, 4.0, -1.0]] {
+                    if open {
+                        highlight.open_tri(p, [0.0; 3], red);
+                    } else {
+                        highlight.tri(p, [0.0; 3], red);
+                    }
+                }
+                let mut frame = test_frame(scene, 1.0);
+                frame.product = true;
+                frame.key = 1 + layout;
+                frame.hl_key = 1 + layout;
+                frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
+                let normal = render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background);
+                let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                let pixel = |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
+                let unchanged = [17, 33, 65, 255];
+                assert_eq!(
+                    pixel(&overlay, 32, 32),
+                    unchanged,
+                    "depth-only product colour must not replace live pixels: {depth:?}, {samples}x, layout={layout}"
+                );
+                assert_eq!(
+                    pixel(&overlay, 46, 32),
+                    unchanged,
+                    "the rear target is hidden by actual product depth: {depth:?}, {samples}x, layout={layout}"
+                );
+                assert_eq!(pixel(&overlay, 3, 3), unchanged, "unselected product pixels remain exactly the live image colour");
+                let selected = pixel(&overlay, 18, 32);
+                assert!(selected[1] > 120 && selected[0] < 17 && selected[2] < 65, "the visible target is transparently composited: {selected:?}");
+                let again = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                assert_eq!(overlay, again, "a cached overlay preserves its transparency");
+                assert_eq!(
+                    normal,
+                    render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background),
+                    "returning to ordinary product rendering cannot reuse the transparent overlay"
+                );
+                assert_ne!(normal, overlay);
+            }
+            // Real imported-body feedback uses shared triangles and placements,
+            // not the loose triangle lists above. Compare both streams with a
+            // separately submitted face control over the same product depth.
+            for selected in [false, true] {
+                for flat in [false, true] {
                     let mut scene = GpuScene::default();
-                    let red = scene.color([255, 0, 0, 255]);
+                    let product_color = scene.color([255, 0, 0, 255]);
                     for p in [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]
                     {
-                        if pbr {
-                            scene.pbr_tri(p, [0.0, 0.0, 1.0], surface);
-                        } else if open {
-                            scene.open_tri(p, [0.0; 3], red);
-                        } else {
-                            scene.tri(p, [0.0; 3], red);
+                        scene.tri(p, [0.0; 3], product_color);
+                    }
+                    let mesh = solidcore_tess::Mesh {
+                        positions: vec![Vec3::new(-3.5, -4.0, 0.0), Vec3::new(3.5, -4.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
+                        normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
+                        triangles: vec![[0, 1, 2]],
+                        ..Default::default()
+                    };
+                    let shared = Arc::new(SharedTris::new(&mesh));
+                    assert_eq!(shared.flat, flat, "exercise both actual shared-triangle vertex layouts");
+                    let mut control = GpuScene::default();
+                    let front = control.color([0, 255, 0, 128]);
+                    let rear = control.color([255, 0, 0, 255]);
+                    let ignored_color = control.color([0, 0, 255, 255]);
+                    let mut instances = InstancedMesh {
+                        key: 1,
+                        tris: shared,
+                        instances: Vec::new(),
+                        look: InstanceLook::Opaque,
+                        levels: Vec::new(),
+                        closed: false,
+                        edges: None,
+                    };
+                    for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
+                        let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];
+                        instances.place(rows, color);
+                        for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
+                            control.tri((*p + Vec3::new(f64::from(x), 0.0, f64::from(z))).to_f32(), n.to_f32(), color);
                         }
                     }
-                    let mut highlight = GpuScene::default();
-                    let green = highlight.color([0, 255, 0, 128]);
-                    let red = highlight.color([255, 0, 0, 255]);
-                    for p in [[-8.0, -4.0, 1.0], [-1.0, -4.0, 1.0], [-4.5, 4.0, 1.0]] {
-                        if open {
-                            highlight.open_tri(p, [0.0; 3], green);
-                        } else {
-                            highlight.tri(p, [0.0; 3], green);
-                        }
-                    }
-                    for p in [[1.0, -4.0, -1.0], [8.0, -4.0, -1.0], [4.5, 4.0, -1.0]] {
-                        if open {
-                            highlight.open_tri(p, [0.0; 3], red);
-                        } else {
-                            highlight.tri(p, [0.0; 3], red);
-                        }
+                    assert_eq!(instances.instances.len(), 2 * INSTANCE_SIZE, "front and occluded rear targets are actual placements");
+                    let mut ignored = instances.clone();
+                    ignored.look = InstanceLook::Faded;
+                    ignored.instances.clear();
+                    ignored.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 2.0]], ignored_color);
+                    let mut highlight = GpuScene { palette: control.palette.clone(), ..Default::default() };
+                    if selected {
+                        highlight.selected_instanced = vec![instances, ignored];
+                    } else {
+                        highlight.hover_instanced = vec![instances, ignored];
                     }
                     let mut frame = test_frame(scene, 1.0);
                     frame.product = true;
-                    frame.key = 1 + layout;
-                    frame.hl_key = 1 + layout;
+                    frame.key = 100 + 2 * u64::from(selected) + u64::from(flat);
+                    frame.hl_key = frame.key;
+                    frame.hl_slot = Arc::new(Mutex::new(Some(control)));
+                    let reference = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                    frame.hl_key += 1000;
                     frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
-                    let normal = render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background);
                     let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
                     let pixel =
                         |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
                     let unchanged = [17, 33, 65, 255];
-                    assert_eq!(
-                        pixel(&overlay, 32, 32),
-                        unchanged,
-                        "depth-only product colour must not replace live pixels: {depth:?}, {samples}x, layout={layout}"
-                    );
-                    assert_eq!(
-                        pixel(&overlay, 46, 32),
-                        unchanged,
-                        "the rear target is hidden by actual product depth: {depth:?}, {samples}x, layout={layout}"
-                    );
-                    assert_eq!(pixel(&overlay, 3, 3), unchanged, "unselected product pixels remain exactly the live image colour");
-                    let selected = pixel(&overlay, 18, 32);
+                    assert_eq!(pixel(&overlay, 3, 3), unchanged, "instanced feedback must not repaint the live image");
+                    assert_eq!(pixel(&overlay, 46, 32), unchanged, "product depth must hide the rear placement");
+                    assert_eq!(pixel(&overlay, 32, 32), unchanged, "non-opaque feedback placements are not part of this pass");
+                    let expected = pixel(&reference, 18, 32);
+                    assert_ne!(expected, unchanged, "the independent face control must visibly composite its translucent front target");
+                    let actual = pixel(&overlay, 18, 32);
+                    // Derivative flat normals and interpolated face normals can
+                    // straddle one RGBA8 rounding step; alpha compositing must
+                    // otherwise match the independently submitted face control.
                     assert!(
-                        selected[1] > 120 && selected[0] < 17 && selected[2] < 65,
-                        "the visible target is transparently composited: {selected:?}"
+                        actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1),
+                        "instanced feedback must draw and alpha-blend its visible target: selected={selected}, flat={flat}, {depth:?}, {samples}x: {actual:?} vs {expected:?}"
                     );
-                    let again = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
-                    assert_eq!(overlay, again, "a cached overlay preserves its transparency");
                     assert_eq!(
-                        normal,
-                        render_frame_kind(&mut renderer, &device, &queue, &frame, false, false, background),
-                        "returning to ordinary product rendering cannot reuse the transparent overlay"
+                        overlay,
+                        render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background),
+                        "cached instanced feedback must retain identical pixels"
                     );
-                    assert_ne!(normal, overlay);
-                }
-                // Real imported-body feedback uses shared triangles and placements,
-                // not the loose triangle lists above. Compare both streams with a
-                // separately submitted face control over the same product depth.
-                for selected in [false, true] {
-                    for flat in [false, true] {
-                        let mut scene = GpuScene::default();
-                        let product_color = scene.color([255, 0, 0, 255]);
-                        for p in
-                            [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]]
-                        {
-                            scene.tri(p, [0.0; 3], product_color);
-                        }
-                        let mesh = solidcore_tess::Mesh {
-                            positions: vec![Vec3::new(-3.5, -4.0, 0.0), Vec3::new(3.5, -4.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
-                            normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
-                            triangles: vec![[0, 1, 2]],
-                            ..Default::default()
-                        };
-                        let shared = Arc::new(SharedTris::new(&mesh));
-                        assert_eq!(shared.flat, flat, "exercise both actual shared-triangle vertex layouts");
-                        let mut control = GpuScene::default();
-                        let front = control.color([0, 255, 0, 128]);
-                        let rear = control.color([255, 0, 0, 255]);
-                        let ignored_color = control.color([0, 0, 255, 255]);
-                        let mut instances = InstancedMesh {
-                            key: 1,
-                            tris: shared,
-                            instances: Vec::new(),
-                            look: InstanceLook::Opaque,
-                            levels: Vec::new(),
-                            closed: false,
-                            edges: None,
-                        };
-                        for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
-                            let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];
-                            instances.place(rows, color);
-                            for (p, n) in mesh.positions.iter().zip(&mesh.normals) {
-                                control.tri((*p + Vec3::new(f64::from(x), 0.0, f64::from(z))).to_f32(), n.to_f32(), color);
-                            }
-                        }
-                        assert_eq!(instances.instances.len(), 2 * INSTANCE_SIZE, "front and occluded rear targets are actual placements");
-                        let mut ignored = instances.clone();
-                        ignored.look = InstanceLook::Faded;
-                        ignored.instances.clear();
-                        ignored.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 2.0]], ignored_color);
-                        let mut highlight = GpuScene { palette: control.palette.clone(), ..Default::default() };
-                        if selected {
-                            highlight.selected_instanced = vec![instances, ignored];
-                        } else {
-                            highlight.hover_instanced = vec![instances, ignored];
-                        }
-                        let mut frame = test_frame(scene, 1.0);
-                        frame.product = true;
-                        frame.key = 100 + 2 * u64::from(selected) + u64::from(flat);
-                        frame.hl_key = frame.key;
-                        frame.hl_slot = Arc::new(Mutex::new(Some(control)));
-                        let reference = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
-                        frame.hl_key += 1000;
-                        frame.hl_slot = Arc::new(Mutex::new(Some(highlight)));
-                        let overlay = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
-                        let pixel =
-                            |bytes: &[u8], x: usize, y: usize| -> [u8; 4] { bytes[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)].try_into().unwrap() };
-                        let unchanged = [17, 33, 65, 255];
-                        assert_eq!(pixel(&overlay, 3, 3), unchanged, "instanced feedback must not repaint the live image");
-                        assert_eq!(pixel(&overlay, 46, 32), unchanged, "product depth must hide the rear placement");
-                        assert_eq!(pixel(&overlay, 32, 32), unchanged, "non-opaque feedback placements are not part of this pass");
-                        let expected = pixel(&reference, 18, 32);
-                        assert_ne!(expected, unchanged, "the independent face control must visibly composite its translucent front target");
-                        let actual = pixel(&overlay, 18, 32);
-                        // Derivative flat normals and interpolated face normals can
-                        // straddle one RGBA8 rounding step; alpha compositing must
-                        // otherwise match the independently submitted face control.
-                        assert!(
-                            actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1),
-                            "instanced feedback must draw and alpha-blend its visible target: selected={selected}, flat={flat}, {depth:?}, {samples}x: {actual:?} vs {expected:?}"
-                        );
-                        assert_eq!(
-                            overlay,
-                            render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background),
-                            "cached instanced feedback must retain identical pixels"
-                        );
-                        frame.hl_key += 1;
-                        frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
-                        let cleared = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
-                        assert!(
-                            cleared.as_chunks::<4>().0.iter().all(|pixel| *pixel == unchanged),
-                            "clearing the target restores every original live-image pixel"
-                        );
-                    }
+                    frame.hl_key += 1;
+                    frame.hl_slot = Arc::new(Mutex::new(Some(GpuScene::default())));
+                    let cleared = render_frame_kind(&mut renderer, &device, &queue, &frame, false, true, background);
+                    assert!(
+                        cleared.as_chunks::<4>().0.iter().all(|pixel| *pixel == unchanged),
+                        "clearing the target restores every original live-image pixel"
+                    );
                 }
             }
         }
@@ -8412,7 +8448,8 @@ mod glass_tests {
             Err(e) => panic!("the startup check needs a GPU: {e}"),
         };
         let depth = crate::depth_format(&device, true);
-        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
+        // Each channel order and each encoding the check reads: RGBA linear, BGRA sRGB.
+        for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };
             for samples in [1, 4] {
                 if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(samples)) {
@@ -8530,6 +8567,31 @@ mod glass_tests {
             let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
             assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
         }
+    }
+
+    /// The pictures of a thread share one renderer for each (samples, oit): an opaque square drawn
+    /// after see-through layers, which order-independent transparency draws offscreen in a target
+    /// the renderer keeps, still takes the direct path and looks as it did before. Skipped
+    /// without a GPU adapter.
+    #[test]
+    fn an_opaque_picture_after_a_see_through_one_takes_the_direct_path() {
+        let opaque = || {
+            let mut sc = GpuScene::default();
+            let red = sc.color([220, 40, 40, 255]);
+            for p in [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]] {
+                sc.tri([p[0], p[1], 0.0], [0.0, 0.0, 1.0], red);
+            }
+            sc
+        };
+        let Some(before) = middle_pixel(opaque(), true) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        middle_pixel(two_layers([40, 80, 220, 128], [220, 40, 40, 128], true), true).unwrap();
+        let kept =
+            MIDDLE_PIXEL_RENDERERS.with_borrow(|(_, renderers)| renderers.get(&(MIDDLE_PIXEL_FORMAT, 1, true)).is_some_and(|r| r.pic.ss.is_some()));
+        assert!(kept, "the see-through picture leaves its offscreen target on the renderer");
+        assert_eq!(middle_pixel(opaque(), true), Some(before), "the opaque square after it");
     }
 
     #[test]

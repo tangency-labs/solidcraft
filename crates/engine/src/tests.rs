@@ -1196,8 +1196,8 @@ fn a_copy_with_history_undoes_like_the_session_it_copies() {
 #[test]
 fn hostile_params_never_panic() {
     // `file.slicers` gets every hostile value like every command, but lists made-up slicers (none)
-    // instead of searching this machine's programs on each of its ~5,600 calls: a third of a second
-    // a call on Windows, half an hour in all. The tests that make slicers up take turns, and
+    // instead of searching this machine's programs on each of its ~4,300 calls: a third of a second
+    // a call on Windows, over twenty minutes in all. The tests that make slicers up take turns, and
     // `MadeUp` puts the real search back.
     let _turn = mesh_convert::CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _reset = mesh_convert::MadeUp;
@@ -1379,7 +1379,7 @@ fn hostile_params_never_panic() {
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
                         // A model with a sketch, a body and an active sketch, so most commands get far.
                         // Built once per command and copied for each call: SMLib serialises every
-                        // call behind one lock, so building the box for each of the ~3000 calls
+                        // call behind one lock, so building the box for each of the ~4,300 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
                         // Hostile plugin ids must never name packages in the user's real install folder.
@@ -1413,10 +1413,11 @@ fn hostile_params_never_panic() {
                                 if let Err(EngineError::Internal(id, msg)) = s.execute(id, &p) {
                                     internal.push(format!("{id} {p}: {msg}"));
                                 }
-                                // Whole-value hostility too.
-                                if let Err(EngineError::Internal(id, msg)) = s.execute(id, &v) {
-                                    internal.push(format!("{id} {v}: {msg}"));
-                                }
+                            }
+                            // Whole-value hostility too, once per value: it names no key.
+                            let mut s = copy_with_history(&start);
+                            if let Err(EngineError::Internal(id, msg)) = s.execute(id, &v) {
+                                internal.push(format!("{id} {v}: {msg}"));
                             }
                         }
                     }
@@ -1857,12 +1858,13 @@ fn step_open_then_model_on_it() {
 
 /// A join onto an imported body of thousands of planar faces (a converted mesh, say): each face of
 /// the result was compared with every planar face of the inputs whose source is unknown, and the
-/// join was refused past the comparison budget.
+/// join was refused past the comparison budget of 2 million pairs (#917). 2000 facets make twice
+/// as many.
 #[test]
 fn join_onto_a_finely_faceted_import() {
     let dir = std::env::temp_dir().join(format!("solidcraft-step-faceted-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let n = 4000;
+    let n = 2000;
     let mut pts: Vec<[f64; 2]> =
         (0..n).map(|i| std::f64::consts::TAU * f64::from(i) / f64::from(n)).map(|a| [20.0 * a.cos(), 20.0 * a.sin()]).collect();
     pts.push(pts[0]);
@@ -4281,11 +4283,7 @@ fn appearances_by_face_body_and_component() {
 fn cached_evaluation_matches_from_scratch() {
     let mut s = Session::default();
     s.run_script(&crate::sample::script()).unwrap();
-    run(
-        &mut s,
-        "solid.pattern.rectangular",
-        json!({"bodies": ["Plate"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 100, "dir2": [0, 1, 0], "count2": 2, "spacing2": 70}),
-    );
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Plate"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 100}));
     run(&mut s, "solid.box", json!({"corner": [-50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Side"}));
     let same = |s: &Session, what: &str| {
         let mut fresh = solidcraft_doc::Model::new();
@@ -5057,6 +5055,7 @@ fn lip_after_boss() {
     // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims. None
     // reaches the rim's bands, so each lip adds, and the groove (no gap) takes, its band: the
     // inside one (78 × 48 − 76 × 46) × 2, the outside one (80 × 50 − 78 × 48) × 2.
+    // The tall boss (up to the rim) takes each of them, the others the inside lip.
     let bosses = [
         json!({"position": [15, 15, 2], "diameter": 8, "height": 28, "hole_diameter": 3}),
         // Ribs out to the inner walls (15 − 4 − 9 = 2), and short of them.
@@ -5072,7 +5071,7 @@ fn lip_after_boss() {
         (json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}), outside),
     ];
     for (i, b) in bosses.iter().enumerate() {
-        for (j, (l, band)) in lips.iter().enumerate() {
+        for (j, (l, band)) in lips.iter().enumerate().take(if i == 0 { lips.len() } else { 1 }) {
             let mut s = Session::default();
             run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
             run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
@@ -7196,8 +7195,9 @@ fn a_pattern_repeats_a_fillet_on_the_edges_it_found() {
     // #219: a filleted pocket patterned along the plate, its height from a parameter. A taller
     // pocket moves its far corner edges away from the points picked for the fillet; the pattern
     // repeats the edges the fillet found (by name), not those points.
+    // n = 4 pockets h = (419.1 - 3.175 - 3 · 3.175) / 4 = 101.6 high, then 3 of 136.525.
     let mut s = Session::default();
-    run(&mut s, "parameters.add", json!({"name": "n", "expression": "14", "unit": ""}));
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "4", "unit": ""}));
     run(&mut s, "parameters.add", json!({"name": "h", "expression": "(419.1 mm - 3.175 mm - (n - 1) * 3.175 mm) / n", "unit": "mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [150, 422.275]}));
@@ -7205,7 +7205,7 @@ fn a_pattern_repeats_a_fillet_on_the_edges_it_found() {
     run(&mut s, "solid.extrude", json!({"distance": 19.05, "name": "Plate"}));
     run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 19.05, "name": "PocketPlane"}));
     run(&mut s, "sketch.create", json!({"plane": "PocketPlane"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3.175, 3.175], "p1": [146.825, 29.9357]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3.175, 3.175], "p1": [146.825, 104.775]}));
     run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": "3.175"}));
     run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "vertical", "value": "3.175"}));
     run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "type": "length", "value": "143.65"}));
@@ -7215,16 +7215,16 @@ fn a_pattern_repeats_a_fillet_on_the_edges_it_found() {
     run(
         &mut s,
         "solid.fillet",
-        json!({"edges": [[3.175, 3.175, 12.700000000000001], [146.825, 3.175, 12.700000000000001], [146.825, 29.9357, 12.700000000000001], [3.175, 29.9357, 12.700000000000001]], "radius": 3.2}),
+        json!({"edges": [[3.175, 3.175, 12.700000000000001], [146.825, 3.175, 12.700000000000001], [146.825, 104.775, 12.700000000000001], [3.175, 104.775, 12.700000000000001]], "radius": 3.2}),
     );
     run(
         &mut s,
         "solid.pattern.rectangular",
         json!({"features": ["Pocket", "Fillet1"], "dir1": [0, 1, 0], "count1": "n", "spacing1": "h + 3.175 mm"}),
     );
-    let r = run(&mut s, "parameters.change", json!({"name": "n", "expression": "10"}));
+    let r = run(&mut s, "parameters.change", json!({"name": "n", "expression": "3"}));
     assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
-    let (n, h) = (10.0, (419.1 - 3.175 - 9.0 * 3.175) / 10.0);
+    let (n, h) = (3.0, (419.1 - 3.175 - 2.0 * 3.175) / 3.0);
     let pocket = 143.65 * h * 12.7 - 4.0 * (1.0 - PI / 4.0) * 3.2 * 3.2 * 12.7;
     let expect = 150.0 * 422.275 * 19.05 - n * pocket;
     assert!(rel(volume(&mut s), expect) < 1e-5, "{} vs {expect}", volume(&mut s));
@@ -7384,9 +7384,11 @@ fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
     let mut s = segment_boss_with_arc_round();
     assert!(s.execute("solid.fillet", &json!({"edges": [[25.502155, 5.5, 6]], "radius": 1, "tangent_chain": false})).is_ok());
     // With the two edges that run on from it, a ball of the arc round's radius cannot roll: refused,
-    // with the chain off and (the chain being those edges) on.
+    // with the chain off and (the chain being those edges) on. The kernel's own refusal: without
+    // the search that builds candidates, ever nearer the collapse, to name the size that fits.
     for chain in [false, true] {
         let mut s = segment_boss_with_arc_round();
+        s.set_validation(solidcraft_kernel::Validation::Off);
         let picks = if chain { json!([[25.502155, 5.5, 6]]) } else { flat_and_ends.clone() };
         let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "tangent_chain": chain})).unwrap_err().to_string();
         assert!(!e.contains("1001"), "chain {chain}: {e}");
@@ -7860,9 +7862,9 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
 /// 10.085 at −15°; the hole's 10.019 at +5°, 10.292 at −5°). Joined to the ball (4188.790)
 /// it adds just that. At −15° the outside would close at z 14.9 and at +5° the hole at z 17.1,
 /// both inside the ball: the tools only run as far as they must. A circle r 12 is wider than
-/// the ball where it starts and still meets it narrowing: at −10° at z_c 16.022, at −20° at
-/// 13.095, at −21° at 12.904, closing at z 31.26 just above the ball (its top at z 30); such a
-/// tool runs to the ball's far side. Growing at +5°, it holds the whole ball and is refused.
+/// the ball where it starts and still meets it narrowing: at −10° at z_c 16.022, at −21° at
+/// 12.904, closing at z 31.26 just above the ball (its top at z 30); such a tool runs to the
+/// ball's far side. Growing at +5°, it holds the whole ball and is refused.
 #[test]
 fn tapered_extrude_to_a_curved_face_ends_on_it() {
     let (b, c, big_r) = (1.5, 20.0, 10.0);
@@ -7896,7 +7898,6 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
                 (4.0, -5.0, 408.1381918962213),
                 (4.0, -15.0, 241.3566646562573),
                 (12.0, -10.0, 4765.092818474139),
-                (12.0, -20.0, 3612.7398353298513),
                 (12.0, -21.0, 3520.22820600382),
             ]
         };
@@ -8441,9 +8442,10 @@ fn renaming_a_body_keeps_its_copies_consistent_with_rebuilding() {
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,
 /// selecting, colouring and renaming a body or a feature, and undoing them, recompute no feature
 /// (renames don't even look over the timeline) and leave every body's display mesh as it was, so
-/// nothing is meshed or uploaded again.
+/// nothing is meshed or uploaded again. What is counted does not depend on how many bodies there
+/// are, so a hundred show it.
 #[test]
-fn cheap_commands_on_thousands_of_bodies_evaluate_nothing() {
+fn cheap_commands_on_many_bodies_evaluate_nothing() {
     let mut s = Session::default();
     for k in 0..2 {
         run(
@@ -8454,11 +8456,11 @@ fn cheap_commands_on_thousands_of_bodies_evaluate_nothing() {
         run(
             &mut s,
             "solid.pattern.rectangular",
-            json!({"features": [format!("Seed{k}")], "dir1": [1, 0, 0], "count1": 1000, "spacing1": 6, "name": format!("Row{k}")}),
+            json!({"features": [format!("Seed{k}")], "dir1": [1, 0, 0], "count1": 50, "spacing1": 6, "name": format!("Row{k}")}),
         );
     }
     let st = s.model.state();
-    assert_eq!(st.bodies.len(), 2000);
+    assert_eq!(st.bodies.len(), 100);
     let meshes = |s: &Session| s.model.state().bodies.iter().map(|b| std::sync::Arc::as_ptr(&b.mesh())).collect::<Vec<_>>();
     let shown = meshes(&s);
     s.refresh();

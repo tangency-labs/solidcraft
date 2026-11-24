@@ -1502,43 +1502,44 @@ mod tests {
         h.app.run("solid.extrude", json!({"distance":"5 mm"})).unwrap();
     }
 
+    /// Each common form fits the view and keeps OK and Cancel in its card, in both layouts and at
+    /// both scales: roomy (scale 1, 950 high) and the tightest, scale 2 at 720 (360 logical
+    /// points), where the footer is pinned.
     #[test]
     fn common_forms_fit_both_layouts_and_scales_and_pin_footer_at_small_heights() {
         for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-            for scale in [1.0, 2.0] {
-                for height in [950.0, 720.0] {
-                    let mut h = Harness::new();
-                    h.call("ui.set", json!({"layout": mode}));
-                    h.app.preferences.ui_scale = scale;
-                    h.call("ui.resize", json!({"width": 1400.0 / scale, "height": height / scale}));
-                    sample(&mut h);
-                    for command in COMMANDS {
-                        h.step(&json!({"start":command})).unwrap();
-                        // Force the long Hole variant too: counterbore, tapping and multiple picks.
-                        if let Some(Dialog { kind: Kind::Hole { kind, opts, .. }, .. }) = h.app.dialog.as_mut() {
-                            *kind = 1;
-                            opts.tapped = true;
-                            opts.multiple = true;
-                        }
-                        h.frames(8);
-                        let card = scenario::rect_of("dialog:card").unwrap();
-                        let viewport = h.app.viewport.rect.unwrap();
-                        assert!(
-                            viewport.expand(1.0).contains_rect(card),
-                            "{command} {mode:?} scale={scale} height={height}: {card:?} outside {viewport:?}"
-                        );
-                        for action in ["dialog:ok", "dialog:cancel"] {
-                            let rect = scenario::rect_of(action).unwrap();
-                            assert!(
-                                card.contains_rect(rect),
-                                "{command} {mode:?} scale={scale} height={height}: clipped {action} {rect:?} card={card:?}"
-                            );
-                        }
-                        assert!(crate::shell::covered_rects(&h.app).contains(&card));
-                        assert!(card.width() <= 301.0, "{card:?}");
-                        h.step(&json!({"widget":"Cancel"})).unwrap();
-                        assert!(h.app.dialog.is_none(), "{command}");
+            for (scale, height) in [(1.0, 950.0), (2.0, 720.0)] {
+                let mut h = Harness::new();
+                h.call("ui.set", json!({"layout": mode}));
+                h.app.preferences.ui_scale = scale;
+                h.call("ui.resize", json!({"width": 1400.0 / scale, "height": height / scale}));
+                sample(&mut h);
+                for command in COMMANDS {
+                    h.step(&json!({"start":command})).unwrap();
+                    // Force the long Hole variant too: counterbore, tapping and multiple picks.
+                    if let Some(Dialog { kind: Kind::Hole { kind, opts, .. }, .. }) = h.app.dialog.as_mut() {
+                        *kind = 1;
+                        opts.tapped = true;
+                        opts.multiple = true;
                     }
+                    h.frames(8);
+                    let card = scenario::rect_of("dialog:card").unwrap();
+                    let viewport = h.app.viewport.rect.unwrap();
+                    assert!(
+                        viewport.expand(1.0).contains_rect(card),
+                        "{command} {mode:?} scale={scale} height={height}: {card:?} outside {viewport:?}"
+                    );
+                    for action in ["dialog:ok", "dialog:cancel"] {
+                        let rect = scenario::rect_of(action).unwrap();
+                        assert!(
+                            card.contains_rect(rect),
+                            "{command} {mode:?} scale={scale} height={height}: clipped {action} {rect:?} card={card:?}"
+                        );
+                    }
+                    assert!(crate::shell::covered_rects(&h.app).contains(&card));
+                    assert!(card.width() <= 301.0, "{card:?}");
+                    h.step(&json!({"widget":"Cancel"})).unwrap();
+                    assert!(h.app.dialog.is_none(), "{command}");
                 }
             }
         }
@@ -1894,10 +1895,13 @@ mod tests {
         assert!(parameters(&h).get("turn").is_none() && scenario::handle_at("dialog:ui.fillet_turn").is_none(), "Turns is for Constant radius only");
     }
 
-    /// The dialog follows the option model (`fillet_option_applies`): through every type, fit and
-    /// corner choice, in either order, each option it shows is one the others allow, and the
-    /// command it builds is never refused for its options (`solid.fillet` runs it on a copy of
-    /// the design). A choice that rules another out resets that one, visibly.
+    /// The dialog follows the option model (`fillet_option_applies`): through every type, an
+    /// exact and a fitted Face limits (Reduce and Taper rule out the same options, `!fit.is_exact()`)
+    /// and the corner choice, in either order, each option it shows is one the others allow, and
+    /// the command it builds is never refused for its options (`solid.fillet` runs it on a copy
+    /// of the design). A choice that rules another out resets that one, visibly. A smooth-patch
+    /// corner is checked here against the option model (Constant radius, Exact), and built by
+    /// `setback_shows_its_default_keeps_a_typed_value_and_flags_one_too_small` from this dialog.
     #[test]
     fn no_reachable_fillet_option_state_is_refused_for_its_options() {
         let refused_for_options = |e: &str| {
@@ -1916,7 +1920,7 @@ mod tests {
             assert!(constant && exact || (p.get("corner").is_none() && p.get("setbacks").is_none()), "{what}: a curvature corner with {p}");
             assert_eq!(scenario::handle_at("dialog:ui.fillet_fit").is_some(), constant, "{what}: Face limits shows exactly with Constant radius");
             assert_eq!(scenario::handle_at("dialog:ui.corners").is_some(), constant, "{what}: Corners shows exactly with Constant radius");
-            if !ran.borrow_mut().insert(p.to_string()) {
+            if p.get("corner").is_some() || !ran.borrow_mut().insert(p.to_string()) {
                 return;
             }
             let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
@@ -1925,7 +1929,7 @@ mod tests {
             }
         };
         for (label, _) in FILLET_TYPES {
-            for (fit, _) in FILLET_FITS {
+            for fit in ["ui.fillet_fit_exact", "ui.fillet_fit_taper"] {
                 for corner_first in [false, true] {
                     let mut h = fillet_harness();
                     set_edges(&mut h, 3);
@@ -2102,8 +2106,6 @@ mod tests {
         assert!(shown.is_empty(), "labels with a continuity code: {shown:?}");
     }
 
-    /// A smooth-patch fillet reopens with its corner and setback, and OK writes them as saved; a
-    /// setback list the dialog cannot show as one distance is kept as it is.
     /// A setback too short for SMLib's corner fill (past the least the field flags) is refused by
     /// the kernel naming the smallest that builds; the dialog says it in plain words, that length
     /// in them.
@@ -2133,6 +2135,8 @@ mod tests {
         );
     }
 
+    /// A smooth-patch fillet reopens with its corner and setback, and OK writes them as saved; a
+    /// setback list the dialog cannot show as one distance is kept as it is.
     #[test]
     fn a_saved_smooth_patch_reopens_with_its_setback() {
         for (setbacks, field) in [
@@ -2157,11 +2161,21 @@ mod tests {
             let d = h.app.dialog.as_ref().unwrap();
             assert!(matches!(&d.kind, Kind::Fillet { setback, .. } if setback.as_deref() == field), "{:?}", d.kind);
             assert_eq!(d.extra.get("corner"), Some(&json!("g2")));
-            for (command, params) in apply_commands(&h.app, d).unwrap() {
-                crate::dialogs::roll_marker(&mut h.app, None).unwrap();
-                h.app.run(&command, params).unwrap();
-            }
-            assert_eq!(corner_of(&h), saved, "OK keeps the corner and its setbacks");
+            // What OK sends, read as `solid.fillet` reads `setbacks`: each a vertex and a distance.
+            let p = redefined(&h);
+            assert_eq!(p["corner"], json!("g2"), "OK keeps the corner: {p}");
+            let sent: Vec<([f64; 3], String)> = p["setbacks"]
+                .as_array()
+                .unwrap_or_else(|| panic!("OK keeps the setbacks: {p}"))
+                .iter()
+                .map(|c| {
+                    let distance = c["distance"].as_str().map_or_else(|| c["distance"].to_string(), str::to_owned);
+                    (serde_json::from_value(c["vertex"].clone()).unwrap(), distance)
+                })
+                .collect();
+            let kept: Vec<([f64; 3], String)> =
+                saved.1.iter().map(|c| ([c.vertex.0.x, c.vertex.0.y, c.vertex.0.z], c.distance.to_string())).collect();
+            assert_eq!(sent, kept, "OK keeps the setbacks as saved");
         }
     }
 

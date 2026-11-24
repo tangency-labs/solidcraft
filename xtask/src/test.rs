@@ -1,5 +1,6 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
-//! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
+//! By default they all run at once, with sequential doc/wasm `side` jobs alongside, and leave
+//! out the heavy tests (`crate::heavy`; SOLIDCRAFT_TEST_HEAVY=1 runs them).
 //! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs, and
 //! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
 
@@ -52,11 +53,16 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
     let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let allowed = Allowed::read(&root())?;
+    let run_heavy = crate::heavy::opted_in()?;
     let mut bins = build(cargo_args)?;
-    if std::env::var_os("SOLIDCRAFT_PROPERTY_TESTS").is_none() && bins.iter().any(|b| b.id == PROPERTY_TESTS) {
-        bins.retain(|b| b.id != PROPERTY_TESTS);
+    let property = std::env::var_os("SOLIDCRAFT_PROPERTY_TESTS").is_some();
+    if !property && bins.iter().any(|b| b.id == PROPERTY_TESTS) {
         eprintln!("test: {PROPERTY_TESTS} left out: it draws new random inputs every run (CI runs it nightly); SOLIDCRAFT_PROPERTY_TESTS=1 runs it");
     }
+    let heavy = if run_heavy { None } else { crate::heavy::left_out(cargo_args)? }.unwrap_or_default();
+    // The property tests answer to their own switch alone; every other binary to the heavy list.
+    let heavy_binaries = bins.iter().filter(|b| b.id != PROPERTY_TESTS && heavy.binaries.contains(&b.exe)).count();
+    bins.retain(|b| if b.id == PROPERTY_TESTS { property } else { !heavy.binaries.contains(&b.exe) });
     let start = Instant::now();
     let side_count = side.len();
     let mut batches: Vec<Vec<(String, Command, Option<String>)>> = Vec::with_capacity(bins.len() + 1);
@@ -65,11 +71,19 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     }
     let graded_args = graded_args(test_args);
     for b in &bins {
-        batches.push(vec![(b.label.clone(), binary_command(b, &graded_args, split), Some(b.id.clone()))]);
+        let skip = heavy.skips.get(&b.exe).map_or(&[][..], Vec::as_slice);
+        batches.push(vec![(b.label.clone(), binary_command(b, &graded_args, skip, split), Some(b.id.clone()))]);
     }
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
     let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
     eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands{split_note}", bins.len());
+    let left_out = heavy.skips.values().map(Vec::len).sum::<usize>();
+    if left_out + heavy_binaries > 0 {
+        let binaries = if heavy_binaries == 1 { "binary" } else { "binaries" };
+        eprintln!(
+            "test: {left_out} heavy tests and {heavy_binaries} heavy {binaries} left out (SOLIDCRAFT_TEST_HEAVY=1 runs them; CI's merge queue always does)"
+        );
+    }
     let mut failed = Vec::new();
     run_bounded(
         batches,
@@ -170,11 +184,15 @@ fn run_bounded<T: Send, R: Send>(tasks: Vec<T>, jobs: usize, work: impl Fn(T, &m
     });
 }
 
-/// The command for one built test binary. With a split in force each binary's own libtest
-/// threads and action-matrix workers are bounded to it, unless the caller already set them.
-fn binary_command(b: &TestBin, test_args: &[&str], split: Option<usize>) -> Command {
+/// The command for one built test binary, leaving out the tests `skip` names (see
+/// [`crate::heavy`]). With a split in force each binary's own libtest threads and action-matrix
+/// workers are bounded to it, unless the caller already set them.
+fn binary_command(b: &TestBin, test_args: &[&str], skip: &[String], split: Option<usize>) -> Command {
     let mut c = Command::new(&b.exe);
     c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
+    for name in skip {
+        c.arg("--skip").arg(name);
+    }
     for name in ["RUST_TEST_THREADS", "ACTION_MATRIX_JOBS"] {
         if let Some(threads) = budget_env(name, split) {
             c.env(name, threads);
@@ -457,7 +475,7 @@ mod tests {
         assert_eq!(stack_env(Some(OsStr::new("65536"))), None);
         if std::env::var_os("RUST_MIN_STACK").is_none() {
             let bin = TestBin { label: "pkg test t".into(), id: "pkg::t".into(), exe: "true".into(), dir: ".".into() };
-            let c = binary_command(&bin, &[], None);
+            let c = binary_command(&bin, &[], &[], None);
             let stack = c.get_envs().find(|(k, _)| *k == OsStr::new("RUST_MIN_STACK")).and_then(|(_, v)| v);
             assert_eq!(stack, Some(OsStr::new(TEST_STACK)));
         }
@@ -480,15 +498,17 @@ mod tests {
             c.get_envs().find(|(k, _)| *k == OsStr::new(name)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned())
         };
         for name in ["RUST_TEST_THREADS", "ACTION_MATRIX_JOBS"] {
-            assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], None), name), None, "{name} unset without a budget");
+            assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], &[], None), name), None, "{name} unset without a budget");
             if std::env::var_os(name).is_none() {
-                assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], Some(6)), name).as_deref(), Some("6"), "{name} follows the budget");
+                assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], &[], Some(6)), name).as_deref(), Some("6"), "{name} follows the budget");
             }
         }
-        let c = binary_command(&bin, &["--exact", "x"], None);
+        let c = binary_command(&bin, &["--exact", "x"], &[], None);
         assert_eq!(c.get_current_dir(), Some(Path::new(".")));
         assert_eq!(env_of(&c, "CARGO_MANIFEST_DIR").as_deref(), Some("."));
         assert_eq!(c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["--exact", "x"]);
+        let c = binary_command(&bin, &["x"], &["heavy::one".into()], None);
+        assert_eq!(c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["x", "--skip", "heavy::one"]);
     }
 
     fn allowed() -> Allowed {

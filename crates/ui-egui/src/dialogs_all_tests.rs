@@ -1150,9 +1150,10 @@ fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
 
 /// Interface › Dialog buttons › Top (#6708): every card made by the shared panel moves its
 /// actions into the header row, with the footer's enabled states, handles and close behaviour.
+/// Closing leaves the design as it was, so one design per placement serves every card.
 #[test]
 fn top_dialog_buttons_keep_every_cards_states_handles_and_close() {
-    for command in [
+    let commands = [
         "solid.revolve",
         "solid.shell",
         "solid.box",
@@ -1168,18 +1169,19 @@ fn top_dialog_buttons_keep_every_cards_states_handles_and_close() {
         "file.save_mesh",
         "file.export_view_dxf",
         "sheet.flat_pattern",
-    ] {
-        let mut seen = Vec::new();
-        for placement in ["bottom", "top"] {
-            let mut h = fixture();
-            h.call("ui.resize", json!({"width":1600,"height":1200}));
-            h.call("ui.prefs", json!({"dialog_buttons": placement}));
-            let design = h.app.session.doc.to_json();
+    ];
+    let mut seen: std::collections::BTreeMap<&str, Vec<_>> = std::collections::BTreeMap::new();
+    for placement in ["bottom", "top"] {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.call("ui.prefs", json!({"dialog_buttons": placement}));
+        let design = h.app.session.doc.to_json();
+        for command in commands {
             h.app.start(command);
             h.frames(4);
             let header = scenario::rect_of("dialog:header").unwrap_or_else(|| panic!("{command} {placement}: no header"));
             let cancel = scenario::handle_at("dialog:cancel").unwrap_or_else(|| panic!("{command} {placement}: no cancel"));
-            seen.push((
+            seen.entry(command).or_default().push((
                 scenario::count_of("dialog:ok:enabled"),
                 scenario::rect_of("dialog:ok").is_some(),
                 scenario::rect_of("dialog:apply").is_some(),
@@ -1196,6 +1198,8 @@ fn top_dialog_buttons_keep_every_cards_states_handles_and_close() {
             assert!(h.app.dialog.is_none(), "{command} {placement}: closed");
             assert_eq!(h.app.session.doc.to_json(), design, "{command} {placement}: closing keeps the design");
         }
+    }
+    for (command, seen) in seen {
         assert_eq!(seen.first(), seen.get(1), "{command}: OK and Apply as at the bottom");
     }
 }
@@ -1764,12 +1768,16 @@ fn a_square_ended_coil_edited_onto_a_profile_is_accepted() {
 /// The Revolutions field steps by whole turns like the other counts (#7481).
 #[test]
 fn coil_revolutions_arrows_step_whole_turns() {
-    let mut h = fixture();
+    // The coil's own primitive section: an empty design leaves its Profile input empty.
+    let mut h = Harness::new();
     h.app.run("parameters.add", json!({"name":"turns","expression":"3","unit":""})).unwrap();
-    h.app.dialog = Some(Dialog::for_command(&h.app, "solid.coil").unwrap());
+    // The arrows edit the field; no preview needs building for that (up to the helix's 200 turns).
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.preview_enabled = false;
+    h.app.dialog = Some(d);
     h.settle();
     let sent = |h: &Harness| {
-        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         cmds.iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p["revolutions"].clone()).unwrap_or_else(|| panic!("{cmds:?}"))
     };
     let set = |h: &mut Harness, text: &str| {

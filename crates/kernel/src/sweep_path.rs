@@ -658,9 +658,10 @@ mod tests {
     #[test]
     fn direction_orientation_follows_the_vector() {
         let r = 30.0;
-        let path: Vec<Vec3> = (0..=60)
+        // 16 chords, 0.04 % shorter than the arc.
+        let path: Vec<Vec3> = (0..=16)
             .map(|i| {
-                let t = i as f64 / 60.0 * FRAC_PI_2;
+                let t = i as f64 / 16.0 * FRAC_PI_2;
                 Vec3::new(r * (1.0 - t.cos()), 0.0, r * t.sin())
             })
             .collect();

@@ -1706,7 +1706,9 @@ mod tests {
 
     /// The Length list of a dialog opens on the length an insert gets when none is asked for,
     /// so the library reports that length for every size of every family that has lengths. The
-    /// rule differs by family, so the reported value is the one the part is actually built to.
+    /// rule differs by family, so the reported value is the one the part is actually built to:
+    /// every size reports one of its family's standard lengths, and each family's first, middle
+    /// and last size is built to check it is that one.
     #[test]
     fn the_library_reports_the_default_length_of_every_size() {
         let all = run(&mut Session::default(), "parts.library", json!({}));
@@ -1715,11 +1717,17 @@ mod tests {
         for fam in families {
             let id = fam["family"].as_str().unwrap_or_default().to_string();
             let standard: Vec<f64> = fam["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-            for row in fam["sizes"].as_array().cloned().unwrap_or_default() {
+            let rows = fam["sizes"].as_array().cloned().unwrap_or_default();
+            let last = rows.len().saturating_sub(1);
+            for (i, row) in rows.into_iter().enumerate() {
                 let size = row["size"].as_str().unwrap_or_default().to_string();
                 let reported = row["default_length"].as_f64();
                 if standard.is_empty() {
                     assert!(reported.is_none(), "{id} {size} has no lengths of its own but reports a default");
+                    continue;
+                }
+                assert!(standard.iter().any(|l| Some(*l) == reported), "{id} {size}: {reported:?} is not one of the standard lengths");
+                if ![0, last / 2, last].contains(&i) {
                     continue;
                 }
                 // What an insert that asks for no length is actually built to.
@@ -1727,7 +1735,6 @@ mod tests {
                 let out = run(&mut s, "parts.insert", json!({"family": id, "size": size}));
                 let built = s.doc.parts.get(&out["component"].as_u64().unwrap_or(0)).and_then(|p| p.length);
                 assert_eq!(reported, built, "{id} {size}: reported default is not what an insert builds");
-                assert!(standard.iter().any(|l| Some(*l) == reported), "{id} {size}: {reported:?} is not one of the standard lengths");
             }
         }
     }

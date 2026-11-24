@@ -99,8 +99,12 @@ debug build, say so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example
-`cargo xtask test -- shell`. To run the test binaries sequentially instead, use
-`cargo test --workspace --profile ci`. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
+`cargo xtask test -- shell`. Like a pull request, `cargo xtask test` and `cargo xtask ci` leave
+out the heavy tests listed under [CI sharding and heavy tests](#ci-sharding-and-heavy-tests), so a
+local run takes minutes: they ask `cargo nextest list` which tests the `ci` profile's default
+filter leaves out (without cargo-nextest installed every test runs). Set
+`SOLIDCRAFT_TEST_HEAVY=1` to run them too; the merge queue always does. To run the test binaries
+sequentially instead, use `cargo test --workspace --profile ci`, which runs every test. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
 bound how many test binaries and side commands run at once; each binary then gets
 `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the binaries in flight
 share the machine instead of each defaulting to one worker per CPU. Setting
@@ -120,8 +124,8 @@ cargo xtask ci
 This optional backend builds the workspace tests once, then schedules individual tests using
 the `local-ci` nextest profile, which inherits `ci`. The action matrix runs first, then the longest geometry
 cases start before the other costly tests, so the ordinary queue does not stall behind an
-all-slot reservation. It **ignores the default filter**,
-so the heavy tests below still run, does not stop after a test failure, and does not retry failures.
+all-slot reservation. Like the libtest runner it leaves out the heavy tests below unless
+`SOLIDCRAFT_TEST_HEAVY=1`, does not stop after a test failure, and does not retry failures.
 Tests marked `#[ignore]` remain ignored, as with the ordinary full local CI.
 The default concurrency is at most four tests; `NEXTEST_TEST_THREADS` overrides it. The action
 matrix's child workers default to the smaller of that budget and the host CPU count;
@@ -141,15 +145,17 @@ fail explicitly.
 On GitHub, one job builds the tests into a [cargo-nextest](https://nexte.st/) archive and four
 jobs run a quarter of the tests each (two halves on a pull request; `--partition slice:N/4`,
 settings in `.config/nextest.toml`), the slowest tests first; doc tests run in their own job.
-Pull requests skip a few heavy tests (each takes one to twelve minutes); they run on every push to
-`main`, nightly, and in `cargo xtask test`:
+Pull requests and local runs skip a few heavy tests (up to four minutes each on a runner); they run
+in the merge queue, on every push to `main`, nightly, and locally with `SOLIDCRAFT_TEST_HEAVY=1`:
 
 - `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
+  `tests::a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_that_fits`,
+  `cmd::sheet::tests::perforated_sheet_takes_a_thousand_round_holes`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
-- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`,
-  `tspline::tests::hostile_tsplines_never_panic`, and the `boolean_props` property tests
+- `solidcraft-kernel`: `tests::loft_through_sections_whose_match_is_past_the_skins_bound_builds`,
+  and the `boolean_props` property tests
   (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 

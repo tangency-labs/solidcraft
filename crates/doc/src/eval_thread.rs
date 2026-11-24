@@ -1268,13 +1268,14 @@ mod tests {
     /// square stop still builds with it, and the feature says its last turn is left uncut.
     #[test]
     fn a_shoulder_cut_the_kernel_refuses_falls_back_to_the_square_stop_and_says_so() {
+        // A boss 6 mm high: four turns of M10's 1.5 mm pitch.
         let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 6.0)).unwrap();
-        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 16.0).unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 6.0).unwrap();
         let body = kernel::boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
         let build = |fail: bool| {
             let mut st = ModelState::default();
             st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
-            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask()).unwrap();
+            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 9.0), &ask()).unwrap();
             EMPTY_TRIM.set(fail);
             let note = cut(&mut st, on, (ThreadTip::None, None, None));
             EMPTY_TRIM.set(false);
@@ -1296,22 +1297,22 @@ mod tests {
     /// or cosmetic.
     #[test]
     fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
-        // An 80 x 80 x 20 mm block with two 5 mm holes.
-        let block = kernel::box_solid(Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 20.0)).unwrap();
-        let hole = |x: f64| kernel::cylinder(Vec3::new(x, 0.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 2.5, 22.0).unwrap();
+        // An 80 x 80 x 6 mm block with two 5 mm holes: six turns of M6's 1 mm pitch each.
+        let block = kernel::box_solid(Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 6.0)).unwrap();
+        let hole = |x: f64| kernel::cylinder(Vec3::new(x, 0.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 2.5, 8.0).unwrap();
         let mut body = kernel::boolean(&block, &hole(-20.0), BoolOp::Cut).unwrap().unwrap();
         body = kernel::boolean(&body, &hole(20.0), BoolOp::Cut).unwrap().unwrap();
         let mut st = ModelState::default();
         st.bodies.push(ModelBody::new("Part".into(), body, 1));
         let ask = ThreadAsk { designation: Some("M6"), ..ask() };
         // The first hole takes a modelled M6 thread.
-        let on = thread_on(&st, 1, Vec3::new(-17.5, 0.0, 10.0), &ask).unwrap();
+        let on = thread_on(&st, 1, Vec3::new(-17.5, 0.0, 3.0), &ask).unwrap();
         cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
         // The second hole's wall is still a cylinder: it takes a thread too.
-        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask);
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 3.0), &ask);
         assert!(on.is_ok(), "the second hole still has a cylinder to thread: {:?}", on.err());
         // And a modelled one cuts there as well.
-        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask).unwrap();
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 3.0), &ask).unwrap();
         assert!(cut(&mut st, on, (ThreadTip::None, None, None)).is_ok());
     }
 }

@@ -1321,21 +1321,23 @@ mod tests {
     }
 
     /// Both Histories draw one shared tooltip: a feature's warning and its time appear in the
-    /// left History exactly as they do in the bottom one.
+    /// left History exactly as they do in the bottom one (one design, shown in each).
     #[test]
     fn feature_tooltips_show_the_same_warning_and_time_in_both_histories() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
+        // R6 on a 10 × 10 × 10 box is reduced to 5, so the feature warns.
+        h.app.run("solid.fillet", json!({"edges":[[0,0,5],[10,0,5],[10,10,5],[0,10,5]],"radius":6,"fit":"reduce","body":"Block"})).unwrap();
+        h.settle();
+        let id = h.app.session.doc.find_feature("Fillet1").map(|f| f.id).expect("the fillet is in the timeline");
+        let warning = h.app.session.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone());
+        assert!(warning.as_deref().is_some_and(|w| w.contains("reduced")), "the fillet warns: {warning:?}");
+        h.app.session.model.results.iter_mut().find(|r| r.id == id).expect("the fillet has a result").ms = 12.5;
         for left in [false, true] {
-            let mut h = Harness::new();
             h.app.preferences.timeline_left = left;
-            h.app.home.open = false;
-            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
-            // R6 on a 10 × 10 × 10 box is reduced to 5, so the feature warns.
-            h.app.run("solid.fillet", json!({"edges":[[0,0,5],[10,0,5],[10,10,5],[0,10,5]],"radius":6,"fit":"reduce","body":"Block"})).unwrap();
-            h.settle();
-            let id = h.app.session.doc.find_feature("Fillet1").map(|f| f.id).expect("the fillet is in the timeline");
-            let warning = h.app.session.model.results.iter().find(|r| r.id == id).and_then(|r| r.warning.clone());
-            assert!(warning.as_deref().is_some_and(|w| w.contains("reduced")), "the fillet warns: {warning:?}");
-            h.app.session.model.results.iter_mut().find(|r| r.id == id).expect("the fillet has a result").ms = 12.5;
+            // Away from any chip first, so no tooltip is left from the other History.
+            h.app.synthetic.push(egui::Event::PointerMoved(egui::pos2(800.0, 400.0)));
             h.frames(4);
             let at = handle_at("timeline:Fillet1").expect("the Fillet's chip");
             h.app.synthetic.push(egui::Event::PointerMoved(at));

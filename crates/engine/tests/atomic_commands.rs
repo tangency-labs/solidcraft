@@ -42,21 +42,26 @@ fn replay(seed: u64, cmds: &[(String, serde_json::Value)]) -> (Session, Vec<Stri
     (s, broken)
 }
 
+/// The three clauses of the contract on each seed's design, from one fuzz run (the costly part):
+/// a failed command leaves the design unchanged (clause 1); two replays of the same commands give
+/// the same design and the same volume to the bit (clause 3); undo back to the start gives the
+/// empty design and redo back to the end the final one (clause 2).
 #[test]
-fn failed_commands_leave_the_design_unchanged() {
-    let mut broken = Vec::new();
-    for seed in seeds() {
-        broken.extend(replay(seed, &commands(seed)).1);
-    }
-    assert!(broken.is_empty(), "{} contract breaks:\n{}", broken.len(), broken.join("\n"));
-}
-
-#[test]
-fn undo_all_then_redo_all_round_trips() {
+fn fuzzed_designs_keep_the_transaction_contract() {
     let empty = (*Session::default().doc).clone();
     let mut broken = Vec::new();
     for seed in seeds() {
-        let (mut s, _) = replay(seed, &commands(seed));
+        let cmds = commands(seed);
+        let (mut s, failed) = replay(seed, &cmds);
+        broken.extend(failed);
+        let (again, _) = replay(seed, &cmds);
+        if *s.doc != *again.doc {
+            broken.push(format!("seed {seed}: two runs of the same commands gave different designs"));
+        }
+        let (va, vb) = (volume(&s), volume(&again));
+        if va.to_bits() != vb.to_bits() {
+            broken.push(format!("seed {seed}: two runs gave volumes {va} and {vb}"));
+        }
         let end: Document = (*s.doc).clone();
         let mut n = 0;
         while s.execute("edit.undo", &serde_json::Value::Null).is_ok() {
@@ -74,24 +79,6 @@ fn undo_all_then_redo_all_round_trips() {
         }
         if *s.doc != end {
             broken.push(format!("seed {seed}: after {n} redos the design is not the design before undo"));
-        }
-    }
-    assert!(broken.is_empty(), "{} contract breaks:\n{}", broken.len(), broken.join("\n"));
-}
-
-#[test]
-fn same_commands_same_design() {
-    let mut broken = Vec::new();
-    for seed in seeds() {
-        let cmds = commands(seed);
-        let (a, _) = replay(seed, &cmds);
-        let (b, _) = replay(seed, &cmds);
-        if *a.doc != *b.doc {
-            broken.push(format!("seed {seed}: two runs of the same commands gave different designs"));
-        }
-        let (va, vb) = (volume(&a), volume(&b));
-        if va.to_bits() != vb.to_bits() {
-            broken.push(format!("seed {seed}: two runs gave volumes {va} and {vb}"));
         }
     }
     assert!(broken.is_empty(), "{} contract breaks:\n{}", broken.len(), broken.join("\n"));

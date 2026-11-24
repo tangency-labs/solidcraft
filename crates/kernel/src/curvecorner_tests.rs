@@ -47,11 +47,17 @@ fn volume(b: &Body) -> f64 {
     crate::issue_851_tests::planned_volume(b)
 }
 
+/// The part's own [`volume`], measured once.
+fn part_volume() -> f64 {
+    static PART: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *PART.get_or_init(|| volume(&arc_part()))
+}
+
 /// What a blend (radius or distance 2) of the edges at `pts` takes off the part.
 fn removed(round: bool, pts: &[Vec3]) -> f64 {
     let body = arc_part();
     let b = if round { crate::fillet(&body, pts, 2.0) } else { crate::chamfer(&body, pts, 2.0) }.unwrap();
-    volume(&body) - volume(&b)
+    part_volume() - volume(&b)
 }
 
 /// The part's material at `p`.
@@ -113,25 +119,19 @@ fn corner_volume(f: impl Fn(Vec3) -> bool) -> f64 {
     count as f64 * h * h * h
 }
 
-/// Two or three of the edges at the arc's top front corner rounded together: the strips cut
-/// each other in a crease (the long one running on past it to end in the arc wall, as far as
-/// its contact reaches along the arc's edge), and with all three a piece of the ball touching
-/// the three faces fills the corner. What they take off: each round alone, less what each alone
-/// takes in a box about the corner, plus what they take there together (rolling-ball rounds
-/// trim each other where each one's corner region ends; with three, what no ball inside the
-/// part reaches).
+/// The three edges at the arc's top front corner rounded together: the strips cut each other in
+/// a crease (the long one running on past it to end in the arc wall, as far as its contact
+/// reaches along the arc's edge), and a piece of the ball touching the three faces fills the
+/// corner. What they take off: each round alone, less what each alone takes in a box about the
+/// corner, plus what no ball inside the part reaches there. (Two of them meeting there are the
+/// #851 pair tests on the same part, `issue_851_tests`.)
 #[test]
 fn rounds_meeting_at_a_corner_of_an_arc_wall() {
     let offs: [(Vec3, fn(Vec3) -> bool); 3] = [(LONG, off_long), (arc_top(), off_arc), (UPRIGHT, off_upright)];
-    let alone: Vec<f64> = offs.iter().map(|(p, f)| removed(true, &[*p]) - corner_volume(f)).collect();
-    for which in [vec![0, 2], vec![0, 1], vec![1, 2], vec![0, 1, 2]] {
-        let pts: Vec<Vec3> = which.iter().map(|i| offs[*i].0).collect();
-        let fs: Vec<fn(Vec3) -> bool> = which.iter().map(|i| offs[*i].1).collect();
-        let together = if which.len() == 3 { corner_volume(|p| in_part(p) && !kept_by_balls(p)) } else { corner_volume(|p| fs.iter().any(|f| f(p))) };
-        let want = which.iter().map(|i| alone[*i]).sum::<f64>() + together;
-        let got = removed(true, &pts);
-        assert!((got - want).abs() < 0.03, "{which:?}: removed {got} vs {want}");
-    }
+    let alone: f64 = offs.iter().map(|(p, f)| removed(true, &[*p]) - corner_volume(f)).sum();
+    let want = alone + corner_volume(|p| in_part(p) && !kept_by_balls(p));
+    let got = removed(true, &offs.map(|(p, _)| p));
+    assert!((got - want).abs() < 0.03, "removed {got} vs {want}");
 }
 
 /// The ball at the knife-edge tip: 2 below the top line and 23 from the arc's axis.
@@ -142,7 +142,7 @@ fn tip_ball() -> Vec2 {
 /// Integral over the cusp between the arc and the top line (midpoint rule, the last cell of
 /// each column cut at the top line), from `x0` to the tip.
 fn over_cusp(x0: f64, f: impl Fn(f64, f64) -> f64) -> f64 {
-    let (hx, hy) = (0.001, 0.0002);
+    let (hx, hy) = (0.002, 0.001);
     let mut sum = 0.0;
     let mut x = x0 + hx / 2.0;
     while x < CX {
@@ -270,32 +270,39 @@ fn rounds_together_in_any_order() {
 /// full size, scaled by the cube, so the tolerances and limits follow the model's size.
 #[test]
 fn corner_blends_hold_at_any_scale() {
-    let cases: [(&str, Vec<Vec<Vec3>>); 6] = [
+    // (The order of the picks is `rounds_together_in_any_order`'s; the back edge then the tip
+    // ends in the earlier round as the arc then the tip does.)
+    let cases: [(&str, Vec<Vec<Vec3>>); 4] = [
         ("tip and arc", vec![vec![TIP, arc_top()]]),
-        ("arc and tip", vec![vec![arc_top(), TIP]]),
         ("back into the tip", vec![vec![BACK]]),
         ("arc, then tip", vec![vec![arc_top()], vec![TIP]]),
-        ("back, then tip", vec![vec![BACK], vec![TIP]]),
         ("arc, then back", vec![vec![arc_top()], vec![BACK]]),
     ];
-    // What a blend takes off the part scaled by `k`, over k³, through a display plan of matching
-    // accuracy.
-    let removed = |k: f64, steps: &[Vec<Vec3>]| {
-        let volume = |b: &Body| b.mesh_plan(&crate::MeshTolerance::chord(2e-4 * k)).unwrap().evaluate_mesh().measure().volume;
-        let body = scaled_arc_part(k);
+    // The part scaled by `k`, its volume through a display plan of matching accuracy, at each scale.
+    let volume = |b: &Body, k: f64| b.mesh_plan(&crate::MeshTolerance::chord(2e-4 * k)).unwrap().evaluate_mesh().measure().volume;
+    let parts: Vec<(f64, Body, f64)> = [1.0, 0.01, 100.0]
+        .into_iter()
+        .map(|k| {
+            let body = scaled_arc_part(k);
+            let v = volume(&body, k);
+            (k, body, v)
+        })
+        .collect();
+    // What a blend takes off the part scaled by `k`, over k³.
+    let removed = |(k, body, before): &(f64, Body, f64), steps: &[Vec<Vec3>]| {
         let mut b = body.clone();
         for pts in steps {
-            let pts: Vec<Vec3> = pts.iter().map(|p| *p * k).collect();
+            let pts: Vec<Vec3> = pts.iter().map(|p| *p * *k).collect();
             b = crate::fillet(&b, &pts, 2.0 * k).unwrap_or_else(|e| panic!("at {k}x: {steps:?}: {e}"));
             assert!(b.validity().is_empty(), "at {k}x: {steps:?}: {:?}", b.validity());
         }
-        (volume(&body) - volume(&b)) / (k * k * k)
+        (before - volume(&b, *k)) / (k * k * k)
     };
     for (name, steps) in &cases {
-        let full = removed(1.0, steps);
-        for k in [0.01, 100.0] {
-            let got = removed(k, steps);
-            assert!((got - full).abs() < full * 1e-4, "{name} at {k}x: removed {got} (scaled back) vs {full}");
+        let full = removed(&parts[0], steps);
+        for scaled in &parts[1..] {
+            let got = removed(scaled, steps);
+            assert!((got - full).abs() < full * 1e-4, "{name} at {}x: removed {got} (scaled back) vs {full}", scaled.0);
         }
     }
 }

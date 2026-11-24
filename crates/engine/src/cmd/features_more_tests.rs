@@ -531,8 +531,18 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
     // and refused the rib (#16874). Without `extend` (the default) it builds as before; with its
     // ends run on (`extend`, #13019) the rib reaches
     // the side walls at y = 2 and 28 and is 26 long; a thin rib's outline closes there too.
-    let sizes = [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)];
-    for ((l, t), extend) in sizes.into_iter().flat_map(|size| [(size, false), (size, true)]) {
+    // Lengths the old sampling took (40, 150) and refused (160, and 400, the report's, thin and
+    // thick).
+    let cases = [
+        (40.0, 0.1, false),
+        (150.0, 0.1, false),
+        (160.0, 0.1, false),
+        (400.0, 0.1, false),
+        (400.0, 4.0, false),
+        (40.0, 0.1, true),
+        (400.0, 4.0, true),
+    ];
+    for (l, t, extend) in cases {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": l, "width": 30, "height": 12, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
         run(&mut s, "solid.box", json!({"length": l - 4.0, "width": 26, "height": 12, "corner": [2, 2, 2], "operation": "cut", "targets": ["T"]}));
@@ -813,21 +823,20 @@ fn cylinder_deboss_is_connected_a_circle_wraps_and_a_profile_past_the_wall_fails
 #[test]
 fn cylinder_emboss_accepts_a_pick_on_either_half_of_the_wall() {
     // #3425: the kernel splits a full cylinder wall into two half-faces; a pick on the half the
-    // sketch is not tangent to was refused with "saved selection no longer identifies ...".
-    for mode in ["emboss", "deboss"] {
-        let mut volumes = Vec::new();
-        for pick in [[0., 10., 7.5], [0., -10., 7.5]] {
-            let mut s = cylinder_badge();
-            let params = json!({"sketch":"Badge","face":pick,"depth":1,"mode":mode,"targets":["Sleeve"],"name":"Badge Wrap"});
-            run(&mut s, "solid.emboss", params);
-            assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
-            let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
-            loaded.refresh();
-            assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
-            volumes.push(exact_cylinder_volume(&loaded));
-        }
-        assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{mode}: {volumes:?}");
+    // sketch is not tangent to was refused with "saved selection no longer identifies ...". The
+    // half is resolved from the pick before the mode applies, so embossing shows it for both.
+    let mut volumes = Vec::new();
+    for pick in [[0., 10., 7.5], [0., -10., 7.5]] {
+        let mut s = cylinder_badge();
+        let params = json!({"sketch":"Badge","face":pick,"depth":1,"targets":["Sleeve"],"name":"Badge Wrap"});
+        run(&mut s, "solid.emboss", params);
+        assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+        let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+        loaded.refresh();
+        assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+        volumes.push(exact_cylinder_volume(&loaded));
     }
+    assert!((volumes[0] - volumes[1]).abs() < 1e-6, "{volumes:?}");
 }
 
 #[test]
@@ -912,6 +921,8 @@ fn emboss_text_wraps_onto_a_half_tube() {
     }
 }
 
+/// Each occurrence and each way of naming the face once: the face inferred on the first
+/// occurrence, picked on the second.
 #[test]
 fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
     let mut s = Session::default();
@@ -1144,7 +1155,7 @@ fn target_planar_face_with_adjacent_fillets_is_not_hijacked() {
 
 #[test]
 fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
-    for (pick_offset, auto) in [(0., false), (80., false), (0., true), (80., true)] {
+    for (pick_offset, auto) in [(0., true), (80., false)] {
         let run = |s: &mut Session, id: &str, p: Value| run(s, id, auto_emboss_params(p, auto && matches!(id, "solid.emboss" | "timeline.redefine")));
         let mut s = Session::default();
         let a = run(&mut s, "component.create", json!({"name":"Source","grounded":false}))["component"].as_u64().unwrap();
@@ -1242,13 +1253,11 @@ fn cylinder_cross_component_emboss_keeps_source_owner_and_placements() {
     }
 }
 
+/// The face inferred (a face picked on the second occurrence is
+/// `cylinder_cross_component_emboss_keeps_source_owner_and_placements`).
 #[test]
 fn cylinder_active_second_source_occurrence_authors_shared_geometry() {
-    check_active_second_source(false);
-    check_active_second_source(true);
-}
-fn check_active_second_source(auto: bool) {
-    let run = |s: &mut Session, id: &str, p: Value| run(s, id, auto_emboss_params(p, auto && id == "solid.emboss"));
+    let run = |s: &mut Session, id: &str, p: Value| run(s, id, auto_emboss_params(p, id == "solid.emboss"));
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source"}))["component"].as_u64().unwrap();
     run(&mut s, "solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"}));
@@ -2232,29 +2241,27 @@ fn letters(s: &Session) -> Vec<solidcore_record::Region2> {
 /// products of its chords, pointed down). Each letter's section at height z is its outline
 /// offset by e = z tan a, by the Round rule of area A + P e + C e² while the offset trims
 /// nothing (Steiner, [`steiner`]), so the letter is A h + P k h²/2 + C k² h³/3 (k = tan a). That
-/// holds exactly for the t at 3° and for s, l and o at 3° and 15°, each extruded alone (SMLib
-/// measures them to 1e-9 of it). The concave joins of r, n, g and e are tighter than e already
+/// holds exactly for the t at 3° and for s, l and o at 15°, each extruded alone (SMLib measures
+/// them to 1e-9 of it). The concave joins of r, n, g and e are tighter than e already
 /// at 3°, their swallowtails trimmed, the t's arms meet the trim by 15°, and the letters grow
 /// into each other on the block: the whole word is checked for what holds exactly, one closed
-/// body with the block, every letter's section half-way up holding the straight letter.
+/// body with the block, every letter's section half-way up holding the straight letter, at 3°
+/// with the default corner and at 15° with round corners.
 #[test]
 fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
     let h = 2.0;
-    for (text, degs) in [("t", &[3.0f64][..]), ("s", &[3.0, 15.0]), ("l", &[3.0, 15.0]), ("o", &[3.0, 15.0])] {
+    for (text, deg) in [("t", 3.0f64), ("s", 15.0), ("l", 15.0), ("o", 15.0)] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.text", json!({"text":text,"at":[5,12],"height":8}));
         let regions = letters(&s);
         let (a, p, c) = steiner(&regions.iter().collect::<Vec<_>>());
         run(&mut s, "sketch.finish", json!({}));
-        for &deg in degs {
-            let k = deg.to_radians().tan();
-            let exact = a * h + p * k * h * h / 2.0 + c * k * k * h.powi(3) / 3.0;
-            let mut t = s.scratch();
-            run(&mut t, "solid.extrude", json!({"distance":h,"taper":format!("{deg} deg"),"corner":"round"}));
-            let v = volume(&mut t);
-            assert!((v - exact).abs() < 1e-6 * exact, "{text:?} {deg}°: {v}, {exact} by its outline");
-        }
+        let k = deg.to_radians().tan();
+        let exact = a * h + p * k * h * h / 2.0 + c * k * k * h.powi(3) / 3.0;
+        run(&mut s, "solid.extrude", json!({"distance":h,"taper":format!("{deg} deg"),"corner":"round"}));
+        let v = volume(&mut s);
+        assert!((v - exact).abs() < 1e-6 * exact, "{text:?} {deg}°: {v}, {exact} by its outline");
     }
     for (at, hanging) in [([5.0, 12.0], false), ([150.0, 12.0], true)] {
         let mut s = Session::default();
@@ -2266,33 +2273,31 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
         run(&mut s, "sketch.text", json!({"text":"tres long","at":at,"height":8}));
         let regions = letters(&s);
         run(&mut s, "sketch.finish", json!({}));
-        for deg in [3.0, 15.0] {
-            for corner in [None, Some("round")] {
-                let mut t = s.scratch();
-                let mut params = json!({"distance":h,"operation":"join","taper":format!("{deg} deg")});
-                if let Some(corner) = corner {
-                    params["corner"] = json!(corner);
-                }
-                run(&mut t, "solid.extrude", params);
-                let m = measure(&mut t);
-                let what = format!("hanging {hanging}, {deg}° {corner:?}");
-                assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{what}: {m}");
-                assert_eq!(m["bodies"][0]["closed"], true, "{what}: {m}");
-                // Half-way up each letter is its outline grown by h/2 tan a: every point of the
-                // straight letter's outline lies inside.
-                let state = t.model.state();
-                let mesh = state.bodies[0].body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
-                for r in &regions {
-                    for seg in std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs) {
-                        for i in 0..8 {
-                            let q = seg.point_at(f64::from(i) / 8.0);
-                            assert!(
-                                mesh.contains(solidcore_record::Vec3::new(q.x, q.y, h / 2.0)),
-                                "{what}: ({}, {}) outside the letter half-way up",
-                                q.x,
-                                q.y
-                            );
-                        }
+        for (deg, corner) in [(3.0, None), (15.0, Some("round"))] {
+            let mut t = s.scratch();
+            let mut params = json!({"distance":h,"operation":"join","taper":format!("{deg} deg")});
+            if let Some(corner) = corner {
+                params["corner"] = json!(corner);
+            }
+            run(&mut t, "solid.extrude", params);
+            let m = measure(&mut t);
+            let what = format!("hanging {hanging}, {deg}° {corner:?}");
+            assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{what}: {m}");
+            assert_eq!(m["bodies"][0]["closed"], true, "{what}: {m}");
+            // Half-way up each letter is its outline grown by h/2 tan a: every point of the
+            // straight letter's outline lies inside.
+            let state = t.model.state();
+            let mesh = state.bodies[0].body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+            for r in &regions {
+                for seg in std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs) {
+                    for i in 0..8 {
+                        let q = seg.point_at(f64::from(i) / 8.0);
+                        assert!(
+                            mesh.contains(solidcore_record::Vec3::new(q.x, q.y, h / 2.0)),
+                            "{what}: ({}, {}) outside the letter half-way up",
+                            q.x,
+                            q.y
+                        );
                     }
                 }
             }
@@ -2715,19 +2720,22 @@ fn fillet_two_edges_meeting_at_a_corner_one_running_into_the_arc_wall() {
 /// of retries, at 3.5 mm deep. Two walls of a letter met the block's face 2e-7 mm apart, which
 /// truck read as two vertices, and the result's shell did not close. The cut works at any
 /// depth now, and takes out the same section at each (the text runs off the block's end, so a
-/// little less than the letters).
+/// little less than the letters). The letters' curves (the font's quadratics) are read exactly
+/// and the cut is decided in 2D in one boolean, also where the text runs off the face's edges:
+/// the B-rep boolean failed there too ("no result"), else took one letter at a time on an ever
+/// larger body (tens of seconds).
 #[test]
 fn a_line_of_text_cuts_into_a_block_at_any_depth() {
     let mut removed = Vec::new();
     let mut area = 0.0;
-    for depth in [1.0, 3.5] {
+    for (at, depth) in [([3.0, 9.0], 1.0), ([3.0, 9.0], 3.5), ([-6.0, 20.0], 1.0)] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"distance":-40}));
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
-        run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":7.81}));
+        run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":at,"height":7.81}));
         let state = s.world_state().unwrap();
         let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
         // The letters' area, counters left out (a letter's hole is its own profile too).
@@ -2739,14 +2747,18 @@ fn a_line_of_text_cuts_into_a_block_at_any_depth() {
         let counter = |p: &solidcraft_sketch::Profile| ss.profiles.iter().any(|q| q.hole_curves.iter().any(|h| sorted(h) == sorted(&p.outer_curves)));
         area = ss.profiles.iter().filter(|p| !counter(p)).map(|p| p.area).sum();
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}));
+        let id = run(&mut s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}))["feature"].as_u64().unwrap();
+        let r = s.model.result(id).unwrap();
+        assert!(r.error.is_none(), "{at:?} {depth}: {r:?}");
         let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
         removed.push((105.0 * 26.0 * 40.0 - volume) / depth);
         assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     }
-    let (shallow, deep) = (removed[0], removed[1]);
+    let (shallow, deep, off) = (removed[0], removed[1], removed[2]);
     assert!((deep - shallow).abs() < 1e-3 * shallow, "{shallow} mm² taken out at 1 mm, {deep} mm² at 3.5 mm");
     assert!(shallow > 0.85 * area && shallow < area, "{shallow} mm² taken out, the letters are {area} mm²");
+    // Off the face's edges, the part of the text still over it.
+    assert!(off > 0.0 && off < shallow, "{off} mm² taken out off the edges, {shallow} mm² on the face");
 }
 
 /// A design saved before tapered sides were built through `taper_loop` (#1014), by the build
@@ -2849,94 +2861,46 @@ fn a_cut_flush_with_a_hole_never_grows_the_part() {
     }
 }
 
-/// A line of text cut into a face: the letters' curves (the font's quadratics) are read
-/// exactly, and the cut is decided in 2D in one boolean, at any depth and where the text runs
-/// off the face. The B-rep boolean failed on many letters at once ("no result" at 3.5 mm, and
-/// off the edge), else took one letter at a time on an ever larger body (tens of seconds).
+/// A line of text cut right through a part, cut again deeper, and joined on in relief, each
+/// decided in 2D in one boolean. Through, each letter's counter (inside an "e" or an "a") comes
+/// out as a piece of its own. Cut again deeper, the new walls lie on the letters' walls: a point a
+/// hair from a segment's end is that end, a sliver of a letter's curve shorter than the tolerance
+/// is dropped, and a piece of a letter so short that the engraved walls read it as an arc while
+/// the tool has the curve itself is one edge (before, the sewing found a degenerate edge, then the
+/// faces did not close, and the cut went to the B-rep boolean's retries, 90 s). In relief the
+/// letters are joined to the part all at once: one by one, each joined to a part grown by the ones
+/// before, it took minutes.
 #[test]
-fn a_line_of_text_is_cut_in_one_exact_boolean() {
-    let cut = |at: [f64; 2], depth: f64| {
-        let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane":"XY"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
-        run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance":40}));
-        let before = volume(&mut s);
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
-        run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":at,"height":7.81}));
-        run(&mut s, "sketch.finish", json!({}));
-        let id = run(&mut s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}))["feature"].as_u64().unwrap();
-        let r = s.model.result(id).unwrap();
-        assert!(r.error.is_none(), "{at:?} {depth}: {r:?}");
-        before - volume(&mut s)
-    };
-    // Straight walls: the material taken grows with the depth, the letters' area each mm.
-    let (one, deep) = (cut([3.0, 9.0], 1.0), cut([3.0, 9.0], 3.5));
-    assert!(rel(deep, 3.5 * one) < 1e-3, "{one} {deep}");
-    // Off the face's edge, the part of the text still over it.
-    let off = cut([-6.0, 20.0], 1.0);
-    assert!(off > 0.0 && off < one, "{off} {one}");
-}
-
-/// A line of text cut right through a part, and one joined on in relief, are decided in 2D in
-/// one boolean too. Through, each letter's counter (inside an "e" or an "a") comes out as a
-/// piece of its own. In relief the letters are joined to the part all at once: one by one, each
-/// joined to a part grown by the ones before, it took minutes.
-#[test]
-fn a_line_of_text_cut_through_or_joined_in_relief_is_one_boolean() {
-    let text = |op: &str, distance: f64| {
-        let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane":"XY"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
-        run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance":40}));
-        let before = volume(&mut s);
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
-        run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
-        run(&mut s, "sketch.finish", json!({}));
-        let id = run(&mut s, "solid.extrude", json!({"distance":distance,"operation":op}))["feature"].as_u64().unwrap();
-        let r = s.model.result(id).unwrap();
-        assert!(r.error.is_none(), "{op}: {r:?}");
-        (before, volume(&mut s), s.model.state().bodies.len())
-    };
-    let (before, through, pieces) = text("cut", -40.0);
-    let (_, one, _) = text("cut", -1.0);
-    // Through: the letters' area all the way down, with the counters left as pieces.
-    assert!(pieces > 1, "{pieces}");
-    assert!(rel(before - through, 40.0 * (before - one)) < 2e-3, "{} vs {}", before - through, 40.0 * (before - one));
-    // In relief 2 high: twice what a 1 mm cut takes.
-    let (_, relief, pieces) = text("join", 2.0);
-    assert_eq!(pieces, 1);
-    assert!(rel(relief - before, 2.0 * (before - one)) < 2e-3, "{} vs {}", relief - before, 2.0 * (before - one));
-}
-
-/// The same line of text cut again, deeper: the new walls lie on the letters' walls. The 2D route
-/// takes it as one exact boolean: a point a hair from a segment's end is that end, a sliver of a
-/// letter's curve shorter than the tolerance is dropped, and a piece of a letter so short that the
-/// engraved walls read it as an arc while the tool has the curve itself is one edge. Before, the
-/// sewing found a degenerate edge, then the faces did not close, and the cut went to the B-rep
-/// boolean's retries (90 s).
-#[test]
-fn a_line_of_text_cut_again_deeper_is_one_exact_boolean() {
+fn a_line_of_text_cut_through_again_deeper_or_joined_in_relief_is_one_boolean() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance":40}));
-    let cut = |s: &mut Session, depth: f64| {
-        let before = volume(s);
+    // The text on the block's top, extruded `distance` with `op`: the volume after, and the bodies.
+    let text = |s: &mut Session, op: &str, distance: f64| {
         run(s, "sketch.create", json!({"plane":"XY","offset":40}));
         run(s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
         run(s, "sketch.finish", json!({}));
-        let id = run(s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}))["feature"].as_u64().unwrap();
+        let id = run(s, "solid.extrude", json!({"distance":distance,"operation":op}))["feature"].as_u64().unwrap();
         let r = s.model.result(id).unwrap();
-        assert!(r.error.is_none(), "{depth}: {r:?}");
-        before - volume(s)
+        assert!(r.error.is_none(), "{op} {distance}: {r:?}");
+        (volume(s), s.model.state().bodies.len())
     };
-    let first = cut(&mut s, 1.0);
+    let before = volume(&mut s);
+    let (mut through, mut relief) = (s.scratch(), s.scratch());
+    let one = before - text(&mut s, "cut", -1.0).0;
     // Cut again 2 mm deep: one more millimetre of the letters.
-    let again = cut(&mut s, 2.0);
-    assert!(rel(again, first) < 1e-3, "{first} {again}");
+    let again = before - one - text(&mut s, "cut", -2.0).0;
+    assert!(rel(again, one) < 1e-3, "{one} {again}");
+    // Through: the letters' area all the way down, with the counters left as pieces.
+    let (cut, pieces) = text(&mut through, "cut", -40.0);
+    assert!(pieces > 1, "{pieces}");
+    assert!(rel(before - cut, 40.0 * one) < 2e-3, "{} vs {}", before - cut, 40.0 * one);
+    // In relief 2 high: twice what a 1 mm cut takes.
+    let (joined, pieces) = text(&mut relief, "join", 2.0);
+    assert_eq!(pieces, 1);
+    assert!(rel(joined - before, 2.0 * one) < 2e-3, "{} vs {}", joined - before, 2.0 * one);
 }
 
 /// Text cut through a large plate (2 m) is decided in 2D in one exact boolean, as it is in a

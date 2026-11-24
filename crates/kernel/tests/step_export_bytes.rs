@@ -1,8 +1,9 @@
 //! SolidCraft's STEP export, byte for byte, and its round trip.
 //!
 //! Every STEP file in the repository's STEP fixtures (`tests/step-conformance`,
-//! `tests/step-regressions`, the import kernel cases and solidcore-step's fixtures) is read
-//! and written back through `step_export_bodies`. The written text's digest must be the one in
+//! `tests/step-regressions`, the import kernel cases and solidcore-step's fixtures), but the
+//! copies of one another and those [`LEFT_OUT`] names, is read and written back through
+//! `step_export_bodies`. The written text's digest must be the one in
 //! [`DIGESTS`]. These digests were taken from the export as it was before the AP242 product layer
 //! moved into solidcore-step, except the torus-ring spline whose exact torus support is now
 //! proved and written analytically (#16297). A small assembly
@@ -30,22 +31,35 @@ fn digest(text: &str) -> String {
     format!("{h:016x}")
 }
 
-/// The fixtures, relative to the repository root, in sorted order.
+/// Fixtures whose export the others already write: `grooved_shaft` (753 cone and cylinder faces,
+/// about 20 s a read and a measure) has only kinds of face and edge the others have, and its
+/// exact read is `step_in`'s conformance test.
+const LEFT_OUT: &[&str] = &["tests/step-conformance/grooved_shaft.step"];
+
+/// The fixtures, relative to the repository root, in sorted order. A file with the same bytes as
+/// one in a directory listed before it (the import kernel cases and solidcore-step's fixtures copy
+/// some conformance and regression files) is the same test of the export, and is left out.
 fn fixtures(root: &std::path::Path) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    let mut walk = vec![
-        root.join("tests/step-conformance"),
-        root.join("tests/step-regressions"),
-        root.join("tests/kernel-cases/import"),
-        root.join("solidcore/crates/solidcore-step/tests/fixtures"),
-    ];
-    while let Some(dir) = walk.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                walk.push(path);
-            } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("step") || x.eq_ignore_ascii_case("stp")) {
-                out.push(path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+    for top in ["tests/step-conformance", "tests/step-regressions", "tests/kernel-cases/import", "solidcore/crates/solidcore-step/tests/fixtures"] {
+        let mut files = Vec::new();
+        let mut walk = vec![root.join(top)];
+        while let Some(dir) = walk.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk.push(path);
+                } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("step") || x.eq_ignore_ascii_case("stp")) {
+                    files.push(path);
+                }
+            }
+        }
+        files.sort();
+        for path in files {
+            let name = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            if seen.insert(std::fs::read(&path).unwrap()) && !LEFT_OUT.contains(&name.as_str()) {
+                out.push(name);
             }
         }
     }
@@ -83,13 +97,9 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 #[rustfmt::skip]
 const DIGESTS_MACOS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "710ec80508bae43a"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "ef5f1b70be16e528"),
-    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "4bcaf00c71d3beca"),
-    ("tests/kernel-cases/import/258-cone-to-point/input.step", "e9765615a698856d"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "ace0f6500312d1e1"),
     ("tests/step-conformance/cone_point.step", "0345ac19b0d17681"),
     ("tests/step-conformance/cone_point_vertex.step", "96c735326c578395"),
-    ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
     ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
     ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
     ("tests/step-regressions/thread_crest_band.step", "2ed5caa31e66e216"),
@@ -117,18 +127,11 @@ fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> 
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
-    ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
-    ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
-    ("tests/kernel-cases/import/258-cone-to-point/input.step", "112fb1ed128b8863"),
-    ("tests/kernel-cases/import/258-tiny-pin/input.step", "7b4b8437f83a83a3"),
     ("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step", "07d600c03b506f20"),
     ("tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step", "cb1a867bf1b66556"),
     ("tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step", "5e6454bed8d85bc3"),
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
-    ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
-    ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "2800a82d4a03a926"),
     ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "3bc30242fa9c3a3f"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
@@ -143,7 +146,6 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/dome.step", "054949758cf68925"),
     ("tests/step-conformance/dome_nurbs.step", "400aef72aa5eead4"),
     ("tests/step-conformance/far_cylinder.step", "dcaaaadcc9f0ef04"),
-    ("tests/step-conformance/grooved_shaft.step", "83cb26c7776bcf55"),
     ("tests/step-conformance/plate_100_holes.step", "414bd143a34716e6"),
     ("tests/step-conformance/sheet_disc.step", "a88c4d5661255edc"),
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),

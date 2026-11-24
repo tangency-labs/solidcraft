@@ -1993,20 +1993,17 @@ fn a_rectangle_put_onto_a_projected_edge_stays_a_closed_profile() {
 #[test]
 fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    let engraved = || {
-        let mut s = Session::default();
-        run(&mut s, "sketch.create", json!({"plane":"XY"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
-        run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance":40}));
-        run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
-        run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
-        run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"distance":-1,"operation":"cut"}));
-        s
-    };
-    // The face round the letters, drawn in a sketch in its plane.
-    let mut drawn = engraved();
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":40}));
+    run(&mut s, "sketch.create", json!({"plane":{"face":[50,13,40]}}));
+    run(&mut s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":-1,"operation":"cut"}));
+    // The face round the letters, drawn in a sketch in its plane (on a copy of the engraved block).
+    let mut drawn = s.scratch();
     let before = volume(&mut drawn);
     run(&mut drawn, "sketch.create", json!({"plane":"XY","offset":40}));
     run(&mut drawn, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
@@ -2016,7 +2013,6 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     let taken = before - volume(&mut drawn);
     assert!(taken > 0.0, "{taken}");
     // The engraved face itself, extruded as a cut.
-    let mut s = engraved();
     let id = run(&mut s, "solid.extrude", json!({"distance":-3.5,"operation":"cut","face":[1,1,40]}))["feature"].as_u64().unwrap();
     let r = s.model.result(id).unwrap();
     assert!(r.error.is_none(), "{r:?}");
@@ -2461,24 +2457,24 @@ fn intersect_on_a_top_face_gives_its_outline() {
 }
 
 /// A free-form edge projects as the one exact spline it is, its knots and weights its own: the
-/// bottom face of a 40 x 20 x 10 box whose upright edges have G2 rounds (each round's bottom
-/// edge a B-spline of several spans) comes into its sketch as four lines and four splines, one a
-/// corner, each meeting the lines at their ends (#3604, where each span was a curve of its own).
-/// The profile they bound, extruded the box's height, is the box: its sides are upright.
+/// bottom face of a 40 x 20 x 10 box with one upright edge G2-rounded (the round's bottom edge a
+/// B-spline of several spans) comes into its sketch as four lines and one spline, the corner,
+/// meeting the lines at its ends (#3604, where each span was a curve of its own). The profile
+/// they bound, extruded the box's height, is the box: its sides are upright.
 #[test]
 fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
     use solidcraft_sketch::CurveKind;
     let volume = |s: &Session, body: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap().volume;
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":40,"width":20,"height":10,"body_name":"B"}));
-    run(&mut s, "solid.fillet", json!({"body":"B","edges":[[0,0,5],[40,0,5],[40,20,5],[0,20,5]],"radius":5,"type":"g2"}));
+    run(&mut s, "solid.fillet", json!({"body":"B","edges":[[0,0,5]],"radius":5,"type":"g2"}));
     let id = run(&mut s, "sketch.create", json!({"plane":{"face":[20,10,0]},"project_edges":true,"name":"Bottom"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));
     let st = s.model.state();
     let sketch = &st.sketch(id).unwrap().sketch;
     let lines = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count();
     let splines: Vec<_> = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Spline { .. })).collect();
-    assert_eq!((lines, splines.len(), sketch.curves.len()), (4, 4, 8), "{:?}", sketch.curves);
+    assert_eq!((lines, splines.len(), sketch.curves.len()), (4, 1, 5), "{:?}", sketch.curves);
     for c in &splines {
         let CurveKind::Spline { pts, control: true, nurbs: Some(nurbs), .. } = &c.kind else { panic!("{:?}", c.kind) };
         assert_eq!(nurbs.knots.len(), pts.len() + 4, "a cubic's knots");
@@ -3018,8 +3014,9 @@ fn an_open_hole_rim_on_a_round_wall_projects_along_the_hole_as_an_arc_of_its_cir
 fn an_edge_winding_a_full_turn_projects_as_no_arc_of_its_remainder() {
     use solidcore_record::{Seg2, Vec3};
     let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "modeled": true}));
+    // 6 long: a few turns of the M8's 1.25 mm pitch, each helical edge still a full turn.
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 6, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 3], "designation": "M8", "modeled": true}));
     let state = s.model.state();
     let body = &state.body("Shaft").unwrap().body;
     let plane = solidcore_record::Plane { origin: Vec3::new(0., 0., -5.), x: Vec3::X, y: Vec3::Y };

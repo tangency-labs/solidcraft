@@ -361,10 +361,14 @@ fn strict_keeps_todays_errors_with_joints() {
         ("joint.as_built", json!({"type": "rigid", "a": "LeafA", "b": "Missing"})),
         ("joint.inspect", json!({"joint": "Missing"})),
     ];
+    // One design for each mode: a refused call leaves it as it was, for the next.
+    let (mut off, mut strict) = (hinged(ParamCheck::Off), hinged(ParamCheck::Strict));
+    let before = off.doc.clone();
     for (id, p) in cases {
-        let off = hinged(ParamCheck::Off).execute(id, &p).err().map(|e| e.to_string());
-        assert!(off.is_some(), "{id} {p} should fail today");
-        assert_eq!(hinged(ParamCheck::Strict).execute(id, &p).err().map(|e| e.to_string()), off, "{id} {p}");
+        let today = off.execute(id, &p).err().map(|e| e.to_string());
+        assert!(today.is_some(), "{id} {p} should fail today");
+        assert_eq!(strict.execute(id, &p).err().map(|e| e.to_string()), today, "{id} {p}");
+        assert!(*off.doc == *before && *strict.doc == *before, "{id} {p} changed the design");
     }
 }
 

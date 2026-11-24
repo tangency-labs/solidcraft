@@ -1512,6 +1512,11 @@ mod tests {
         }
     }
 
+    /// The whole egui frame composed with the backdrop blur, in both output encodings: the
+    /// source rests and is cached, the panels' alpha leaves it alone, camera and background
+    /// changes invalidate it, the quality tier caps the passes, and off restores the plain
+    /// frame. The dark theme (the tint is the only thing a theme changes) at the smallest and
+    /// largest radius of the schedule.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn blur_full_egui_composition() {
@@ -1528,94 +1533,94 @@ mod tests {
             let original_theme = f.app.preferences.theme.clone();
             let original_dark = f.app.ui.dark;
             assert_eq!(f.app.blur.counters().textures_created, 0);
-            for dark in [false, true] {
-                f.app.preferences.theme = if dark { "dark" } else { "light" }.into();
-                f.app.ui.dark = dark;
-                f.app.blur.set_surface_alpha(Some(180));
+            // The dark theme: a theme changes only the tint.
+            f.app.preferences.theme = "dark".into();
+            f.app.ui.dark = true;
+            f.app.blur.set_surface_alpha(Some(180));
+            f.app.cam = original_camera;
+            f.app.preferences.viewport_background = original_background;
+            f.radius(0.0);
+            for _ in 0..3 {
+                f.frame();
+            }
+            // The zero reference uses the same camera, view settings and panel alpha.
+            let zero_reference = f.pixels();
+            f.frame();
+            assert_eq!(zero_reference, f.pixels(), "stable zero reference");
+            f.evidence(&format!("blur-dark-0-{}", if srgb { "srgb" } else { "unorm" }));
+            // The tier cap below runs on the last, largest radius.
+            for radius in [8.0, 40.0] {
                 f.app.cam = original_camera;
                 f.app.preferences.viewport_background = original_background;
-                f.radius(0.0);
+                f.radius(radius);
                 for _ in 0..3 {
                     f.frame();
                 }
-                // The zero reference uses the same camera, view settings and panel alpha.
-                let zero_reference = f.pixels();
-                f.frame();
-                assert_eq!(zero_reference, f.pixels(), "stable zero reference");
-                f.evidence(&format!("blur-{}-0-{}", if dark { "dark" } else { "light" }, if srgb { "srgb" } else { "unorm" }));
-                for radius in [8.0, 18.0, 40.0] {
-                    f.app.cam = original_camera;
-                    f.app.preferences.viewport_background = original_background;
-                    f.radius(radius);
-                    for _ in 0..3 {
-                        f.frame();
-                    }
-                    let before = f.app.blur.counters();
-                    assert_eq!(
-                        crate::prefs::blur_availability(&f.app),
-                        crate::theme_options::Availability::Available,
-                        "positive rendering fixtures must pass the shared app-aware capability policy"
-                    );
-                    assert_eq!(f.app.blur.radius(), radius);
-                    let panels = &f.app.universal_panel_frame().unwrap().layout.sections;
-                    assert!(!panels.is_empty());
-                    assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
-                    assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
-                    let resting = f.pixels();
-                    f.frame();
-                    let after = f.app.blur.counters();
-                    assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                    assert_eq!(f.pixels(), resting, "resting ordered composition is stable");
-                    f.app.blur.set_surface_alpha(Some(120));
-                    f.frame();
-                    f.app.blur.set_surface_alpha(Some(180));
-                    f.frame();
-                    let positive = f.pixels();
-                    let changed_pixels = zero_reference
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .zip(positive.as_chunks::<4>().0.iter())
-                        .filter(|(zero, blurred)| (0..3).any(|channel| zero[channel].abs_diff(blurred[channel]) > 1))
-                        .count();
-                    assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");
-                    let name = format!("blur-{}-{}-{}", if dark { "dark" } else { "light" }, radius as u32, if srgb { "srgb" } else { "unorm" });
-                    f.evidence(&name);
-                    // There is no source to rebuild: a moved camera is only another frame to blur.
-                    let before = f.app.blur.counters();
-                    f.app.cam.yaw += 0.2;
-                    f.frame();
-                    let after = f.app.blur.counters();
-                    assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
-                    assert_eq!(after.textures_created, before.textures_created, "a moved camera reuses storage");
-                    f.app.cam = original_camera;
-                    f.frame();
-                    f.app.preferences.viewport_background = Some([3, 37, 93]);
-                    let before = f.app.blur.counters();
-                    f.frame();
-                    let after = f.app.blur.counters();
-                    assert_eq!(after.textures_created, before.textures_created, "background changes reuse storage");
-                    f.app.preferences.viewport_background = original_background;
-                    f.frame();
-                }
                 let before = f.app.blur.counters();
-                f.app.blur_session.guard.cap = 3; // Explicit deterministic quality input in this GPU fixture.
+                assert_eq!(
+                    crate::prefs::blur_availability(&f.app),
+                    crate::theme_options::Availability::Available,
+                    "positive rendering fixtures must pass the shared app-aware capability policy"
+                );
+                assert_eq!(f.app.blur.radius(), radius);
+                let panels = &f.app.universal_panel_frame().unwrap().layout.sections;
+                assert!(!panels.is_empty());
+                assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
+                assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
+                let resting = f.pixels();
                 f.frame();
-                let reduced = f.app.blur.counters();
-                assert_eq!(f.app.blur.radius(), 40.0);
-                assert_backdrop_passes(before, reduced, 3);
+                let after = f.app.blur.counters();
+                assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
+                assert_eq!(f.pixels(), resting, "resting ordered composition is stable");
+                f.app.blur.set_surface_alpha(Some(120));
                 f.frame();
-                let cached = f.app.blur.counters();
-                assert_backdrop_passes(reduced, cached, 3);
-                f.app.blur_session.guard.cap = 5;
+                f.app.blur.set_surface_alpha(Some(180));
                 f.frame();
-                assert_backdrop_passes(cached, f.app.blur.counters(), 5);
-                f.radius(0.0);
-                for _ in 0..2 {
-                    f.frame();
-                }
-                assert_eq!(zero_reference, f.pixels(), "on -> off preserves the fixed scene and tint");
+                let positive = f.pixels();
+                let changed_pixels = zero_reference
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(positive.as_chunks::<4>().0.iter())
+                    .filter(|(zero, blurred)| (0..3).any(|channel| zero[channel].abs_diff(blurred[channel]) > 1))
+                    .count();
+                assert!(changed_pixels > 0, "radius {radius} must change RGB pixels with the same camera, alpha and theme");
+                let name = format!("blur-dark-{}-{}", radius as u32, if srgb { "srgb" } else { "unorm" });
+                f.evidence(&name);
+                // There is no source to rebuild: a moved camera is only another frame to blur.
+                let before = f.app.blur.counters();
+                f.app.cam.yaw += 0.2;
+                f.frame();
+                let after = f.app.blur.counters();
+                assert_backdrop_passes(before, after, crate::blur::schedule(radius).unwrap().0);
+                assert_eq!(after.textures_created, before.textures_created, "a moved camera reuses storage");
+                f.app.cam = original_camera;
+                f.frame();
+                f.app.preferences.viewport_background = Some([3, 37, 93]);
+                let before = f.app.blur.counters();
+                f.frame();
+                let after = f.app.blur.counters();
+                assert_eq!(after.textures_created, before.textures_created, "background changes reuse storage");
+                f.app.preferences.viewport_background = original_background;
+                f.frame();
             }
+            let before = f.app.blur.counters();
+            f.app.blur_session.guard.cap = 3; // Explicit deterministic quality input in this GPU fixture.
+            f.frame();
+            let reduced = f.app.blur.counters();
+            assert_eq!(f.app.blur.radius(), 40.0);
+            assert_backdrop_passes(before, reduced, 3);
+            f.frame();
+            let cached = f.app.blur.counters();
+            assert_backdrop_passes(reduced, cached, 3);
+            f.app.blur_session.guard.cap = 5;
+            f.frame();
+            assert_backdrop_passes(cached, f.app.blur.counters(), 5);
+            f.radius(0.0);
+            for _ in 0..2 {
+                f.frame();
+            }
+            assert_eq!(zero_reference, f.pixels(), "on -> off preserves the fixed scene and tint");
             f.app.blur.set_surface_alpha(None);
             f.app.cam = original_camera;
             f.app.preferences.theme = original_theme;

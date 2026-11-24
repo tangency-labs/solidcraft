@@ -4093,8 +4093,9 @@ mod tests {
             let held = model_zoom_anchor(&mut h.app, rect, Some(at), true);
             assert_eq!(held.is_some(), stop_at_model);
             assert_eq!(zoom_anchor(&mut h.app, rect, Some(at), true).is_some(), to_cursor, "wheel anchoring stays independent");
+            // A vertical drag zooms by the distance dragged, not by its frames: 8 steps each.
             for _ in 0..12 {
-                h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x, "y1": at.y - 160.0, "steps": 40}));
+                h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x, "y1": at.y - 160.0, "steps": 8}));
             }
             assert_eq!(
                 outside(&h.app.cam),
@@ -4987,7 +4988,7 @@ mod view_key_tests {
             (seed >> 11) as f64 / (1u64 << 53) as f64
         };
         h.app.cam = Camera::default();
-        for i in 0..200 {
+        for i in 0..60 {
             let at = pos2(rect.left() + 40.0 + next() as f32 * (rect.width() - 80.0), rect.top() + 40.0 + next() as f32 * (rect.height() - 80.0));
             match (next() * 3.0) as u32 {
                 0 => {

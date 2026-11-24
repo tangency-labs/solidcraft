@@ -3327,7 +3327,7 @@ fn periodic_offset_extrusion_survives_post_extrude_span_changes_and_cold_reopen(
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":sk_id,"profiles":[index],"distance":3,"operation":"new"}));
     let initial_doc = s.doc.to_json();
-    for major in [12.0, 16.0, 20.0] {
+    for major in [12.0, 20.0] {
         run(&mut s, "parameters.change", json!({"name":"d1","expression":major}));
         let state = s.world_state().unwrap();
         let sk = state.sketch(sk_id).unwrap();

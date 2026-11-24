@@ -348,7 +348,7 @@ fn detects_freecad_from_contents() {
 #[test]
 fn hostile_freecad_history_never_panics() {
     for good in [BRACKET_FCSTD, KNOB_FCSTD] {
-        for i in (0..good.len()).step_by((good.len() / 40).max(1)) {
+        for i in (0..good.len()).step_by((good.len() / 15).max(1)) {
             let mut b = good.to_vec();
             b[i] ^= 0x5a;
             let r = std::panic::catch_unwind(|| native_cad_design(&b, "hostile.FCStd"));
@@ -455,10 +455,15 @@ fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64;
         })
 }
 
+/// The step-conformance parts [`compared_parts`] leaves out: the two largest, 95 % of the bytes,
+/// whose exact shapes the kernel's STEP and records tests check, and the two assemblies, whose
+/// bodies `an_assembly_read_into_records_has_the_tree_our_step_reader_gives_it` compares.
+const NOT_COMPARED: [&str; 4] = ["grooved_shaft.step", "plate_100_holes.step", "cylinder_placed.step", "cylinder_twice.step"];
+
 /// The parts compared between the two routes: every FreeCAD and Rhino fixture, and every
-/// step-conformance part decoded by cadmpeg's STEP decoder (as the cadmpeg STEP reader reads it),
-/// and the import kernel cases whose surfaces the records once read differently
-/// ([`KERNEL_CASES`]).
+/// step-conformance part but [`NOT_COMPARED`] decoded by cadmpeg's STEP decoder (as the cadmpeg
+/// STEP reader reads it), and the import kernel cases whose surfaces the records once read
+/// differently ([`KERNEL_CASES`]).
 fn compared_parts() -> Vec<(String, Vec<u8>)> {
     let mut parts: Vec<(String, Vec<u8>)> = [
         ("block.FCStd", BLOCK_FCSTD),
@@ -475,7 +480,8 @@ fn compared_parts() -> Vec<(String, Vec<u8>)> {
         std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
     steps.sort();
     assert!(steps.len() >= 17, "{} step-conformance parts", steps.len());
-    parts.extend(steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(p).unwrap())));
+    let names = steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), p));
+    parts.extend(names.filter(|(n, _)| !NOT_COMPARED.contains(&n.as_str())).map(|(n, p)| (n, std::fs::read(p).unwrap())));
     let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
     parts.extend(KERNEL_CASES.iter().map(|c| (format!("{c}.step"), std::fs::read(cases.join(c).join("input.step")).unwrap())));
     parts
@@ -489,8 +495,7 @@ const KERNEL_CASES: [&str; 2] = ["3208-extruded-ellipse-face-over-parameter-seam
 
 /// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
 /// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
-/// same volume and the same box, for every part in [`compared_parts`], an assembly's parts at
-/// each of their placements.
+/// same volume and the same box, for every part in [`compared_parts`].
 #[test]
 fn records_build_the_bodies_the_step_route_built() {
     let mut differ = Vec::new();

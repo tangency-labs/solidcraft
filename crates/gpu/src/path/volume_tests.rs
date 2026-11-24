@@ -682,9 +682,12 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
     // The archived pre-GPU12 control fingerprint remains historical evidence:
     // f373400816e40e803691ceb847d8c9d7983fd4744c3874a322363810c14b6d6c.
     // Map filtering, optical transport and producer specialization can change. Reconstruct
-    // each current producer, changing only this signed primary hook/helper.
-    let old_pipeline = |opaque: bool| {
-        let shader = scene_shader(opaque);
+    // the current general producer, changing only this signed primary hook/helper. The hook
+    // sits under `!OPAQUE_SCENE`, so the opaque producer that serves None and zero extinction
+    // (modes 0 and 1) holds it only as dead code: those modes check the new producer against
+    // each other.
+    let general = {
+        let shader = scene_shader(false);
         assert_eq!(shader.matches(new_hook).count(), 1);
         assert_eq!(shader.matches(helper).count(), 1);
         let helper_block = format!("\n{helper}");
@@ -710,7 +713,7 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             module: &module,
             entry_point: Some("main"),
             compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", 0.0)],
+                constants: &[("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", 0.0)],
                 ..Default::default()
             },
             cache: None,
@@ -720,7 +723,6 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             .unwrap();
         pipeline
     };
-    let pipelines = [old_pipeline(true), old_pipeline(false)];
     let mut inactive_baseline = None;
     for mode in 0..8 {
         let case = OpticalLineCase {
@@ -770,7 +772,6 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
         let opaque = mode < 2;
         assert_eq!(use_opaque_pipeline(&source, options), opaque);
         assert!(image.textures.is_none() && !options.nested_media);
-        let pipeline = &pipelines[usize::from(!opaque)];
         let run = |old: bool| {
             let mut task = Task::new(context.clone(), source.clone(), image.clone(), options, CancelToken::default()).unwrap();
             assert_eq!((task.opaque_scene, task.has_textures, task.options.nested_media), (opaque, false, false));
@@ -785,7 +786,7 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
                     let mut encoder = context.device.create_command_encoder(&Default::default());
                     {
                         let mut pass = encoder.begin_compute_pass(&Default::default());
-                        pass.set_pipeline(pipeline);
+                        pass.set_pipeline(&general);
                         pass.set_bind_group(0, &task.bind, &[]);
                         pass.dispatch_workgroups(16u32.div_ceil(PATH_WORKGROUP_SIZE), 1, 1);
                     }
@@ -802,9 +803,10 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             assert_eq!(optical_line_raw(&raw, 4, 4), *prefixes.last().unwrap());
             (uniforms, prefixes, png, raw)
         };
-        let old = run(true);
         let new = run(false);
-        assert_eq!(old, new, "mode{mode}: complete input packets, each film prefix and PNG/raw must remain byte-identical");
+        if !opaque {
+            assert_eq!(run(true), new, "mode{mode}: complete input packets, each film prefix and PNG/raw must remain byte-identical");
+        }
         if mode == 0 {
             inactive_baseline = Some(new);
         } else if mode == 1 {

@@ -1176,17 +1176,17 @@ mod tests {
         (fill, measure(&closed).unwrap().volume)
     }
 
-    /// The fill's height over the point `(x, y)`: Newton's method on the surface's `x`, `y` from
-    /// the middle of its face's domain (or the last answer).
-    fn height_over(body: &Body, x: f64, y: f64, start: &mut Option<(f64, f64)>) -> Option<f64> {
-        let r = record(body);
-        let face = &r.faces[0];
-        let s = SurfaceEval::new(face.parameters()).ok()?;
-        let [[u0, u1], [v0, v1]] = face.domain;
+    /// The fill's height over the point `(x, y)`: Newton's method on the surface `s`'s `x`, `y`
+    /// over its face's `domain`, from the middle of it (or the last answer), until within 1e-12.
+    fn height_over(s: &SurfaceEval, domain: [[f64; 2]; 2], x: f64, y: f64, start: &mut Option<(f64, f64)>) -> Option<f64> {
+        let [[u0, u1], [v0, v1]] = domain;
         let (mut u, mut v) = start.unwrap_or(((u0 + u1) / 2.0, (v0 + v1) / 2.0));
         for _ in 0..30 {
             let (q, a, b) = s.derivs(u, v)?;
             let (rx, ry) = (q.x - x, q.y - y);
+            if rx.hypot(ry) < 1e-12 {
+                break;
+            }
             let det = a.x * b.y - a.y * b.x;
             if det.abs() < 1e-300 {
                 return None;
@@ -1208,6 +1208,8 @@ mod tests {
         let n = 300;
         let (dx, dy) = ((hi.x - lo.x) / n as f64, (hi.y - lo.y) / n as f64);
         let inside = |x: f64, y: f64| polygon.contains(Vec2::new(x, y));
+        let r = record(fill);
+        let s = SurfaceEval::new(r.faces[0].parameters()).unwrap();
         let mut sum = 0.0;
         let mut start = None;
         for i in 0..n {
@@ -1215,7 +1217,7 @@ mod tests {
             for j in 0..n {
                 let y = lo.y + (j as f64 + 0.5) * dy;
                 if inside(x, y) {
-                    let h = height_over(fill, x, y, &mut start).expect("the fill covers the polygon");
+                    let h = height_over(&s, r.faces[0].domain, x, y, &mut start).expect("the fill covers the polygon");
                     sum += (h - cut_height(x)) * dx * dy;
                 }
             }
@@ -1309,9 +1311,10 @@ mod tests {
         crate::native::body_from_smlib(&solidcraft_smlib::Brep::from_record(&made.brep, true).unwrap()).unwrap()
     }
 
+    /// (Five sides are `the_fill_does_not_depend_on_pick_order_or_where_the_body_is`'s.)
     #[test]
     fn regular_rims_of_three_to_eight_sides_fill_with_one_face_and_close_the_cup() {
-        for n in 3..=8 {
+        for n in [3, 4, 8] {
             let corners = regular(n, 0.3);
             let (solid, open, rim) = cup(&corners, Vec2::ZERO);
             let (fill, got) = fill_rim(&open, &rim);

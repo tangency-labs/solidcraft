@@ -42,18 +42,27 @@ fn tube() -> Body {
     .unwrap()
 }
 
+/// Each face's mesh area, of a body of `faces` faces.
+fn areas(faces: usize, mesh: &solidcraft_geom::Mesh) -> Vec<f64> {
+    let mut out = vec![0.0; faces];
+    for (t, &f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let ([a, b, c], Some(slot)) = (mesh.tri(t).unwrap(), out.get_mut(f as usize)) else { continue };
+        *slot += (b - a).cross(c - a).len() / 2.0;
+    }
+    out
+}
+
 /// Each face's mesh area, and how far its triangles' centroids lie off its surface at most.
 fn per_face(body: &Body, mesh: &solidcraft_geom::Mesh) -> Vec<(f64, f64)> {
     let faces: Vec<SurfaceEval> = body.record().faces.iter().map(|f| SurfaceEval::new(&f.surface).unwrap()).collect();
-    let mut out = vec![(0.0, 0.0f64); faces.len()];
+    let mut off = vec![0.0f64; faces.len()];
     for (t, &f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        let ([a, b, c], Some(surface), Some(slot)) = (mesh.tri(t).unwrap(), faces.get(f as usize), out.get_mut(f as usize)) else { continue };
-        slot.0 += (b - a).cross(c - a).len() / 2.0;
+        let ([a, b, c], Some(surface), Some(slot)) = (mesh.tri(t).unwrap(), faces.get(f as usize), off.get_mut(f as usize)) else { continue };
         let g = (a + b + c) / 3.0;
         let uv = surface.project(g, None, f64::INFINITY).unwrap();
-        slot.1 = slot.1.max(surface.point(uv).unwrap().dist(g));
+        *slot = slot.max(surface.point(uv).unwrap().dist(g));
     }
-    out
+    areas(faces.len(), mesh).into_iter().zip(off).collect()
 }
 
 /// A lofted tube whose side faces are ruled across (straight section edges) and long along
@@ -67,8 +76,8 @@ fn trimmed_ruled_loft_faces_mesh_on_their_surfaces() {
     let joined = boolean(&tube, &shell, BoolOp::Union).unwrap().unwrap();
     let tol = (joined.size() * 1e-3).max(1e-3);
     let display = per_face(&joined, &joined.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap());
-    let fine = per_face(&joined, &joined.mesh(&crate::MeshTolerance::chord(tol / 8.0)).unwrap());
-    for (fi, ((area, off), (fine_area, _))) in display.iter().zip(&fine).enumerate() {
+    let fine = areas(joined.face_count(), &joined.mesh(&crate::MeshTolerance::chord(tol / 8.0)).unwrap());
+    for (fi, ((area, off), fine_area)) in display.iter().zip(&fine).enumerate() {
         // A centroid sags at most about the chord tolerance (the bad sheet was 7 mm off at 0.6).
         assert!(*off < 2.0 * tol, "face {fi}: a triangle lies {off:.2} mm off the surface (tolerance {tol:.2})");
         // Covered once: the area of a much finer mesh (the bad face had two and a half times it).

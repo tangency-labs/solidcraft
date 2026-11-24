@@ -120,16 +120,11 @@ fn a_body_drawn_see_through_is_the_picture_of_the_same_appearance_assigned() {
     let see_through = dir.snapshot(&plain, "see-through.png", &["--body", "Target:opacity=0.3"]);
     assert_differs(&see_through, &solid, "--body opacity was ignored");
     assert_same(&see_through, &dir.snapshot(&assigned, "by-script.png", &[]), "the same appearance assigned by a script");
-
-    // The option's colour is the design's too. It names the target, not the tool: the tool is
-    // inside the target, so a solid target hides whatever colour the tool is given.
-    let painted =
-        dir.script("painted.json", &[json!({"command": "appearance.assign", "params": {"bodies": ["Target"], "color": "#00aa33", "opacity": 1.0}})]);
-    let by_option = dir.snapshot(&plain, "painted.png", &["--body", "Target:color=#00aa33"]);
-    assert_differs(&by_option, &solid, "--body color was ignored");
-    assert_same(&by_option, &dir.snapshot(&painted, "painted-script.png", &[]), "the same colour assigned by a script");
 }
 
+/// `--body NAME:color=…`, repeated for two bodies, is the picture of both colours assigned by a
+/// script (the option's colour is the design's too), and `--tool` repeated draws both bodies as
+/// tools.
 #[test]
 fn body_and_tool_options_can_still_be_repeated() {
     let dir = Scratch::new();
@@ -182,14 +177,13 @@ fn a_tool_shows_through_the_bodies_around_it() {
 fn a_section_cuts_the_model_as_inspect_section_does() {
     let dir = Scratch::new();
     let script = dir.script("part.json", &[]);
-    let whole = dir.snapshot(&script, "whole.png", &[]);
     let cut = dir.snapshot(&script, "cut.png", &["--section", "z=12"]);
-    assert_differs(&cut, &whole, "--section was ignored");
     assert_same(&cut, &dir.snapshot(&script, "cut-json.png", &["--section", r#"{"plane": "XY", "at": 12}"#]), "the command's own JSON");
     let by_script = dir.script("sectioned.json", &[json!({"command": "inspect.section", "params": {"plane": "XY", "at": 12}})]);
     assert_same(&cut, &dir.snapshot(&by_script, "by-script.png", &[]), "inspect.section in a script");
 
-    // The other side of the same plane is a different picture.
+    // The other side of the same plane is a different picture (were `--section` ignored, the
+    // two would be the same whole model).
     let flipped = dir.snapshot(&script, "flipped.png", &["--section", "z=12,flip"]);
     assert_differs(&flipped, &cut, "flip keeps the other side");
 

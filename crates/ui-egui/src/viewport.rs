@@ -12688,9 +12688,11 @@ mod tests {
 
     /// A hovered face lights solidly over a body drawn from its display plan on the GPU: the
     /// highlight uses the plan's triangles, not the reference mesh's other triangulation of the
-    /// same face, which fought the model at equal depth and shimmered in wedges. Every face of a
-    /// box with a pocket and a round boss, hovered, changes the same pixels as on the CPU path (where model and
-    /// highlight share the reference mesh). Skipped without a GPU adapter.
+    /// same face, which fought the model at equal depth and shimmered in wedges. The faces of a
+    /// box with a pocket and a round boss that the iso view shows (the top with the pocket's and
+    /// the boss's loops in it, the boss's round side and its top, and the box's two sides in
+    /// view), hovered, change the same pixels as on the CPU path (where model and highlight share
+    /// the reference mesh). Skipped without a GPU adapter.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_hovered_face_lights_whole_over_a_body_drawn_from_its_plan() {
@@ -12703,7 +12705,21 @@ mod tests {
         const SIZE: u32 = 256;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
         let body = app.session.world_state().unwrap().bodies[0].clone();
-        let faces = body.body.face_count();
+        // The iso view looks from +x, -y, +z: the pocket's floor is hidden behind its walls.
+        let faces: Vec<usize> = [
+            Vec3::new(5.0, 5.0, 40.0),
+            Vec3::new(38.0, 33.0, 45.0),
+            Vec3::new(33.0, 33.0, 50.0),
+            Vec3::new(40.0, 20.0, 20.0),
+            Vec3::new(20.0, 0.0, 20.0),
+        ]
+        .into_iter()
+        .map(|p| {
+            let (distance, face) = body.body.nearest_face(p).unwrap();
+            assert!(distance < 1e-6, "{p:?} lies on a face ({distance} away)");
+            face
+        })
+        .collect();
         let mut render = |tess: bool, hover: Option<usize>| {
             app.viewport.gpu =
                 Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false, edges: false });
@@ -12732,7 +12748,7 @@ mod tests {
             return;
         };
         let mut checked = 0;
-        for f in 0..faces {
+        for f in faces {
             let (Some(gpu), Some(cpu)) = (render(true, Some(f)), render(false, Some(f))) else { return };
             let (on_gpu, on_cpu) = (lit(&gpu_plain, &gpu), lit(&cpu_plain, &cpu));
             let area = on_cpu.iter().filter(|x| **x).count();
@@ -12822,8 +12838,13 @@ mod tests {
             eprintln!("skipping: no GPU adapter");
             return;
         };
+        // The block draws as its merged triangles whichever face it holds: three faces seen lit
+        // (all the iso view shows of a box) are enough.
         let mut lit = 0;
         for index in 0..body.body.face_count() {
+            if lit == 3 {
+                break;
+            }
             app.viewport.hover = Some(Hit::Face { body: body.name.clone(), index, point: Vec3::ZERO });
             let highlight = build_highlight(&app);
             assert!(highlight.blocks.iter().any(|b| !b.bytes.vertices.is_empty()), "the face's feedback is in the highlight's block");
@@ -14752,20 +14773,17 @@ mod tests {
     }
 
     /// A part drawn as instances looks the same as its placements' own triangles drawn one by
-    /// one. Skipped without a GPU adapter.
+    /// one: the cylinder, whose smooth normals go through the turned placement's instance
+    /// transform. Skipped without a GPU adapter.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn instances_draw_like_their_placements_own_triangles() {
-        for part in PARTS {
-            if !placed_three_times_draws_like_its_own_triangles(part) {
-                return;
-            }
-        }
+        placed_three_times_draws_like_its_own_triangles(PARTS[1]);
     }
 
-    /// `false` without a GPU adapter.
+    /// Skipped without a GPU adapter.
     #[cfg(not(target_arch = "wasm32"))]
-    fn placed_three_times_draws_like_its_own_triangles(part: (&str, &str)) -> bool {
+    fn placed_three_times_draws_like_its_own_triangles(part: (&str, &str)) {
         let mut app = three_placed_parts(part);
         app.fit_view();
         const SIZE: u32 = 256;
@@ -14790,7 +14808,7 @@ mod tests {
         assert!(!scene.instanced.is_empty());
         let (Some(instanced), Some(one_by_one)) = (render(scene.clone()), render(scene.clone().merged())) else {
             eprintln!("skipping: no GPU adapter");
-            return false;
+            return;
         };
         let drawn = instanced.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
         assert!(drawn > (SIZE * SIZE) as usize / 50, "the parts are drawn: {drawn} pixels");
@@ -14816,12 +14834,11 @@ mod tests {
                 crate::gpu::analysis_colors(&Tokens::get().analysis),
             )
         };
-        let (Some(instanced), Some(one_by_one)) = (render(scene.clone()), render(scene.merged())) else { return false };
+        let (Some(instanced), Some(one_by_one)) = (render(scene.clone()), render(scene.merged())) else { return };
         let drawn = instanced.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
         assert!(drawn > (SIZE * SIZE) as usize / 4, "{part:?}: close up, the part fills the view: {drawn} pixels");
         let differ = instanced.chunks(4).zip(one_by_one.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
         assert!(differ * 200 < drawn, "{part:?} close up: {differ} of {drawn} pixels differ");
-        true
     }
 
     #[test]
@@ -16601,7 +16618,8 @@ mod tests {
 
     /// A whole faded or see-through body lit from the model's own vertices, recoloured in the
     /// highlight's palette, looks exactly as the copy of its triangles it replaces did: hovered,
-    /// and selected. Skipped without a GPU adapter.
+    /// and selected (one recolouring path, its colour aside: a see-through body hovered and a
+    /// faded one selected). Skipped without a GPU adapter.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn faded_and_see_through_bodies_light_as_their_copies_did() {
@@ -16629,7 +16647,7 @@ mod tests {
                 crate::gpu::analysis_colors(&Tokens::get().analysis),
             )
         };
-        for case in ["see-through", "faded"] {
+        for (case, selected) in [("see-through", false), ("faded", true)] {
             match case {
                 "see-through" => drop(app.run("appearance.assign", json!({"bodies": ["Plate"], "color": "#88aacc", "opacity": 0.4})).unwrap()),
                 _ => {
@@ -16637,33 +16655,31 @@ mod tests {
                     app.run("component.activate", json!({"component": "Post"})).unwrap();
                 }
             }
-            for selected in [false, true] {
-                app.viewport.hover_bodies = if selected { Vec::new() } else { vec!["Plate".into()] };
-                app.session.selection = if selected { vec![Sel::Body { name: "Plate".into() }] } else { Vec::new() };
-                let model = build_scene(&app);
-                let highlight = build_highlight(&app);
-                assert_eq!(highlight.recoloured.len(), 1, "{case}: the plate is lit from the model's vertices");
-                let highlight_handed = highlight.clone();
-                // The copy it replaces: every triangle, lit, in the colour the copy was drawn in.
-                let t = Tokens::get();
-                let colour = if selected {
-                    c4(t.body_selected)
-                } else {
-                    let c = body_color(&app.session.doc, &app_body(&app, "Plate")).unwrap_or(t.body);
-                    let k = t.hover_face_lift;
-                    [c.r().saturating_add(k), c.g().saturating_add(k), c.b().saturating_add(k), 255]
-                };
-                // The same highlight (its edges and widgets), the plate copied instead of recoloured.
-                let mut copy = highlight.clone().merged();
-                copy.recoloured.clear();
-                let mesh = drawn_mesh(&app, &app_body(&app, "Plate"));
-                mesh_tris(&mut copy, &mesh, colour, true, |_| true);
-                let (Some(lit), Some(copied)) = (render(model.clone(), highlight_handed), render(model, copy)) else {
-                    eprintln!("skipping: no GPU adapter");
-                    return;
-                };
-                assert!(lit == copied, "{case}, selected {selected}: the recoloured body does not look as its copy did");
-            }
+            app.viewport.hover_bodies = if selected { Vec::new() } else { vec!["Plate".into()] };
+            app.session.selection = if selected { vec![Sel::Body { name: "Plate".into() }] } else { Vec::new() };
+            let model = build_scene(&app);
+            let highlight = build_highlight(&app);
+            assert_eq!(highlight.recoloured.len(), 1, "{case}: the plate is lit from the model's vertices");
+            let highlight_handed = highlight.clone();
+            // The copy it replaces: every triangle, lit, in the colour the copy was drawn in.
+            let t = Tokens::get();
+            let colour = if selected {
+                c4(t.body_selected)
+            } else {
+                let c = body_color(&app.session.doc, &app_body(&app, "Plate")).unwrap_or(t.body);
+                let k = t.hover_face_lift;
+                [c.r().saturating_add(k), c.g().saturating_add(k), c.b().saturating_add(k), 255]
+            };
+            // The same highlight (its edges and widgets), the plate copied instead of recoloured.
+            let mut copy = highlight.clone().merged();
+            copy.recoloured.clear();
+            let mesh = drawn_mesh(&app, &app_body(&app, "Plate"));
+            mesh_tris(&mut copy, &mesh, colour, true, |_| true);
+            let (Some(lit), Some(copied)) = (render(model.clone(), highlight_handed), render(model, copy)) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            assert!(lit == copied, "{case}, selected {selected}: the recoloured body does not look as its copy did");
             app.session.selection.clear();
         }
     }
@@ -17708,6 +17724,7 @@ mod tests {
     fn trackpad_zoom_modifier_zooms_without_pan_or_tail() {
         use crate::prefs::TrackpadZoomModifier as Z;
         use egui::{Modifiers as M, MouseWheelUnit as U, TouchPhase as P};
+        // Reversed zoom only flips the sign (`zoom_sign`): once, with Cmd chosen and bracketed.
         for preset in ["fusion", crate::prefs::TOUCHPAD_NAV] {
             for (chosen, held, zooms) in [
                 (Z::Cmd, M::COMMAND, true),
@@ -17717,7 +17734,8 @@ mod tests {
                 (Z::Ctrl, M::CTRL, true),
             ] {
                 for bracket in [true, false] {
-                    for reverse in [false, true] {
+                    let reversed = preset == "fusion" && chosen == Z::Cmd && bracket;
+                    for reverse in std::iter::once(false).chain(reversed.then_some(true)) {
                         // Run the same input with the given choice; a key that is not chosen
                         // must leave main's own handling (Cmd/Ctrl + wheel is a pinch, #8480) unchanged.
                         let run = |choice| {
@@ -18695,12 +18713,8 @@ mod tests {
             h.frames(20);
             h.app.cam != before
         };
-        for (layout, smooth) in [
-            (crate::ui_kit::LayoutMode::Floating, true),
-            (crate::ui_kit::LayoutMode::Floating, false),
-            (crate::ui_kit::LayoutMode::Docked, true),
-            (crate::ui_kit::LayoutMode::Docked, false),
-        ] {
+        // Each layout and each smoothing once: the list over the model (#678) is in both.
+        for (layout, smooth) in [(crate::ui_kit::LayoutMode::Floating, true), (crate::ui_kit::LayoutMode::Docked, false)] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":layout}));
             h.app.preferences.smooth_wheel_zoom = smooth;

@@ -857,10 +857,10 @@ fn replies_match_the_output_schema() {
     assert!(!conforms(schema, schema, &bad), "{bad}");
 }
 
-/// `solid.fillet` replies with `FilletResult` in each of its forms, its contract taking each: a
-/// boss's base rounded with each turn and its options spelled out, a reduced round (with the radii
-/// it used), chord and curvature rounds, a smooth-patch corner with setbacks, and the variable and
-/// spline forms.
+/// `solid.fillet` replies with `FilletResult`, its contract taking each of its forms. Built: a
+/// boss's base rounded with its options spelled out, a reduced round (with the radii it used) and
+/// a smooth-patch corner with setbacks, the replies' three shapes. Checked against the contract
+/// alone: the swept turn, chord, curvature, per-edge, by-index, variable and spline forms.
 #[test]
 fn fillet_replies_match_its_output_schema() {
     let schema = output_schema_for::<FilletResult>();
@@ -880,17 +880,18 @@ fn fillet_replies_match_its_output_schema() {
     run(
         json!({"edges": boss, "radius": 1, "turn": "mitre", "type": "constant", "fit": "exact", "corner": "rolling", "tangent_chain": true, "body": "B", "name": "Round"}),
     );
-    run(json!({"edges": boss, "radius": "1 mm", "turn": "Swept"}));
-    run(json!({"edges": boss, "radius": 1, "turn": "swept", "fit": "reduce"}));
     let reduced = run(json!({"edges": [[20, 0, 10]], "radius": 15, "fit": "reduce"}));
     assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
-    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
-    run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
-    run(json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "2 mm"], "tangent_chain": false}));
-    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
-    // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
-    // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.
+    // The other forms reply as the first: their contract takes them. (Variable and spline radii
+    // are not built here at all: solidcore fails a variable round on a box edge at this pin, status
+    // 1001, as `variable_radius_on_a_box_edge`.)
     for p in [
+        json!({"edges": boss, "radius": "1 mm", "turn": "Swept"}),
+        json!({"edges": boss, "radius": 1, "turn": "swept", "fit": "reduce"}),
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}),
+        json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}),
+        json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "2 mm"], "tangent_chain": false}),
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}),
         json!({"edges": [[20, 0, 10]], "radius": 1, "type": "variable", "radius2": 2, "start": [0, 0, 10], "mid": [[0.5, "1.5 mm"]], "smooth": true}),
         json!({"edges": [[20, 0, 10]], "radius": 1, "type": "spline", "start": [0, 0, 10], "radii": [2], "knots": [0, 0, 1, 1]}),
     ] {

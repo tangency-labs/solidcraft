@@ -694,7 +694,8 @@ fn parallel_import_retains_units_order_sources_and_partial_failure_across_batche
     assert_eq!(serial.bodies.first().unwrap().name, "Cube0");
     assert_eq!(serial.bodies.last().unwrap().name, "Cube69");
     assert!((measure(&serial.bodies[0].body).unwrap().volume - 1000.0).abs() < 1e-9);
-    for workers in [2, 3, 8, usize::MAX] {
+    // Uneven batches, and more workers than the machine has (clamped).
+    for workers in [3, usize::MAX] {
         assert_same_import(&serial, &step_import_with_workers(&text, workers).unwrap());
     }
 }
@@ -2951,10 +2952,7 @@ fn tee_fillet_exports_byte_identical() {
         let f = fillet(&tee, &[Vec3::new(0.0, 10.0, 125f64.sqrt())], 3.0).unwrap();
         step_export(&[&f], "tee").unwrap()
     };
-    let first = export();
-    for _ in 0..2 {
-        assert!(export() == first, "export differs between runs");
-    }
+    assert!(export() == export(), "export differs between runs");
 }
 
 /// A plate with a hole glued to its mirror image: the faces split at the mirror plane and the
@@ -3606,8 +3604,11 @@ fn a_surface_model_with_an_edge_of_two_faces_still_imports_as_one_open_body() {
 /// Parts of known shape from the step-conformance corpus (`tests/step-conformance`, generated
 /// from formulas by https://github.com/dan335/step-conformance at 96f30bb, CC0 1.0):
 /// each reads back with its exact volume (from the generator's own profile), its box and its
-/// face count. Left out: `torus_ring` (meshes below its equator, a meshing issue for the
-/// tessellation work) and the 1.4 MB `plate_900_holes`.
+/// face count. Each is the STEP reader's schema 4 record made into a body by SMLib as read (a
+/// closed solid, none refused and brought in as surfaces), and every face is traced to a face of
+/// the file (the NURBS cylinder, dome and torus ring among them: their faces wind around a spline
+/// closed on itself, and get a seam). Left out: `torus_ring` (meshes below its equator, a meshing
+/// issue for the tessellation work) and the 1.4 MB `plate_900_holes`.
 #[test]
 fn step_conformance_parts_read_back_their_exact_shape() {
     // (file, exact volume (mm³), box (min, max), kernel faces, bodies, seam edges the reader adds
@@ -3634,6 +3635,7 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     ];
     for (name, text, volume, bbox, faces, bodies, seams) in parts {
         let imp = step_import(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let ex = solidcore_step::p21::parse(text).unwrap();
         // A face that winds around its surface without a seam edge (a cone or a dome bounded by
         // its base circle alone, a cylinder by its two rims) gets one, and the import says so.
         let added: Option<usize> = imp
@@ -3646,6 +3648,9 @@ fn step_conformance_parts_read_back_their_exact_shape() {
         let (mut v, mut n) = (0.0, 0);
         let mut b = solidcraft_geom::Aabb3::EMPTY;
         for body in &imp.bodies {
+            assert!(body.refused.is_none() && body.closed, "{name}: {:?}", body.refused);
+            assert_eq!(body.face_origin.len(), body.body.face_count(), "{name}");
+            assert!(body.face_origin.iter().all(|f| ex.get(*f).is_some_and(|e| e.name() == "ADVANCED_FACE")), "{name}: {:?}", body.face_origin);
             let m = measure(&body.body).unwrap_or_else(|e| panic!("{name}: {e}"));
             v += m.volume;
             n += m.faces;
@@ -3933,46 +3938,6 @@ pub(super) fn schema_4_volume(text: &str) -> f64 {
     let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
-}
-
-/// The step-conformance parts read into the kernel: the STEP reader's
-/// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
-/// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
-/// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
-#[test]
-fn step_conformance_parts_read_into_smlib() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
-    // (file, exact volume (mm³) and faces of its solid items: cylinder_twice places its one
-    // cylinder twice)
-    #[rustfmt::skip]
-    let parts: [(&str, f64, usize); 17] = [
-        ("cone_point", 1000.0 * std::f64::consts::PI, 2), ("cone_point_vertex", 1000.0 * std::f64::consts::PI, 2),
-        ("cylinder", 9424.778, 3), ("cylinder_inch", 9424.778, 3), ("cylinder_nurbs", 9424.778, 3),
-        ("cylinder_placed", 9424.778, 3), ("cylinder_seam", 9424.778, 3), ("cylinder_twice", 9424.778, 3),
-        ("dome", 16755.161, 2), ("dome_nurbs", 16755.161, 2), ("far_cylinder", 9424.778, 3),
-        ("grooved_shaft", 153532.251, 753), ("plate_100_holes", 71588.321, 110), ("sheet_disc", 193396443.755, 3),
-        ("tiny_pin", std::f64::consts::FRAC_PI_8, 3), ("torus_ring_nurbs", 4934.802, 2), ("washer", 3534.292, 4),
-    ];
-    for (name, volume, faces) in parts {
-        let text = std::fs::read_to_string(dir.join(format!("{name}.step"))).unwrap();
-        let ex = solidcore_step::p21::parse(&text).unwrap();
-        // The file's one representation context, as the import reads it.
-        let ctx = ex.entities.iter().find(|(_, e)| e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some()).map(|(id, _)| *id);
-        let units = context_units(&ex, ctx, &mut HashMap::new());
-        let mut items: Vec<u64> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
-        items.sort_unstable();
-        let (mut v, mut n) = (0.0, 0);
-        for item in items {
-            let (part, _) = parallel::smlib_part(&ex, item, units).unwrap_or_else(|f| panic!("{name}: {}", f.msg));
-            assert_eq!(part.face_origin.len(), part.body.face_count(), "{name}");
-            assert!(part.face_origin.iter().all(|f| ex.get(*f).is_some_and(|e| e.name() == "ADVANCED_FACE")), "{name}: {:?}", part.face_origin);
-            let m = measure(&part.body).unwrap_or_else(|e| panic!("{name}: {e}"));
-            v += m.volume;
-            n += m.faces;
-        }
-        assert!(rel(v, volume) < 1e-3, "{name}: volume {v} vs {volume}");
-        assert_eq!(n, faces, "{name}: faces");
-    }
 }
 
 /// A domed cubic patch 30 mm across whose four edges, cubic B-splines on its boundary rows,

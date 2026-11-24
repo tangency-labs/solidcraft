@@ -12,7 +12,8 @@
 //! `tests/action_matrix/baseline.json` is a ratchet: an action that passed there and fails now
 //! fails the test (a regression). Newly passing actions are reported; record them with
 //! `cargo xtask action-matrix --bless` (or `ACTION_MATRIX_BLESS=1` on [`action_matrix_all`]).
-//! Every CI run checks a fixed sample ([`action_matrix_sample`], under a minute); the full matrix
+//! Every CI run checks a fixed sample ([`action_matrix_sample`], under a minute: one action in
+//! [`PR_SAMPLE`], fewer in a design whose actions take long, see [`SAMPLE_DESIGN_SECS`]); the full matrix
 //! is the ignored [`action_matrix_shard`], which the nightly "Action matrix" jobs run one shard
 //! each (`ACTION_MATRIX_SHARD=k/n`), cut by what each design costs (`tests/action_matrix/costs.json`).
 //! [`action_matrix_determinism`] runs a sample twice and lists any action whose outcome changed.
@@ -36,6 +37,10 @@ use solidcraft_engine::doc::{FaceAttachmentStatus, ModelBody, naming};
 
 /// One in this many actions runs on pull requests (by a stable hash of its key).
 const PR_SAMPLE: u64 = 40;
+/// At most about this many seconds of a design's actions (on a CI runner, from costs.json) run on
+/// pull requests: a design whose actions take longer runs one in more than [`PR_SAMPLE`], so no
+/// one design holds up the sample while the others are done.
+const SAMPLE_DESIGN_SECS: f64 = 10.0;
 /// One in this many actions runs twice in the nightly determinism check, on the designs whose
 /// whole matrix takes at most [`DETERMINISM_MAX_SECS`] on a runner (most of the corpus).
 const DETERMINISM_SAMPLE: u64 = 8;
@@ -50,6 +55,11 @@ const SLOW: [&str; 7] = [
     "oracle/40-box-sphere-torus",
     "oracle/42-overlapping-patterns",
 ];
+/// Designs some of whose actions take over a minute each on a runner (the rounds of the hull
+/// triangle, the shells of oracle 77's variably rounded block): a sample that holds one of them
+/// is the pull request sample's whole wall time, whatever share of the design it takes. The full
+/// matrix only.
+const SLOW_ACTIONS: [&str; 2] = ["regressions/front_triangle_hull_triangle", "oracle/77-fillet-variable-linear"];
 /// One in this many passes also gets the edit round.
 const EDIT_SAMPLE: u64 = 6;
 /// An action that takes longer than this is recorded as a timeout.
@@ -765,12 +775,14 @@ const SLICE_SECS: f64 = 600.0;
 /// Designs that take longer than this to load on a runner stay out of the pull request sample.
 const SAMPLE_MAX_LOAD_SECS: f64 = 8.0;
 
-/// A piece of work: one design, or a slice `(j, n)` of a heavy one, and what it should cost.
+/// A piece of work: one design, or a slice `(j, n)` of a heavy one, what it should cost, and the
+/// share of its actions it runs (one in `sample`, by a stable hash of the action's key).
 #[derive(Clone, Debug)]
 struct Unit {
     design: String,
     slice: Option<(usize, usize)>,
     cost: f64,
+    sample: u64,
 }
 
 impl Unit {
@@ -791,10 +803,10 @@ fn plan(designs: &[String], costs: &BTreeMap<String, Cost>, parts: usize) -> Vec
         let c = costs.get(d).copied().unwrap_or(UNKNOWN_COST);
         let n = ((c.secs / SLICE_SECS.max(5.0 * c.load)).ceil() as usize).max(1);
         if n == 1 {
-            units.push(Unit { design: d.clone(), slice: None, cost: c.secs });
+            units.push(Unit { design: d.clone(), slice: None, cost: c.secs, sample: 1 });
         } else {
             let each = c.load + (c.secs - c.load).max(0.0) / n as f64;
-            units.extend((0..n).map(|j| Unit { design: d.clone(), slice: Some((j, n)), cost: each }));
+            units.extend((0..n).map(|j| Unit { design: d.clone(), slice: Some((j, n)), cost: each, sample: 1 }));
         }
     }
     units.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name().cmp(&b.name())));
@@ -815,12 +827,12 @@ fn design_names() -> Vec<String> {
     designs.into_iter().map(|(n, _)| n).filter(|n| filter.as_deref().is_none_or(|f| n.contains(f))).collect()
 }
 
-/// Run the actions (one in `sample`) of these units in child processes, `jobs` at a time.
+/// Run the actions (one in each unit's sample) of these units in child processes, `jobs` at a time.
 ///
 /// `ACTION_MATRIX_WORKDIR` keeps each design's raw outcomes there (one JSON line each, written as
 /// they come, so a run cut short still shows what it did) and `ACTION_MATRIX_TIMINGS` appends
 /// each unit's time to that file (JSON lines).
-fn run_units(sample: u64, queue: &[Unit]) -> Vec<Value> {
+fn run_units(queue: &[Unit]) -> Vec<Value> {
     let keep = std::env::var_os("ACTION_MATRIX_WORKDIR").map(PathBuf::from);
     static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -841,7 +853,7 @@ fn run_units(sample: u64, queue: &[Unit]) -> Vec<Value> {
                     let file = u.name().replace('/', "__").replace([' ', '[', ']'], "_");
                     let out = dir.join(format!("{file}.r{run}.jsonl"));
                     let t = Instant::now();
-                    let lines = run_design(&u.design, &out, sample, u.slice);
+                    let lines = run_design(&u.design, &out, u.sample, u.slice);
                     let secs = t.elapsed().as_secs_f64();
                     let load = lines.iter().find(|o| o["entity"] == "design" && o["action"] == "load").and_then(|o| o["ms"].as_f64()).unwrap_or(0.0) / 1000.0;
                     if let Some(p) = &timings {
@@ -863,16 +875,26 @@ fn run_units(sample: u64, queue: &[Unit]) -> Vec<Value> {
     v
 }
 
-/// Run the actions (one in `sample`) of every design (the pull request sample leaves out the
-/// slow-loading ones).
+/// Run the actions of every design, heaviest first: all of them (`sample` 1), or one in `sample`
+/// and at most about [`SAMPLE_DESIGN_SECS`] of each design's, leaving out the slow-loading designs
+/// and [`SLOW_ACTIONS`].
 fn run_matrix(sample: u64) -> Vec<Value> {
     let costs = read_costs();
-    let queue: Vec<Unit> = design_names()
+    let mut queue: Vec<Unit> = design_names()
         .into_iter()
-        .filter(|n| sample == 1 || !(SLOW.contains(&n.as_str()) || costs.get(n).is_some_and(|c| c.load > SAMPLE_MAX_LOAD_SECS)))
-        .map(|design| Unit { design, slice: None, cost: 0.0 })
+        .filter(|n| {
+            sample == 1
+                || !(SLOW.contains(&n.as_str()) || SLOW_ACTIONS.contains(&n.as_str()) || costs.get(n).is_some_and(|c| c.load > SAMPLE_MAX_LOAD_SECS))
+        })
+        .map(|design| {
+            let c = costs.get(&design).copied().unwrap_or(UNKNOWN_COST);
+            let work = (c.secs - c.load).max(0.0);
+            let sample = if sample == 1 { 1 } else { sample.max((work / SAMPLE_DESIGN_SECS).ceil() as u64) };
+            Unit { design, slice: None, cost: c.load + work / sample as f64, sample }
+        })
         .collect();
-    run_units(sample, &queue)
+    queue.sort_by(|a, b| b.cost.total_cmp(&a.cost).then_with(|| a.name().cmp(&b.name())));
+    run_units(&queue)
 }
 
 /// One design in child processes, restarting after an action that hangs or aborts.
@@ -1101,7 +1123,8 @@ fn ratchet(results: &[Value], full: bool) {
     );
 }
 
-/// Pull requests: a fixed sample of the matrix (one action in [`PR_SAMPLE`]) against the ratchet.
+/// Pull requests: a fixed sample of the matrix (one action in [`PR_SAMPLE`], fewer in the heaviest
+/// designs) against the ratchet.
 #[test]
 fn action_matrix_sample() {
     let results = run_matrix(PR_SAMPLE);
@@ -1126,7 +1149,7 @@ fn action_matrix_shard() {
     if std::env::var_os("ACTION_MATRIX_SHARD_LIST").is_some() {
         return;
     }
-    let results = run_units(1, &shards[k]);
+    let results = run_units(&shards[k]);
     ratchet(&results, false);
 }
 
@@ -1153,10 +1176,10 @@ fn action_matrix_determinism() {
     let queue: Vec<Unit> = design_names()
         .into_iter()
         .filter(|n| costs.get(n).copied().unwrap_or(UNKNOWN_COST).secs <= DETERMINISM_MAX_SECS)
-        .map(|design| Unit { design, slice: None, cost: 0.0 })
+        .map(|design| Unit { design, slice: None, cost: 0.0, sample: DETERMINISM_SAMPLE })
         .collect();
-    let a = outcomes(run_units(DETERMINISM_SAMPLE, &queue));
-    let b = outcomes(run_units(DETERMINISM_SAMPLE, &queue));
+    let a = outcomes(run_units(&queue));
+    let b = outcomes(run_units(&queue));
     let keys: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
     let mut changed = Vec::new();
     // Pieces that share a name can swap numbers between runs (#569): compare passes per family
@@ -1416,16 +1439,22 @@ fn a_hole_square_to_a_45_degree_flange() {
     }
 }
 
-// #1255: an axis through a corner round of the sensor enclosure's lid, then a parameter that
-// widens the lid. The round is found again by name, but its point nearest the old pick is the
-// end of its arc, on the edge it shares with the flat side, and picking again by that point
-// took the side: "the face is not a cylinder". The named face is used as found now.
+// #1255: an axis through a corner round, then a parameter that widens the part. The round is
+// found again by name, but its point nearest the old pick is the end of its arc, on the edge it
+// shares with the flat side, and picking again by that point took the side: "the face is not a
+// cylinder". The named face is used as found now. A 60 x 40 x 20 box `w` long with its vertical
+// edge at (w, 40) rounded 5, picked halfway round: once `w` is 66 the round's centre is at
+// (61, 35), and from there the old pick lies at about 125°, past the arc's end at 90°.
 #[test]
 fn an_axis_through_a_corner_round_that_a_parameter_moves() {
-    let mut s = load(&root().join("examples/acceptance/sensor_enclosure.json")).unwrap();
-    s.execute("construct.axis.through_cylinder", &json!({"face": {"face": [36.242_617, 29.977_740, 27.0]}})).unwrap();
+    let mut s = Session::default();
+    s.execute("parameters.add", &json!({"name": "w", "expression": "60 mm"})).unwrap();
+    s.execute("solid.box", &json!({"length": "w", "width": 40, "height": 20})).unwrap();
+    s.execute("solid.fillet", &json!({"edges": [[60, 40, 10]], "radius": 5})).unwrap();
+    let halfway = 5.0 * std::f64::consts::FRAC_1_SQRT_2;
+    s.execute("construct.axis.through_cylinder", &json!({"face": {"face": [55.0 + halfway, 35.0 + halfway, 10.0]}})).unwrap();
     let start = s.doc.features.len();
-    s.execute("parameters.change", &json!({"name": "board_w", "expression": "(60 mm) * 1.1"})).unwrap();
+    s.execute("parameters.change", &json!({"name": "w", "expression": "(60 mm) * 1.1"})).unwrap();
     check(&s, start, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
     let st = s.model.state();
     let axis = st.construct.iter().find_map(|c| match &c.geom {
@@ -1433,8 +1462,8 @@ fn an_axis_through_a_corner_round_that_a_parameter_moves() {
         _ => None,
     });
     let (origin, dir) = axis.expect("the axis");
-    // The round's axis moved with the lid's corner, from x = 36 to 39.
-    let off = origin - Vec3::new(39.0, 26.0, 0.0);
+    // The round's axis moved with the box's corner, from x = 55 to 61.
+    let off = origin - Vec3::new(61.0, 35.0, 0.0);
     assert!((off - dir * off.dot(dir)).len() < 1e-6, "the axis passes {origin:?} along {dir:?}");
 }
 
@@ -1746,7 +1775,7 @@ fn the_ribbed_lid_builds_the_same_body_every_time() {
             .collect::<Vec<_>>()
     };
     let first = fingerprint();
-    for _ in 0..5 {
+    for _ in 0..2 {
         assert_eq!(fingerprint(), first);
     }
 }

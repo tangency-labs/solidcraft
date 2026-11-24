@@ -87,18 +87,15 @@ fn a_window_in_a_cylinder_wrapping_past_half_way_fills_close_to_the_cylinder() {
     assert!(f.deviation <= TOL && f.normal_deviation <= ANGLE);
     // Inside, the fill stays near the cylinder it was cut from (it is the least-bending surface
     // with the cylinder's boundary data, not the cylinder itself).
+    // The fill's point nearest each cylinder point, by a coarse search over samples taken once.
+    let samples: Vec<Vec3> =
+        (0..=120).flat_map(|u| (0..=120).map(move |v| (u, v))).map(|(u, v)| at(&f.surface, u as f64 / 120.0, v as f64 / 120.0)).collect();
     let mut worst = 0.0f64;
     for k in 1..20 {
         for j in 1..20 {
             let (ang, z) = (-a + 2.0 * a * k as f64 / 20.0, h * j as f64 / 20.0);
-            // The fill's point nearest this cylinder point, by a coarse search.
             let target = radial(ang) * r + Vec3::Z * z;
-            let mut best = f64::INFINITY;
-            for u in 0..=120 {
-                for v in 0..=120 {
-                    best = best.min(at(&f.surface, u as f64 / 120.0, v as f64 / 120.0).dist(target));
-                }
-            }
+            let best = samples.iter().map(|p| p.dist(target)).fold(f64::INFINITY, f64::min);
             worst = worst.max(best);
         }
     }

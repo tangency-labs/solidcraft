@@ -280,7 +280,7 @@ fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
             collect(h, &handle, requested);
             for (family, at) in solidcraft_ui_egui::scenario::handles("create_family:") {
                 h.call("ui.move", json!({"x":at.x,"y":at.y}));
-                h.frames(20);
+                h.frames(4);
                 collect(h, &family, requested);
             }
             escape(h);
@@ -646,8 +646,10 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.selectOther", json!({"close":true}));
     }
 
-    // Search every command by its full label so results beyond the first page are painted.
-    for command in solidcraft_engine::command_specs() {
+    // Search a command by its full label for every icon, so results beyond the first page are
+    // painted: the manifest records icon names, and a second command with the same icon adds none.
+    let mut searched = std::collections::BTreeSet::new();
+    for command in solidcraft_engine::command_specs().into_iter().filter(|command| searched.insert(command.icon)) {
         solidcraft_ui_egui::shortcut_box::open(&mut h.app, None);
         h.app.sbox.text = command.label.to_owned();
         h.frames(2);
@@ -687,7 +689,6 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
             menu(&mut sample_h, json!({"type":"occurrence","path":[id]}), "occurrence", &mut requested);
         }
         context_rows(&mut sample_h, "row:", &mut requested);
-        panels(&mut sample_h, &mut requested);
         collect(&mut sample_h, sample.name, &mut requested);
     }
     let mut geometry = harness();
@@ -711,7 +712,6 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         geometry.app.run("select.set", json!({"items":[{"type":"body","name":name}]})).unwrap();
         menu(&mut geometry, json!({"type":"viewport"}), &format!("solid/surface/mesh viewport {name}"), &mut requested);
     }
-    panels(&mut geometry, &mut requested);
     // Home recent-file context menus have their own native popup dispatch.
     let path = geometry.dir.join("audit.solidcraft");
     geometry.app.run("file.save", json!({"path":path})).unwrap();

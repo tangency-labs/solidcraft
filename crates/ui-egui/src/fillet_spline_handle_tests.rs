@@ -29,6 +29,11 @@ fn open(h: &mut Harness) {
     h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Round"}})).unwrap();
+    wait_for_taper(h);
+}
+
+/// Frames until the fillet dialog's preview has built its tapers.
+fn wait_for_taper(h: &mut Harness) {
     // The preview's fillet runs on a worker thread; the loop ends as soon as it is in. The
     // ceiling is only for a preview that never comes: with every test binary running at once,
     // that thread can wait more than a minute for a core. A preview that ends in an error ends
@@ -186,13 +191,27 @@ fn double_clicks_add_and_remove_control_radii() {
     assert!(h.app.session.world_state().unwrap().body("Box").is_some());
 }
 
+/// A taper over two edges, as the fillet dialog previews it, shows the radius arrow but no
+/// handles.
 #[test]
 fn a_taper_over_several_edges_keeps_the_radius_arrow() {
     let mut h = Harness::new();
     plate(&mut h);
-    h.app.run("solid.fillet", json!({"edges": [[20, 0, 15], [20, 0, 0]], "radius": 3, "fit": "taper", "name": "Round"})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+    h.step(&json!({"start": "solid.fillet"})).unwrap();
     h.frames(4);
-    open(&mut h);
+    let edges: Vec<_> = [solidcore_record::Vec3::new(20.0, 0.0, 15.0), solidcore_record::Vec3::new(20.0, 0.0, 0.0)]
+        .into_iter()
+        .map(|p| crate::dialogs::edge_sel(&h.app.session, p).unwrap())
+        .collect();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = edges;
+    if let crate::dialogs::Kind::Fillet { radius, .. } = &mut d.kind {
+        *radius = "3 mm".into();
+    }
+    d.extra.insert("fit".into(), json!("taper"));
+    wait_for_taper(&mut h);
     assert_eq!(h.app.preview.tapered.len(), 2, "both edges taper");
     // One spline would replace every edge's taper, so none is offered to drag.
     assert!(crate::scenario::handles("fillet_").is_empty(), "{:?}", crate::scenario::handles("fillet_"));

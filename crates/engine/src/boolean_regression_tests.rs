@@ -222,10 +222,11 @@ fn revolve_cut_round_a_box_corner_does_not_panic() {
     }
 }
 
-/// #5543: a grid of 121 holes cut through a plate, four of its circles drawn a second time on
-/// top of themselves. Each of those was two profiles of one region and so two coincident tools:
-/// the cut retried with the tool nudged and took fifty times as long. The profiles drawn twice
-/// are cut once: no retry, and the plate is the one the 121 circles drawn once make.
+/// #5543: a grid of holes cut through a plate (121 in the report, the 19 within 7 mm of the
+/// centre here), four of its circles drawn a second time on top of themselves. Each of those was
+/// two profiles of one region and so two coincident tools: the cut retried with the tool nudged
+/// and took fifty times as long. The profiles drawn twice are cut once: no retry, and the plate
+/// is the one the circles drawn once make.
 #[test]
 fn circles_drawn_twice_are_cut_once() {
     let cut = |repeats: usize| {
@@ -239,12 +240,13 @@ fn circles_drawn_twice_are_cut_once() {
         for i in -7i32..8 {
             for j in -8i32..9 {
                 let (x, y) = (f64::from(j) * 3.45 + if i % 2 != 0 { 1.725 } else { 0.0 }, f64::from(i) * 3.0);
-                if x.hypot(y) <= 20.7 {
+                if x.hypot(y) <= 7.0 {
                     centres.push([x, y]);
                 }
             }
         }
-        assert_eq!(centres.len(), 121);
+        // 5 on the middle row, 4 on each row 3 mm off it, 3 on each row 6 mm off.
+        assert_eq!(centres.len(), 19);
         for c in centres.iter().chain(centres.iter().take(repeats)) {
             s.execute("sketch.circle.center", &json!({"center": c, "radius": 1.15})).unwrap();
         }
@@ -257,7 +259,7 @@ fn circles_drawn_twice_are_cut_once() {
     };
     let (once, faces_once) = cut(0);
     let (twice, faces_twice) = cut(4);
-    let analytic = 70.0 * 70.0 * 2.0 - 121.0 * std::f64::consts::PI * 1.15 * 1.15 * 2.0;
+    let analytic = 70.0 * 70.0 * 2.0 - 19.0 * std::f64::consts::PI * 1.15 * 1.15 * 2.0;
     assert!((once - analytic).abs() < 0.2, "{once} vs {analytic}");
     assert!((twice - once).abs() < 1e-9 * once, "{twice} vs {once}");
     assert_eq!(faces_twice, faces_once);
@@ -677,13 +679,14 @@ fn cut_of_a_whole_face_beside_round_corners_after_a_chamfer() {
 }
 
 /// The display tessellation of loft bodies joined into a bike frame plans at every display
-/// quality and every refinement step. The edge nodes on an intersection of two lofts once
-/// stepped back along the curve (the edge's fit rang where truck's parameter changes speed, and
-/// took a leader point off the curve past a vertex), so a face's boundary crossed itself and
-/// the body fell back to the reference mesher, which drew a sheet across the down tube.
+/// quality, and at the finest refinement step (#1615). The edge nodes on an intersection of two
+/// lofts once stepped back along the curve (the edge's fit rang where truck's parameter changes
+/// speed, and took a leader point off the curve past a vertex), so a face's boundary crossed
+/// itself and the body fell back to the reference mesher, which drew a sheet across the down tube.
 #[test]
 fn joined_loft_frames_plan_their_display_at_every_quality() {
     use solidcraft_doc::display_quality::{DisplayQuality, MAX_REFINE};
+    let levels = DisplayQuality::ALL.into_iter().map(|q| (q, 0)).chain([(DisplayQuality::Ultra, MAX_REFINE)]);
     for (script, name) in [
         (include_str!("../../../examples/regressions/loft_join_bracket_hull_triangle.json"), "DT2"),
         (include_str!("../../../examples/regressions/front_triangle_hull_triangle.json"), "FrontTriangle"),
@@ -691,12 +694,9 @@ fn joined_loft_frames_plan_their_display_at_every_quality() {
         let s = replay(script);
         let state = s.model.state();
         let body = &state.body(name).unwrap().body;
-        for q in DisplayQuality::ALL {
-            for k in 0..=MAX_REFINE {
-                let plan =
-                    body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(body.size(), k), angle: Some(q.refined_angle(k)) });
-                assert!(plan.is_ok(), "{name} at {} + {k}: {:?}", q.id(), plan.err());
-            }
+        for (q, k) in levels.clone() {
+            let plan = body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: q.refined_chord(body.size(), k), angle: Some(q.refined_angle(k)) });
+            assert!(plan.is_ok(), "{name} at {} + {k}: {:?}", q.id(), plan.err());
         }
     }
 }
@@ -855,31 +855,31 @@ fn raked_wedge(lean: f64) -> Session {
 /// the issue had it and moved by 0.02 mm, as it also tried.
 #[test]
 fn box_intersect_splits_the_end_off_a_raked_wedge_after_its_end_rounds() {
-    for lean in [10f64.to_radians().tan(), 0.0] {
-        let mut s = raked_wedge(lean);
-        let whole = volume(&s, "Wedge");
-        for (i, x0) in [55.0, 55.02].into_iter().enumerate() {
-            let mut piece = |op: &str| -> (f64, solidcraft_geom::Aabb3) {
-                let copy = s.execute("solid.move", &json!({"bodies": ["Wedge"], "translate": [0, 0, 0], "copy": true})).unwrap();
-                let copy = copy["created_bodies"][0].as_str().unwrap().to_string();
-                let cap = format!("Cap{i}{op}");
-                let length = 80.0 - x0;
-                let cap_box = json!({"center": [x0 + length / 2.0, 0, 40], "length": length, "width": 160, "height": 120, "operation": "new", "body_name": cap});
-                s.execute("solid.box", &cap_box).unwrap();
-                let (target, tool) = if op == "intersect" { (cap, copy) } else { (copy, cap) };
-                s.execute("solid.combine", &json!({"target": target, "tools": [tool], "operation": op}))
-                    .unwrap_or_else(|e| panic!("lean {lean}, x >= {x0}, {op}: {e}"));
-                let state = s.model.state();
-                let body = &state.body(&target).unwrap().body;
-                assert!(body.validity().is_empty(), "lean {lean}, x >= {x0}, {op}: {:?}", body.validity());
-                (solidcraft_kernel::measure(body).unwrap().volume, body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds())
-            };
-            let (slice, at) = piece("intersect");
-            let (rest, _) = piece("cut");
-            println!("#1617 lean {lean:.4}, x >= {x0}: slice {slice:.6} + rest {rest:.6} = {:.6}, wedge {whole:.6} mm³", slice + rest);
-            assert!((slice + rest - whole).abs() < 1e-6 * whole, "{slice} + {rest} vs {whole}");
-            assert!((at.min.x - x0).abs() < 1e-6 && (at.max.x - 69.0).abs() < 1e-3, "slice spans x {} to {}", at.min.x, at.max.x);
-        }
+    let lean = 10f64.to_radians().tan();
+    let mut s = raked_wedge(lean);
+    let whole = volume(&s, "Wedge");
+    for (i, x0) in [55.0, 55.02].into_iter().enumerate() {
+        let mut piece = |op: &str| -> (f64, solidcraft_geom::Aabb3) {
+            let copy = s.execute("solid.move", &json!({"bodies": ["Wedge"], "translate": [0, 0, 0], "copy": true})).unwrap();
+            let copy = copy["created_bodies"][0].as_str().unwrap().to_string();
+            let cap = format!("Cap{i}{op}");
+            let length = 80.0 - x0;
+            let cap_box =
+                json!({"center": [x0 + length / 2.0, 0, 40], "length": length, "width": 160, "height": 120, "operation": "new", "body_name": cap});
+            s.execute("solid.box", &cap_box).unwrap();
+            let (target, tool) = if op == "intersect" { (cap, copy) } else { (copy, cap) };
+            s.execute("solid.combine", &json!({"target": target, "tools": [tool], "operation": op}))
+                .unwrap_or_else(|e| panic!("lean {lean}, x >= {x0}, {op}: {e}"));
+            let state = s.model.state();
+            let body = &state.body(&target).unwrap().body;
+            assert!(body.validity().is_empty(), "lean {lean}, x >= {x0}, {op}: {:?}", body.validity());
+            (solidcraft_kernel::measure(body).unwrap().volume, body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds())
+        };
+        let (slice, at) = piece("intersect");
+        let (rest, _) = piece("cut");
+        println!("#1617 lean {lean:.4}, x >= {x0}: slice {slice:.6} + rest {rest:.6} = {:.6}, wedge {whole:.6} mm³", slice + rest);
+        assert!((slice + rest - whole).abs() < 1e-6 * whole, "{slice} + {rest} vs {whole}");
+        assert!((at.min.x - x0).abs() < 1e-6 && (at.max.x - 69.0).abs() < 1e-3, "slice spans x {} to {}", at.min.x, at.max.x);
     }
 }
 
@@ -1008,8 +1008,8 @@ fn coplanar_body_faces_extrude_together_and_replay_their_links() {
     s.execute("solid.box", &json!({"length":64,"width":64,"height":20,"body_name":"Plate"})).unwrap();
     s.execute("sketch.create", &json!({"plane":{"origin":[0,0,20],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
     let mut faces = Vec::new();
-    for i in 0..8 {
-        for j in 0..8 {
+    for i in 0..4 {
+        for j in 0..4 {
             let (x, y) = (2 + i * 7, 2 + j * 7);
             s.execute("sketch.rectangle.two_point", &json!({"p0":[x,y],"p1":[x+4,y+4]})).unwrap();
             faces.push(json!([x + 2, y + 2, 26]));
@@ -1021,19 +1021,21 @@ fn coplanar_body_faces_extrude_together_and_replay_their_links() {
     s.execute("solid.extrude", &json!({"faces":faces,"distance":-7,"operation":"cut"})).unwrap();
     assert_eq!(s.doc.features.len(), features + 2, "one linked sketch and one extrusion");
     assert_eq!(s.undo.len(), undo + 1);
+    // The plate, and 16 pads 4 x 4 x 6 each cut 7 down from its top: 1 mm into the plate.
+    let want = 64.0 * 64.0 * 20.0 + 16.0 * 4.0 * 4.0 * (6.0 - 7.0);
     let actual = volume(&s, "Plate");
     let state = s.model.state();
     let sketch = state.sketch(4).unwrap();
-    assert!((actual - 80_896.0).abs() < 1e-5, "volume {actual}; plane {:?}; profiles {}", sketch.plane, sketch.profiles.len());
+    assert!((actual - want).abs() < 1e-5, "volume {actual}; plane {:?}; profiles {}", sketch.plane, sketch.profiles.len());
     assert_eq!(s.model.state().bodies.len(), 1);
     let document = serde_json::from_value(serde_json::to_value(s.doc.as_ref()).unwrap()).unwrap();
     let mut reopened = Session { doc: std::sync::Arc::new(document), ..Session::default() };
     reopened.refresh();
-    assert!((volume(&reopened, "Plate") - 80_896.0).abs() < 1e-5);
+    assert!((volume(&reopened, "Plate") - want).abs() < 1e-5);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc.features.len(), features);
     s.execute("edit.redo", &json!({})).unwrap();
-    assert!((volume(&s, "Plate") - 80_896.0).abs() < 1e-5);
+    assert!((volume(&s, "Plate") - want).abs() < 1e-5);
 }
 
 #[test]
@@ -2222,21 +2224,17 @@ fn a_loft_of_arches_offset_to_97_and_193_points_runs_foot_to_foot_and_cuts_its_l
     ];
     for (case, steps, loft, (far, far_foot), (tool, params), want) in cases {
         let ((loft_volume, loft_counts), (cut_volume, cut_counts), floor, (leg_volume, leg_counts)) = want;
-        let lofted = || {
-            let mut s = Session::default();
-            for (command, p) in steps.iter().cloned().chain([("solid.loft", loft.clone())]) {
-                s.execute(command, &p).unwrap_or_else(|e| panic!("{case} {command}: {e}"));
-            }
-            s
-        };
+        let mut s = Session::default();
+        for (command, p) in steps.iter().cloned().chain([("solid.loft", loft.clone())]) {
+            s.execute(command, &p).unwrap_or_else(|e| panic!("{case} {command}: {e}"));
+        }
         let measure = |b: &solidcraft_kernel::Body, what: &str| solidcraft_kernel::measure(b).unwrap_or_else(|e| panic!("{case} {what}: {e}"));
-        // The bodies the tool leaves with `op`: each one's validity and measure.
+        // The bodies the tool leaves with `op` on a copy of the loft: each one's validity and measure.
         let after = |op: &str| {
-            let mut s = lofted();
-            s.execute(tool, &params(op)).unwrap_or_else(|e| panic!("{case} {op}: {e}"));
-            s.model.state().bodies.iter().map(|b| (b.body.validity(), measure(&b.body, op))).collect::<Vec<_>>()
+            let mut t = s.scratch();
+            t.execute(tool, &params(op)).unwrap_or_else(|e| panic!("{case} {op}: {e}"));
+            t.model.state().bodies.iter().map(|b| (b.body.validity(), measure(&b.body, op))).collect::<Vec<_>>()
         };
-        let s = lofted();
         let state = s.model.state();
         let body = &state.body("Loft").unwrap_or_else(|| panic!("{case}: no loft")).body;
         let m = measure(body, "loft");

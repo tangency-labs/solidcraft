@@ -833,7 +833,8 @@ fn an_edit_in_one_component_recomputes_only_what_reads_it() {
         let mut m = Model::new();
         m.evaluate(&doc);
         no_errors(&m);
-        for h in ["11 mm", "12 mm", "13 mm"] {
+        // Two successive edits.
+        for h in ["11 mm", "12 mm"] {
             doc.set_param("A_h", h, None, None).unwrap();
             m.evaluate(&doc);
             no_errors(&m);

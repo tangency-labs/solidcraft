@@ -48,6 +48,9 @@ fn setback_hole(r: f64, s: f64, g2: bool) -> impl FnMut(usize, &[f64]) -> Result
     }
 }
 
+/// The setback hole is filled G2 to its rounds and faces, as the corner's cap under the rounds'
+/// tangent planes; filled G1 it is closed on a coarser grid, since flat to the second order along
+/// a curved plane's curve is what makes G2 the harder fill.
 #[test]
 fn a_setback_corner_hole_is_filled_g2_to_its_rounds_and_faces() {
     let f = fill_matched(6, &mut setback_hole(5.0, 8.0, true), &spec()).unwrap();
@@ -82,16 +85,10 @@ fn a_setback_corner_hole_is_filled_g2_to_its_rounds_and_faces() {
     }
     eprintln!("setback hole: highest point along the diagonal {highest:.6}");
     assert!(highest < 0.0);
-}
-
-#[test]
-fn a_setback_corner_hole_is_filled_g1_on_a_coarser_grid() {
-    let f = fill_matched(6, &mut setback_hole(5.0, 8.0, false), &spec()).unwrap();
-    eprintln!("setback hole G1: spans {:?}, deviation {:e}, normal {:.5}°", f.spans, f.fill.deviation, f.normal_deviation.to_degrees());
-    assert!(f.fill.deviation <= TOL && f.normal_deviation <= ANGLE);
-    // Flat to the second order along a curved plane's curve is what makes G2 the harder fill.
-    let g2 = fill_matched(6, &mut setback_hole(5.0, 8.0, true), &spec()).unwrap();
-    assert!(f.spans[0] < g2.spans[0], "{:?} {:?}", f.spans, g2.spans);
+    let g1 = fill_matched(6, &mut setback_hole(5.0, 8.0, false), &spec()).unwrap();
+    eprintln!("setback hole G1: spans {:?}, deviation {:e}, normal {:.5}°", g1.spans, g1.fill.deviation, g1.normal_deviation.to_degrees());
+    assert!(g1.fill.deviation <= TOL && g1.normal_deviation <= ANGLE);
+    assert!(g1.spans[0] < f.spans[0], "{:?} {:?}", g1.spans, f.spans);
 }
 
 /// A hole in a cylinder of radius 5 about the x axis (its top line through the origin), the rim
@@ -178,7 +175,7 @@ fn over_the_planes(f: &MatchedFill, r: f64, s: f64) -> f64 {
 /// 2.2 r and 0.25 at 3 r).
 #[test]
 fn a_setback_g2_fill_stays_under_its_planes() {
-    for s in [7.5, 8.0, 10.0, 12.0, 15.0] {
+    for s in [7.5, 15.0] {
         let f = fill_matched(6, &mut setback_hole(5.0, s, true), &spec()).unwrap();
         let over = over_the_planes(&f, 5.0, s);
         eprintln!("set back {s}: spans {:?}, curvature {:.2e}, over the planes {over:.2e}", f.spans, f.curvature_mismatch);

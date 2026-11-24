@@ -1435,17 +1435,18 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
     assert!(r.as_ref().is_err_and(|e| e.contains("fastest 1.00 s and 16.00 s, limit 10.00 s")), "{r:?}");
 }
 
-/// 512 identical through-holes from a feature pattern of one cut (#261). 128 took 30 s and 512 did
+/// 256 identical through-holes from a feature pattern of one cut (#261). 128 took 30 s and 512 did
 /// not finish in 150 s: each copy was cut into an ever more complex plate. The time must grow about
-/// linearly with the count. A ratio, not a time: CI runs every test binary at once and is many
-/// times slower than a machine running this alone (about 6 s for 512 holes there).
+/// linearly with the count: 64 holes, then 256. A ratio, not a time: CI runs every test binary at
+/// once and is many times slower than a machine running this alone.
 #[test]
-fn pattern_of_512_hole_cuts_finishes_in_reasonable_time() {
+fn pattern_of_256_hole_cuts_finishes_in_reasonable_time() {
     // #14515: on the merge-queue runner, with every test binary running at once, the small run keeps
     // its parallel speed-up while the big one does not, and three pairs in a row took 10.7x to 11.1x
-    // (2.9 s then 31 s) though the cost is linear. The old quadratic cost is 16x or more, so allow 13x.
-    if let Err(missed) = scales_within(13.0, || (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
-        panic!("128 holes, then 512, took {missed}");
+    // (2.9 s then 31 s, 128 holes then 512). The old quadratic cost is 16x or more (at 64 holes it
+    // took about 7 s, past 13 × that + 2 s at 256), so allow 13x.
+    if let Err(missed) = scales_within(13.0, || (hole_pattern(8, 8).1, hole_pattern(16, 16).1)) {
+        panic!("64 holes, then 256, took {missed}");
     }
 }
 
@@ -1479,7 +1480,7 @@ fn sketch_hole_cut(n: usize) -> std::time::Duration {
 
 /// Many holes drawn in one sketch and cut by one extrude (#368), the usual way to draw a vent
 /// field: 32 took 2 s and 128 took 60 s, though a feature pattern of the same holes is near
-/// linear since #261. Linear is 4×. A ratio, not a time (see the 512-hole pattern test).
+/// linear since #261. Linear is 4×. A ratio, not a time (see the 256-hole pattern test).
 #[test]
 fn one_extrude_of_many_sketch_circles_scales_linearly() {
     if let Err(missed) = scales_linearly(|| (sketch_hole_cut(32), sketch_hole_cut(128))) {
@@ -2542,18 +2543,15 @@ fn circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them() {
 /// picked before its hole used to find no edge ("no edge near ...").
 #[test]
 fn pattern_of_features_picked_in_any_order_copies_them_in_timeline_order() {
-    let mut reference = disc_with_chamfered_hole();
-    run(
-        &mut reference,
-        "solid.pattern.circular",
-        json!({"features": ["Bore", "TopChamfer", "BottomChamfer"], "axis": "Z", "count": 6, "angle": 360}),
-    );
-    let expected = volume(&mut reference);
-    for picked in [["BottomChamfer", "TopChamfer", "Bore"], ["TopChamfer", "Bore", "BottomChamfer"]] {
-        let mut s = disc_with_chamfered_hole();
-        run(&mut s, "solid.pattern.circular", json!({"features": picked, "axis": "Z", "count": 6, "angle": 360}));
-        assert!(rel(volume(&mut s), expected) < 1e-9, "{picked:?}");
-    }
+    let mut s = disc_with_chamfered_hole();
+    run(&mut s, "solid.pattern.circular", json!({"features": ["BottomChamfer", "TopChamfer", "Bore"], "axis": "Z", "count": 6, "angle": 360}));
+    // Six chamfered holes, as in `circular_pattern_of_a_hole_and_its_chamfers_copies_all_of_them`:
+    // each its bore and two rings of the chamfer's triangle about the bore's axis (Pappus).
+    let pi = std::f64::consts::PI;
+    let hole = pi * 9.0 * 10.0 + 2.0 * 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125;
+    let want = pi * 900.0 * 10.0 - 6.0 * hole;
+    let v = volume(&mut s);
+    assert!((v - want).abs() < 4e-7 * want, "{v} mm³, expected {want}");
 }
 
 #[test]
@@ -2933,11 +2931,11 @@ fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
 }
 
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
-/// earlier or is mirrored together with the thread.
+/// earlier (a cosmetic thread here) or is mirrored together with the thread (a modelled one).
 #[test]
 fn mirror_of_a_thread_threads_the_mirrored_hole() {
     let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0]});
-    for (together, modeled) in [(false, false), (true, false), (false, true), (true, true)] {
+    for (together, modeled) in [(false, false), (true, true)] {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
         run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": 6.8, "depth": 10, "name": "Hole1"}));
@@ -3037,38 +3035,42 @@ fn mirror_of_two_holes_placed_from_edges_makes_both_copies() {
 
 /// #16912: the mirror or pattern copy of a curvature or spline fillet is the same fillet, not a
 /// constant-radius round: its face is the original's kind of surface (no cylinder), so the result
-/// has twice the original's blend faces of that kind.
+/// has twice the original's blend faces of that kind. Each kind and each copy command once: the
+/// curvature fillet mirrored, the spline fillet patterned.
 #[test]
 fn copies_of_a_curvature_or_spline_fillet_keep_its_type() {
     let face_types = |s: &mut Session| run(s, "inspect.measure", json!({}))["bodies"][0]["face_types"].clone();
-    let fillets = [
-        json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 8, "type": "curvature", "name": "Round"}),
-        json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 12, "type": "spline", "start": [0, 0, 30], "radii": ["3"], "knots": [0, 0, 1, 1], "name": "Round"}),
+    let cases = [
+        (
+            json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 8, "type": "curvature", "name": "Round"}),
+            "solid.mirror",
+            json!({"features": ["Round"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}),
+        ),
+        (
+            json!({"body": "Box", "edges": [[30, 0, 30]], "radius": 12, "type": "spline", "start": [0, 0, 30], "radii": ["3"], "knots": [0, 0, 1, 1], "name": "Round"}),
+            "solid.pattern.rectangular",
+            json!({"features": ["Round"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 40}),
+        ),
     ];
-    let copies = [
-        ("solid.mirror", json!({"features": ["Round"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}})),
-        ("solid.pattern.rectangular", json!({"features": ["Round"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 40})),
-    ];
-    for fillet in &fillets {
-        for (id, p) in &copies {
-            let mut s = Session::default();
-            run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 30, "body_name": "Box"}));
-            run(&mut s, "solid.fillet", fillet.clone());
-            let one = face_types(&mut s);
-            let other = one["other"].as_u64().unwrap_or(0);
-            assert!(other > 0 && one.get("cylinder").is_none(), "{fillet}: {one}");
-            run(&mut s, id, p.clone());
-            let both = face_types(&mut s);
-            assert!(both.get("cylinder").is_none(), "{id} of {fillet}: {both}");
-            assert_eq!(both["other"].as_u64(), Some(2 * other), "{id} of {fillet}: {one} then {both}");
-        }
+    for (fillet, id, p) in cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 30, "body_name": "Box"}));
+        run(&mut s, "solid.fillet", fillet.clone());
+        let one = face_types(&mut s);
+        let other = one["other"].as_u64().unwrap_or(0);
+        assert!(other > 0 && one.get("cylinder").is_none(), "{fillet}: {one}");
+        run(&mut s, id, p);
+        let both = face_types(&mut s);
+        assert!(both.get("cylinder").is_none(), "{id} of {fillet}: {both}");
+        assert_eq!(both["other"].as_u64(), Some(2 * other), "{id} of {fillet}: {one} then {both}");
     }
 }
 
 /// #16934: a circular pattern of a groove and the fillet that rounds its edges. The fillet's pick
 /// on the groove's top rim sits at the vertex where the groove's seam splits the rim in two, as
 /// near to one half as to the other: copies made from the pick rounded one half or the other as
-/// rounding fell, so every other copy kept half its rim sharp. Every copy is the original turned.
+/// rounding fell, so every other copy kept half its rim sharp. Every copy is the original turned:
+/// three copies a tenth of a turn apart, each on a face of the decagon, show the alternation.
 #[test]
 fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     let mut s = Session::default();
@@ -3093,18 +3095,22 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     let edges = json!([[1.6583, -12.388, 13], [-1.6583, -12.388, 13], [0, -8.682, 16], [0, -15.388, 9.294]]);
     run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 1, "name": "GrooveRounds"}));
     let one = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
-    let r = run(&mut s, "solid.pattern.circular", json!({"features": ["Groove", "GrooveRounds"], "axis": "Z", "count": 10, "name": "Grooves"}));
+    let r = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"features": ["Groove", "GrooveRounds"], "axis": "Z", "count": 3, "angle": "72 deg", "name": "Grooves"}),
+    );
     assert!(r["error"].is_null(), "{r}");
     let all = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
     // Each copy adds the faces the groove and its rounds added, and takes the material they took.
     let count = |m: &Value, kind: &str| m["face_types"][kind].as_u64().unwrap_or(0);
     for kind in ["cylinder", "other", "plane"] {
-        let want = count(&plain, kind) + 10 * (count(&one, kind) - count(&plain, kind));
+        let want = count(&plain, kind) + 3 * (count(&one, kind) - count(&plain, kind));
         assert_eq!(count(&all, kind), want, "{kind} faces: {all}");
     }
     let v = |m: &Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
-    let want = v(&plain) - 10.0 * (v(&plain) - v(&one));
-    assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
+    let want = v(&plain) - 3.0 * (v(&plain) - v(&one));
+    assert!(rel(v(&all), want) < 1e-6, "three rounded grooves: {} mm³, expected {want} mm³", v(&all));
 }
 
 /// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,

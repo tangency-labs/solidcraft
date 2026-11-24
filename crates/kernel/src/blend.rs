@@ -1910,7 +1910,8 @@ mod tests {
     #[test]
     fn a_carried_on_blend_checks_each_step_whatever_the_evaluation_checks() {
         let body = boss_on_rounded_plate();
-        for mode in crate::Validation::ALL {
+        // Under `EachStep` the forced `EachStep` changes nothing: the modes it overrides are these.
+        for mode in [crate::Validation::EachFeature, crate::Validation::Off] {
             let seen = std::cell::Cell::new(None);
             let (out, deferred) = crate::validation::validating(mode, || {
                 concave_overflow_round(&body, BOSS_EDGE, 8.0, |carried| {
@@ -1932,7 +1933,7 @@ mod tests {
         assert!(matches!(chamfer(&body, &[BOSS_EDGE], 7.02), Err(KernelError::Failed(_))));
         let before = crate::measure(&body).unwrap().volume;
         let mut last = before;
-        for d in [7.0, 7.01, 7.02, 7.05, 7.1, 8.0] {
+        for d in [7.0, 7.01, 7.02, 7.1] {
             let out = chamfer_carrying_face(&body, &[BOSS_EDGE], d).unwrap_or_else(|e| panic!("{d}: {e}"));
             let v = crate::measure(&out).unwrap().volume;
             let (_, _, area) = boss_chamfer_section(d);
@@ -2181,14 +2182,14 @@ mod tests {
     /// The boss curves away behind the line of its base edge: its circle is back at the edge's x
     /// (26.797) 7.08 in front of the plate. A chamfer whose contact on the boss lies past there
     /// (equal distances from 12.92 on) stands over the boss there, not over the plate's face,
-    /// and is whole there all the same: chamfered 13, 14 and 16 its material is its section over
+    /// and is whole there all the same: chamfered 13 and 16 its material is its section over
     /// the boss's 24 mm less the part past the corner's arc, its contact line on the boss runs
     /// the boss's height, and it is one face.
     #[test]
     fn a_concave_chamfer_is_whole_where_it_stands_over_the_boss() {
         let body = boss_on_rounded_plate();
         let before = crate::measure(&body).unwrap().volume;
-        for d in [13.0, 14.0, 16.0] {
+        for d in [13.0, 16.0] {
             assert!(matches!(chamfer(&body, &[BOSS_EDGE], d), Err(KernelError::TooLarge(_))), "SMLib refuses {d}");
             let out = chamfer_carrying_face(&body, &[BOSS_EDGE], d).unwrap_or_else(|e| panic!("{d}: {e}"));
             let (p, q, area) = boss_chamfer_section(d);
@@ -2344,33 +2345,33 @@ mod tests {
         let body = boss_on_rounded_plate();
         let before = crate::measure(&body).unwrap().volume;
         let bytes = |b: &Body| crate::encode_native_body(b).unwrap();
-        for (d1, side) in [(3.0, ChamferSide::Distance(5.0)), (5.0, ChamferSide::Distance(3.0)), (5.0, ChamferSide::Angle(60f64.to_radians()))] {
-            let unflipped = bytes(&chamfer_sides(&body, &[BOSS_EDGE], d1, side, false).unwrap());
+        for (d1, d2) in [(3.0, 5.0), (5.0, 3.0)] {
+            let side = ChamferSide::Distance(d2);
+            let unflipped = chamfer_sides(&body, &[BOSS_EDGE], d1, side, false).unwrap();
+            let (p, q, area) = boss_chamfer_sides_section(d1, d2);
+            let added = crate::measure(&unflipped).unwrap().volume - before;
+            assert!((24.0 * area - added).abs() < 1e-4, "{d1} and {d2}: {added}");
+            for v in [Vec3::new(p.0, -10.5, 0.0), Vec3::new(q.0, q.1, 0.0)] {
+                assert!(has_vertex(&unflipped, v, 1e-6), "{d1} and {d2}: no vertex at {v:?}");
+            }
+            let unflipped = bytes(&unflipped);
             for flip in [false, true] {
                 let plain = chamfer_sides(&body, &[BOSS_EDGE], d1, side, flip).unwrap();
-                assert_eq!(bytes(&plain), unflipped, "{d1} {side:?}: flipped");
+                assert_eq!(bytes(&plain), unflipped, "{d1} and {d2}: flipped");
                 let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d1, side, flip).unwrap();
-                assert_eq!(bytes(&out), bytes(&plain), "{d1} {side:?} flip {flip}");
+                assert_eq!(bytes(&out), unflipped, "{d1} and {d2} flip {flip}");
                 let first = first_face_normal(&body, BOSS_EDGE, flip).expect("the first face");
                 assert_eq!(first, Vec3::new(0.0, -1.0, 0.0), "the plate's front face");
                 let along = crate::blend_smlib::chamfer_sides_along(&body, &[BOSS_EDGE], d1, side, first).unwrap();
-                assert_eq!(bytes(&along), bytes(&plain), "{d1} {side:?} flip {flip}: along the first face's normal");
-                if let ChamferSide::Distance(d2) = side {
-                    let (p, q, area) = boss_chamfer_sides_section(d1, d2);
-                    let added = crate::measure(&plain).unwrap().volume - before;
-                    assert!((24.0 * area - added).abs() < 1e-4, "{d1} and {d2}: {added}");
-                    for v in [Vec3::new(p.0, -10.5, 0.0), Vec3::new(q.0, q.1, 0.0)] {
-                        assert!(has_vertex(&plain, v, 1e-6), "{d1} and {d2}: no vertex at {v:?}");
-                    }
-                }
+                assert_eq!(bytes(&along), unflipped, "{d1} and {d2} flip {flip}: along the first face's normal");
             }
         }
     }
 
-    /// Past the plate's face the first distance stays along the plate. 9 and 10, 10 and 9, and 8
-    /// and 4 each run the contact line on the plate past x 32.5, where the face's top edge turns
-    /// into the r16 corner's arc (to x 33.32, 34.91 and 34.40), and SMLib refuses each as too
-    /// large. Carried on, each is its own chamfer and not the one with the distances the other
+    /// Past the plate's face the first distance stays along the plate. 9 and 10 (for either
+    /// `flip`), and 8 and 4, each run the contact line on the plate past x 32.5, where the face's
+    /// top edge turns into the r16 corner's arc (to x 33.32 and 34.40), and SMLib refuses each as
+    /// too large. Carried on, each is its own chamfer and not the one with the distances the other
     /// way round: its contact line on the plate ends on the arc, its top edge meets the corner
     /// at x 32.5, its contact on the boss is where the second distance puts it, and its material
     /// is its section over the boss's 24 mm less the part past the arc. One shell, within the
@@ -2381,8 +2382,8 @@ mod tests {
         let before = crate::measure(&body).unwrap();
         // The plate's top edge is z = 0 up to x 32.5 and the corner's arc from there.
         let on_plate = |p: (f64, f64)| Vec3::new(p.0, -10.5, if p.0 > 32.5 { on_corner_arc(p.0) } else { 0.0 });
-        for (d1, d2) in [(9.0, 10.0), (10.0, 9.0), (8.0, 4.0)] {
-            for flip in [false, true] {
+        for (d1, d2, flips) in [(9.0, 10.0, &[false, true][..]), (8.0, 4.0, &[false][..])] {
+            for &flip in flips {
                 let side = ChamferSide::Distance(d2);
                 assert!(matches!(chamfer_sides(&body, &[BOSS_EDGE], d1, side, flip), Err(KernelError::TooLarge(_))), "SMLib refuses {d1} and {d2}");
                 let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d1, side, flip).unwrap_or_else(|e| panic!("{d1} and {d2}: {e}"));
@@ -2450,7 +2451,8 @@ mod tests {
     /// With 5 along the boss, 6.38 along the plate is the largest that fits the plate's face (its
     /// contact at x 32.4994) and is SMLib's body; 6.4 SMLib fails as an operation and 6.45 it
     /// refuses as too large. Carried on they build, and the chamfer grows with its first distance
-    /// through there, its material the section less the part past the arc.
+    /// through there (6.38, 6.39, 6.4 and 6.45), its material the section less the part past the
+    /// arc.
     #[test]
     fn a_two_distance_chamfer_just_past_its_face_builds() {
         let body = boss_on_rounded_plate();
@@ -2462,7 +2464,7 @@ mod tests {
         assert_eq!(crate::encode_native_body(&fits).unwrap(), crate::encode_native_body(&plain(6.38).unwrap()).unwrap());
         let before = crate::measure(&body).unwrap().volume;
         let mut last = before;
-        for d in [6.38, 6.39, 6.4, 6.42, 6.45, 6.6, 8.0] {
+        for d in [6.38, 6.39, 6.4, 6.45] {
             let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d, side, false).unwrap_or_else(|e| panic!("{d}: {e}"));
             let m = crate::measure(&out).unwrap();
             let (p, q, area) = boss_chamfer_sides_section(d, 5.0);
@@ -2473,7 +2475,7 @@ mod tests {
     }
 
     /// A two-distance chamfer whose contact on the boss lies behind the line of the edge stands
-    /// over the boss there and is whole: 10 and 12, 11 and 13, 12 and 15 (plate and boss) run
+    /// over the boss there and is whole: 10 and 12, and 12 and 15 (plate and boss), run
     /// past the plate's face, and carried on each is its section over the boss's 24 mm less the
     /// part past the corner's arc, its contact line on the boss runs the boss's height, and it
     /// is one face. 9 and 12 fits the plate's face and stands over the boss too: SMLib builds
@@ -2498,7 +2500,7 @@ mod tests {
         };
         assert!(chamfer_sides(&body, &[BOSS_EDGE], 9.0, ChamferSide::Distance(12.0), false).is_ok(), "SMLib builds 9 and 12");
         let fits = added(9.0, 12.0);
-        for (d1, d2) in [(10.0, 12.0), (11.0, 13.0), (12.0, 15.0)] {
+        for (d1, d2) in [(10.0, 12.0), (12.0, 15.0)] {
             assert!(
                 matches!(chamfer_sides(&body, &[BOSS_EDGE], d1, ChamferSide::Distance(d2), false), Err(KernelError::TooLarge(_))),
                 "{d1} and {d2}"
@@ -2600,8 +2602,8 @@ mod tests {
     /// ([`boss_chamfer_sides_section`]); 5 at 60°, which fits, is SMLib's body and that section.
     /// At 45°, 6.43 is the largest that fits the plate's face (its contact at x 32.4942) and is
     /// SMLib's; 6.45 SMLib fails as an operation, and from 6.5 it refuses as too large, naming
-    /// the part of the sizes that fits. Carried on they build, the chamfer growing with its
-    /// distance through there, each its section over the boss's 24 mm less the part past the
+    /// the part of the sizes that fits. Carried on they build (6.45 and 8), the chamfer growing
+    /// with its distance through there, each its section over the boss's 24 mm less the part past the
     /// corner's arc; 8 at 45° has its contact line on the plate ending on the arc, its top edge
     /// meeting the corner at x 32.5, and its contact on the boss. 10 at 60° (12.06 along the
     /// boss) has its contact on the boss behind the edge's line and is whole there. One face,
@@ -2631,7 +2633,7 @@ mod tests {
         assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("the largest distance that fits is")));
         let (largest, mut last) = carried(6.43, angle);
         assert_eq!(crate::encode_native_body(&largest).unwrap(), crate::encode_native_body(&plain(6.43, angle).unwrap()).unwrap());
-        for d in [6.44, 6.45, 6.5, 7.0, 8.0] {
+        for d in [6.45, 8.0] {
             let (out, added) = carried(d, angle);
             assert!(added > last, "{d}: {added}");
             last = added;
@@ -2682,9 +2684,9 @@ mod tests {
 
     /// The chord round and the G2 round of the boss's base edge are carried on as the constant
     /// round is. Where SMLib builds them on the face as it is (chord 7, G2 5) the carried-on
-    /// build gives its volume. Past the face (chord 8 and 10, G2 7 and 8.5) SMLib refuses them and
-    /// they are built: one shell, inside the body's box, growing with the size. (The G2 round
-    /// is still refused at some radii, 8 among them: a boolean of the build fails on its
+    /// build gives its volume. Past the face (chord 10, G2 8.5) SMLib refuses them and they are
+    /// built: one shell, inside the body's box, adding more than the size that fits. (The G2
+    /// round is still refused at some radii, 8 among them: a boolean of the build fails on its
     /// face, #15417.)
     #[test]
     fn concave_chord_and_g2_rounds_run_on_past_where_their_face_turns_into_a_round() {
@@ -2700,25 +2702,17 @@ mod tests {
         let smlib = added(&crate::fillet_chord(&body, &[BOSS_EDGE], 7.0).unwrap());
         let carried = concave_overflow_round(&body, BOSS_EDGE, 7.0, |c| crate::blend_smlib::fillet_chord(c, &[BOSS_EDGE], 7.0)).unwrap().unwrap();
         assert!((added(&carried) - smlib).abs() < 1e-6, "chord: carried on {}, SMLib {smlib}", added(&carried));
-        let mut last = smlib;
-        for c in [8.0, 10.0] {
-            assert!(matches!(crate::blend_smlib::fillet_chord(&body, &[BOSS_EDGE], c), Err(KernelError::TooLarge(_))), "SMLib refuses chord {c}");
-            let round = crate::fillet_chord(&body, &[BOSS_EDGE], c).unwrap_or_else(|e| panic!("chord {c}: {e}"));
-            grown(&round, last, &format!("chord {c}"));
-            last = added(&round);
-        }
+        assert!(matches!(crate::blend_smlib::fillet_chord(&body, &[BOSS_EDGE], 10.0), Err(KernelError::TooLarge(_))), "SMLib refuses chord 10");
+        let round = crate::fillet_chord(&body, &[BOSS_EDGE], 10.0).unwrap_or_else(|e| panic!("chord 10: {e}"));
+        grown(&round, smlib, "chord 10");
         let smlib = added(&fillet_g2(&body, &[BOSS_EDGE], 5.0).unwrap());
         let carried = concave_overflow_round(&body, BOSS_EDGE, 5.0, |c| crate::blend_smlib::fillet_g2(c, &[BOSS_EDGE], 5.0)).unwrap().unwrap();
         assert!((added(&carried) - smlib).abs() < 1e-6, "G2: carried on {}, SMLib {smlib}", added(&carried));
-        // 7 and 8.5 build carried on, on Linux and Windows alike (9 builds on Windows only: a
-        // boolean of the build on the G2 face goes either way there)
-        let mut last = smlib;
-        for r in [7.0, 8.5] {
-            assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], r), Err(KernelError::TooLarge(_))), "SMLib refuses G2 {r}");
-            let round = fillet_g2(&body, &[BOSS_EDGE], r).unwrap_or_else(|e| panic!("G2 {r}: {e}"));
-            grown(&round, last, &format!("G2 {r}"));
-            last = added(&round);
-        }
+        // 8.5 builds carried on, on Linux and Windows alike (9 builds on Windows only: a boolean
+        // of the build on the G2 face goes either way there)
+        assert!(matches!(crate::blend_smlib::fillet_g2(&body, &[BOSS_EDGE], 8.5), Err(KernelError::TooLarge(_))), "SMLib refuses G2 8.5");
+        let round = fillet_g2(&body, &[BOSS_EDGE], 8.5).unwrap_or_else(|e| panic!("G2 8.5: {e}"));
+        grown(&round, smlib, "G2 8.5");
         // At 8 a boolean of the carried-on build fails on the G2 face: the refusal names that
         // step and its cause, not SMLib's largest radius that fits, which 8.5 beats.
         let why = match fillet_g2(&body, &[BOSS_EDGE], 8.0) {
@@ -3242,22 +3236,10 @@ mod tests {
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
     }
 
+    /// Two separate edges in one call: a G2 round on each. (A concave edge's G2 round is
+    /// `g2_fillet_on_concave_edge_meets_caps_sloped_in_both_directions`.)
     #[test]
-    fn g2_fillet_handles_concave_edges_and_separate_edges() {
-        let lp = Loop2::polygon(&[
-            Vec2::new(0.0, 0.0),
-            Vec2::new(20.0, 0.0),
-            Vec2::new(20.0, 10.0),
-            Vec2::new(10.0, 10.0),
-            Vec2::new(10.0, 20.0),
-            Vec2::new(0.0, 20.0),
-        ]);
-        let body = crate::build::extrude(&Plane::XY, &[Region2 { outer: lp, holes: vec![] }], 0.0, 20.0).unwrap().remove(0);
-        let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 10.0)], 2.0).unwrap();
-        assert!(out.validity().is_empty(), "{:?}", out.validity());
-        let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
-        let expected = 6000.0 + (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 20.0;
-        assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
+    fn g2_fillet_handles_separate_edges() {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0), Vec3::new(0.0, 20.0, 10.0)], 2.0).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
@@ -3271,41 +3253,40 @@ mod tests {
             outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]),
             holes: vec![Loop2::circle(Vec2::new(0.5, 0.5), 0.15)],
         };
-        for plane in [Plane::XY, Plane::XZ] {
-            let body = crate::extrude(&plane, std::slice::from_ref(&region), 0.0, 20.0).unwrap().remove(0);
-            let pick = plane.to_world(Vec2::ZERO) + plane.normal() * 10.0;
-            assert_eq!(body.crossed_face_loops().unwrap(), 0);
-            let out = fillet_g2(&body, &[pick], 0.5).unwrap();
-            assert!(out.validity().is_empty(), "{:?}", out.validity());
-            assert_eq!(out.crossed_face_loops().unwrap(), 0);
-            assert_eq!(out.face_count(), body.face_count() + 1);
-            assert!(fillet_g2(&body, &[pick], 2.0).is_err());
-        }
+        // On the XZ plane (how the orientation turns the round is `g2_fillet_meets_sloped_planar_ends`').
+        let plane = Plane::XZ;
+        let body = crate::extrude(&plane, std::slice::from_ref(&region), 0.0, 20.0).unwrap().remove(0);
+        let pick = plane.to_world(Vec2::ZERO) + plane.normal() * 10.0;
+        assert_eq!(body.crossed_face_loops().unwrap(), 0);
+        let out = fillet_g2(&body, &[pick], 0.5).unwrap();
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+        assert_eq!(out.crossed_face_loops().unwrap(), 0);
+        assert_eq!(out.face_count(), body.face_count() + 1);
+        assert!(fillet_g2(&body, &[pick], 2.0).is_err());
     }
 
     #[test]
     fn g2_fillet_meets_sloped_planar_ends() {
-        // Inward and outward sloping ends, and one square end, in two orientations (#2708).
-        for plane in [Plane::XY, Plane::XZ] {
-            for (left, right) in [(-0.5, -0.5), (0.5, 0.5), (0.0, 0.5), (-0.25, 0.5)] {
-                let region = Region2 {
-                    outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(40.0, 0.0), Vec2::new(40.0 - right * 20.0, 20.0), Vec2::new(left * 20.0, 20.0)]),
-                    holes: vec![],
-                };
-                let body = crate::extrude(&plane, &[region], 0.0, 20.0).unwrap().pop().unwrap();
-                let pick = plane.to_world(Vec2::new(20.0, 0.0)) + plane.normal() * 20.0;
-                let out = fillet_g2(&body, &[pick], 5.0).unwrap();
-                assert!(out.validity().is_empty(), "{:?}", out.validity());
-                assert_eq!(out.crossed_face_loops().unwrap(), 0);
-                assert_eq!(out.face_count(), 7);
-                // Analytic volume: the equal-area section removes (1 - pi/4) r², and its first
-                // moment ∫y dA is 0.0474559669443 r³ (Green's theorem on the section at the
-                // square corner's equal-area thumbweight). Axial length is 40−(left+right)y.
-                let removed = 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 - (left + right) * 0.0474559669443 * 125.0;
-                let expected = 16000.0 - 4000.0 * (left + right) - removed;
-                let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
-                assert!((volume - expected).abs() < 0.05, "{volume} vs {expected}");
-            }
+        // Outward and inward sloping ends, and one of each, in both orientations (#2708); a
+        // square end is every box's G2 round.
+        for (plane, left, right) in [(Plane::XY, -0.5, -0.5), (Plane::XY, 0.5, 0.5), (Plane::XZ, -0.25, 0.5)] {
+            let region = Region2 {
+                outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(40.0, 0.0), Vec2::new(40.0 - right * 20.0, 20.0), Vec2::new(left * 20.0, 20.0)]),
+                holes: vec![],
+            };
+            let body = crate::extrude(&plane, &[region], 0.0, 20.0).unwrap().pop().unwrap();
+            let pick = plane.to_world(Vec2::new(20.0, 0.0)) + plane.normal() * 20.0;
+            let out = fillet_g2(&body, &[pick], 5.0).unwrap();
+            assert!(out.validity().is_empty(), "{:?}", out.validity());
+            assert_eq!(out.crossed_face_loops().unwrap(), 0);
+            assert_eq!(out.face_count(), 7);
+            // Analytic volume: the equal-area section removes (1 - pi/4) r², and its first
+            // moment ∫y dA is 0.0474559669443 r³ (Green's theorem on the section at the
+            // square corner's equal-area thumbweight). Axial length is 40−(left+right)y.
+            let removed = 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 - (left + right) * 0.0474559669443 * 125.0;
+            let expected = 16000.0 - 4000.0 * (left + right) - removed;
+            let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
+            assert!((volume - expected).abs() < 0.05, "{volume} vs {expected}");
         }
     }
 

@@ -3213,19 +3213,22 @@ mod tests {
         check(&h, &ids, Some(Status::Warning), Some(a), "a suppressed feature has none");
     }
 
+    /// A feature's menu copies its warning message, in the bottom History and in the left one
+    /// (one design, shown in each).
     #[test]
     fn the_feature_menu_copies_a_warning_message() {
+        let mut h = two_boxes(false);
+        // Too large for the box: R6 on its four vertical edges would cross on the 10 mm faces,
+        // so it is reduced to what fits (a full round, 5), which the feature's warning says.
+        h.app
+            .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
+            .unwrap();
+        let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        let name = h.app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
+        let warning = h.app.session.model.result(id).and_then(|r| r.warning.clone()).unwrap();
         for left in [false, true] {
-            let mut h = two_boxes(left);
-            // Too large for the box: R6 on its four vertical edges would cross on the 10 mm faces,
-            // so it is reduced to what fits (a full round, 5), which the feature's warning says.
-            h.app
-                .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
-                .unwrap();
+            h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
             h.frames(4);
-            let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
-            let name = h.app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
-            let warning = h.app.session.model.result(id).and_then(|r| r.warning.clone()).unwrap();
             h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
             assert!(h.widget("Copy Warning Message").is_none(), "left: {left}");
             h.step(&json!({"key": "Escape"})).unwrap();

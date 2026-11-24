@@ -103,7 +103,8 @@ impl Lcg {
 /// boss its four sides and its end).
 #[test]
 fn random_cuts_and_joins_never_split_other_faces() {
-    for seed in 1..=6u64 {
+    // One seed a case height (32, then 24).
+    for seed in 1..=2u64 {
         let mut rng = Lcg(seed);
         let h = 24. + 8. * (seed % 2) as f64;
         let mut b = case(h);

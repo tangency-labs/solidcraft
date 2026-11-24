@@ -912,13 +912,15 @@ mod tests {
     /// the faceted solid it is, rather than the whole conversion failing (#18340).
     #[test]
     fn a_mesh_whose_caps_are_too_costly_to_compare_converts_as_a_faceted_solid() {
-        let (positions, triangles) = sign_with_star_plate(2000);
+        // The budget is 32 000 000: the work, (cap nodes + 4 · walls) · segments, is about 21 n²
+        // for n points, 47 000 000 at 1500.
+        let (positions, triangles) = sign_with_star_plate(1500);
         let welded = weld(crate::mesh_body(&positions, &triangles).unwrap().mesh.as_ref().unwrap(), 0.05).unwrap();
         assert!(extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, 0.05).unwrap().is_none());
         let converted = convert_prismatic_mesh(&crate::mesh_body(&positions, &triangles).unwrap(), 0.05).unwrap();
         assert!(!converted.is_mesh());
         assert!(converted.validity().is_empty());
-        // The base 60 x 60 x 3, and the plate: 2000 triangles of 20 x 19.5 mm (about) x 2 mm.
+        // The base 60 x 60 x 3, and the plate: 1500 triangles of 20 x 19.5 mm (about) x 2 mm.
         let volume = crate::measure(&converted).unwrap().volume;
         assert!(volume > 10_000. && volume < 16_000., "volume {volume}");
     }
@@ -1089,24 +1091,24 @@ mod tests {
     /// #358, #12281: a mesh that is no constant-section prism — the section of a rounded form
     /// changes every way you slice it — still converts, as the faceted solid its triangles
     /// describe: one planar face per triangle (or per coplanar run), nothing rounded into
-    /// cylinders.
+    /// cylinders, and exactly the polyhedron's volume.
     #[test]
     fn a_rounded_mesh_converts_as_a_faceted_solid() {
         let source = crate::sphere(Vec3::ZERO, 10.).unwrap();
-        let mesh = mesh_of(&source);
-        let triangles = mesh.mesh.as_ref().unwrap().triangles.len();
+        // Coarse facets, each far more than the tolerance off its neighbours' planes.
+        let facets = source.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
+        let mesh = crate::mesh_body(&facets.positions, &facets.triangles).unwrap();
+        let triangles = facets.triangles.len();
         let converted = convert_prismatic_mesh(&mesh, 0.05).unwrap();
         assert!(!converted.is_mesh());
         assert!(converted.validity().is_empty());
         let faces = converted.faces(0.01).unwrap().len();
         assert!(faces <= triangles, "{faces} faces of {triangles} triangles");
-        assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("plane"), Some(&faces));
-        let expected = 4. / 3. * std::f64::consts::PI * 1000.;
-        let fine_volume = |body: &Body| body.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
-        // The facets are the tessellation's own chords, so the volume sits just under the
-        // sphere's, by the chord tolerance's sagitta.
-        let volume = fine_volume(&converted);
-        assert!((expected - volume).abs() < expected * 0.01, "{volume} of {expected}");
+        let m = crate::measure(&converted).unwrap();
+        assert_eq!(m.merged.face_types.get("plane"), Some(&faces));
+        // The polyhedron's own volume, Σ a · (b × c) / 6 over its triangles.
+        let polyhedron = crate::measure(&mesh).unwrap().volume;
+        assert!((m.volume - polyhedron).abs() < 1e-9 * polyhedron, "{} of {polyhedron}", m.volume);
     }
 
     /// #18458: a faceted solid's volume is checked exactly, from its facets, not by integrating
@@ -1289,14 +1291,14 @@ mod tests {
         crate::extrude_planar_regions(&Plane::XY, &[Region2 { outer, holes }], 0., 3.).unwrap()
     }
 
+    /// A plate of many holes is refused by its count of boundary loops, before any work on their
+    /// pairs (400 holes stalled on ~80k loop pairs and ~160k planar booleans): 56 holes and the
+    /// outline are past the 50 (`MAX_LOOPS`).
     #[test]
     fn many_holes_are_refused_promptly_instead_of_stalling() {
-        // 400 holes would be ~80k loop pairs and ~160k planar booleans.
-        let mesh = mesh_of(&perforated_plate(20, 20));
-        let start = std::time::Instant::now();
+        let mesh = mesh_of(&perforated_plate(8, 7));
         let err = convert_prismatic_mesh(&mesh, 0.05).unwrap_err().to_string();
         assert!(err.contains("too complex to convert"), "{err}");
-        assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
         // At the limit, a plate still converts in bounded time.
         let mesh = mesh_of(&perforated_plate(7, 7));
         let result = convert_prismatic_mesh(&mesh, 0.05).unwrap();

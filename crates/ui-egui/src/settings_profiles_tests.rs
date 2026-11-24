@@ -466,198 +466,213 @@ fn choosing_a_profile_in_preferences_applies_it() {
     assert!(h.app.preferences.zoom_reverse);
 }
 
+/// The active profile's card, its name and the kinds of settings it holds are painted in the theme's
+/// selection colours.
+fn assert_active_profile_colours(h: &Harness, name: &str) {
+    let card = crate::scenario::rect_of(&format!("prefs:profile:{name}:card")).unwrap();
+    let t = solidcraft_theme::Tokens::get();
+    assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == card && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
+    assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if card.contains(text.pos) && text.galley.job.text == name && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_label)))));
+    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+    assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_caption)))));
+}
+
+/// The rows save, replace and apply profiles and show their real state, in the light theme; the dark
+/// theme checks what depends on it, the selection colours.
 #[test]
 fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() {
-    for theme in ["light", "dark"] {
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        h.call("ui.prefs", json!({"language":"en", "theme":theme, "open":"General"}));
-        h.frames(3);
-        assert!(h.app.settings_profiles.list.is_empty());
-        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-        let heading = crate::scenario::rect_of("prefs:page_heading").unwrap();
-        let subtitle = crate::scenario::rect_of("dialog:hint:settings_heading").unwrap();
-        let profiles = crate::scenario::rect_of("prefs:section:profiles").unwrap();
-        assert!(heading.contains_rect(subtitle));
-        {
-            let title = h
-                .shapes
-                .iter()
-                .find_map(|shape| {
-                    if let egui::Shape::Text(text) = &shape.shape
-                        && text.galley.job.text == "PROFILES"
-                        && profiles.contains(text.pos)
-                    {
-                        return Some(egui::Rect::from_min_size(text.pos, text.galley.size()));
-                    }
-                    None
-                })
-                .unwrap();
-            let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
-            assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = solidcraft_theme::Tokens::get();
-            let rule = h
-                .shapes
-                .iter()
-                .find_map(|shape| {
-                    if let egui::Shape::LineSegment { points, stroke } = &shape.shape
-                        && stroke.color == t.dialog_rule
-                        && points.iter().all(|point| (point.y - profiles.center().y).abs() < 0.5)
-                    {
-                        return Some(*points);
-                    }
-                    None
-                })
-                .unwrap();
-            assert!((rule[0].x - count.right() - 12.0).abs() < 0.5, "{theme}: the rule begins after the count");
-            assert!((rule[1].x - profiles.right()).abs() < 0.5);
-            for (key, text) in [("held", "Held"), ("computer", "This computer")] {
-                let label = crate::scenario::rect_of(&format!("prefs:profiles:{key}:label")).unwrap();
-                let first = crate::scenario::rect_of(&format!("prefs:profiles:{key}:first_chip")).unwrap();
-                let painted = h
-                    .shapes
-                    .iter()
-                    .find_map(|shape| {
-                        if let egui::Shape::Text(galley) = &shape.shape
-                            && galley.galley.job.text == text
-                            && label.contains(galley.pos)
-                        {
-                            return Some(egui::Rect::from_min_size(galley.pos, galley.galley.size()));
-                        }
-                        None
-                    })
-                    .unwrap();
-                assert!((painted.left() - body.left()).abs() < 0.75, "{theme}: {text} starts at the body's left edge");
-                assert!((first.left() - body.left() - 90.0).abs() < 0.5, "{theme}: {text} reserves the full caption column and gap");
-                assert!((first.height() - 24.0).abs() < 0.5);
-            }
-            let held = crate::scenario::rect_of("prefs:profiles:held:row").unwrap();
-            let computer = crate::scenario::rect_of("prefs:profiles:computer:row").unwrap();
-            assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
-        }
-        assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "{theme}: the first section has the same breathing room as later sections");
-        for (previous, next) in [("profiles", "language"), ("language", "startup"), ("startup", "saving")] {
-            let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
-            let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
-            assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{theme}: {previous} to {next}");
-            assert!((next_header.height() - 30.0).abs() < 0.5);
-            let next_body = crate::scenario::rect_of(&format!("prefs:section:{next}:body")).unwrap();
-            assert!((next_body.top() - next_header.bottom() - 10.0).abs() < 0.5);
-        }
-        let name_field = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
-        assert!((name_field.width() - 220.0).abs() < 0.5, "{theme}: bounded name entry");
-        assert!((name_field.left() - body.left()).abs() < 0.5, "{theme}: no separate label column before name entry");
-        assert!(body.contains_rect(name_field));
-        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
-        let status = h.app.status.clone();
-        h.step(&json!({"key":"Enter"})).unwrap();
-        assert_eq!(h.app.status, status, "empty Enter cannot submit a save");
-        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
-        h.step(&json!({"text":"x".repeat(65)})).unwrap();
-        h.step(&json!({"key":"Enter"})).unwrap();
-        assert_eq!(h.app.status, status, "invalid Enter cannot submit a save");
-        assert!(h.app.settings_profiles.list.is_empty());
-        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
-        h.step(&json!({"key":"A", "cmd":true})).unwrap();
-        h.step(&json!({"text":"  Laptop  "})).unwrap();
-        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
-        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
-        assert_eq!(
-            h.output
-                .accesskit_update
-                .as_ref()
-                .unwrap()
-                .nodes
-                .iter()
-                .filter(|(_, node)| node.label() == Some("Profile name"))
-                .find_map(|(_, node)| node.value()),
-            Some("  Laptop  "),
-            "saving keeps exactly the typed text while the command normalizes its name"
-        );
-        assert!(crate::scenario::rect_of("prefs:profile:Laptop:active").is_some());
-        assert!(crate::scenario::rect_of("prefs:profile:Laptop:apply").is_none());
-        h.app.preferences.zoom_reverse = true;
-        h.frames(3);
-        assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_some());
-        assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
-        // The new label must keep save's replacement semantics, not create a duplicate.
-        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.settings_profiles.list.len(), 1);
-        assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], true);
-        assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_none());
-        assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
-        h.app.preferences.zoom_reverse = false;
-        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
-        h.step(&json!({"key":"A", "cmd":true})).unwrap();
-        h.step(&json!({"text":"Desk"})).unwrap();
-        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
-        assert!(crate::scenario::rect_of("prefs:profile:Desk:apply").is_none());
-        let laptop = crate::scenario::rect_of("prefs:profile:Laptop:card").unwrap();
-        let desk = crate::scenario::rect_of("prefs:profile:Desk:card").unwrap();
-        assert!((laptop.height() - 42.0).abs() < 0.5 && (desk.height() - 42.0).abs() < 0.5, "{theme}: compact saved cards");
-        assert!((desk.top() - laptop.bottom() - 8.0).abs() < 0.5, "{theme}: saved card gap");
-        assert_eq!((laptop.left(), laptop.right()), (desk.left(), desk.right()));
-        for (name, card) in [("Laptop", laptop), ("Desk", desk)] {
-            assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(card));
-            for action in ["export", "rename", "delete"] {
-                let target = crate::scenario::rect_of(&format!("prefs:profile:{name}:{action}")).unwrap();
-                assert!(card.contains_rect(target), "{theme}: {name} {action} stays inside its card");
-                assert!((target.width() - 24.0).abs() < 0.5 && (target.height() - 24.0).abs() < 0.5);
-            }
-        }
-        let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
-        assert!(desk.contains_rect(active));
-        assert!((active.height() - 18.0).abs() < 0.5);
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"language":"en", "theme":"light", "open":"General"}));
+    h.frames(3);
+    assert!(h.app.settings_profiles.list.is_empty());
+    let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+    let heading = crate::scenario::rect_of("prefs:page_heading").unwrap();
+    let subtitle = crate::scenario::rect_of("dialog:hint:settings_heading").unwrap();
+    let profiles = crate::scenario::rect_of("prefs:section:profiles").unwrap();
+    assert!(heading.contains_rect(subtitle));
+    {
+        let title = h
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape
+                    && text.galley.job.text == "PROFILES"
+                    && profiles.contains(text.pos)
+                {
+                    return Some(egui::Rect::from_min_size(text.pos, text.galley.size()));
+                }
+                None
+            })
+            .unwrap();
+        let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
+        assert!((count.left() - title.right() - 12.0).abs() < 1.1, "count follows the painted title");
         let t = solidcraft_theme::Tokens::get();
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_label)))));
-        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-        assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if body.contains(text.pos) && text.galley.job.text == "Appearance" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::ui_kit::type_face::semibold(t.font_caption)))));
-        assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
-        h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
-        assert!(h.app.preferences.zoom_reverse);
-        assert_eq!(
-            h.output
-                .accesskit_update
-                .as_ref()
-                .unwrap()
-                .nodes
+        let rule = h
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::LineSegment { points, stroke } = &shape.shape
+                    && stroke.color == t.dialog_rule
+                    && points.iter().all(|point| (point.y - profiles.center().y).abs() < 0.5)
+                {
+                    return Some(*points);
+                }
+                None
+            })
+            .unwrap();
+        assert!((rule[0].x - count.right() - 12.0).abs() < 0.5, "the rule begins after the count");
+        assert!((rule[1].x - profiles.right()).abs() < 0.5);
+        for (key, text) in [("held", "Held"), ("computer", "This computer")] {
+            let label = crate::scenario::rect_of(&format!("prefs:profiles:{key}:label")).unwrap();
+            let first = crate::scenario::rect_of(&format!("prefs:profiles:{key}:first_chip")).unwrap();
+            let painted = h
+                .shapes
                 .iter()
-                .filter(|(_, node)| node.label() == Some("Profile name"))
-                .find_map(|(_, node)| node.value()),
-            Some("Desk"),
-            "applying a different row preserves the user-typed draft"
-        );
-        h.app.preferences.zoom_reverse = false;
-        h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
-        h.step(&json!({"key":"A", "cmd":true})).unwrap();
-        h.step(&json!({"text":"Laptop"})).unwrap();
-        h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
-        h.frames(3);
-        assert_eq!(h.app.settings_profiles.list.len(), 2, "typing an existing name still replaces it");
-        assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], false);
-        assert_eq!(
-            h.output
-                .accesskit_update
-                .as_ref()
-                .unwrap()
-                .nodes
-                .iter()
-                .filter(|(_, node)| node.label() == Some("Profile name"))
-                .find_map(|(_, node)| node.value()),
-            Some("Laptop"),
-            "replacement keeps the typed name too"
-        );
-        assert!(h.app.prefs_window.shell.filter.is_empty(), "name entry must not type into search");
-        assert!(h.app.prefs_window.shell.open);
+                .find_map(|shape| {
+                    if let egui::Shape::Text(galley) = &shape.shape
+                        && galley.galley.job.text == text
+                        && label.contains(galley.pos)
+                    {
+                        return Some(egui::Rect::from_min_size(galley.pos, galley.galley.size()));
+                    }
+                    None
+                })
+                .unwrap();
+            assert!((painted.left() - body.left()).abs() < 0.75, "{text} starts at the body's left edge");
+            assert!((first.left() - body.left() - 90.0).abs() < 0.5, "{text} reserves the full caption column and gap");
+            assert!((first.height() - 24.0).abs() < 0.5);
+        }
+        let held = crate::scenario::rect_of("prefs:profiles:held:row").unwrap();
+        let computer = crate::scenario::rect_of("prefs:profiles:computer:row").unwrap();
+        assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
     }
+    assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "the first section has the same breathing room as later sections");
+    for (previous, next) in [("profiles", "language"), ("language", "startup"), ("startup", "saving")] {
+        let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
+        let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
+        assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{previous} to {next}");
+        assert!((next_header.height() - 30.0).abs() < 0.5);
+        let next_body = crate::scenario::rect_of(&format!("prefs:section:{next}:body")).unwrap();
+        assert!((next_body.top() - next_header.bottom() - 10.0).abs() < 0.5);
+    }
+    let name_field = crate::scenario::rect_of("dialog:widget:Profile name").unwrap();
+    assert!((name_field.width() - 220.0).abs() < 0.5, "bounded name entry");
+    assert!((name_field.left() - body.left()).abs() < 0.5, "no separate label column before name entry");
+    assert!(body.contains_rect(name_field));
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    let status = h.app.status.clone();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.status, status, "empty Enter cannot submit a save");
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"text":"x".repeat(65)})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.status, status, "invalid Enter cannot submit a save");
+    assert!(h.app.settings_profiles.list.is_empty());
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"key":"A", "cmd":true})).unwrap();
+    h.step(&json!({"text":"  Laptop  "})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("  Laptop  "),
+        "saving keeps exactly the typed text while the command normalizes its name"
+    );
+    assert!(crate::scenario::rect_of("prefs:profile:Laptop:active").is_some());
+    assert!(crate::scenario::rect_of("prefs:profile:Laptop:apply").is_none());
+    h.app.preferences.zoom_reverse = true;
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_some());
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
+    // The new label must keep save's replacement semantics, not create a duplicate.
+    h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.list.len(), 1);
+    assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], true);
+    assert!(crate::scenario::rect_of("prefs:profile:Laptop:edited").is_none());
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    h.app.preferences.zoom_reverse = false;
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"key":"A", "cmd":true})).unwrap();
+    h.step(&json!({"text":"Desk"})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.names(), ["Laptop", "Desk"]);
+    assert!(crate::scenario::rect_of("prefs:profile:Desk:apply").is_none());
+    let laptop = crate::scenario::rect_of("prefs:profile:Laptop:card").unwrap();
+    let desk = crate::scenario::rect_of("prefs:profile:Desk:card").unwrap();
+    assert!((laptop.height() - 42.0).abs() < 0.5 && (desk.height() - 42.0).abs() < 0.5, "compact saved cards");
+    assert!((desk.top() - laptop.bottom() - 8.0).abs() < 0.5, "saved card gap");
+    assert_eq!((laptop.left(), laptop.right()), (desk.left(), desk.right()));
+    for (name, card) in [("Laptop", laptop), ("Desk", desk)] {
+        assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(card));
+        for action in ["export", "rename", "delete"] {
+            let target = crate::scenario::rect_of(&format!("prefs:profile:{name}:{action}")).unwrap();
+            assert!(card.contains_rect(target), "{name} {action} stays inside its card");
+            assert!((target.width() - 24.0).abs() < 0.5 && (target.height() - 24.0).abs() < 0.5);
+        }
+    }
+    let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
+    assert!(desk.contains_rect(active));
+    assert!((active.height() - 18.0).abs() < 0.5);
+    assert_active_profile_colours(&h, "Desk");
+    assert!(laptop.contains_rect(crate::scenario::rect_of("prefs:profile:Laptop:apply").unwrap()));
+    h.step(&json!({"click":{"handle":"prefs:profile:Laptop:apply"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+    assert!(h.app.preferences.zoom_reverse);
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("Desk"),
+        "applying a different row preserves the user-typed draft"
+    );
+    h.app.preferences.zoom_reverse = false;
+    h.step(&json!({"click":{"handle":"dialog:Profile name"}})).unwrap();
+    h.step(&json!({"key":"A", "cmd":true})).unwrap();
+    h.step(&json!({"text":"Laptop"})).unwrap();
+    h.step(&json!({"click":{"handle":"prefs:profile:save"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.list.len(), 2, "typing an existing name still replaces it");
+    assert_eq!(h.app.settings_profiles.list[0]["preferences"]["zoom_reverse"], false);
+    assert_eq!(
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.label() == Some("Profile name"))
+            .find_map(|(_, node)| node.value()),
+        Some("Laptop"),
+        "replacement keeps the typed name too"
+    );
+    assert!(h.app.prefs_window.shell.filter.is_empty(), "name entry must not type into search");
+    assert!(h.app.prefs_window.shell.open);
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+    run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+    h.call("ui.prefs", json!({"language":"en", "theme":"dark", "open":"General"}));
+    h.frames(3);
+    assert_active_profile_colours(&h, "Desk");
 }
 
 #[test]
@@ -751,18 +766,20 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
 
 #[test]
 fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
-    for action in ["Enter", "Tab", "ok", "Escape", "cancel", "outside"] {
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
-        run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
-        h.call("ui.prefs", json!({"language":"en", "open":"General"}));
-        h.step(&json!({"click":{"handle":"prefs:profile:Laptop:rename"}})).unwrap();
+    // Enter commits in general_inactive_profile_rows_export_rename_import_and_delete_without_applying.
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+    run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+    h.call("ui.prefs", json!({"language":"en", "open":"General"}));
+    let mut name = "Laptop";
+    for (action, typed) in [("Tab", "Travel"), ("ok", "Trip"), ("Escape", "Gone"), ("cancel", "Gone"), ("outside", "Gone")] {
+        h.step(&json!({"click":{"handle":format!("prefs:profile:{name}:rename")}})).unwrap();
         h.frames(3);
         let popup = crate::scenario::rect_of("prefs:profile:rename_popup").unwrap();
         let editor = crate::scenario::rect_of("rename:name").unwrap();
         assert!(popup.contains_rect(editor), "the editor is outside the page's scroll clip");
-        h.step(&json!({"text":"  Travel  "})).unwrap();
+        h.step(&json!({"text":format!("  {typed}  ")})).unwrap();
         match action {
             "ok" | "cancel" => h.step(&json!({"click":{"handle":format!("prefs:profile:rename:{action}")}})).unwrap(),
             "outside" => {
@@ -774,8 +791,10 @@ fn general_profile_row_rename_commits_or_cancels_without_closing_preferences() {
             _ => h.step(&json!({"key":action})).unwrap(),
         }
         h.frames(3);
-        let committed = matches!(action, "Enter" | "Tab" | "ok");
-        assert_eq!(h.app.settings_profiles.names(), [if committed { "Travel" } else { "Laptop" }, "Desk"], "{action}");
+        if matches!(action, "Tab" | "ok") {
+            name = typed;
+        }
+        assert_eq!(h.app.settings_profiles.names(), [name, "Desk"], "{action}");
         assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
         assert!(h.app.prefs_window.shell.open && h.app.prefs_window.shell.filter.is_empty(), "{action}");
         assert!(crate::scenario::rect_of("prefs:profile:rename_popup").is_none());

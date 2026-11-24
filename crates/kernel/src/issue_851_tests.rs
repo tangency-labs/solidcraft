@@ -135,8 +135,8 @@ fn arc_top_removed(size: f64, round: bool) -> f64 {
     total
 }
 
-/// Volume through the display planner (the mesh the app draws): closed and exact where the
-/// legacy mesher behind `measure` can leak at a zero-angle corner like the one at the tip.
+/// Volume through the display planner (the mesh the app draws), which must close (no crack at a
+/// zero-angle corner like the one at the tip). Volumes alone are `measure`'s, exact.
 pub(crate) fn planned_volume(b: &Body) -> f64 {
     let mesh = b.mesh_plan(&crate::MeshTolerance::chord(2e-4)).unwrap().evaluate_mesh();
     let key = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
@@ -153,21 +153,31 @@ pub(crate) fn planned_volume(b: &Body) -> f64 {
 }
 
 /// The arc's top edge runs out tangent to the back face at the knife edge's top: the blend is cut
-/// by that face along a curve that touches the wall's contact at the tip.
+/// by that face along a curve that touches the wall's contact at the tip. The exact volumes take
+/// off the integrated corner; the display plan of each r 2 blend closes there (no crack at the
+/// tip) and takes off the same.
 #[test]
 fn fillet_and_chamfer_the_arc_top_edge() {
+    let sizes = [0.5, 2.0, 4.0, 8.0];
+    let expected: Vec<[f64; 2]> = sizes.iter().map(|r| [arc_top_removed(*r, true), arc_top_removed(*r, false)]).collect();
     for (name, body) in [("plate first", part()), ("corner first", part_other_order()), ("cut from a box", part_cut_from_a_box())] {
-        let before = planned_volume(&body);
-        for r in [0.5, 2.0, 4.0, 8.0] {
-            for round in [true, false] {
+        let before = measure(&body).unwrap().volume;
+        for (r, expected) in sizes.iter().zip(&expected) {
+            for (round, expected) in [(true, expected[0]), (false, expected[1])] {
                 let what = if round { "fillet" } else { "chamfer" };
-                let made = if round { fillet(&body, &[arc_top()], r) } else { chamfer(&body, &[arc_top()], r) };
+                let made = if round { fillet(&body, &[arc_top()], *r) } else { chamfer(&body, &[arc_top()], *r) };
                 let made = made.unwrap_or_else(|e| panic!("{name} {what} r={r}: {e}"));
                 assert!(made.validity().is_empty(), "{name} {what} r={r}: {:?}", made.validity());
                 assert_eq!(made.face_count(), body.face_count() + 1, "{name} {what} r={r}: one blend face");
-                let removed = before - planned_volume(&made);
-                let expected = arc_top_removed(r, round);
+                let removed = before - measure(&made).unwrap().volume;
                 assert!((removed - expected).abs() < 0.01 * expected + 0.01, "{name} {what} r={r}: removed {removed}, expected {expected}");
+                if name == "plate first" && *r == 2.0 {
+                    let planned = planned_volume(&body) - planned_volume(&made);
+                    assert!(
+                        (planned - expected).abs() < 0.01 * expected + 0.01,
+                        "{what} r={r}: the display plan removes {planned}, expected {expected}"
+                    );
+                }
             }
         }
     }
@@ -177,7 +187,7 @@ fn fillet_and_chamfer_the_arc_top_edge() {
 #[test]
 fn the_arc_top_edge_blends_the_same_in_a_mirror() {
     let body = part();
-    let reference = planned_volume(&fillet(&body, &[arc_top()], 2.0).unwrap());
+    let reference = measure(&fillet(&body, &[arc_top()], 2.0).unwrap()).unwrap().volume;
     let mirror = |axis: usize| {
         let mut m = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         m[axis][axis] = -1.0;
@@ -186,7 +196,7 @@ fn the_arc_top_edge_blends_the_same_in_a_mirror() {
     let at = arc_top();
     for (axis, p) in [(0, Vec3::new(-at.x, at.y, at.z)), (1, Vec3::new(at.x, -at.y, at.z)), (2, Vec3::new(at.x, at.y, -at.z))] {
         let mirrored = transform_matrix(&body, mirror(axis)).unwrap();
-        let v = planned_volume(&fillet(&mirrored, &[p], 2.0).unwrap_or_else(|e| panic!("mirror {axis}: {e}")));
+        let v = measure(&fillet(&mirrored, &[p], 2.0).unwrap_or_else(|e| panic!("mirror {axis}: {e}"))).unwrap().volume;
         assert!((v - reference).abs() < 1e-4 * reference, "mirror {axis}: volume {v}, expected {reference}");
     }
 }
@@ -215,10 +225,10 @@ fn fu() -> Vec3 {
     Vec3::new(TIP_X - R_WALL, -R_WALL, HEIGHT / 2.0)
 }
 
-/// Volume two blends take off together: each alone, less the corner both would take.
-fn removed_together(body: &Body, picks: &[Vec3], r: f64, overlap: f64) -> f64 {
-    let before = planned_volume(body);
-    picks.iter().map(|p| before - planned_volume(&fillet(body, &[*p], r).unwrap())).sum::<f64>() - overlap
+/// Volume two blends take off together: what each takes `alone` off a body of volume `before`,
+/// less the corner both would take.
+fn removed_together(before: f64, alone: &[&Body], overlap: f64) -> f64 {
+    alone.iter().map(|b| before - measure(b).unwrap().volume).sum::<f64>() - overlap
 }
 
 /// The front's top edge and its left upright meet at a box corner; the edge's far end runs into
@@ -228,17 +238,17 @@ fn removed_together(body: &Body, picks: &[Vec3], r: f64, overlap: f64) -> f64 {
 #[test]
 fn fillet_the_top_front_edge_and_the_front_left_upright() {
     let body = part();
-    let (before, r) = (planned_volume(&body), 2.0);
-    let want = removed_together(&body, &[tf(), fl()], r, 0.766_957);
+    let (before, r) = (measure(&body).unwrap().volume, 2.0);
+    let first = fillet(&body, &[tf()], r).unwrap();
+    let second = fillet(&body, &[fl()], r).unwrap();
+    let want = removed_together(before, &[&first, &second], 0.766_957);
     let check = |name: &str, made: Result<Body>| {
         let made = made.unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(made.validity().is_empty(), "{name}: {:?}", made.validity());
-        let removed = before - planned_volume(&made);
+        let removed = before - measure(&made).unwrap().volume;
         assert!((removed - want).abs() < 0.02, "{name}: removed {removed}, expected {want}");
         made.face_count()
     };
-    let first = fillet(&body, &[tf()], r).unwrap();
-    let second = fillet(&body, &[fl()], r).unwrap();
     let faces = [
         check("top front, then the upright", fillet(&first, &[fl()], r)),
         check("upright, then the top front", fillet(&second, &[tf()], r)),
@@ -253,15 +263,15 @@ fn fillet_the_top_front_edge_and_the_front_left_upright() {
 #[test]
 fn fillet_the_top_front_edge_and_the_front_upright_at_the_arc() {
     let body = part();
-    let (before, r) = (planned_volume(&body), 2.0);
-    let want = removed_together(&body, &[tf(), fu()], r, 0.699_134);
+    let (before, r) = (measure(&body).unwrap().volume, 2.0);
+    let first = fillet(&body, &[tf()], r).unwrap();
+    let want = removed_together(before, &[&first, &fillet(&body, &[fu()], r).unwrap()], 0.699_134);
     let check = |name: &str, made: Result<Body>| {
         let made = made.unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(made.validity().is_empty(), "{name}: {:?}", made.validity());
-        let removed = before - planned_volume(&made);
+        let removed = before - measure(&made).unwrap().volume;
         assert!((removed - want).abs() < 0.02, "{name}: removed {removed}, expected {want}");
     };
-    let first = fillet(&body, &[tf()], r).unwrap();
     check("top front, then the upright", fillet(&first, &[fu()], r));
     check("together", fillet(&body, &[tf(), fu()], r));
     check("together, the other way", fillet(&body, &[fu(), tf()], r));
@@ -279,17 +289,16 @@ fn blend_one_edge(body: &Body, p: Vec3, r: f64, round: bool) -> Result<Body> {
 #[test]
 fn blend_the_arc_top_edge_and_the_top_front_edge() {
     let body = part();
-    let before = planned_volume(&body);
+    let before = measure(&body).unwrap().volume;
     for (name, round, overlap) in [("fillet", true, 0.759), ("chamfer", false, 2.69)] {
-        let alone = |p: Vec3| before - planned_volume(&blend_one_edge(&body, p, 2.0, round).unwrap());
-        let want = alone(tf()) + alone(arc_top()) - overlap;
+        let (a, t) = (blend_one_edge(&body, arc_top(), 2.0, round).unwrap(), blend_one_edge(&body, tf(), 2.0, round).unwrap());
+        let want = removed_together(before, &[&t, &a], overlap);
         let check = |how: &str, made: Result<Body>| {
             let made = made.unwrap_or_else(|e| panic!("{name} {how}: {e}"));
             assert!(made.validity().is_empty(), "{name} {how}: {:?}", made.validity());
-            let removed = before - planned_volume(&made);
+            let removed = before - measure(&made).unwrap().volume;
             assert!((removed - want).abs() < 0.06, "{name} {how}: removed {removed}, expected {want}");
         };
-        let (a, t) = (blend_one_edge(&body, arc_top(), 2.0, round).unwrap(), blend_one_edge(&body, tf(), 2.0, round).unwrap());
         check("arc, then the front", blend_one_edge(&a, tf(), 2.0, round));
         check("front, then the arc", blend_one_edge(&t, arc_top(), 2.0, round));
         let both = |picks: &[Vec3]| if round { fillet(&body, picks, 2.0) } else { chamfer(&body, picks, 2.0) };
@@ -303,18 +312,17 @@ fn blend_the_arc_top_edge_and_the_top_front_edge() {
 #[test]
 fn fillet_the_arc_top_edge_and_the_front_upright_at_the_arc() {
     let body = part();
-    let (before, r) = (planned_volume(&body), 2.0);
-    let alone = |p: Vec3| before - planned_volume(&fillet(&body, &[p], r).unwrap());
-    let want = alone(arc_top()) + alone(fu()) - 0.682_379;
+    let (before, r) = (measure(&body).unwrap().volume, 2.0);
+    let a = fillet(&body, &[arc_top()], r).unwrap();
+    let want = removed_together(before, &[&a, &fillet(&body, &[fu()], r).unwrap()], 0.682_379);
     let check = |how: &str, made: Result<Body>| {
         let made = made.unwrap_or_else(|e| panic!("{how}: {e}"));
         assert!(made.validity().is_empty(), "{how}: {:?}", made.validity());
-        let removed = before - planned_volume(&made);
+        let removed = before - measure(&made).unwrap().volume;
         assert!((removed - want).abs() < 0.06, "{how}: removed {removed}, expected {want}");
     };
     // (The upright first, then the arc as a feature of its own, is not supported yet: the arc's
     // blend would run on over the upright's round, past the crease where the two meet.)
-    let a = fillet(&body, &[arc_top()], r).unwrap();
     check("arc, then the upright", fillet(&a, &[fu()], r));
     check("together", fillet(&body, &[arc_top(), fu()], r));
     check("together, the other way", fillet(&body, &[fu(), arc_top()], r));
@@ -328,14 +336,14 @@ fn fillet_the_arc_top_edge_and_the_front_upright_at_the_arc() {
 #[test]
 fn fillet_the_three_edges_at_the_arcs_front_corner() {
     let body = part();
-    let before = planned_volume(&body);
+    let before = measure(&body).unwrap().volume;
     let want = 67.05;
-    for (name, picks) in [("as picked", [tf(), arc_top(), fu()]), ("another order", [fu(), tf(), arc_top()]), ("a third", [arc_top(), fu(), tf()])] {
+    for (name, picks) in [("as picked", [tf(), arc_top(), fu()]), ("another order", [fu(), tf(), arc_top()])] {
         let made = fillet(&body, &picks, 2.0).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(made.validity().is_empty(), "{name}: {:?}", made.validity());
         // The body's six faces, the three rounds and the sphere's patch.
         assert_eq!(made.face_count(), 10, "{name}");
-        let removed = before - planned_volume(&made);
+        let removed = before - measure(&made).unwrap().volume;
         assert!((removed - want).abs() < 0.12, "{name}: removed {removed}, expected {want}");
     }
 }

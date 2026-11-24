@@ -25,32 +25,21 @@ fn cut_window(s: &mut Session) -> serde_json::Value {
     run(s, "solid.box", json!({"corner": [-24, -0.5, -1], "length": 48, "width": 4, "height": 50, "operation": "cut", "targets": ["Case"]}))
 }
 
-/// Every face of the case after the round meshes (the strip had no triangles at any tolerance).
+/// Every face of the case after the round meshes (the strip had no triangles at any tolerance),
+/// and the window cut through the rim then takes its three faces (two sides and the top) in one
+/// boolean with no retry, leaving one shell.
 #[test]
-fn every_face_of_the_rounded_case_meshes() {
-    let s = open_at("Fillet2");
+fn rim_cut_after_the_round_on_the_other_end() {
+    let mut s = open_at("Fillet2");
     let case = s.model.state().body("Case").map(|b| b.body.clone()).unwrap();
     let faces = case.faces(0.05).unwrap();
     assert_eq!(faces.len(), case.face_count());
     let unmeshed: Vec<usize> = faces.iter().filter(|f| f.area <= 0.0).map(|f| f.index).collect();
     assert!(unmeshed.is_empty(), "faces with no mesh: {unmeshed:?}");
-}
-
-/// The cut takes the same window after the round as before it (the round is 120 mm away), in one
-/// boolean with no retry.
-#[test]
-fn rim_cut_after_the_round_on_the_other_end() {
-    let mut before = open_at("Fillet1");
-    let mut after = open_at("Fillet2");
-    let faces = |s: &Session| s.model.state().body("Case").map(|b| b.body.face_count()).unwrap();
-    let (f1, f2) = (faces(&before), faces(&after));
-    cut_window(&mut before);
-    let id = cut_window(&mut after)["feature"].as_u64().unwrap();
-    let result = after.model.result(id).unwrap();
+    let id = cut_window(&mut s)["feature"].as_u64().unwrap();
+    let result = s.model.result(id).unwrap();
     assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-    // The window's three faces (two sides and the top), at both points of the timeline.
-    assert_eq!(faces(&before), f1 + 3);
-    assert_eq!(faces(&after), f2 + 3);
-    let case = after.model.state().body("Case").map(|b| b.body.clone()).unwrap();
-    assert_eq!(case.shell_count(), 1);
+    let case_after = s.model.state().body("Case").map(|b| b.body.clone()).unwrap();
+    assert_eq!(case_after.face_count(), case.face_count() + 3);
+    assert_eq!(case_after.shell_count(), 1);
 }

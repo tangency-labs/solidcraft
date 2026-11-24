@@ -205,28 +205,10 @@ fn creating_after_deleting_future_features_keeps_the_new_feature_active() {
     assert!((volume - 1189.0).abs() < 1e-6, "{volume}");
 }
 
-#[test]
-fn g2_fillet_survives_edit_undo_and_reopen() {
-    use solidcraft_doc::{Document, FeatureKind, FilletStyle};
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "name": "Base"}));
-    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "type": "g2", "name": "Smooth"}));
-    assert!(matches!(&s.doc.find_feature("Smooth").unwrap().kind, FeatureKind::Fillet { style: FilletStyle::Curvature, .. }));
-    let before = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    run(&mut s, "timeline.edit", json!({"feature": "Smooth", "set": {"radius": "3"}}));
-    let after = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    assert!(after < before);
-    run(&mut s, "edit.undo", json!({}));
-    let undo = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    assert!((undo - before).abs() < 1e-6);
-    run(&mut s, "edit.redo", json!({}));
-    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(matches!(&reopened.doc.find_feature("Smooth").unwrap().kind, FeatureKind::Fillet { style: FilletStyle::Curvature, .. }));
-    let volume = run(&mut reopened, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    assert!((volume - after).abs() < 1e-6);
-    assert!(s.execute("solid.fillet", &json!({"edges": [[0, 0, 10]], "radius": 2, "type": "curvature", "fit": "reduce"})).is_err());
-}
-
+/// A constant round redefined as a curvature (G2) round, by the `g2` alias of its type, on a
+/// prism whose ends slope (#2708): the curvature section's volume, through undo, redo, a reopen
+/// and a radius edit; a radius too large is refused with nothing changed, and a curvature round
+/// takes no `fit: reduce`.
 #[test]
 fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     use solidcraft_doc::{Document, FeatureKind, FilletStyle};
@@ -238,11 +220,11 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 5, "name": "Fillet1"}));
     let original = s.doc.clone();
     let id = s.doc.find_feature("Fillet1").unwrap().id;
-    // #2708: changing an existing constant fillet to Curvature (G2) in Edit Feature.
+    // #2708: changing an existing constant fillet to Curvature (G2) in Edit Feature; `g2` names it too.
     run(
         &mut s,
         "timeline.redefine",
-        json!({"feature": id, "command": "solid.fillet", "params": {"edges": [[20, 0, 20]], "radius": "5", "type": "curvature"}}),
+        json!({"feature": id, "command": "solid.fillet", "params": {"edges": [[20, 0, 20]], "radius": "5", "type": "g2"}}),
     );
     let f = s.doc.find_feature("Fillet1").unwrap();
     assert_eq!(f.id, id);
@@ -279,6 +261,9 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     );
     assert_eq!(reopened.doc, before);
     assert!((volume(&reopened) - expected(3.0)).abs() < 0.05);
+    let reduced = json!({"edges": [[20, 0, 0]], "radius": 2, "type": "curvature", "fit": "reduce"});
+    let why = reopened.execute("solid.fillet", &reduced).unwrap_err().to_string();
+    assert!(why.contains("take a constant radius"), "{why}");
 }
 
 #[test]

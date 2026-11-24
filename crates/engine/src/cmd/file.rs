@@ -5208,30 +5208,33 @@ mod tests {
     /// over and over, and past the cache's size limit kept only some of its states.
     #[test]
     fn a_saved_model_keeps_each_sheet_body_once() {
-        let design = |boxes: usize| {
-            let mut s = Session::new(Document::new("Sheet"));
-            let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap();
-            run(
-                &mut s,
-                "sheet.manage_rules",
-                json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","gap":"0.5 mm","active":true}),
-            );
-            run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
-            run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,150]}));
-            run(&mut s, "sketch.finish", json!({}));
-            run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
-            run(&mut s, "sheet.flange", json!({"edges":[[100,0,2],[200,75,2],[100,150,2],[0,75,2]],"height":"20 mm","angle":"90 deg"}));
-            // A panel's holes: each one is a cut-out the sheet keeps.
-            for i in 0..16 {
-                run(&mut s, "solid.hole", json!({"position":[25 + 10 * i,40,2],"diameter":5}));
+        let run = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).unwrap();
+        // Boxes `from..to` after the sheet, each a feature of its own.
+        let boxes = |s: &mut Session, from: usize, to: usize| {
+            for i in from..to {
+                run(s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[300 + 10 * i,0,0],"operation":"new"}));
             }
-            for i in 0..boxes {
-                run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[300 + 10 * i,0,0],"operation":"new"}));
-            }
-            s
         };
+        let mut few = Session::new(Document::new("Sheet"));
+        run(
+            &mut few,
+            "sheet.manage_rules",
+            json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","gap":"0.5 mm","active":true}),
+        );
+        run(&mut few, "sketch.create", json!({"plane":"XY","name":"Base"}));
+        run(&mut few, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,150]}));
+        run(&mut few, "sketch.finish", json!({}));
+        run(&mut few, "sheet.flange", json!({"sketch":"Base"}));
+        run(&mut few, "sheet.flange", json!({"edges":[[100,0,2],[200,75,2],[100,150,2],[0,75,2]],"height":"20 mm","angle":"90 deg"}));
+        // A panel's holes: each one is a cut-out the sheet keeps.
+        for i in 0..16 {
+            run(&mut few, "solid.hole", json!({"position":[25 + 10 * i,40,2],"diameter":5}));
+        }
+        boxes(&mut few, 0, 2);
+        // The same design with 10 boxes more.
+        let mut many = few.scratch();
+        boxes(&mut many, 2, 12);
         let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
-        let (few, many) = (design(2), design(12));
         let sheet = serde_json::to_vec(&many.model.state().surface_sheets).unwrap().len();
         let per_feature = (size(&many) - size(&few)) / 10;
         assert!(per_feature * 2 < sheet, "each later feature adds {per_feature} bytes, the sheet is {sheet}");
@@ -5765,34 +5768,25 @@ mod tests {
         s.execute("solid.fillet", &json!({"edges": [[60, -15, 10]], "radius": 0.5})).unwrap();
         s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
         let errors = |s: &Session| s.model.results.iter().filter(|r| r.error.is_some()).count();
-        let open = |mode: Validation| {
-            let mut whole = Session::default();
-            whole.set_validation(mode);
-            whole.execute("doc.open", &json!({"path": path})).unwrap();
-            errors(&whole)
-        };
-        // Each evaluation of the design takes seconds (its last round), so each mode's reference
-        // is opened once and each starting mode is tried once.
-        for mode in Validation::ALL {
-            let reference = open(mode);
-            let mut starts = vec![mode];
-            for other in [Validation::EachFeature, Validation::Off] {
-                if !starts.contains(&other) {
-                    starts.push(other);
-                }
-            }
-            for started in starts {
-                let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
-                while steps.step() {}
-                let mut stepped = Session::default();
-                stepped.set_validation(mode);
-                steps.finish(&mut stepped).unwrap();
-                assert_eq!(stepped.validation(), mode);
-                assert_eq!(errors(&stepped), reference, "started under {started:?}, the session's mode {mode:?}");
-                let again = if started == mode { 0 } else { stepped.doc.features.len() };
-                assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
-                assert!(stepped.model.is_current(&stepped.doc));
-            }
+        // Each evaluation of the design takes seconds (its last round), so one session mode is
+        // tried, the strictest, with its `doc.open` as the reference: started under that mode,
+        // nothing is evaluated again; started under Off, everything is.
+        let mode = Validation::EachStep;
+        let mut whole = Session::default();
+        whole.set_validation(mode);
+        whole.execute("doc.open", &json!({"path": path})).unwrap();
+        let reference = errors(&whole);
+        for started in [mode, Validation::Off] {
+            let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
+            while steps.step() {}
+            let mut stepped = Session::default();
+            stepped.set_validation(mode);
+            steps.finish(&mut stepped).unwrap();
+            assert_eq!(stepped.validation(), mode);
+            assert_eq!(errors(&stepped), reference, "started under {started:?}, the session's mode {mode:?}");
+            let again = if started == mode { 0 } else { stepped.doc.features.len() };
+            assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
+            assert!(stepped.model.is_current(&stepped.doc));
         }
         std::fs::remove_dir_all(dir).unwrap();
     }

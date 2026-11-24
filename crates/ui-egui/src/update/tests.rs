@@ -905,66 +905,69 @@ fn the_version_links_to_its_release_notes() {
 fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
     use egui::accesskit::{Role, Toggled};
     let _language = solidcraft_ui_text::scope("en");
-    for kind in [InstallKind::Dev, InstallKind::Web, InstallKind::Flatpak("io.solidcraft.SolidCraft".into())] {
-        for checked in [false, true] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.app.preferences.language = "en".into();
-            h.app.preferences.check_updates = checked;
-            h.app.updater.kind = Some(kind.clone());
-            h.app.updater.feed = None;
-            assert!(!available(&mut h.app));
-            let memo = h.app.preferences.update.clone();
-            let launch_checked = h.app.updater.launch_checked;
-            let last_manual = h.app.updater.last_manual;
-            h.call("ui.prefs", json!({"open":"General"}));
-            crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
-            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-            let button = crate::scenario::rect_of("prefs:check_now").unwrap();
-            assert!(body.contains_rect(button));
-            assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_updates").unwrap()));
-            let tree = h.output.accesskit_update.as_ref().unwrap();
-            for (label, role) in [("Check now", Role::Button), ("Check at start and once a day", Role::CheckBox)] {
-                let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
-                assert_eq!(controls.len(), 1, "{kind:?}: one {label} control");
-                assert!(controls[0].1.is_disabled(), "{kind:?}: {label} is disabled");
-                if role == Role::CheckBox {
-                    assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
-                }
+    // Each kind has its own note; both states of the disabled checkbox are seen. The disabled controls are
+    // the same widgets for every kind, so the first run alone tries to click them.
+    for (run, (kind, checked)) in
+        [(InstallKind::Dev, false), (InstallKind::Web, true), (InstallKind::Flatpak("io.solidcraft.SolidCraft".into()), false)]
+            .into_iter()
+            .enumerate()
+    {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.preferences.check_updates = checked;
+        h.app.updater.kind = Some(kind.clone());
+        h.app.updater.feed = None;
+        assert!(!available(&mut h.app));
+        let memo = h.app.preferences.update.clone();
+        let launch_checked = h.app.updater.launch_checked;
+        let last_manual = h.app.updater.last_manual;
+        h.call("ui.prefs", json!({"open":"General"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+        assert!(body.contains_rect(button));
+        assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_updates").unwrap()));
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        for (label, role) in [("Check now", Role::Button), ("Check at start and once a day", Role::CheckBox)] {
+            let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+            assert_eq!(controls.len(), 1, "{kind:?}: one {label} control");
+            assert!(controls[0].1.is_disabled(), "{kind:?}: {label} is disabled");
+            if role == Role::CheckBox {
+                assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
             }
-            let reason = solidcraft_ui_text::tr("update.check_unavailable");
-            assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
-            let texts: Vec<_> = h
-                .shapes
-                .iter()
-                .filter_map(|shape| if let egui::Shape::Text(text) = &shape.shape { Some(text.galley.text()) } else { None })
-                .collect();
-            assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
-            assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
-            let note = match &kind {
-                InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
-                InstallKind::Flatpak(id) => solidcraft_ui_text::format(
-                    "update.prefs_flatpak",
-                    &[("version", current_version()), ("command", &format!("flatpak update {id}"))],
-                ),
-                _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
-            };
-            assert!(
-                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
-                "the platform help stays accessible as an enabled help button"
-            );
-            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
-            assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
-            h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
-            h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
-            assert_eq!(h.app.preferences.check_updates, checked);
-            assert_eq!(h.app.preferences.update, memo);
-            assert_eq!(h.app.updater.status, Status::Idle);
-            assert_eq!(h.app.updater.launch_checked, launch_checked);
-            assert_eq!(h.app.updater.last_manual, last_manual);
-            assert!(h.app.updater.rx.is_none() && h.app.updater.job.is_none() && h.app.updater.release.is_none());
-            assert!(!h.app.updater.open, "attempting the disabled action does not open the checker");
         }
+        let reason = solidcraft_ui_text::tr("update.check_unavailable");
+        assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
+        let texts: Vec<_> =
+            h.shapes.iter().filter_map(|shape| if let egui::Shape::Text(text) = &shape.shape { Some(text.galley.text()) } else { None }).collect();
+        assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
+        assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
+        let note = match &kind {
+            InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
+            InstallKind::Flatpak(id) => {
+                solidcraft_ui_text::format("update.prefs_flatpak", &[("version", current_version()), ("command", &format!("flatpak update {id}"))])
+            }
+            _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
+        };
+        assert!(
+            tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+            "the platform help stays accessible as an enabled help button"
+        );
+        assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
+        assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
+        if run > 0 {
+            continue;
+        }
+        h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
+        h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
+        assert_eq!(h.app.preferences.check_updates, checked);
+        assert_eq!(h.app.preferences.update, memo);
+        assert_eq!(h.app.updater.status, Status::Idle);
+        assert_eq!(h.app.updater.launch_checked, launch_checked);
+        assert_eq!(h.app.updater.last_manual, last_manual);
+        assert!(h.app.updater.rx.is_none() && h.app.updater.job.is_none() && h.app.updater.release.is_none());
+        assert!(!h.app.updater.open, "attempting the disabled action does not open the checker");
     }
 }
 

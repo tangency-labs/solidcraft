@@ -124,7 +124,10 @@ fn a_parallel_rail_along_a_curved_path_keeps_the_section() {
 /// turns with it. The profile drawn square to the start meets the first chord tilted by half a
 /// step d/2, and each run carries that section as it is, so the runs are oblique cylinders whose
 /// sections parallel to the profile are the r5 circle (the rail stays 5 mm out in those planes):
-/// volume πr² · L · cos(d/2) over the polyline's length L.
+/// volume πr² · L · cos(d/2) over the polyline's length L. The 8 runs' pieces are unioned in a
+/// balanced tree (#14451), so each takes part in ⌈log2 8⌉ = 3 unions, 24 pieces' worth of union
+/// operands in all, where unioning each onto the body so far takes in 2 + 3 + … + 8 = 35 and
+/// grows with the square of the points.
 #[test]
 fn a_parallel_rail_along_a_polyline_turns_with_its_corners() {
     let n = 8;
@@ -136,34 +139,10 @@ fn a_parallel_rail_along_a_polyline_turns_with_its_corners() {
             })
             .collect()
     };
-    let b = sweep_path_with(&Plane::XY, &circle(5.0), &arc(30.0), &railed(vec![arc(35.0)], RailFit::Scale)).unwrap();
-    let m = measure(&b).unwrap();
-    let d = PI / 2.0 / f64::from(n);
-    let length = f64::from(n) * 60.0 * (d / 2.0).sin();
-    let volume = PI * 25.0 * length * (d / 2.0).cos();
-    assert!(close(m.volume, volume, 1e-6), "volume {} vs {volume}", m.volume);
-}
-
-/// A densely sampled polyline (#14451): 33 points, 32 runs, 31 mitres. The runs' pieces are
-/// unioned in a balanced tree, so each takes part in at most ⌈log2 32⌉ = 5 unions (160 pieces'
-/// worth of union operands in all, where unioning each onto the body so far takes in
-/// 2 + 3 + … + 32 = 527 and grows with the square of the points), and the solid is the same
-/// oblique cylinders: volume πr² · L · cos(d/2).
-#[test]
-fn a_rail_along_a_dense_polyline_joins_its_runs_in_a_balanced_union() {
-    let n = 32;
-    let arc = |radius: f64| -> Vec<Vec3> {
-        (0..=n)
-            .map(|i| {
-                let a = PI / 2.0 * f64::from(i) / f64::from(n);
-                Vec3::new(30.0 - radius * a.cos(), 0.0, radius * a.sin())
-            })
-            .collect()
-    };
     crate::smlib_sweeps::UNION_LOAD.with(|l| l.set(0));
     let b = sweep_path_with(&Plane::XY, &circle(5.0), &arc(30.0), &railed(vec![arc(35.0)], RailFit::Scale)).unwrap();
     let load = crate::smlib_sweeps::UNION_LOAD.with(std::cell::Cell::get);
-    assert_eq!(load, 32 * 5, "union operands, in runs' pieces");
+    assert_eq!(load, 8 * 3, "union operands, in runs' pieces");
     let m = measure(&b).unwrap();
     let d = PI / 2.0 / f64::from(n);
     let length = f64::from(n) * 60.0 * (d / 2.0).sin();

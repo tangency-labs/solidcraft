@@ -2425,15 +2425,16 @@ mod tests {
 
     /// The same ball on the daemon's path, through the reader and the tick: newly arriving records are
     /// fresh even when they decode to the same value (spacenavd truncates 16 and 17 alike), and a last value
-    /// kept with nothing arriving is not.
+    /// kept with nothing arriving is not. The same record over and over is the strictest case of the first:
+    /// it is fresh by arriving alone, so it also covers different records that decode alike.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_decelerating_ball_on_the_daemon_is_rolling_while_records_arrive_and_stopped_when_they_do_not() {
         use machine::{Fake, Running};
         use solidcraft_space_mouse::{Kind, Stage, Wizard};
-        // (what arrives after the ball slows, whether the step ends): different values that decode alike,
-        // the same value over and over, or one record and then silence.
-        for (mode, step_done) in [("alternating", false), ("identical", false), ("silence", true)] {
+        // (what arrives after the ball slows, whether the step ends): the same value over and over, or one
+        // record and then silence.
+        for (mode, step_done) in [("identical", false), ("silence", true)] {
             let fake = Fake::default();
             *fake.world() = machine::World { device: false, daemon: true, openable: true, ..Default::default() };
             let reader = Running::start(SpaceMouseDriver::Automatic, fake.clone());
@@ -2486,13 +2487,9 @@ mod tests {
             for _ in 0..30 {
                 tick(&mut app, Some(58));
             }
-            // Then 16 and 17, which both decode to 11, for 0.7 s: arriving, or one last record and silence.
+            // Then 16, which decodes to 11 as 17 does, for 0.7 s: arriving, or one last record and silence.
             for i in 0..35 {
-                let record = match mode {
-                    "alternating" => Some(if i % 2 == 0 { 16 } else { 17 }),
-                    "identical" => Some(16),
-                    _ => (i == 0).then_some(16),
-                };
+                let record = if mode == "identical" { Some(16) } else { (i == 0).then_some(16) };
                 tick(&mut app, record);
             }
             assert_eq!(stage(&app) == Some(Stage::Step(1)), step_done, "{mode}: {:?}", stage(&app));

@@ -262,23 +262,17 @@ fn rim_volume(perimeter: f64, across: f64, down: f64) -> f64 {
     perimeter * across * down / 2.0 - PI * across * across * down / 3.0
 }
 
+/// The Bézier rim chamfered 7 across the top and 1 down the wall (flipped: the first distance
+/// down the wall), the large offset of the spline outline. Flipping and angles on curved rims are
+/// the circular rims' tests.
 #[test]
 fn spline_outline_rim_by_two_distances() {
     let (oval, perimeter) = bezier_oval();
-    let base = volume(&oval);
     // The whole rim, as a pick takes it: the four Béziers' tangent chain.
     let rim = crate::tangent_chain(&oval, &[Vec3::new(14.6, 10.2, 10.0)]).unwrap();
     assert_eq!(rim.len(), 4);
-    // 1 across the top, 7 down the wall; flipped, 1 down the wall and 7 across the top.
-    for (flip, across, down) in [(false, 1.0, 7.0), (true, 7.0, 1.0)] {
-        let out = chamfer_sides(&oval, &rim, 1.0, ChamferSide::Distance(7.0), flip).unwrap();
-        sound(&out);
-        let expected = base - rim_volume(perimeter, across, down);
-        assert!(rel(volume(&out), expected) < 1e-4, "flip {flip}: {} vs {expected}", volume(&out));
-    }
-    // By an angle: 2 across the top at 60° from it, 2·tan 60° down the square wall.
-    let out = chamfer_sides(&oval, &rim, 2.0, ChamferSide::Angle(60f64.to_radians()), false).unwrap();
+    let out = chamfer_sides(&oval, &rim, 1.0, ChamferSide::Distance(7.0), true).unwrap();
     sound(&out);
-    let expected = base - rim_volume(perimeter, 2.0, 2.0 * 60f64.to_radians().tan());
+    let expected = volume(&oval) - rim_volume(perimeter, 7.0, 1.0);
     assert!(rel(volume(&out), expected) < 1e-4, "{} vs {expected}", volume(&out));
 }

@@ -1540,10 +1540,16 @@ fn smlib_sweep(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::S
 /// The path as a polyline: its first point, then each segment's points (arcs within 0.01 mm of
 /// their chords).
 pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
+    path_polyline_within(path, 1e-2)
+}
+
+/// The path as a polyline: its first point, then each segment's points (arcs within `tol` of
+/// their chords).
+pub(crate) fn path_polyline_within(path: &[PathSeg], tol: f64) -> Result<Vec<Vec3>> {
     let first = path.first().map(PathSeg::start).ok_or_else(|| KernelError::Invalid("the path needs 1…1000 segments".into()))?;
     let mut pts = vec![first];
     for seg in path {
-        pts.extend(seg.points_after_start(1e-2));
+        pts.extend(seg.points_after_start(tol));
     }
     Ok(pts)
 }

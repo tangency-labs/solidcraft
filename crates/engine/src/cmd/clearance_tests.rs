@@ -316,7 +316,8 @@ fn a_small_gap_in_an_inside_corner_is_not_contact() {
 /// z -1.5 to 3.5 and 8.5 to 13.5) on a shared axis is 0.2 mm from them at every angle. Its axis
 /// tilted 1.5e-6 rad (as a STEP round trip leaves it), the band's rim lies on the knuckle's
 /// cylinder extended past its end, and a point there was taken for a point of the knuckle at
-/// some angles: contact (0) at a point off the body.
+/// some angles: contact (0) at a point off the body. Every 5° from 30° to 80°, and 42°, the first
+/// the report read 0 at.
 #[test]
 fn a_hinge_gap_is_measured_on_the_trimmed_faces_at_every_angle() {
     let mut s = Session::default();
@@ -337,9 +338,10 @@ fn a_hinge_gap_is_measured_on_the_trimmed_faces_at_every_angle() {
     part(&mut s, "solid.cylinder", json!({"radius": 3, "height": 4.6, "base": [0, 0, 3.7]}), "Temple", false);
     part(&mut s, "solid.box", json!({"length": 150, "width": 2, "height": 4.6, "corner": [0, -1, 3.7]}), "Temple", true);
     run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [1, 0, 0], "angle": "1.5e-6 rad"}));
-    run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [0, 0, 1], "angle": "29 deg"}));
-    for deg in 30..=80 {
-        run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [0, 0, 1], "angle": "1 deg"}));
+    let mut at = 0;
+    for deg in [30, 35, 40, 42, 45, 50, 55, 60, 65, 70, 75, 80] {
+        run(&mut s, "solid.move", json!({"bodies": ["Temple"], "axis": [0, 0, 1], "angle": format!("{} deg", deg - at)}));
+        at = deg;
         let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Temple"], "against": ["Frame"], "clearance": 0.5, "nearest": 1}));
         assert_eq!(r["unchecked"], json!([]), "{deg}°: {r}");
         let near = &r["near"][0];

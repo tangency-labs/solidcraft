@@ -5,7 +5,7 @@
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::{Body, BoolOp, boolean, chamfer, cylinder, extrude, tangent_chain};
+use solidcraft_kernel::{Body, BoolOp, boolean, chamfer, cylinder, extrude, measure, tangent_chain};
 use std::f64::consts::PI;
 
 fn holder() -> Body {
@@ -62,15 +62,9 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     assert_eq!(made.crossed_face_loops().unwrap(), 0);
     let history = made.history().expect("the chamfer retains exact face provenance");
     assert!(history.faces.iter().any(|f| f.origins.iter().any(|o| matches!(o, solidcraft_kernel::history::FaceOrigin::Edge { operand: 0, .. }))));
-    // Fine enough that the meshes' chord error is below the tolerance: the removed volume
-    // measured on meshes is 37.404 at chord 0.002, 37.672 at 0.0005, 37.761 at 0.0001 and 37.759
-    // at 0.00003, converged on the expected 37.762 (the chamfer as the chord between the contacts
-    // of a 2 mm ball). The planner's meshes of the two bodies differ, so their chord errors no
-    // longer cancel as truck's did.
-    let mesh = |body: &Body| body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap();
-    let before = mesh(&body).measure().volume;
-    let after = mesh(&made);
-    let removed = before - after.measure().volume;
+    // The exact volumes (SMLib's) against the expected 37.762 (the chamfer as the chord between
+    // the contacts of a 2 mm ball).
+    let removed = measure(&body).unwrap().volume - measure(&made).unwrap().volume;
     let expected = expected_removed(2.0);
     eprintln!("removed {removed:.8} mm³, expected {expected:.8} mm³");
     assert!((removed - expected).abs() < 0.03, "removed {removed}, expected {expected}");
@@ -78,6 +72,7 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     assert_eq!(made.classify_point(Vec3::new(10.0, 7.0, 59.5)).unwrap(), solidcraft_kernel::PointClass::Inside, "material behind the bevel remains");
     assert_eq!(made.classify_point(Vec3::new(10.0, 10.0, 55.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "material below the bevel remains");
     // A closed mesh's signed volume is independent of the origin.
+    let after = made.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let volume_about = |origin: Vec3| {
         after
             .triangles

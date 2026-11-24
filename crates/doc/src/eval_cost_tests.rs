@@ -2111,12 +2111,16 @@ fn marking(p: Vec3) -> FeatureKind {
     }
 }
 
-/// Four selected cylindrical faces on one plate for a grouped Thread feature.
-fn grouped_thread_document(modeled: bool) -> (Document, u64) {
+/// Where the shafts of [`grouped_thread_document`] stand on its plate, in order.
+const SHAFTS: [(f64, f64); 4] = [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)];
+
+/// The first `shafts` of [`SHAFTS`] on one plate, each cylindrical face selected for a grouped
+/// Thread feature.
+fn grouped_thread_document(modeled: bool, shafts: usize) -> (Document, u64) {
     let mut doc = Document::new("grouped threads");
     block(&mut doc, "Part", Vec3::new(-15.0, -15.0, 0.0), [30.0, 30.0, 2.0]);
     let mut faces = Vec::new();
-    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+    for &(x, y) in SHAFTS.iter().take(shafts) {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(x, y, 2.0)),
@@ -2144,7 +2148,7 @@ fn grouped_thread_document(modeled: bool) -> (Document, u64) {
 /// A cosmetic group keeps one feature and one marking at each selected cylindrical face.
 #[test]
 fn a_grouped_thread_marks_every_selected_face_with_one_feature() {
-    let (doc, id) = grouped_thread_document(false);
+    let (doc, id) = grouped_thread_document(false, 4);
     let mut model = Model::new();
     model.evaluate(&doc);
     assert_eq!(model.result(id).unwrap().error, None);
@@ -2159,7 +2163,7 @@ fn a_grouped_thread_marks_every_selected_face_with_one_feature() {
 
 #[test]
 fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
-    let (mut doc, id) = grouped_thread_document(false);
+    let (mut doc, id) = grouped_thread_document(false, 4);
     if let FeatureKind::Thread { additional_faces, target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
         additional_faces.truncate(1);
         *target_bodies = vec!["Part".into(); 2];
@@ -2211,7 +2215,7 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
 /// A pattern replays the continuous-flank group and reuses only its final exact output.
 #[test]
 fn a_patterned_modelled_thread_reuses_its_final_check() {
-    let (mut doc, id) = grouped_thread_document(true);
+    let (mut doc, id) = grouped_thread_document(true, 4);
     if let FeatureKind::Thread { additional_faces, target_bodies, continuous_flanks, .. } = &mut doc.feature_mut(id).unwrap().kind {
         additional_faces.truncate(1);
         *target_bodies = vec!["Part".into(); 2];
@@ -2265,7 +2269,7 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
 /// Different points on the same cylindrical interval create just one marking.
 #[test]
 fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
-    let (mut doc, id) = grouped_thread_document(false);
+    let (mut doc, id) = grouped_thread_document(false, 4);
     if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
         additional_faces.push(FacePick(Vec3::new(-8.0, -5.0, 4.0)));
     }
@@ -2278,7 +2282,7 @@ fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
 /// A malformed saved group is bounded before expensive geometry is visited.
 #[test]
 fn an_oversized_grouped_thread_is_refused() {
-    let (mut doc, id) = grouped_thread_document(false);
+    let (mut doc, id) = grouped_thread_document(false, 4);
     if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
         *additional_faces = vec![FacePick(Vec3::new(-5.0, -8.0, 5.0)); 1024];
     }
@@ -2288,48 +2292,10 @@ fn an_oversized_grouped_thread_is_refused() {
     assert!(model.state().threads.is_empty());
 }
 
-/// A body-qualified modelled group cuts every selected shaft within one timeline feature.
-#[test]
-fn a_grouped_modelled_thread_cuts_every_selected_shaft() {
-    let (mut doc, id) = grouped_thread_document(true);
-    if let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
-        *target_bodies = vec!["Part".into(); 4];
-    }
-    assert_eq!(doc.feature(id).unwrap().kind.input_bodies(), ["Part"; 4]);
-    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
-    let mut model = Model::new();
-    model.evaluate(&doc);
-    assert_eq!(model.result(id).unwrap().error, None);
-    let before = model.state_before(id);
-    let after = model.state();
-    assert_eq!(after.bodies.len(), 1);
-    assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
-    assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
-    let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
-    let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
-    assert!(base_volume - threaded_volume > 8.0, "all four grooves remove material");
-    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
-        // Four phases at radius 2.9 mm, inside the original 3 mm shaft. A 0.75 mm
-        // ISO groove spans more than a quarter turn there, so at least one is cut.
-        let probes = [Vec3::new(x + 2.9, y, 4.0), Vec3::new(x, y + 2.9, 4.0), Vec3::new(x - 2.9, y, 4.0), Vec3::new(x, y - 2.9, 4.0)];
-        assert!(probes.iter().all(|p| before.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Inside));
-        assert!(
-            probes.iter().any(|p| after.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Outside),
-            "shaft at ({x}, {y}) is threaded"
-        );
-        assert_eq!(after.bodies[0].body.classify_point(Vec3::new(x, y, 4.0)).unwrap(), kernel::PointClass::Inside, "the shaft core stays intact");
-        assert_eq!(
-            after.bodies[0].body.classify_point(Vec3::new(x, y, 1.0)).unwrap(),
-            kernel::PointClass::Inside,
-            "the supporting plate stays intact"
-        );
-    }
-}
-
 /// A bad later pick refuses the complete group rather than leaving earlier markings behind.
 #[test]
 fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
-    let (mut doc, id) = grouped_thread_document(false);
+    let (mut doc, id) = grouped_thread_document(false, 4);
     if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
         additional_faces.push(FacePick(Vec3::new(1000.0, 0.0, 0.0)));
     }
@@ -2341,12 +2307,18 @@ fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
     assert!(model.state().bodies[0].body.same_shape(&before.bodies[0].body));
 }
 
-/// Evaluate just the grouped thread, after its unchanged support geometry is already cached.
-fn grouped_thread_work(mode: kernel::Validation, refuse_trim: bool, continuous_flanks: bool) -> (Counts, Model, u64) {
-    let (mut doc, id) = grouped_thread_document(true);
+/// A modelled M6x0.75 group over the first two of [`SHAFTS`], with continuous flanks or not.
+fn modelled_pair(continuous_flanks: bool) -> (Document, u64) {
+    let (mut doc, id) = grouped_thread_document(true, 2);
     if let FeatureKind::Thread { continuous_flanks: value, .. } = &mut doc.feature_mut(id).unwrap().kind {
         *value = continuous_flanks;
     }
+    (doc, id)
+}
+
+/// Evaluate just the grouped thread `id` of `doc`, after its unchanged support geometry is
+/// already cached.
+fn grouped_thread_work((mut doc, id): (Document, u64), mode: kernel::Validation, refuse_trim: bool) -> (Counts, Model, u64) {
     doc.feature_mut(id).unwrap().suppressed = true;
     let mut model = Model::new();
     model.set_validation(mode);
@@ -2361,12 +2333,22 @@ fn grouped_thread_work(mode: kernel::Validation, refuse_trim: bool, continuous_f
     (work, model, id)
 }
 
-/// Separate tools share one target cut and one full native-result validity check.
+/// Separate tools share one target cut and one full native-result validity check. Without
+/// continuous flanks the group is body-qualified, and it cuts every selected shaft within one
+/// timeline feature: both grooves remove material, the shafts' cores and the plate stay whole.
 #[test]
 fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
     use solidcore_record::brep::Surface;
     for continuous_flanks in [false, true] {
-        let (work, model, _) = grouped_thread_work(kernel::Validation::EachFeature, false, continuous_flanks);
+        let (mut doc, id) = modelled_pair(continuous_flanks);
+        if !continuous_flanks {
+            if let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+                *target_bodies = vec!["Part".into(); 2];
+            }
+            assert_eq!(doc.feature(id).unwrap().kind.input_bodies(), ["Part"; 2]);
+            assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+        }
+        let (work, model, _) = grouped_thread_work((doc, id), kernel::Validation::EachFeature, false);
         assert_eq!(work.thread_cuts, 1);
         assert_eq!(work.kept_checks, 1);
         assert_eq!(work.detached_checks, 0, "reuse the check before copying a native body for another check");
@@ -2382,9 +2364,32 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
             .count();
         if continuous_flanks {
-            assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
-        } else {
-            assert!(flanks > 8, "historical half-turn faces remain segmented");
+            assert_eq!(flanks, 4, "two whole flank faces on each of the two shafts");
+            continue;
+        }
+        assert!(flanks > 4, "historical half-turn faces remain segmented");
+        let before = model.state_before(id);
+        let after = model.state();
+        assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
+        assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
+        let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
+        let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
+        assert!(base_volume - threaded_volume > 4.0, "both grooves remove material");
+        for &(x, y) in SHAFTS.iter().take(2) {
+            // Four phases at radius 2.9 mm, inside the original 3 mm shaft. A 0.75 mm
+            // ISO groove spans more than a quarter turn there, so at least one is cut.
+            let probes = [Vec3::new(x + 2.9, y, 4.0), Vec3::new(x, y + 2.9, 4.0), Vec3::new(x - 2.9, y, 4.0), Vec3::new(x, y - 2.9, 4.0)];
+            assert!(probes.iter().all(|p| before.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Inside));
+            assert!(
+                probes.iter().any(|p| after.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Outside),
+                "shaft at ({x}, {y}) is threaded"
+            );
+            assert_eq!(after.bodies[0].body.classify_point(Vec3::new(x, y, 4.0)).unwrap(), kernel::PointClass::Inside, "the shaft core stays intact");
+            assert_eq!(
+                after.bodies[0].body.classify_point(Vec3::new(x, y, 1.0)).unwrap(),
+                kernel::PointClass::Inside,
+                "the supporting plate stays intact"
+            );
         }
     }
 }
@@ -2392,9 +2397,9 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
 /// A refused grouped trim returns to the existing per-face square-stop fallback.
 #[test]
 fn a_grouped_thread_keeps_the_established_shoulder_fallback() {
-    let (work, model, id) = grouped_thread_work(kernel::Validation::EachFeature, true, false);
+    let (work, model, id) = grouped_thread_work(modelled_pair(false), kernel::Validation::EachFeature, true);
     assert_eq!(work.grouped_thread_fallbacks, 1);
-    assert_eq!(work.thread_cuts, 4, "the failed preparation never cut a target");
+    assert_eq!(work.thread_cuts, 2, "the failed preparation never cut a target");
     assert_eq!(work.kept_checks + work.detached_checks, 1, "the fallback still validates its final body");
     assert_eq!(work.reused_checks, 0);
     assert!(model.result(id).unwrap().warning.as_ref().is_some_and(|w| w.contains("left uncut")));
@@ -2404,7 +2409,7 @@ fn a_grouped_thread_keeps_the_established_shoulder_fallback() {
 #[test]
 fn modelled_thread_batching_and_fallback_keep_the_targets_component() {
     for refuse_trim in [false, true] {
-        let (mut doc, id) = grouped_thread_document(true);
+        let (mut doc, id) = grouped_thread_document(true, 2);
         let component = doc.add_component(Some("Threaded part"), 0).unwrap();
         assert_ne!(component, 0);
         for feature in &mut doc.features {
@@ -2431,7 +2436,7 @@ fn modelled_thread_batching_and_fallback_keep_the_targets_component() {
         });
         super::thread::replace_empty_trim_for_test(prior);
         result.unwrap();
-        assert_eq!(work.thread_cuts, if refuse_trim { 4 } else { 1 });
+        assert_eq!(work.thread_cuts, if refuse_trim { 2 } else { 1 });
         assert_eq!(work.grouped_thread_fallbacks, usize::from(refuse_trim));
         let remade = after.body("Part").unwrap();
         assert_eq!(remade.name, original.name);
@@ -2445,9 +2450,9 @@ fn modelled_thread_batching_and_fallback_keep_the_targets_component() {
 /// Explicit Off mode keeps the original sequential orchestration and shoulder checks.
 #[test]
 fn grouped_thread_batching_does_not_change_explicit_off_validation() {
-    let (work, _, _) = grouped_thread_work(kernel::Validation::Off, false, false);
-    assert_eq!(work.thread_cuts, 4);
-    assert_eq!(work.kept_checks, 4);
+    let (work, _, _) = grouped_thread_work(modelled_pair(false), kernel::Validation::Off, false);
+    assert_eq!(work.thread_cuts, 2);
+    assert_eq!(work.kept_checks, 2);
     assert_eq!(work.reused_checks, 0);
     assert_eq!(work.grouped_thread_fallbacks, 0);
 }
@@ -2540,9 +2545,9 @@ fn overlapping_grouped_thread_tool_boxes_keep_the_sequential_cutter() {
 /// EachStep explicitly retains the existing per-face sequence and its shoulder checks.
 #[test]
 fn grouped_thread_batching_does_not_change_explicit_each_step_validation() {
-    let (work, _, _) = grouped_thread_work(kernel::Validation::EachStep, false, false);
-    assert_eq!(work.thread_cuts, 4);
-    assert_eq!(work.kept_checks, 4);
+    let (work, _, _) = grouped_thread_work(modelled_pair(false), kernel::Validation::EachStep, false);
+    assert_eq!(work.thread_cuts, 2);
+    assert_eq!(work.kept_checks, 2);
     assert_eq!(work.reused_checks, 0);
     assert_eq!(work.grouped_thread_fallbacks, 0);
 }
@@ -3006,10 +3011,11 @@ fn disc_volume(model: &Model) -> f64 {
 fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
     // The copies' tools run twice the disc's size along Z, so the kernel's box test, which
     // grows each box by a share of the tool's size, finds them meeting (#9007); they are still
-    // 4.3 mm apart, centre to centre, and are cut in one go. No copy is intersected with the
-    // disc to see whether it takes material: each passes through the disc's material.
+    // 2 x 6.3 x sin 20° = 4.3 mm apart, centre to centre, and the eight copies (as few as are
+    // joined) are cut in one go. No copy is intersected with the disc to see whether it takes
+    // material: each passes through the disc's material.
     let mut doc = Document::new("sieve");
-    let pattern = disc_with_hole_pattern(&mut doc, 20.0, 29);
+    let pattern = disc_with_hole_pattern(&mut doc, 6.3, 9);
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
@@ -3017,16 +3023,16 @@ fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
     let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
     let disc = std::f64::consts::PI * 2500.0 * 1.5;
     let v = disc_volume(&model);
-    assert!((v - (disc - 29.0 * hole)).abs() < 1e-3 * hole, "{v}");
+    assert!((v - (disc - 9.0 * hole)).abs() < 1e-3 * hole, "{v}");
     // The same copies again, landing in the holes cut already: they are intersected together, in
     // one boolean, and each still counts as a copy that removes no material.
     let hole_id = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
-    hole_pattern(&mut doc, hole_id, 29);
+    hole_pattern(&mut doc, hole_id, 9);
     let work = counted(|| model.evaluate(&doc));
     let again = model.results.last().unwrap();
     assert!(again.error.is_none(), "{again:?}");
     // (The kernel may add a note on a retry of a boolean on faces that lie on each other.)
-    assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
+    assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("8 of 8 cut copies remove no material")), "{again:?}");
     assert_eq!(work.miss_intersects, 1, "{work:?}");
     assert!((disc_volume(&model) - v).abs() < 1e-3 * hole);
     assert!(model.results.iter().any(|r| r.id == pattern && r.warning.is_none()));
@@ -3079,13 +3085,14 @@ fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
 
 #[test]
 fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
-    // 48 holes on a 40 mm circle, 5.2 mm apart: the 47 copies are more than one joined tool
-    // takes, so they are cut as two (#8765). The disc comes out as cutting all of them in one go
-    // leaves it: the same volume, the same faces, named the same.
+    // 17 holes on a 40 mm circle: with at most 8 tools joined (the fewest that are joined at
+    // all), the 16 copies are more than one joined tool takes, so they are cut as two (#8765).
+    // The disc comes out as cutting all of them in one go leaves it: the same volume, the same
+    // faces, named the same.
     let disc = |limit: usize| {
         super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
         let mut doc = Document::new("perforated");
-        disc_with_hole_pattern(&mut doc, 40.0, 48);
+        disc_with_hole_pattern(&mut doc, 40.0, 17);
         let mut model = Model::new();
         let work = counted(|| model.evaluate(&doc));
         super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
@@ -3096,12 +3103,12 @@ fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
         names.sort();
         (disc_volume(&model), st.bodies[0].body.face_count(), names, work.cut_tools)
     };
-    let (volume, faces, names, tools) = disc(super::MAX_JOINED_TOOLS);
+    let (volume, faces, names, tools) = disc(8);
     let (one_volume, one_faces, one_names, one_tools) = disc(usize::MAX);
     assert_eq!((tools, one_tools), (2, 1));
     let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
     assert!((volume - one_volume).abs() < 1e-6 * hole, "{volume} vs {one_volume}");
-    assert!((one_volume - (std::f64::consts::PI * 2500.0 * 1.5 - 48.0 * hole)).abs() < 1e-3 * hole, "{one_volume}");
+    assert!((one_volume - (std::f64::consts::PI * 2500.0 * 1.5 - 17.0 * hole)).abs() < 1e-3 * hole, "{one_volume}");
     assert_eq!(faces, one_faces);
     assert_eq!(names, one_names);
 }
@@ -3267,20 +3274,22 @@ fn a_circular_pattern_of_a_coil_cut_cuts_its_copies_at_once() {
     // The groove wraps round the shaft, so every copy's box is the whole cylinder and the
     // copies' boxes meet: their exact shapes decide whether they are apart. Telling the
     // forty-nine copies of a pattern of fifty apart took a union for each of their 1176 pairs,
-    // and minutes on the design of #17632. The copies are cut in two groups, and each group is
-    // told apart with one union.
+    // and minutes on the design of #17632. The eight copies of a pattern of nine (as few as are
+    // joined) are told apart with one union, not 28, and cut in one go. (More copies than one
+    // joined tool takes are cut in groups, each told apart on its own: #8765,
+    // `many_copies_cut_in_groups_leave_what_one_cut_leaves`.)
     let mut doc = Document::new("grooved shaft");
-    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(50));
-    assert_eq!((work.cut_tools, work.apart_unions), (2, 2), "{work:?}");
-    // The shaft less fifty grooves: fifty times what one groove takes away.
+    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(9));
+    assert_eq!((work.cut_tools, work.apart_unions), (1, 1), "{work:?}");
+    // The shaft less nine grooves: nine times what one groove takes away.
     let mut doc = Document::new("one groove");
     let (one, _) = shaft_with_coil_pattern(&mut doc, None);
     let shaft = std::f64::consts::PI * 100.0 * 40.0;
     let taken = shaft - volume;
-    assert!((taken - 50.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 50.0 * (shaft - one));
+    assert!((taken - 9.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 9.0 * (shaft - one));
 }
 
-/// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a
+/// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 3 x 2 grid on a
 /// 10 mm pitch: the plate's volume, the holes' and the work.
 fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     let mut doc = Document::new("perforated");
@@ -3296,7 +3305,7 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     let hole = doc.add_feature(serde_json::from_value(spec).unwrap(), Some("Hole")).unwrap();
     let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
         "type": "pattern", "features": [hole],
-        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "10", "spacing1": "10", "dir2": [0, 1, 0], "count2": "9", "spacing2": "10"},
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "10", "dir2": [0, 1, 0], "count2": "2", "spacing2": "10"},
     }))
     .unwrap();
     doc.add_feature(pattern, Some("Grid")).unwrap();
@@ -3367,21 +3376,21 @@ fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
 #[test]
 fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
     // A plain hole's tools are the same at every copy, moved: they are built for the hole and
-    // for the pattern's first copy, and the 90 holes are all cut (#7942).
+    // for the pattern's first copy, and the 6 holes are all cut (#7942).
     let (v, hole, work) = plate_with_hole_grid(serde_json::json!({}));
-    assert!((v - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{v}");
+    assert!((v - (20_000.0 - 6.0 * hole)).abs() < 1e-6 * hole, "{v}");
     assert_eq!(work.hole_tools, 2, "{work:?}");
     // A counterbore's are too.
     let cb = serde_json::json!({"hole": {"type": "counterbore", "cb_diameter": "5", "cb_depth": "1"}});
     let (v, hole, work) = plate_with_hole_grid(cb);
     let pocket = std::f64::consts::PI * (2.5 * 2.5 - 1.5 * 1.5) * 1.0;
-    assert!((v - (20_000.0 - 90.0 * (hole + pocket))).abs() < 1e-6 * hole, "{v}");
+    assert!((v - (20_000.0 - 6.0 * (hole + pocket))).abs() < 1e-6 * hole, "{v}");
     assert_eq!(work.hole_tools, 2, "{work:?}");
     // A blind hole with a drill point looks at the material at each copy, so each copy is
     // drilled on its own, as before.
     let drilled = serde_json::json!({"depth": "1", "hole": {"type": "drilled", "tip_angle": "118 deg"}});
     let (_, _, work) = plate_with_hole_grid(drilled);
-    assert_eq!(work.hole_tools, 90, "{work:?}");
+    assert_eq!(work.hole_tools, 6, "{work:?}");
 }
 
 /// A copy of a hole with material just above its spot, which is cut out of its tools there, has
@@ -3400,7 +3409,7 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     let hole = doc.add_feature(serde_json::from_value(spec).unwrap(), Some("Hole")).unwrap();
     let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
         "type": "pattern", "features": [hole],
-        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "10", "spacing1": "10", "dir2": [0, 1, 0], "count2": "9", "spacing2": "10"},
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "10", "dir2": [0, 1, 0], "count2": "3", "spacing2": "10"},
     }))
     .unwrap();
     doc.add_feature(pattern, Some("Grid")).unwrap();
@@ -3410,12 +3419,13 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     let mut volumes: Vec<f64> = model.state().bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).collect();
     volumes.sort_by(f64::total_cmp);
     let hole = std::f64::consts::PI * 1.5 * 1.5 * 2.0;
-    // The block 0.1 mm over the four holes under it is left whole, and the plate has all 90.
+    // The block 0.1 mm over the four holes under it is left whole, and the plate has all 3 x 3.
     assert_eq!(volumes.len(), 2, "{volumes:?}");
     assert!((volumes[0] - 400.0).abs() < 1e-6, "{volumes:?}");
-    assert!((volumes[1] - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
-    // The three copies under the block build theirs, and so does a copy in the clear after one.
-    assert!(work.hole_tools > 4 && work.hole_tools < 90, "{work:?}");
+    assert!((volumes[1] - (20_000.0 - 9.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
+    // The three copies under the block build theirs, and so does a copy in the clear after one;
+    // the other clear copies move tools built already.
+    assert!(work.hole_tools > 4 && work.hole_tools < 9, "{work:?}");
 }
 
 /// A pattern of a pattern is held to the copies one pattern makes, counted before they are made

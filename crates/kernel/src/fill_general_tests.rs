@@ -162,7 +162,8 @@ fn along_the_loop(fill: &Body, normal: &dyn Fn(Vec3) -> Vec3, curvature: &dyn Fn
 /// a loop of five or more edges is filled by patches about a centre, its edges in halves), within
 /// the fill's tolerance of them; its mesh has no folded triangle (each faces the way its corners'
 /// normals do); and the mesher's area agrees with a quadrature of the surfaces over their own
-/// regions. Returns the area.
+/// regions (100 × 100 a patch: the patches are squares in their parameters, with straight
+/// pcurves, so the midpoint rule cuts no cell at a trim and errs as h²). Returns the area.
 fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
     assert!(fill.is_surface());
     assert!(fill.face_count() >= 1, "{name}: a face");
@@ -198,7 +199,7 @@ fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
         }
     }
     let area = measure(fill).unwrap().area;
-    let quad = faces.quadrature(500, &|_, n| n.len());
+    let quad = faces.quadrature(100, &|_, n| n.len());
     eprintln!("{name}: {} faces, edges within {off:e} (tolerance {tol:e}), mesh area {area:.4}, quadrature {quad:.4}", fill.face_count());
     assert!((area - quad).abs() < 3e-3 * quad, "{name}: mesh area {area} against the surface's {quad}");
     area
@@ -270,29 +271,6 @@ fn pentagon_window() -> (Body, Vec<Vec3>) {
 }
 
 #[test]
-fn a_five_sided_window_fills_g1_and_through_a_point() {
-    let (open, rim) = pentagon_window();
-    let (fill, r) = patch_edges_report(&open, &rim, &spec(Continuity::G1)).unwrap();
-    report("pentagon g1", &r);
-    check_face("pentagon g1", &open, &fill);
-    let (gap, angle, _) = along_the_loop(&fill, &radial, &|_| 0.0);
-    eprintln!("pentagon g1: along the rim: within {gap:e}, normal within {angle:.5}° of the wall's");
-    assert!(angle < 0.1, "{angle}°");
-    // Through a point half a millimetre out from the wall in the middle (G0 and G1).
-    let point = Vec3::new(10.5, 0.0, 20.0);
-    for g in [Continuity::G0, Continuity::G1] {
-        let name = format!("pentagon {} through a point", g.as_str());
-        let spec = PatchSpec { continuity: g, points: vec![point], ..PatchSpec::default() };
-        let (fill, r) = patch_edges_report(&open, &rim, &spec).unwrap();
-        report(&name, &r);
-        check_face(&name, &open, &fill);
-        let off = Faces::of(&fill).nearest(point).2.dist(point);
-        eprintln!("{name}: the point is {off:e} off the surface");
-        assert!(off <= face_tolerance(&open), "{name}: {off}");
-    }
-}
-
-#[test]
 fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds_away_from_the_corners() {
     // A hexagonal prism's top cut by a sideways cylinder: six walls meeting at 120°.
     let corners: Vec<Vec2> = (0..6).map(|k| Vec2::from_angle(0.3 + k as f64 * std::f64::consts::TAU / 6.0) * 20.0).collect();
@@ -309,6 +287,7 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
     let open = copy_faces(&solid, &keep).unwrap();
     let plain = patch_edges(&open, &rim).unwrap();
     let sealed = |f: &Body| measure(&stitch(&[&open, f], 0.0).unwrap()).unwrap().volume;
+    let sealed_plain = sealed(&plain);
     // Six sides, G0, through a point 3 mm above the middle of the plain fill: it passes through
     // the point and seals the cup into a closed solid holding more than the plain fill's.
     let point = Faces::of(&plain).nearest(Vec3::new(0.0, 0.0, 12.0)).2 + Vec3::Z * 3.0;
@@ -316,8 +295,9 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
     report("hexagon through a point", &r);
     check_face("hexagon through a point", &open, &lifted);
     let off = Faces::of(&lifted).nearest(point).2.dist(point);
-    eprintln!("hexagon through a point: the point is {off:e} off the surface; sealed {:.2} against {:.2} plain", sealed(&lifted), sealed(&plain));
-    assert!(off <= face_tolerance(&open) && sealed(&lifted) > sealed(&plain));
+    let sealed_lifted = sealed(&lifted);
+    eprintln!("hexagon through a point: the point is {off:e} off the surface; sealed {sealed_lifted:.2} against {sealed_plain:.2} plain");
+    assert!(off <= face_tolerance(&open) && sealed_lifted > sealed_plain);
     // G1 to the walls: at a corner no surface is tangent to both walls (its tangent plane there
     // holds both rim edges), so G1 is asked only away from the corners. On walls standing square
     // to the patch the corner is pinched too sharply for the finest grid to hold the rim within
@@ -327,7 +307,7 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
             report("hexagon g1", &r);
             check_face("hexagon g1", &open, &fill);
             assert!(r.normal_deviation_deg <= PATCH_ANGLE_TOL_DEG);
-            assert!(sealed(&fill) > sealed(&plain));
+            assert!(sealed(&fill) > sealed_plain);
         }
         Err(e) => {
             eprintln!("hexagon g1: {e}");
@@ -336,16 +316,35 @@ fn a_hexagonal_rim_fills_through_a_point_and_g1_to_walls_meeting_at_angles_holds
     }
 }
 
+/// The pentagonal window filled G1 meets the wall's normals along the rim; through a point half a
+/// millimetre out from the wall, G1, it passes through the point; G1 on two edges only (G1 and G2
+/// given per edge) fills; specs that cannot be met are refused; a crown fills the middle out from
+/// the wall and leaves the loop, and G1 across it, as they were.
 #[test]
 fn per_edge_continuity_and_hostile_specs() {
     let (open, rim) = pentagon_window();
+    let g1 = PatchSpec { continuity: Continuity::G1, ..PatchSpec::default() };
+    let (plain, r) = patch_edges_report(&open, &rim, &g1).unwrap();
+    report("pentagon g1", &r);
+    check_face("pentagon g1", &open, &plain);
+    let (gap, angle, _) = along_the_loop(&plain, &radial, &|_| 0.0);
+    eprintln!("pentagon g1: along the rim: within {gap:e}, normal within {angle:.5}° of the wall's");
+    assert!(angle < 0.1, "{angle}°");
+    // Through a point half a millimetre out from the wall in the middle (G0 through a point is
+    // the hexagon's).
+    let point = Vec3::new(10.5, 0.0, 20.0);
+    let (through, r) = patch_edges_report(&open, &rim, &PatchSpec { points: vec![point], ..g1.clone() }).unwrap();
+    report("pentagon g1 through a point", &r);
+    check_face("pentagon g1 through a point", &open, &through);
+    let off = Faces::of(&through).nearest(point).2.dist(point);
+    eprintln!("pentagon g1 through a point: the point is {off:e} off the surface");
+    assert!(off <= face_tolerance(&open), "{off}");
     // G1 on two edges only.
     let spec = PatchSpec { edges: vec![(rim[0], Continuity::G1), (rim[2], Continuity::G2)], ..PatchSpec::default() };
     let (fill, r) = patch_edges_report(&open, &rim, &spec).unwrap();
     report("pentagon, two edges g1/g2", &r);
     check_face("pentagon, two edges g1/g2", &open, &fill);
     let bad = |spec: PatchSpec| patch_edges_report(&open, &rim, &spec).is_err();
-    let g1 = PatchSpec { continuity: Continuity::G1, ..PatchSpec::default() };
     assert!(bad(PatchSpec { edges: vec![(Vec3::new(0.0, 0.0, 40.0), Continuity::G1)], ..g1.clone() }), "an edge off the loop");
     assert!(bad(PatchSpec { edges: vec![(Vec3::new(f64::NAN, 0.0, 0.0), Continuity::G1)], ..g1.clone() }));
     assert!(bad(PatchSpec { points: vec![Vec3::new(f64::INFINITY, 0.0, 0.0)], ..g1.clone() }));
@@ -357,7 +356,6 @@ fn per_edge_continuity_and_hostile_specs() {
     assert!(bad(PatchSpec { crown: 0.1, points: vec![Vec3::new(10.2, 0.0, 20.0)], ..PatchSpec::default() }), "a crown with no g1 edge");
     // A crown fills the middle out from the wall (the side the wall's normals face) and leaves
     // the loop, and G1 across it, as they were.
-    let (plain, _) = patch_edges_report(&open, &rim, &g1).unwrap();
     let (full, r) = patch_edges_report(&open, &rim, &PatchSpec { crown: 0.1, ..g1.clone() }).unwrap();
     report("pentagon g1 crown 0.1", &r);
     check_face("pentagon g1 crown 0.1", &open, &full);

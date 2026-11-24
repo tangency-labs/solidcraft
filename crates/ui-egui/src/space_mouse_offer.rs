@@ -407,7 +407,8 @@ mod preferences_tests {
                 h.frames(3);
                 h.step(&serde_json::json!({"widget": "Preferences…"})).unwrap();
             }
-            for frame in 0..200 {
+            // 90 frames (1.5 s): more than twice the 40 the notice takes to come up.
+            for frame in 0..90 {
                 h.frame();
                 assert!(h.app.prefs_window.shell.open, "open_first {open_first}, before {frames_before}: closed at frame {frame}");
                 let window = crate::scenario::rect_of("dialog:window").expect("drawn");
@@ -598,11 +599,28 @@ mod preferences_tests {
         assert!(h.app.space_mouse.offer_since.is_none());
     }
 
-    /// Frames of the harness are 1/60 s: this many make `seconds`.
+    /// `seconds` of the window up, in frames half a second apart, then one harness frame (whose
+    /// output `widget` reads). The offer reads only the clock (`ctx.input(|i| i.time)`), and half
+    /// a second is well within `AWAY_SECONDS`, so these frames count as time shown just as frames
+    /// 1/60 s apart do; the harness's frames follow this clock.
     fn run(h: &mut crate::scenario::Harness, seconds: f64) {
-        for _ in 0..(seconds * 60.0).round() as usize {
-            h.frame();
+        const STEP: f64 = 0.5;
+        const _: () = assert!(STEP < super::AWAY_SECONDS);
+        for _ in 0..(seconds / STEP).round() as usize {
+            let raw = egui::RawInput {
+                screen_rect: Some(h.ctx.viewport_rect()),
+                time: Some(h.ctx.input(|i| i.time) + STEP),
+                focused: true,
+                ..Default::default()
+            };
+            let app = &mut h.app;
+            let mut out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
         }
+        h.frame();
     }
 
     fn card_up(h: &crate::scenario::Harness) -> bool {
@@ -622,12 +640,13 @@ mod preferences_tests {
         run(&mut h, 5.0);
         assert!(!card_up(&h));
         assert!(h.app.preferences.space_mouse_offered.is_empty());
-        // Time away: Preferences open for 45 s must not use the time up.
+        // Time away: Preferences open for 3 s (more than `AWAY_SECONDS`) starts the 30 seconds
+        // again; counted on, 3 + 3 + 3 + 25 = 34 would be past them.
         let mut h = spacenavd_harness();
         run(&mut h, 3.0);
         assert!(card_up(&h));
         h.app.prefs_window.shell.open = true;
-        run(&mut h, 45.0);
+        run(&mut h, 3.0);
         h.app.prefs_window.shell.open = false;
         run(&mut h, 3.0);
         assert!(card_up(&h), "the offer waited for Preferences to close");

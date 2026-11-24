@@ -536,7 +536,8 @@ fn find_limits_sees_arms_meet_behind_pins_already_in_each_other() {
     let corners = [(40.0f64, 10.0f64), (50.0, 10.0), (40.0, 20.0), (50.0, 20.0)];
     let max = corners.iter().map(|(x, y)| y.atan2(*x) - (2.0 / x.hypot(*y)).asin()).fold(f64::INFINITY, f64::min).to_degrees();
     let min = corners.iter().map(|(x, y)| y.atan2(*x) + (2.0 / x.hypot(*y)).asin()).fold(f64::NEG_INFINITY, f64::max).to_degrees() - 360.0;
-    let r = run(&mut s, "joint.find_limits", json!({"joint": "Swing", "refine": 0.001}));
+    // Refined to 0.01°, a fifth of what the limits are checked to.
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Swing", "refine": 0.01}));
     let (lo, hi, lo_by, hi_by) = limits(&r);
     // The joint's value may grow either way round Z.
     let near = |a: f64, b: f64| (a - b).abs() < 0.05;

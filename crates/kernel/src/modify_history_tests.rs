@@ -155,6 +155,11 @@ fn fillet_every_edge_of_a_box() {
     assert_eq!(blends(h).iter().filter(|o| o.len() == 3).count(), 8);
 }
 
+/// A branch (radius 10) on a main pipe (radius 15): the saddle curve between the two cylinders,
+/// blended by rolling a ball of radius 3 along it. Each blend face comes from the one edge; the
+/// blend adds less than r²(1 − π/4) (a right-angled corner's) swept round the ≈ 65 mm saddle, as
+/// the pipes meet at obtuse angles, but well over a third of it; and the body's faces are the
+/// main cylinder, the branch cylinder, the blend, the branch's top and the main's two ends.
 #[test]
 fn fillet_a_rolling_ball_chain() {
     let main = cylinder(Vec3::new(-40.0, 0.0, 0.0), Vec3::X, 15.0, 80.0).unwrap();
@@ -165,6 +170,11 @@ fn fillet_a_rolling_ball_chain() {
     let h = verified(&r, &tee, reach(3.0 * 2.0));
     assert!(!blends(h).is_empty());
     assert!(blends(h).iter().all(|o| o.len() == 1));
+    let m = crate::measure(&r).unwrap();
+    let bare = 9.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 65.0;
+    let added = m.volume - crate::measure(&tee).unwrap().volume;
+    assert!(added > 0.35 * bare && added < bare, "added {added} (bare {bare})");
+    assert_eq!(m.merged.faces, 6, "{:?}", m.merged);
 }
 
 #[test]

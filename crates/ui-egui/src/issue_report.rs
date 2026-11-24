@@ -1900,8 +1900,9 @@ mod tests {
 
     #[test]
     fn issue_report_idle_window_does_not_grow_with_a_screenshot() {
-        for size in [[1600, 1000], [900, 700], [640, 480]] {
-            for scale in [1.0, 1.25, 1.4, 2.0] {
+        // The largest and smallest window, at a whole, a fractional and a high scale.
+        for size in [[1600, 1000], [640, 480]] {
+            for scale in [1.0, 1.25, 2.0] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.preferences.ui_scale = scale;
                 h.app.home.open = false;

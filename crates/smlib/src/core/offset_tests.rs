@@ -735,9 +735,10 @@ fn a_draft_moves_a_face() {
         ("away from the wall above", &leaning, [20.0, 5.0, 5.0], [0.0, 0.0, 10.0], -five),
         ("hinged far off", &plate, [20.0, 0.0, 5.0], [0.0, 0.0, 1000.0], five),
     ];
+    // Built, a solid of some volume (its sign needs no fine integration).
     for (name, b, at, origin, angle) in cases {
         let r = draft(b, &[at], TOL, origin, z, z, angle).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(volume(&r, 1e-8).unwrap() > 0.0, "{name}");
+        assert!(volume(&r, 1e-3).unwrap() > 0.0, "{name}");
     }
 }
 

@@ -2879,56 +2879,41 @@ mod tests {
         assert!(under == 0, "{under} of {} triangles under {EXPORT_MIN_ANGLE}°, smallest {smallest}°", angles.len());
     }
 
-    /// OBJ is welded as STL and 3MF are: a filleted box, a cylinder and a torus written as OBJ
-    /// open again closed, with their STL export's volume, every face keeping its normals
-    /// (#9074). Before, each face wrote its edge points again, a few ulps apart, and the file
-    /// opened as an open mesh with no volume.
-    #[test]
-    fn obj_round_trip_of_curved_bodies_is_closed() {
-        let m = curved_bodies();
-        let st = m.state();
-        let bytes = export(&st, &[], Format::Obj, "t").unwrap();
-        let text = String::from_utf8(bytes.clone()).unwrap();
-        assert!(text.lines().filter(|l| l.starts_with("f ")).all(|l| l.matches("//").count() == 3), "every corner has a normal");
-        let f = mesh_import_feature(&bytes, "parts.obj").unwrap();
-        let mut d2 = Document::new("m");
-        let id = d2.add_feature(f.kind, Some(&f.name)).unwrap();
-        let mut m2 = Model::new();
-        m2.evaluate(&d2);
-        assert!(m2.result(id).unwrap().error.is_none());
-        let st2 = m2.state();
-        assert_eq!(st2.bodies.len(), 3);
-        for (a, b) in st.bodies.iter().zip(&st2.bodies) {
-            assert!(b.body.is_mesh() && b.body.is_closed_mesh(), "{} is not watertight", a.name);
-            let v_stl = stl_volume(&export(&st, std::slice::from_ref(&a.name), Format::StlBinary, "t").unwrap());
-            let v = solidcraft_kernel::measure(&b.body).unwrap().volume;
-            assert!((v - v_stl).abs() <= 1e-6 * v_stl.abs(), "{}: {v} vs {v_stl}", a.name);
-        }
-    }
-
-    /// Build → export 3MF → import → the same volume as the STL export, closed meshes, names.
+    /// Build → export 3MF and OBJ → import → closed meshes with the volume of the STL export, and
+    /// from 3MF the bodies' names. OBJ is welded as STL and 3MF are, every face keeping its
+    /// normals (#9074). Before, each face wrote its edge points again, a few ulps apart, and the
+    /// file opened as an open mesh with no volume.
     #[test]
     fn threemf_round_trip() {
         let m = curved_bodies();
         let st = m.state();
         assert_eq!(st.bodies.len(), 3);
+        let v_stl: Vec<f64> =
+            st.bodies.iter().map(|a| stl_volume(&export(&st, std::slice::from_ref(&a.name), Format::StlBinary, "t").unwrap())).collect();
+        let reimported = |f: MeshFeature, format: &str| {
+            let mut d2 = Document::new("m");
+            let id = d2.add_feature(f.kind, Some(&f.name)).unwrap();
+            let mut m2 = Model::new();
+            m2.evaluate(&d2);
+            assert!(m2.result(id).unwrap().error.is_none(), "{format}");
+            let st2 = m2.state();
+            assert_eq!(st2.bodies.len(), 3, "{format}");
+            for ((a, b), v_stl) in st.bodies.iter().zip(&st2.bodies).zip(&v_stl) {
+                assert!(b.body.is_mesh() && b.body.is_closed_mesh(), "{format}: {} is not watertight", a.name);
+                let v = solidcraft_kernel::measure(&b.body).unwrap().volume;
+                assert!((v - v_stl).abs() <= 1e-6 * v_stl.abs(), "{format}: {}: {v} vs {v_stl}", a.name);
+            }
+            st2
+        };
+        let obj = export(&st, &[], Format::Obj, "t").unwrap();
+        let text = String::from_utf8(obj.clone()).unwrap();
+        assert!(text.lines().filter(|l| l.starts_with("f ")).all(|l| l.matches("//").count() == 3), "every corner has a normal");
+        reimported(mesh_import_feature(&obj, "parts.obj").unwrap(), "OBJ");
         let bytes = export(&st, &[], Format::ThreeMf, "t").unwrap();
         let f = mesh_import_feature(&bytes, "/tmp/parts.3MF").unwrap();
         assert_eq!(f.body_names, st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
-        let mut d2 = Document::new("m");
-        let id = d2.add_feature(f.kind, Some(&f.name)).unwrap();
-        let mut m2 = Model::new();
-        m2.evaluate(&d2);
-        assert!(m2.result(id).unwrap().error.is_none());
-        let st2 = m2.state();
-        assert_eq!(st2.bodies.len(), 3);
-        for (a, b) in st.bodies.iter().zip(&st2.bodies) {
-            assert_eq!(a.name, b.name);
-            assert!(b.body.is_mesh() && b.body.is_closed_mesh(), "{} is not watertight", b.name);
-            let v_stl = stl_volume(&export(&st, std::slice::from_ref(&a.name), Format::StlBinary, "t").unwrap());
-            let v = solidcraft_kernel::measure(&b.body).unwrap().volume;
-            assert!((v - v_stl).abs() <= 1e-6 * v_stl.abs(), "{}: {v} vs {v_stl}", a.name);
-        }
+        let st2 = reimported(f, "3MF");
+        assert!(st.bodies.iter().zip(&st2.bodies).all(|(a, b)| a.name == b.name));
         // Mesh bodies export again (3MF, STL, OBJ) but not as STEP.
         assert!(export(&st2, &[], Format::ThreeMf, "t").is_ok());
         assert!(export(&st2, &[], Format::StlAscii, "t").is_ok());

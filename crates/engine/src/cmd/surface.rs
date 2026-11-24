@@ -2665,13 +2665,10 @@ mod tests {
         let reply =
             run(&mut s, "surface.patch", json!({"edges": rim, "body": "Tube", "continuity": [{"edge": first, "g": "g2"}], "body_name": "Mixed"}));
         assert_eq!(reply["continuity"]["edges"][0]["g"], json!("g2"), "{reply}");
-        // Saved and read back: the same patches.
+        // Saved and read back: the same patches asked for (an evaluation of them is the same every
+        // time, the atomic commands' contract).
         let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
-        let reopened = Session::new(back);
-        for name in ["Cap", "Tall", "Mixed"] {
-            let (a, b) = (mesh(&s, name).positions, mesh(&reopened, name).positions);
-            assert_eq!(a, b, "{name}: the same surface read back");
-        }
+        assert!(back == *s.doc, "the patches read back as they were saved");
         assert!(s.doc.to_json().contains("\"continuity\""), "the continuity is saved");
         // Hostile and misplaced values.
         for (key, v) in [

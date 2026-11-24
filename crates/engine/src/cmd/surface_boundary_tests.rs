@@ -38,33 +38,42 @@ fn areas(s: &mut Session, body: &str) -> (f64, f64) {
 }
 
 /// Three and four sketch curves in loop order: the flat patch of the loop. A triangle and a square
-/// of lines, and a square whose top is a half circle bulging out, each measure their own area.
+/// of lines, and a square whose top is a half circle bulging out, each measure their own area. A
+/// free loop has no neighbour, so its continuity changes nothing: the triangle is built G0 and G3,
+/// the square G1. A loop whose curves are drawn the other way round keeps its order (#20380).
 #[test]
 fn three_and_four_curve_loops_are_flat_patches() {
     use std::f64::consts::PI;
-    let cases: Vec<(Vec<[[f64; 2]; 2]>, f64, f64)> = vec![
-        (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
-        // Issue #20380: loop order holds when curves are drawn or mirrored in reverse
-        (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[0.0, 0.0], [10.0, 15.0]]], 150.0, 1e-6),
-        (vec![[[20.0, 0.0], [0.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
-        (vec![[[0.0, 0.0], [20.0, 0.0]], [[10.0, 15.0], [20.0, 0.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
-        (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 0.0], [10.0, 10.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 10.0], [0.0, 0.0]]], 100.0, 1e-6),
-        (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 10.0], [10.0, 0.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 0.0], [0.0, 10.0]]], 100.0, 1e-6),
+    let triangle = [[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]];
+    let square = [[[0.0, 0.0], [10.0, 0.0]], [[10.0, 0.0], [10.0, 10.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 10.0], [0.0, 0.0]]];
+    // #20380: the same loops with some curves drawn (or mirrored) the other way round.
+    let triangles_reversed = [
+        [[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[0.0, 0.0], [10.0, 15.0]]],
+        [[[20.0, 0.0], [0.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]],
+        [[[0.0, 0.0], [20.0, 0.0]], [[10.0, 15.0], [20.0, 0.0]], [[10.0, 15.0], [0.0, 0.0]]],
     ];
-    for (lines, want, tol) in cases {
-        for continuity in [json!("g0"), json!("g1"), json!("g3")] {
-            let mut s = Session::default();
-            run(&mut s, "sketch.create", json!({"plane": "XY"}));
-            let curves: Vec<String> = lines.iter().map(|[a, b]| line(&mut s, *a, *b)).collect();
-            let r = run(&mut s, "surface.boundary", json!({"curves": curves, "continuity": continuity}));
-            let body = first(&r["created_bodies"]);
-            let (face, total) = areas(&mut s, &body);
-            assert!(
-                (face - want).abs() < tol * want && (total - want).abs() < tol * want,
-                "{} sides, {continuity}: {face} / {total} vs {want}",
-                lines.len()
-            );
-        }
+    let square_reversed = [[[0.0, 0.0], [10.0, 0.0]], [[10.0, 10.0], [10.0, 0.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 0.0], [0.0, 10.0]]];
+    let cases: [(&[[[f64; 2]; 2]], f64, f64, &str); 7] = [
+        (&triangle, 150.0, 1e-6, "g0"),
+        (&triangle, 150.0, 1e-6, "g3"),
+        (&square, 100.0, 1e-6, "g1"),
+        (&triangles_reversed[0], 150.0, 1e-6, "g0"),
+        (&triangles_reversed[1], 150.0, 1e-6, "g0"),
+        (&triangles_reversed[2], 150.0, 1e-6, "g0"),
+        (&square_reversed, 100.0, 1e-6, "g1"),
+    ];
+    for (lines, want, tol, continuity) in cases {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let curves: Vec<String> = lines.iter().map(|[a, b]| line(&mut s, *a, *b)).collect();
+        let r = run(&mut s, "surface.boundary", json!({"curves": curves, "continuity": continuity}));
+        let body = first(&r["created_bodies"]);
+        let (face, total) = areas(&mut s, &body);
+        assert!(
+            (face - want).abs() < tol * want && (total - want).abs() < tol * want,
+            "{} sides, {continuity}: {face} / {total} vs {want}",
+            lines.len()
+        );
     }
     // A square with a half circle for its top, bulging out: 100 + 12.5π.
     let mut s = Session::default();

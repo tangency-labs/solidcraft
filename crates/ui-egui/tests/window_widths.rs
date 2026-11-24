@@ -1,10 +1,12 @@
 //! Every command dialog and shared window stays within its content-width limits: started
-//! through the control channel (the toolbar's way) and measured as drawn.
+//! through the control channel (the toolbar's way) and measured as drawn. A toolbar command's
+//! dialog also docks at the right edge within its card class's width, and its windows fit on
+//! screen.
 
 use serde_json::json;
 use solidcraft_ui_egui::frame::{DIALOG_MAX_W, DIALOG_MIN_W};
 
-use solidcraft_ui_egui::scenario::Harness;
+use solidcraft_ui_egui::scenario::{Harness, check, rect_of};
 
 /// Widths of the windows on screen (their areas in the middle layer).
 fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
@@ -75,15 +77,55 @@ fn render_strip_is_excluded_while_real_windows_are_still_measured() {
     assert!(dialog.width() >= DIALOG_MIN_W - 4.0, "actual DXF dialog remains at least the dialog minimum: {dialog:?}");
 }
 
+/// A box body extruded from a finished sketch, to give feature dialogs something to work on.
+fn sketched() -> Harness {
+    let mut h = Harness::new();
+    for (id, p) in [
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 10})),
+    ] {
+        h.call("engine.execute", json!({"command": id, "params": p}));
+    }
+    h.frames(3);
+    h
+}
+
+/// Every command's windows stay within their limits, and a toolbar command's dialog (outside
+/// the Sketch tab) docks at the right edge within its card class's width, with every window
+/// on screen.
 #[test]
 fn command_dialogs_shrink_to_their_content_within_limits() {
-    let mut h = fresh();
+    let mut h = sketched();
     let mut bad = Vec::new();
+    let mut docked = 0;
     // The frame border and shadow add a little to the content limits.
     let slack = 4.0;
     for spec in solidcraft_engine::command_specs() {
         h.call("ui.start", json!({"command": spec.id}));
         h.frames(4);
+        if !spec.tab.is_empty() && spec.tab != "SKETCH" {
+            if h.app.dialog.is_some() {
+                docked += 1;
+                // Wide cards use the kit's bounded table/timeline width.
+                let w = rect_of("dialog:outer").map_or(0.0, |r| r.width());
+                let limits = if matches!(spec.id, "config.table" | "config.configure" | "motion.study") {
+                    let width = solidcraft_theme::Tokens::get().form_card_width * 3.0;
+                    json!({"min":width - 4.0,"max":width + 2.0})
+                } else if w > 400.0 {
+                    json!({"min":480,"max":562})
+                } else {
+                    json!({"min":260,"max":382})
+                };
+                if let Err(e) = check(&mut h, &json!({ "dialog_docked": limits })) {
+                    bad.push(format!("{}: {e}", spec.id));
+                }
+            }
+            if let Err(e) = check(&mut h, &json!({"windows_fit": {"max_width": 900}})) {
+                bad.push(format!("{}: {e}", spec.id));
+            }
+        }
         for (layer, w) in window_widths(&h) {
             // Floating windows a command opened (Parameters…) have their own limit.
             let limit = kit_table_limit(layer).unwrap_or(if h.app.dialog.is_some() {
@@ -116,9 +158,15 @@ fn command_dialogs_shrink_to_their_content_within_limits() {
         if h.app.session.active_sketch.is_some() {
             h.app.finish_sketch();
         }
+        // The next command starts as from a fresh window: in the design workspace, with no
+        // command search or chat beside the view (each narrows the room a dialog docks in).
+        h.app.ui.palette_open = false;
+        h.app.agent_chat.open = false;
+        h.call("ui.workspace", json!({"workspace": "design"}));
         h.frames(2);
     }
-    assert!(bad.is_empty(), "windows too wide or too narrow:\n{}", bad.join("\n"));
+    assert!(docked > 20, "only {docked} commands opened a dialog");
+    assert!(bad.is_empty(), "windows too wide, too narrow or off their place:\n{}", bad.join("\n"));
 }
 
 #[test]

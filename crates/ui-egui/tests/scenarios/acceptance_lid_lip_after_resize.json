@@ -1,6 +1,6 @@
 [
  {
-  "note": "Acceptance (#27): the board grows 60 \u2192 70 mm; the lid's lip (offsets of the case's projected rim) follows."
+  "note": "Acceptance (#27): the board grows 60 \u2192 70 mm; the lid's lip (offsets of the case's projected rim) follows. Back at 60 mm, a lip on the case's rounded rim with the Lip command."
  },
  {
   "script": "examples/acceptance/sensor_enclosure.json"
@@ -12,6 +12,38 @@
    "params": {
     "name": "board_w",
     "expression": "70 mm"
+   }
+  }
+ },
+ {
+  "expect": {
+   "errors": 0,
+   "bodies": 2
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "parameters.change",
+   "params": {
+    "name": "board_w",
+    "expression": "60 mm"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "plastic.lip",
+   "params": {
+    "face": [
+     0,
+     29,
+     25
+    ],
+    "width": 1,
+    "height": 1.5,
+    "body": "Case"
    }
   }
  },

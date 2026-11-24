@@ -93,54 +93,53 @@ const REPORT: &str = "20261018-210412-bb60791ed6692f1d";
 
 #[test]
 fn crash_card_has_no_horizontal_bar_but_long_reports_still_scroll_vertically() {
-    for dark in [false, true] {
-        for ppp in [1.0, 2.0] {
-            for long in [false, true] {
-                let mut h = setup(dark, ppp);
-                let folder = h.dir.join("crashes");
-                for (id, message) in [
-                    (REPORT, "The radius produced a degenerate face while rebuilding Fillet2.".to_owned()),
-                    ("20261017-210412-bb60791ed6692f1d", "Long report line.\n".repeat(800)),
-                ]
-                .into_iter()
-                .take(if long { 2 } else { 1 })
-                {
-                    std::fs::create_dir_all(folder.join(id)).unwrap();
-                    std::fs::write(folder.join(id).join("report.json"), json!({"format":"solidcraft-crash/1", "id":id, "kind":"command_panic", "count":3,
-                        "first_seen":"2026-10-18T21:04:12Z", "message":message,"command":{"command":"solid.fillet","params":{"radius":2}}, "backtrace":[], "app":{"version":"0.16.1"}, "system":{}}).to_string()).unwrap();
-                }
-                h.app.crashes.folder = Some(folder);
-                h.call("ui.help", json!({"item":"crashes"}));
-                let (image, _) = capture(&mut h, &format!("crash-{dark}-{ppp}x-long-{long}"));
-                let viewport = scenario::rect_of("dialog:list:reports:viewport")
-                    .unwrap()
-                    .intersect(scenario::rect_of("dialog:list:reports").unwrap().shrink(1.0));
-                let message = scenario::rect_of(&format!("dialog:report:message:{REPORT}")).unwrap();
-                let below = Rect::from_min_max(
-                    pos2(viewport.left() + 2.0, message.bottom() + 1.0),
-                    pos2(viewport.right() - 12.0, (message.bottom() + 20.0).min(viewport.bottom())),
-                );
-                let divider = scenario::rect_of(&format!("dialog:divider:end:{REPORT}"));
-                if long {
-                    // A divider separates reports only; it is a full-width hairline.
-                    let divider = divider.unwrap();
-                    let frame = scenario::rect_of("dialog:list:reports").unwrap();
-                    assert!((divider.left() - frame.left() - 1.0).abs() <= 1.0 / ppp);
-                    assert!((frame.right() - divider.right() - 1.0).abs() <= 1.0 / ppp);
-                    assert_eq!(divider.height(), 1.0);
-                } else {
-                    assert!(divider.is_none(), "no divider after the last report");
-                }
-                let bar = Tokens::get().form_ink.to_array();
-                assert_eq!(
-                    crop(&image, below, ppp).pixels().filter(|p| p.0 == bar).count(),
-                    0,
-                    "no scrollbar pixels below the message: dark={dark}, ppp={ppp}, long={long}"
-                );
-                let right = Rect::from_min_max(pos2(viewport.right() - 4.0, viewport.top() + 2.0), pos2(viewport.right(), viewport.bottom() - 2.0));
-                let bar_pixels = crop(&image, right, ppp).pixels().filter(|p| p.0 == bar).count();
-                assert_eq!(bar_pixels > 0, long, "vertical scrollbar pixels: {bar_pixels}, long={long}, dark={dark}, ppp={ppp}");
+    // The light theme: the bars' layout does not depend on the theme.
+    let dark = false;
+    for ppp in [1.0, 2.0] {
+        for long in [false, true] {
+            let mut h = setup(dark, ppp);
+            let folder = h.dir.join("crashes");
+            for (id, message) in [
+                (REPORT, "The radius produced a degenerate face while rebuilding Fillet2.".to_owned()),
+                ("20261017-210412-bb60791ed6692f1d", "Long report line.\n".repeat(800)),
+            ]
+            .into_iter()
+            .take(if long { 2 } else { 1 })
+            {
+                std::fs::create_dir_all(folder.join(id)).unwrap();
+                std::fs::write(folder.join(id).join("report.json"), json!({"format":"solidcraft-crash/1", "id":id, "kind":"command_panic", "count":3,
+                    "first_seen":"2026-10-18T21:04:12Z", "message":message,"command":{"command":"solid.fillet","params":{"radius":2}}, "backtrace":[], "app":{"version":"0.16.1"}, "system":{}}).to_string()).unwrap();
             }
+            h.app.crashes.folder = Some(folder);
+            h.call("ui.help", json!({"item":"crashes"}));
+            let (image, _) = capture(&mut h, &format!("crash-{dark}-{ppp}x-long-{long}"));
+            let viewport =
+                scenario::rect_of("dialog:list:reports:viewport").unwrap().intersect(scenario::rect_of("dialog:list:reports").unwrap().shrink(1.0));
+            let message = scenario::rect_of(&format!("dialog:report:message:{REPORT}")).unwrap();
+            let below = Rect::from_min_max(
+                pos2(viewport.left() + 2.0, message.bottom() + 1.0),
+                pos2(viewport.right() - 12.0, (message.bottom() + 20.0).min(viewport.bottom())),
+            );
+            let divider = scenario::rect_of(&format!("dialog:divider:end:{REPORT}"));
+            if long {
+                // A divider separates reports only; it is a full-width hairline.
+                let divider = divider.unwrap();
+                let frame = scenario::rect_of("dialog:list:reports").unwrap();
+                assert!((divider.left() - frame.left() - 1.0).abs() <= 1.0 / ppp);
+                assert!((frame.right() - divider.right() - 1.0).abs() <= 1.0 / ppp);
+                assert_eq!(divider.height(), 1.0);
+            } else {
+                assert!(divider.is_none(), "no divider after the last report");
+            }
+            let bar = Tokens::get().form_ink.to_array();
+            assert_eq!(
+                crop(&image, below, ppp).pixels().filter(|p| p.0 == bar).count(),
+                0,
+                "no scrollbar pixels below the message: dark={dark}, ppp={ppp}, long={long}"
+            );
+            let right = Rect::from_min_max(pos2(viewport.right() - 4.0, viewport.top() + 2.0), pos2(viewport.right(), viewport.bottom() - 2.0));
+            let bar_pixels = crop(&image, right, ppp).pixels().filter(|p| p.0 == bar).count();
+            assert_eq!(bar_pixels > 0, long, "vertical scrollbar pixels: {bar_pixels}, long={long}, dark={dark}, ppp={ppp}");
         }
     }
 }

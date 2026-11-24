@@ -2823,9 +2823,9 @@ fn preference_widgets_and_figures_board_in_both_themes() {
                     vec2(if board == "figures" { 700.0 } else { 360.0 }, if board == "figures" { 920.0 } else { 800.0 }),
                 );
                 let mut textures = HashMap::new();
-                let mut image = None;
+                let mut last = None;
                 for _ in 0..3 {
-                    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                    let output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
                         ui.set_width(bounds.width() - 40.0);
                         ui.painter().rect_filled(bounds, 0.0, Tokens::get().dialog_body);
                         ui.add_space(12.0);
@@ -2837,10 +2837,11 @@ fn preference_widgets_and_figures_board_in_both_themes() {
                         });
                     });
                     textures_update(&mut textures, &output.textures_delta);
-                    output.textures_delta.clear();
-                    image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                    last = Some(output);
                 }
-                let image = image.unwrap();
+                // The third frame has settled: only it is drawn.
+                let output = last.unwrap();
+                let image = raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
                 assert!(image.pixels().any(|p| p.0[3] != 0));
                 if let Some(dir) = std::env::var_os("SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE") {
                     std::fs::create_dir_all(&dir).unwrap();

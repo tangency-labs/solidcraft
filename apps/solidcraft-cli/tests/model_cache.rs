@@ -99,9 +99,21 @@ fn check(name: &str, mut built: Session) {
     let _ = std::fs::remove_file(format!("{}.bak", path.display()));
 }
 
+/// The corpus designs that hold what no sample design does: components and their frames and
+/// paths, revolved primitives, a path pattern, moved bodies, a stacked join (#489) and names
+/// saved before format 14 (a model the file does not keep). The others are built as the samples
+/// are: a filleted, holed box (Sample Plate), a shelled enclosure (Plastic Enclosure), sheet metal
+/// (Sheet Metal Bracket), joints (Hinge Assembly), and sketches extruded, cut and joined.
+const CORPUS_KINDS: [&str; 6] =
+    ["components-arm", "issue-489-stacked-join", "m0-revolve-primitives", "modern-path-pattern", "move-bodies", "naming-split-pieces"];
+
 #[test]
 fn corpus_designs_open_from_their_model_as_evaluated() {
-    for p in corpus() {
+    let designs: Vec<PathBuf> =
+        corpus().into_iter().filter(|p| p.file_stem().and_then(|n| n.to_str()).is_some_and(|n| CORPUS_KINDS.contains(&n))).collect();
+    assert_eq!(designs.len(), CORPUS_KINDS.len(), "{designs:?}");
+    let (mut kept, mut not_kept) = (0, 0);
+    for p in designs {
         let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
         let s = open(&p);
         // Names saved before format 14 are found again through names worked out from geometry on
@@ -115,15 +127,19 @@ fn corpus_designs_open_from_their_model_as_evaluated() {
             assert!(solidcraft_engine::io::read_design_geometry(&std::fs::read(&path).unwrap()).is_none(), "{name}");
             let _ = std::fs::remove_file(&path);
             let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+            not_kept += 1;
             continue;
         }
         check(&name, s);
+        kept += 1;
     }
+    assert!(kept > 0 && not_kept > 0, "{kept} models kept, {not_kept} not");
 }
 
+/// Every sample design but Vent Plate, a pattern a parameter drives as Bolted Flange's is.
 #[test]
 fn sample_designs_open_from_their_model_as_evaluated() {
-    for sample in solidcraft_engine::sample::samples() {
+    for sample in solidcraft_engine::sample::samples().into_iter().filter(|s| s.name != "Vent Plate") {
         let mut s = Session::default();
         for c in (sample.script)()["commands"].as_array().unwrap() {
             s.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap_or_else(|e| panic!("{}: {e}", sample.name));
@@ -273,13 +289,13 @@ fn check_thinned(name: &str, built: &Session, saved: &SavedModel) {
 
 /// A model too big for its file keeps the final state, then the slowest features' states as fit
 /// (#3220). Both the smallest such model (the final state, and states that add no body to it)
-/// and one that keeps more open as the design evaluated again. The placed components' design has
-/// a cut whose fingerprint reads where the bodies before it lie, which a state left out does not
-/// say until it is evaluated.
+/// and one that keeps more open as the design evaluated again: a single body's chain (Sample
+/// Plate), and the placed components' design, which has a cut whose fingerprint reads where the
+/// bodies before it lie, which a state left out does not say until it is evaluated.
 #[test]
 fn thinned_models_open_as_evaluated() {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/components-arm.solidcraft");
-    for sample in ["Sample Plate", "Plastic Enclosure", "components-arm"] {
+    for sample in ["Sample Plate", "components-arm"] {
         let built = match solidcraft_engine::sample::samples().into_iter().find(|s| s.name == sample) {
             Some(s) => {
                 let mut built = Session::default();

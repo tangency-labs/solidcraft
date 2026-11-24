@@ -550,7 +550,8 @@ mod tests {
 
     /// The material a variable fillet removes from a right-angled edge, radius running r0 → r1:
     /// its balls' union (`removed_by_balls`; the balls' great circles, (1 − π/4) L (r0² + r0 r1 +
-    /// r1²) / 3, take more), to 1e-4 of itself.
+    /// r1²) / 3, take more), to 1e-4 of itself. (Started from the other end it is the same solid:
+    /// `variable_radius_through_a_middle_point`.)
     #[test]
     fn variable_radius_on_a_box_edge() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
@@ -559,9 +560,6 @@ mod tests {
         let removed = removed_by_balls(20.0, &|u| 2.0 + 3.0 * u, &open, &[]);
         let v = measure(&f).unwrap().volume;
         assert!(rel(6000.0 - v, removed) < 1e-4, "{} removed vs {removed}", 6000.0 - v);
-        // Started from the other end: the same solid.
-        let h = fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 20.0, 30.0), 5.0, 2.0).unwrap();
-        assert!(rel(measure(&h).unwrap().volume, v) < 1e-9);
         // Equal radii give the constant fillet.
         let g = fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 3.0, 3.0).unwrap();
         let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], 3.0).unwrap();
@@ -601,20 +599,22 @@ mod tests {
         }
     }
 
-    /// A radius through a middle point, smooth: the removed volume is the balls' union.
+    /// A radius through a middle point, smooth: the removed volume is the balls' union. The law
+    /// is not symmetric (2 → 4 → 3), so the same solid started from the other end checks that the
+    /// radii are mapped along the edge's direction.
     #[test]
     fn variable_radius_through_a_middle_point() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let (at, start) = (Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0));
-        let pts = [(0.0, 2.0), (0.5, 4.0), (1.0, 2.0)];
+        let pts = [(0.0, 2.0), (0.5, 4.0), (1.0, 3.0)];
         let s = fillet_variable_points(&b, at, start, &pts, true).unwrap();
         let law = RadiusSpline::through(&pts, true);
-        assert!((law.eval(0.5) - 4.0).abs() < 1e-12 && (law.eval(0.0) - 2.0).abs() < 1e-12);
+        assert!((law.eval(0.5) - 4.0).abs() < 1e-12 && (law.eval(0.0) - 2.0).abs() < 1e-12 && (law.eval(1.0) - 3.0).abs() < 1e-12);
         let removed = removed(&law, 20.0);
         let v = measure(&s).unwrap().volume;
         assert!(rel(6000.0 - v, removed) < 1e-4, "{} removed vs {removed}", 6000.0 - v);
         // Unsorted, from the other end: the same.
-        let r = fillet_variable_points(&b, at, Vec3::new(10.0, 20.0, 30.0), &[(1.0, 2.0), (0.0, 2.0), (0.5, 4.0)], true).unwrap();
+        let r = fillet_variable_points(&b, at, Vec3::new(10.0, 20.0, 30.0), &[(1.0, 2.0), (0.0, 3.0), (0.5, 4.0)], true).unwrap();
         assert!(rel(measure(&r).unwrap().volume, v) < 1e-9);
         // A middle radius too big for the faces, missing ends, bad positions: refused.
         assert!(fillet_variable_points(&b, at, start, &[(0.0, 2.0), (0.5, 40.0), (1.0, 2.0)], false).is_err());
@@ -626,26 +626,24 @@ mod tests {
     /// The radius running down to zero at one end: the blend closes to the corner, a three-sided
     /// face, and the end face there is untouched. Removed: the balls' union (a cone to its apex
     /// when linear, 22.594877; the great circles' (1 − π/4) L r0² / 3 would take 22.8945).
+    /// Straight it closes at the far end, smooth through a middle point at the start.
     #[test]
     fn variable_radius_down_to_zero_at_one_end() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let (at, start, end) = (Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), Vec3::new(10.0, 20.0, 30.0));
         let cone = removed_by_balls(20.0, &|u| 4.0 - 4.0 * u, &open, &[]);
         assert!((cone - 22.594877).abs() < 1e-5, "{cone}");
-        for (r0, r1) in [(4.0, 0.0), (0.0, 4.0)] {
-            let f = fillet_variable(&b, at, start, r0, r1).unwrap();
-            let v = measure(&f).unwrap().volume;
-            assert!(rel(6000.0 - v, cone) < 1e-4, "{r0} → {r1}: {} removed vs {cone}", 6000.0 - v);
-            assert_eq!(f.unmeshed_faces(), 0);
-            let (faces, vertices) = faces_and_vertices(&f);
-            assert_eq!(faces.len(), 7);
-            // The blend is three-sided; the closed end's corner is still a box corner.
-            assert!(faces.contains(&3));
-            let corner = if r1 == 0.0 { end } else { start };
-            assert!(vertices.iter().any(|x| x.dist(corner) < 1e-9));
-        }
-        // Through a middle point, smooth, closing at the far end.
-        let pts = [(0.0, 3.0), (0.5, 4.0), (1.0, 0.0)];
+        let f = fillet_variable(&b, at, start, 4.0, 0.0).unwrap();
+        let v = measure(&f).unwrap().volume;
+        assert!(rel(6000.0 - v, cone) < 1e-4, "{} removed vs {cone}", 6000.0 - v);
+        assert_eq!(f.unmeshed_faces(), 0);
+        let (faces, vertices) = faces_and_vertices(&f);
+        assert_eq!(faces.len(), 7);
+        // The blend is three-sided; the closed end's corner is still a box corner.
+        assert!(faces.contains(&3));
+        assert!(vertices.iter().any(|x| x.dist(end) < 1e-9));
+        // Through a middle point, smooth, closing at the start.
+        let pts = [(0.0, 0.0), (0.5, 4.0), (1.0, 3.0)];
         let s = fillet_variable_points(&b, at, start, &pts, true).unwrap();
         let law = RadiusSpline::through(&pts, true);
         let removed = removed(&law, 20.0);
@@ -710,7 +708,9 @@ mod tests {
     /// to the edge at x, the ray from the edge at angle θ from the first face meets the union
     /// first at the least entry over the balls, and the corner up to there is taken, as far as
     /// `room(x, θ)` (the body's section along the ray; ∞ where it does not end): ∫ ρ²/2 dθ,
-    /// integrated over x, both by Simpson's rule, split at `kinks` (where the law turns).
+    /// integrated over x, both by Simpson's rule, split at `kinks` (where the law turns). The
+    /// least entry is found on a scan of the balls near x (their radii taken once for every ray in
+    /// that plane), then by a golden-section search about the scan's best, to 4e-9 of its step.
     pub(crate) fn removed_by_balls(len: f64, law: &dyn Fn(f64) -> f64, room: &dyn Fn(f64, f64) -> f64, kinks: &[f64]) -> f64 {
         let h = 1e-7;
         let (k0, k1) = ((law(h) - law(0.0)) / (h * len), (law(1.0) - law(1.0 - h)) / (h * len));
@@ -724,43 +724,60 @@ mod tests {
             }
         };
         let big = (0..=1000).map(|i| law(i as f64 / 1000.0)).fold(0.0f64, f64::max);
-        let entry = |x: f64, c: f64, sn: f64, s: f64| {
-            let rr = r(s);
+        // Where the ray at angle (cos, sin) in the plane at x enters the ball at s of radius rr.
+        let entry = |x: f64, c: f64, sn: f64, s: f64, rr: f64| {
             let p = rr * (c + sn);
             let disc = p * p - (x - s) * (x - s) - rr * rr;
             if rr > 0.0 && disc >= 0.0 { p - disc.sqrt() } else { f64::INFINITY }
         };
-        let rho = |x: f64, t: f64| {
+        let scan = 400;
+        let step = 3.0 * big / scan as f64;
+        // The balls the scan of the plane at x tries, (s, r(s)).
+        let near = |x: f64| -> Vec<(f64, f64)> {
+            (0..=scan)
+                .map(|i| {
+                    let s = x - 1.5 * big + i as f64 * step;
+                    (s, r(s))
+                })
+                .collect()
+        };
+        let rho = |x: f64, balls: &[(f64, f64)], t: f64| {
             let (c, sn) = (t.cos(), t.sin());
-            let (lo, hi, scan) = (x - 1.5 * big, x + 1.5 * big, 400);
-            let step = (hi - lo) / scan as f64;
+            let e = |s: f64| entry(x, c, sn, s, r(s));
             let (mut best, mut at) = (f64::INFINITY, x);
-            for i in 0..=scan {
-                let s = lo + i as f64 * step;
-                let e = entry(x, c, sn, s);
+            for &(s, rr) in balls {
+                let e = entry(x, c, sn, s, rr);
                 if e < best {
                     (best, at) = (e, s);
                 }
             }
-            let (mut a, mut b, g) = (at - step, at + step, (5f64.sqrt() - 1.0) / 2.0);
-            for _ in 0..80 {
-                let (m1, m2) = (b - g * (b - a), a + g * (b - a));
-                if entry(x, c, sn, m1) < entry(x, c, sn, m2) {
-                    b = m2;
+            // Golden section, one new entry a step: the bracket shrinks by g each time.
+            let g = (5f64.sqrt() - 1.0) / 2.0;
+            let (mut a, mut b) = (at - step, at + step);
+            let (mut m1, mut m2) = (b - g * (b - a), a + g * (b - a));
+            let (mut e1, mut e2) = (e(m1), e(m2));
+            for _ in 0..40 {
+                if e1 < e2 {
+                    (b, m2, e2) = (m2, m1, e1);
+                    m1 = b - g * (b - a);
+                    e1 = e(m1);
                 } else {
-                    a = m1;
+                    (a, m1, e1) = (m1, m2, e2);
+                    m2 = a + g * (b - a);
+                    e2 = e(m2);
                 }
             }
-            best.min(entry(x, c, sn, 0.5 * (a + b)))
+            best.min(e(0.5 * (a + b)))
         };
         // The rays meet the union tangentially at the faces (ρ goes as the root of the angle
         // there): θ = π/4 (1 − cos(π q)) makes the integrand smooth in q.
         let area = |x: f64| {
             let q = std::f64::consts::PI;
+            let balls = near(x);
             simpson(
                 |u: f64| {
                     let t = q / 4.0 * (1.0 - (q * u).cos());
-                    let p = rho(x, t).min(room(x, t));
+                    let p = rho(x, &balls, t).min(room(x, t));
                     let p = if p.is_finite() { p } else { 0.0 };
                     0.5 * p * p * q * q / 4.0 * (q * u).sin()
                 },
@@ -840,7 +857,7 @@ mod tests {
         assert!(rel(v, 6000.0 - removed16) < 1e-6, "{v} vs {}", 6000.0 - removed16);
         // The taper the room gives: the top face is 20 (1 − u) wide, the front 15 high.
         let t = taper(&wedge, at, 16.0).unwrap();
-        let law = if t.start.dist(start) < 1e-9 { t.spline.clone() } else { t.spline.reversed() };
+        let law = if t.start.dist(start) < 1e-9 { t.spline } else { t.spline.reversed() };
         for i in 0..=100 {
             let u = i as f64 / 100.0;
             let r = law.eval(u);
@@ -848,14 +865,11 @@ mod tests {
         }
         assert_eq!(law.eval(1.0), 0.0);
         assert!((law.eval(0.0) - 13.5).abs() < 1e-9);
-        let f = fillet_variable_spline(&wedge, at, t.start, &t.spline).unwrap();
-        let v = fine_volume(&f);
-        assert!(rel(v, 6000.0 - removed(&law, 40.0)) < 1e-4, "{v} vs {}", 6000.0 - removed(&law, 40.0));
-        assert!(f.validity().is_empty(), "{:?}", f.validity());
+        // The wedge's round of that taper is `taper_mesh_tests::the_wedge_round_keeps_its_volume`.
     }
 
     /// A radius spline given directly: a cubic with its control radii pulling the radius up in
-    /// the middle; the same from the other end; refused when it isn't clamped or dips to zero.
+    /// the middle; refused when it isn't clamped or dips to zero.
     #[test]
     fn variable_radius_from_a_spline() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
@@ -864,8 +878,6 @@ mod tests {
         let f = fillet_variable_spline(&b, at, start, &law).unwrap();
         let v = fine_volume(&f);
         assert!(rel(v, 6000.0 - removed(&law, 20.0)) < 1e-4, "{v} vs {}", 6000.0 - removed(&law, 20.0));
-        let r = fillet_variable_spline(&b, at, Vec3::new(10.0, 20.0, 30.0), &law.reversed()).unwrap();
-        assert!(rel(fine_volume(&r), v) < 1e-9);
         let unclamped = RadiusSpline { knots: vec![0.0, 0.0, 0.0, 0.1, 0.5, 1.0, 1.0, 1.0, 1.0], ..law.clone() };
         assert!(fillet_variable_spline(&b, at, start, &unclamped).is_err());
         let dips = RadiusSpline { radii: vec![2.0, 0.0, 0.0, 3.0, 2.0], ..law.clone() };

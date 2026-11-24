@@ -857,7 +857,9 @@ fn an_opened_design_is_drawn_whole_when_meshing_has_no_thread() {
 }
 
 /// An opened design is in the window before its bodies are meshed: the view draws the bodies
-/// meshed so far (never meshing one itself), framed from their outlines, until all are.
+/// meshed so far (never meshing one itself), framed from their outlines, until all are. A
+/// screenshot asked for right after the open shows the whole design: it waits for the meshing,
+/// and what was asked after it waits for it.
 #[test]
 fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
     let dir = scratch("progressive");
@@ -873,6 +875,15 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
         std::thread::sleep(std::time::Duration::from_millis(1));
         assert!(std::time::Instant::now() < deadline, "the open answers");
     }
+    // A screenshot, then a request after it, while the design is still being meshed (unless it
+    // is meshed already on this machine: then there is nothing to wait for).
+    let count_rx = crate::open_meshing::active(&w.app).then(|| {
+        let (shot, _shot_rx) = crate::control::ControlRequest::new("ui.screenshot", json!({}));
+        let (count, count_rx) = crate::control::ControlRequest::new("document.inspect", json!({}));
+        tx.send(shot).unwrap();
+        tx.send(count).unwrap();
+        count_rx
+    });
     let mut seen = Vec::new();
     while crate::open_meshing::active(&w.app) {
         let shown = crate::open_meshing::shown_world(&w.app);
@@ -881,8 +892,19 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
         assert!(done <= total && total == w.app.session.world_state().unwrap().bodies.len(), "Loading parts {done}/{total}");
         seen.push(shown.bodies.len());
         w.frame(vec![]);
+        if let Some(count_rx) = &count_rx
+            && crate::open_meshing::active(&w.app)
+        {
+            assert!(count_rx.try_recv().is_err(), "a request after the screenshot waits for it");
+        }
     }
     assert!(seen.windows(2).all(|p| p[0] <= p[1]), "the picture only grows: {seen:?}");
+    if let Some(count_rx) = count_rx {
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        assert!(count_rx.try_recv().is_ok(), "answered once the design is meshed");
+    }
     let world = w.app.session.world_state().unwrap();
     // Then the whole design (in the order its bodies came, kept until the design changes).
     let names = |st: &solidcraft_engine::doc::ModelState| {
@@ -910,50 +932,12 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A screenshot asked for right after an open shows the whole design: it waits for the meshing,
-/// and what was asked after it waits for it.
-#[test]
-fn a_screenshot_after_an_open_waits_for_the_whole_design() {
-    let dir = scratch("progressive-shot");
-    let path = large_design(&dir, 24);
-    let mut w = Win::new();
-    let (tx, rx) = std::sync::mpsc::channel();
-    w.app.control_rx = Some(rx);
-    let (open, open_rx) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": path}}));
-    tx.send(open).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while open_rx.try_recv().is_err() {
-        w.frame(vec![]);
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        assert!(std::time::Instant::now() < deadline, "the open answers");
-    }
-    if !crate::open_meshing::active(&w.app) {
-        return; // Meshed already: nothing to wait for on this machine.
-    }
-    let (shot, _shot_rx) = crate::control::ControlRequest::new("ui.screenshot", json!({}));
-    let (count, count_rx) = crate::control::ControlRequest::new("document.inspect", json!({}));
-    tx.send(shot).unwrap();
-    tx.send(count).unwrap();
-    w.frame(vec![]);
-    if crate::open_meshing::active(&w.app) {
-        assert!(count_rx.try_recv().is_err(), "a request after the screenshot waits for it");
-    }
-    while crate::open_meshing::active(&w.app) {
-        w.frame(vec![]);
-    }
-    for _ in 0..3 {
-        w.frame(vec![]);
-    }
-    assert!(count_rx.try_recv().is_ok(), "answered once the design is meshed");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
 /// An assembly of a few rounded parts placed many times, as a STEP file: an import that takes a
 /// while to read, place and mesh.
 fn step_assembly(dir: &std::path::Path) -> String {
     let mut s = Session::default();
     // Distinct parts (each meshed on its own), each placed a few times (placed copies share it).
-    for k in 0..40 {
+    for k in 0..20 {
         let len = 30.0 + k as f64;
         let part = s.execute("component.create", &json!({"name": format!("Bracket {k}")})).unwrap()["component"].as_u64().unwrap();
         s.execute("solid.box", &json!({"length": len, "width": 20, "height": 8, "operation": "new"})).unwrap();
@@ -1010,7 +994,8 @@ fn opening_a_large_design_never_stalls_the_window() {
     let step = step_assembly(&dir);
     let (mut w, (ms, phase)) = open_timed(&step);
     assert!(ms < BUDGET_MS, "STEP import: a {ms:.0} ms frame while {phase}");
-    assert!(w.app.session.world_state().unwrap().bodies.len() >= 200);
+    // 20 parts, each placed 5 times.
+    assert!(w.app.session.world_state().unwrap().bodies.len() >= 100);
     for (name, cache) in [("cached.solidcraft", true), ("plain.solidcraft", false)] {
         let path = dir.join(name).to_string_lossy().to_string();
         w.app.session.execute("file.save_as", &json!({"path": path, "cache": cache})).unwrap();

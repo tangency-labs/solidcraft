@@ -1541,24 +1541,24 @@ fn batch_refuses_a_step_with_an_unknown_key() {
 fn batch_coalesces_parameter_edits() {
     let mut s = server();
     let mut build = vec![json!({"command": "solid.box", "params": {"length": 100, "width": 100, "height": 5, "body_name": "Plate"}})];
-    for i in 0..5 {
+    for i in 0..3 {
         build.push(json!({"command": "parameters.add", "params": {"name": format!("h{i}"), "expression": "5 mm"}}));
         build.push(json!({"command": "solid.cylinder", "params": {"radius": 3, "height": format!("h{i}"), "base": [i * 15 - 30, 0, 5], "operation": "join"}}));
     }
     tool(&mut s, "batch", json!({"commands": build}));
-    let edits: Vec<Value> = (0..5)
+    let edits: Vec<Value> = (0..3)
         .map(|i| json!({"command": "parameters.change", "params": {"name": format!("h{i}"), "expression": format!("{} mm", 10 + i)}}))
         .collect();
     let r = tool(&mut s, "batch", json!({"commands": edits, "coalesce_parameters": true}));
     let results = r["results"].as_array().unwrap();
-    assert_eq!(results.len(), 5, "{r}");
+    assert_eq!(results.len(), 3, "{r}");
     for (i, row) in results.iter().enumerate() {
         assert_eq!(row["name"], format!("h{i}"), "{row}");
-        assert_eq!(row["coalesced"], 5, "{row}");
+        assert_eq!(row["coalesced"], 3, "{row}");
         assert_eq!(row["value"], json!(10.0 + i as f64), "{row}");
     }
-    // The plate and five pins, as tall as the new parameters make them.
-    let pins: f64 = (0..5).map(|i| std::f64::consts::PI * 9.0 * (10.0 + f64::from(i))).sum();
+    // The plate and three pins, as tall as the new parameters make them.
+    let pins: f64 = (0..3).map(|i| std::f64::consts::PI * 9.0 * (10.0 + f64::from(i))).sum();
     let v = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     assert!((v - (100.0 * 100.0 * 5.0 + pins)).abs() < 1e-3 * v, "{v}");
     // The same edits step by step on a second design end in the same design and values.

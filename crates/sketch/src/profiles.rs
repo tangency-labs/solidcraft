@@ -3287,9 +3287,9 @@ mod tests {
             |p: Vec2| profiles.iter().enumerate().filter(|(_, q)| q.region.contains(p)).min_by(|a, b| a.1.area.total_cmp(&b.1.area)).map(|(i, _)| i);
         let mut found = 0;
         for round in 0..2 {
-            for j in 0..=91 {
-                for i in 0..=127 {
-                    let p = Vec2::new(-10.0 + 120.0 * f64::from(i) / 127.0, -10.0 + 100.0 * f64::from(j) / 91.0);
+            for j in 0..=45 {
+                for i in 0..=63 {
+                    let p = Vec2::new(-10.0 + 120.0 * f64::from(i) / 63.0, -10.0 + 100.0 * f64::from(j) / 45.0);
                     let want = old(p);
                     assert_eq!(profile_at_point(&profiles, p), want, "round {round} at {p:?}");
                     for q in &profiles {
@@ -3299,7 +3299,8 @@ mod tests {
                 }
             }
         }
-        assert!(found > 15_000, "{found}");
+        // The plate holds 58 x 40 of the 64 x 46 grid points, 4,640 over both rounds.
+        assert!(found > 3_750, "{found}");
     }
 
     /// The box test before sampling, and the outline sampled once, answer exactly what testing

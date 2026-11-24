@@ -983,7 +983,7 @@ mod tests {
         run(
             &mut s,
             "solid.coil",
-            json!({"diameter": 16, "pitch": 6, "revolutions": 3, "section_size": 2, "base": [15, 15, 5], "operation": "join", "targets": ["Plate"], "name": "Spring"}),
+            json!({"diameter": 16, "pitch": 6, "revolutions": 1, "section_size": 2, "base": [15, 15, 5], "operation": "join", "targets": ["Plate"], "name": "Spring"}),
         );
         run(&mut s, "timeline.copy", json!({"features": ["Base", "Spring"]}));
         let r = run(&mut s, "timeline.paste", json!({"translate": [50, 0, 0]}));
@@ -993,7 +993,7 @@ mod tests {
         assert_eq!(def["definition"]["targets"], json!(["Plate (2)"]), "{def}");
         let st = s.world_state().unwrap();
         let v = |name: &str| solidcraft_kernel::measure(&st.body(name).unwrap().body).unwrap().volume;
-        // A spring on the wrong plate is hundreds of mm³ off. The two plates are measured apart
+        // A spring on the wrong plate (one turn of a 2 mm section round a Ø16) is over a hundred mm³ off. The two plates are measured apart
         // (one moved 50 mm), which the boolean and the measure each round in their own way:
         // a few 1e-6 mm³ on 5000.
         assert!((v("Plate") - v("Plate (2)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (2)"));

@@ -159,20 +159,26 @@ fn heavier_faces(name: &str) -> [Option<Arc<egui::FontData>>; 3] {
 /// `fonts` with `bytes` appended as the last fallback of every interface
 /// family, after the Latin UI font. `None` when the bytes are not a font.
 pub fn with_cjk_fallback(fonts: egui::FontDefinitions, bytes: Vec<u8>) -> Option<egui::FontDefinitions> {
-    with_fallback(fonts, CJK_FALLBACK, bytes)
+    Some(with_fallback(fonts, CJK_FALLBACK, shared_face(bytes)?))
 }
 
-/// `fonts` with `bytes` appended under `name` as the last fallback of every interface
-/// family. `None` when the bytes are not a font.
-fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -> Option<egui::FontDefinitions> {
+/// `bytes` as a face that font definitions share by reference, checked once. `None` when the
+/// bytes are not a font. System CJK faces run to tens of megabytes: installing them again (a
+/// language change, a new window) clones the `Arc`, never the bytes.
+fn shared_face(bytes: Vec<u8>) -> Option<Arc<egui::FontData>> {
     ttf_parser::Face::parse(&bytes, 0).ok()?;
-    fonts.font_data.insert(name.to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+    Some(Arc::new(egui::FontData::from_owned(bytes)))
+}
+
+/// `fonts` with `face` appended under `name` as the last fallback of every interface family.
+fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, face: Arc<egui::FontData>) -> egui::FontDefinitions {
+    fonts.font_data.insert(name.to_owned(), face);
     for family in all_families() {
         let list = fonts.families.entry(family).or_default();
         list.retain(|entry| entry != name);
         list.push(name.to_owned());
     }
-    Some(fonts)
+    fonts
 }
 
 /// `fonts` with the Georgian fallback moved ahead of Hack in a Georgian interface. Hack (egui's
@@ -263,8 +269,8 @@ pub fn install_web_script_fonts(
     for (name, bytes) in [(CJK_FALLBACK, cjk), (CHINESE_FALLBACK, chinese), (HANGUL_FALLBACK, korean)] {
         let Some(bytes) = bytes else { continue };
         any = true;
-        if let Some(next) = with_fallback(fonts.clone(), name, bytes) {
-            fonts = next;
+        if let Some(face) = shared_face(bytes) {
+            fonts = with_fallback(fonts, name, face);
         }
     }
     if any
@@ -498,16 +504,17 @@ pub fn setup_fonts_for(ctx: &egui::Context, language: &str, ui_font: &str) {
 
 /// The system fallback faces, searched for once and kept: reading them takes long on a system
 /// with large CJK fonts, so the app starts that search on a thread and draws its first frame
-/// with the bundled faces (see [`load_system_fonts_in_background`]).
+/// with the bundled faces (see [`load_system_fonts_in_background`]). Each face is read and
+/// checked once; every install shares it (see [`shared_face`]).
 #[cfg(not(target_arch = "wasm32"))]
 struct SystemFonts {
-    cjk: Option<Vec<u8>>,
-    chinese: Option<Vec<u8>>,
-    hangul: Option<Vec<u8>>,
-    thai: Option<Vec<u8>>,
-    hebrew: Option<Vec<u8>>,
-    arabic: Option<Vec<u8>>,
-    georgian: Option<Vec<u8>>,
+    cjk: Option<Arc<egui::FontData>>,
+    chinese: Option<Arc<egui::FontData>>,
+    hangul: Option<Arc<egui::FontData>>,
+    thai: Option<Arc<egui::FontData>>,
+    hebrew: Option<Arc<egui::FontData>>,
+    arabic: Option<Arc<egui::FontData>>,
+    georgian: Option<Arc<egui::FontData>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -525,7 +532,15 @@ fn system_fallbacks() -> &'static SystemFonts {
         let arabic = arabic_font();
         let georgian = fallback::candidate_files(fallback::GEORGIAN)
             .find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
-        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian }
+        SystemFonts {
+            cjk: cjk.and_then(shared_face),
+            chinese: chinese.and_then(shared_face),
+            hangul: hangul.and_then(shared_face),
+            thai: thai.and_then(shared_face),
+            hebrew: hebrew.and_then(shared_face),
+            arabic: arabic.and_then(shared_face),
+            georgian: georgian.and_then(shared_face),
+        }
     })
 }
 
@@ -566,29 +581,23 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Option<&SystemFonts>) {
-    let (cjk, chinese, hangul, thai, hebrew, arabic, georgian) = match system {
-        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone(), f.georgian.clone()),
-        None => (None, None, None, None, None, None, None),
-    };
     let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
         fonts = with_ui_font_faces(fonts, font, heavier_faces(ui_font));
     }
     let order = fallback_order(language);
     for name in order {
-        let bytes = match name {
-            CJK_FALLBACK => cjk.clone(),
-            CHINESE_FALLBACK => chinese.clone(),
-            HANGUL_FALLBACK => hangul.clone(),
-            THAI_FALLBACK => thai.clone(),
-            HEBREW_FALLBACK => hebrew.clone(),
-            ARABIC_FALLBACK => arabic.clone(),
-            _ => georgian.clone(),
-        };
-        if let Some(bytes) = bytes
-            && let Some(with_fallback) = with_fallback(fonts.clone(), name, bytes)
-        {
-            fonts = with_fallback;
+        let face = system.and_then(|f| match name {
+            CJK_FALLBACK => f.cjk.clone(),
+            CHINESE_FALLBACK => f.chinese.clone(),
+            HANGUL_FALLBACK => f.hangul.clone(),
+            THAI_FALLBACK => f.thai.clone(),
+            HEBREW_FALLBACK => f.hebrew.clone(),
+            ARABIC_FALLBACK => f.arabic.clone(),
+            _ => f.georgian.clone(),
+        });
+        if let Some(face) = face {
+            fonts = with_fallback(fonts, name, face);
         }
     }
     fonts = georgian_before_symbols(fonts, language);
@@ -977,7 +986,7 @@ mod tests {
                     _ => None,
                 };
                 if let Some(bytes) = bytes {
-                    fonts = with_fallback(fonts, name, bytes).unwrap();
+                    fonts = with_fallback(fonts, name, shared_face(bytes).unwrap());
                 }
             }
             let ctx = test_context();
@@ -1039,7 +1048,7 @@ mod tests {
         let defaults = look::definitions();
         let mut fonts = defaults.clone();
         for name in fallback_order("zh") {
-            fonts = with_fallback(fonts, name, latin_font_bytes()).unwrap();
+            fonts = with_fallback(fonts, name, shared_face(latin_font_bytes()).unwrap());
         }
         for family in all_families() {
             let list = &fonts.families[&family];
@@ -1070,20 +1079,20 @@ mod tests {
         };
         assert!(!thai(egui::FontDefinitions::default()), "the built-in faces have no Thai");
         let Some(bytes) = found.into_iter().next() else { return };
-        assert!(thai(with_fallback(egui::FontDefinitions::default(), THAI_FALLBACK, bytes).unwrap()), "Thai draws with the fallback");
+        assert!(thai(with_fallback(egui::FontDefinitions::default(), THAI_FALLBACK, shared_face(bytes).unwrap())), "Thai draws with the fallback");
     }
 
     /// The search reads each script's own list: what it found for Thai draws Thai, and what it found
     /// for Hangul draws Hangul. A machine without one finds none, which says nothing.
     #[test]
     fn the_system_search_finds_each_script_in_its_own_list() {
-        let has = |bytes: &Vec<u8>, text: &str| {
-            let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+        let has = |data: &Arc<egui::FontData>, text: &str| {
+            let face = ttf_parser::Face::parse((*data.font).as_ref(), data.index).unwrap();
             text.chars().all(|c| face.glyph_index(c).is_some())
         };
         let found = system_fallbacks();
-        assert!(found.thai.as_ref().is_none_or(|bytes| has(bytes, "สวัสดี")));
-        assert!(found.hangul.as_ref().is_none_or(|bytes| has(bytes, "안녕")));
+        assert!(found.thai.as_ref().is_none_or(|data| has(data, "สวัสดี")));
+        assert!(found.hangul.as_ref().is_none_or(|data| has(data, "안녕")));
     }
 
     /// The Hebrew interface (#3457): every Hebrew candidate this machine has that passes the
@@ -1108,7 +1117,7 @@ mod tests {
         };
         assert!(!hebrew(look::definitions()), "the bundled faces have no Hebrew");
         let Some(bytes) = found.into_iter().next() else { return };
-        assert!(hebrew(with_fallback(look::definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
+        assert!(hebrew(with_fallback(look::definitions(), HEBREW_FALLBACK, shared_face(bytes).unwrap())), "Hebrew draws with the fallback");
     }
 
     /// Georgian: every Georgian candidate this machine has that passes the coverage check draws
@@ -1133,7 +1142,7 @@ mod tests {
         };
         // Hack draws Mkhedruli too, so the system face must come before it to be the one used.
         let Some(bytes) = found.into_iter().next() else { return };
-        let installed = with_fallback(look::definitions(), GEORGIAN_FALLBACK, bytes).unwrap();
+        let installed = with_fallback(look::definitions(), GEORGIAN_FALLBACK, shared_face(bytes).unwrap());
         let at = |fonts: &egui::FontDefinitions, family: &egui::FontFamily, name: &str| {
             fonts.families[family].iter().position(|entry| entry == name).unwrap()
         };
@@ -1160,7 +1169,7 @@ mod tests {
             return;
         };
         let ctx = egui::Context::default();
-        ctx.set_fonts(with_symbol_fallback(with_fallback(look::definitions(), HEBREW_FALLBACK, bytes).unwrap()));
+        ctx.set_fonts(with_symbol_fallback(with_fallback(look::definitions(), HEBREW_FALLBACK, shared_face(bytes).unwrap())));
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         let on_screen = |text: &str| {
             let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), egui::FontId::proportional(14.0), egui::Color32::WHITE));
@@ -1191,7 +1200,7 @@ mod tests {
     fn arabic_messages_land_on_screen_in_display_order() {
         let Some(bytes) = arabic_font() else { return };
         let ctx = egui::Context::default();
-        ctx.set_fonts(with_symbol_fallback(with_fallback(egui::FontDefinitions::default(), ARABIC_FALLBACK, bytes).unwrap()));
+        ctx.set_fonts(with_symbol_fallback(with_fallback(egui::FontDefinitions::default(), ARABIC_FALLBACK, shared_face(bytes).unwrap())));
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         // Each space-separated word as the set of its characters (the shaper orders and joins a
         // word's glyphs, and a glyph's character comes from its cluster), placed by its leftmost
@@ -1273,7 +1282,7 @@ mod tests {
     fn hangul_font_falls_back_after_the_cjk_font() {
         let defaults = look::definitions();
         let cjk = with_cjk_fallback(defaults.clone(), latin_font_bytes()).unwrap();
-        let fonts = with_fallback(cjk, HANGUL_FALLBACK, latin_font_bytes()).unwrap();
+        let fonts = with_fallback(cjk, HANGUL_FALLBACK, shared_face(latin_font_bytes()).unwrap());
         for family in all_families() {
             let list = &fonts.families[&family];
             assert_eq!(list.first(), defaults.families[&family].first(), "the Latin UI font stays first");

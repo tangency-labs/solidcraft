@@ -72,8 +72,10 @@ fn off_the_ball(s: &Session, round: f64) -> (usize, f64) {
     (count, worst)
 }
 
+/// The round is the rolling ball's blend, and the chamfer (undoing the round) builds, both near
+/// what they take off a straight tube.
 #[test]
-fn a_round_on_the_end_circle_of_a_bent_lofted_tube_is_a_rolling_ball_blend() {
+fn a_round_and_a_chamfer_on_the_end_circle_of_a_bent_lofted_tube_build() {
     let mut s = Session::default();
     bent_tube(&mut s);
     let before = volume(&mut s);
@@ -85,21 +87,16 @@ fn a_round_on_the_end_circle_of_a_bent_lofted_tube_is_a_rolling_ball_blend() {
     // between the ball and the wall, 9 (1 - pi / 4) mm2 at 0.2234 * 3 mm inside the wall).
     let straight = 2.0 * PI * 9.0 * (1.0 - PI / 4.0) * (TUBE - 0.2234 * 3.0);
     let removed = before - volume(&mut s);
-    assert!((removed - straight).abs() < 0.08 * straight, "removed {removed}, a straight tube loses {straight}");
+    assert!((removed - straight).abs() < 0.08 * straight, "round: removed {removed}, a straight tube loses {straight}");
     let (count, worst) = off_the_ball(&s, 3.0);
     assert!(count > 200, "only {count} vertices on the round");
     assert!(worst < 0.02, "the round's surface is {worst} mm off the ball's");
-}
 
-#[test]
-fn a_chamfer_on_the_end_circle_of_a_bent_lofted_tube_builds() {
-    let mut s = Session::default();
-    bent_tube(&mut s);
-    let before = volume(&mut s);
+    run(&mut s, "edit.undo", json!({}));
     run(&mut s, "solid.chamfer", json!({"edges": start_circle(), "distance": 3.0}));
     assert_eq!(s.model.state().bodies.len(), 1);
     // A straight tube loses a triangle of 3 x 3 / 2 mm2 with its middle a third of 3 mm inside the wall.
     let straight = 2.0 * PI * 4.5 * (TUBE - 1.0);
     let removed = before - volume(&mut s);
-    assert!((removed - straight).abs() < 0.08 * straight, "removed {removed}, a straight tube loses {straight}");
+    assert!((removed - straight).abs() < 0.08 * straight, "chamfer: removed {removed}, a straight tube loses {straight}");
 }
