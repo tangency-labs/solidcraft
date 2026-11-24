@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn this_build_runs_every_operation_on_solidcore() {
-        for op in OpKind::ALL {
+        for &op in OpKind::ALL {
             assert_eq!(which(op), Which::Solidcore, "{}", op.name());
         }
     }

@@ -51,7 +51,7 @@ pub enum OpKind {
 
 impl OpKind {
     /// Every operation, in the order above.
-    pub const ALL: [OpKind; 12] = [
+    pub const ALL: &[OpKind] = &[
         OpKind::Box,
         OpKind::Cylinder,
         OpKind::Sphere,
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn operation_names_are_their_serde_names() {
-        for k in OpKind::ALL {
+        for &k in OpKind::ALL {
             assert_eq!(serde_json::to_string(&k).ok(), Some(format!("\"{}\"", k.name())));
         }
     }

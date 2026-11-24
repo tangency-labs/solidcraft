@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn the_adapter_takes_every_operation() {
-        for op in OpKind::ALL {
+        for &op in OpKind::ALL {
             assert_eq!(Solidcore.supports(op), Support::Yes, "{}", op.name());
         }
     }
