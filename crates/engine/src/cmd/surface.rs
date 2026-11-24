@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_stitch")
         .contract(&STITCH_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight)"),
+        .params("bodies: [names] (surfaces sewn into the first; a solid when they close); tolerance?: expr (default: tight); name?, body_name?"),
     CommandSpec::new("surface.thicken", "Thicken", crate::checked!("surface.thicken", thicken)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_thicken")
@@ -2447,13 +2447,14 @@ mod tests {
             s
         };
         let (sealed_plain, sealed_small, sealed_big) = (sealed(plain), sealed(small), sealed(big));
-        // The stitch sews the cover onto the cup: one body is left, under the cup's name.
+        // The stitch sews the cover onto the cup: one body is left, under the requested name.
         let only = |s: &Session| {
             let st = s.world_state().unwrap();
             assert_eq!(st.bodies.len(), 1, "the cover still meets the rim: {:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
             st.bodies.first().map(|b| b.name.clone()).unwrap_or_default()
         };
         let (plain_name, small_name, big_name) = (only(&sealed_plain), only(&sealed_small), only(&sealed_big));
+        assert_eq!((plain_name.as_str(), small_name.as_str(), big_name.as_str()), ("Sealed", "Sealed", "Sealed"));
         let gained = |s: &Session, name: &str| volume(s, name) - volume(&sealed_plain, &plain_name);
         let (g1, g2) = (gained(&sealed_small, &small_name), gained(&sealed_big, &big_name));
         eprintln!("the crown adds {g1} mm³ at 0.05 and {g2} mm³ at 0.1 to the sealed cup");
@@ -2822,5 +2823,126 @@ mod tests {
         for p in bad {
             assert!(s.execute("surface.loft", &p).is_err(), "hostile loft params: {p}");
         }
+    }
+
+    /// `surface.stitch` honours `body_name` (including after `surface.unstitch`), reports the
+    /// requested name in open-boundary warnings, and survives undo, redo, reopen and `body.rename`.
+    #[test]
+    fn stitch_uses_body_name_after_unstitch_and_survives_replay() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        let apart = run(&mut s, "surface.unstitch", json!({"body": "Box"}));
+        let pieces: Vec<String> = apart["created_bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        assert_eq!(pieces.len(), 6);
+        let reply = run(&mut s, "surface.stitch", json!({"bodies": pieces, "body_name": "Sealed"}));
+        assert!(reply["warning"].is_null(), "{reply}");
+        let st = s.world_state().unwrap();
+        assert_eq!(st.bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Sealed"]);
+        assert!(!st.body("Sealed").unwrap().body.is_surface());
+        assert!((volume(&s, "Sealed") - 1000.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.world_state().unwrap().bodies.len(), 6);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.world_state().unwrap().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Sealed"]);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(cold.world_state().unwrap().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Sealed"]);
+        assert!((volume(&cold, "Sealed") - 1000.0).abs() < 1e-9);
+        run(&mut s, "body.rename", json!({"body": "Sealed", "name": "Renamed"}));
+        assert_eq!(s.world_state().unwrap().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Renamed"]);
+        // An open stitch warning names the stitched result after `body_name`.
+        let mut open = Session::default();
+        sheet(&mut open, "XY", "SheetA", [0.0, 0.0], [10.0, 10.0]);
+        sheet(&mut open, "XY", "SheetB", [10.0, 0.0], [20.0, 10.0]);
+        let reply = run(&mut open, "surface.stitch", json!({"bodies": ["SheetA", "SheetB"], "body_name": "Joined"}));
+        assert_eq!(reply["warning"], "Stitch result `Joined` remains open (boundary edges: 6).");
+        assert_eq!(open.world_state().unwrap().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Joined"]);
+    }
+
+    /// `surface.stitch` without `body_name` keeps the first input body's name.
+    #[test]
+    fn stitch_without_body_name_keeps_first_body_name() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "SheetA", [0.0, 0.0], [10.0, 10.0]);
+        sheet(&mut s, "XY", "SheetB", [10.0, 0.0], [20.0, 10.0]);
+        run(&mut s, "surface.stitch", json!({"bodies": ["SheetA", "SheetB"]}));
+        let st = s.world_state().unwrap();
+        assert_eq!(st.bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["SheetA"]);
+        assert!((area(&s, "SheetA") - 200.0).abs() < 1e-9);
+    }
+
+    /// Unstitching and re-stitching a middle body preserves its rank in both flat multi-body
+    /// models and multi-component assemblies (where root features must not pull a subcomponent's
+    /// body into root at rank 0).
+    #[test]
+    fn unstitch_and_stitch_preserve_body_rank_in_flat_and_component_models() {
+        let body_names = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        // Flat model: four boxes, unstitch and re-stitch the second one (even in reversed piece order).
+        let mut flat = Session::default();
+        for (name, x) in [("BoxA", 0), ("BoxB", 20), ("BoxC", 40), ("BoxD", 60)] {
+            run(&mut flat, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": name}));
+        }
+        assert_eq!(body_names(&flat), ["BoxA", "BoxB", "BoxC", "BoxD"]);
+        let apart = run(&mut flat, "surface.unstitch", json!({"body": "BoxB"}));
+        let mut pieces: Vec<String> = apart["created_bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        assert_eq!(pieces.len(), 6);
+        pieces.reverse();
+        run(&mut flat, "surface.stitch", json!({"bodies": pieces, "body_name": "Sealed"}));
+        assert_eq!(body_names(&flat), ["BoxA", "Sealed", "BoxC", "BoxD"]);
+        assert!((volume(&flat, "Sealed") - 1000.0).abs() < 1e-9);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&flat.doc.to_json()).unwrap());
+        assert_eq!(body_names(&cold), ["BoxA", "Sealed", "BoxC", "BoxD"]);
+
+        // Multi-component assembly: three sibling components, unstitch + stitch the middle one
+        // while the root component is active.
+        let mut asm = Session::default();
+        let mut comp_b = 0;
+        for (comp, name, x) in [("CompA", "BoxA", 0), ("CompB", "BoxB", 20), ("CompC", "BoxC", 40)] {
+            run(&mut asm, "component.activate", json!({"component": 0}));
+            let created = run(&mut asm, "component.create", json!({"name": comp}));
+            if comp == "CompB" {
+                comp_b = created["component"].as_u64().unwrap();
+            }
+            run(&mut asm, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": name}));
+        }
+        run(&mut asm, "component.activate", json!({"component": 0}));
+        assert_eq!(body_names(&asm), ["BoxA", "BoxB", "BoxC"]);
+        let apart = run(&mut asm, "surface.unstitch", json!({"body": "BoxB"}));
+        let pieces: Vec<String> = apart["created_bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        assert_eq!(pieces.len(), 6);
+        run(&mut asm, "surface.stitch", json!({"bodies": pieces, "body_name": "Sealed"}));
+        assert_eq!(body_names(&asm), ["BoxA", "Sealed", "BoxC"]);
+        assert_eq!(asm.doc.model_body_component(asm.model.state().body("Sealed").unwrap()), comp_b);
+        assert!((volume(&asm, "Sealed") - 1000.0).abs() < 1e-9);
+        let cold = Session::new(solidcraft_doc::Document::from_json(&asm.doc.to_json()).unwrap());
+        assert_eq!(body_names(&cold), ["BoxA", "Sealed", "BoxC"]);
+        assert_eq!(cold.doc.model_body_component(cold.model.state().body("Sealed").unwrap()), comp_b);
+    }
+
+    /// `surface.stitch` disambiguates a `body_name` that collides with a surviving body, while
+    /// allowing reuse of any consumed input body's name (first or non-first).
+    #[test]
+    fn stitch_body_name_disambiguates_surviving_collision_and_allows_consumed_reuse() {
+        let body_names = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Peer"}));
+        sheet(&mut s, "XY", "SheetA", [0.0, 0.0], [10.0, 10.0]);
+        sheet(&mut s, "XY", "SheetB", [10.0, 0.0], [20.0, 10.0]);
+
+        // Collision with surviving body `Peer` -> disambiguated cleanly to `Peer (2)`.
+        run(&mut s, "surface.stitch", json!({"bodies": ["SheetA", "SheetB"], "body_name": "Peer"}));
+        assert_eq!(body_names(&s), ["Peer", "Peer (2)"]);
+        assert!((area(&s, "Peer (2)") - 200.0).abs() < 1e-9);
+
+        // Reuse the second (non-first) consumed input body's name (`SheetB`).
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.stitch", json!({"bodies": ["SheetA", "SheetB"], "body_name": "SheetB"}));
+        assert_eq!(body_names(&s), ["Peer", "SheetB"]);
+        assert!((area(&s, "SheetB") - 200.0).abs() < 1e-9);
+
+        // Reuse the first consumed input body's name (`SheetA`).
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.stitch", json!({"bodies": ["SheetA", "SheetB"], "body_name": "SheetA"}));
+        assert_eq!(body_names(&s), ["Peer", "SheetA"]);
+        assert!((area(&s, "SheetA") - 200.0).abs() < 1e-9);
     }
 }

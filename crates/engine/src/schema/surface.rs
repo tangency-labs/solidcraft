@@ -102,8 +102,8 @@ fn bodies_required(schema: &mut Schema) {
     require(schema, "bodies");
 }
 
-/// Sew surface bodies into the first one along the edges they share; a solid when they close. One
-/// undo step.
+/// Sew surface bodies into the first one along the edges they share; a solid when they close.
+/// Keeps the first body's name unless `body_name` is given. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = bodies_required)]
 pub struct StitchParams {

@@ -58,16 +58,52 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let refs: Vec<&kernel::Body> = idx.iter().filter_map(|i| st.bodies.get(*i).map(|b| &b.body)).collect();
             let sewn = kernel::stitch(&refs, tol)?;
             let Some(mb) = st.bodies.get(first).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let mut consumed = vec![false; st.bodies.len()];
+            for &i in &idx {
+                if let Some(flag) = consumed.get_mut(i) {
+                    *flag = true;
+                }
+            }
+            let (name, creator) = match f.body_names.first().map(|n| n.trim()).filter(|n| !n.is_empty()) {
+                Some(requested) => {
+                    let name = {
+                        let surviving_taken = |candidate: &str| {
+                            st.bodies.iter().enumerate().any(|(j, b)| !consumed.get(j).copied().unwrap_or(false) && b.name == candidate)
+                        };
+                        if !surviving_taken(requested) {
+                            requested.to_string()
+                        } else {
+                            (2..).map(|k| format!("{requested} ({k})")).find(|n| !surviving_taken(n)).unwrap_or_else(|| requested.to_string())
+                        }
+                    };
+                    if let Some(number) =
+                        name.strip_prefix("Body").filter(|_| crate::is_counted_body_name(&name)).and_then(|d| d.parse::<usize>().ok())
+                    {
+                        st.body_counter = st.body_counter.max(number);
+                    }
+                    (name, f.id)
+                }
+                None => (mb.name, mb.feature),
+            };
             let open = sewn.open_edge_count()?;
             if open > 0 {
-                append_warning(warning, format!("Stitch result `{}` remains open (boundary edges: {open}).", mb.name));
+                append_warning(warning, format!("Stitch result `{name}` remains open (boundary edges: {open})."));
             }
+            let mut out = ModelBody::new(name, sewn, creator);
+            out.component = mb.component;
+            out.transferred = mb.transferred || mb.component != f.component;
+            out.source_name = mb.source_name;
+            out.source_transform = mb.source_transform;
             if let Some(slot) = st.bodies.get_mut(first) {
-                *slot = ModelBody::new(mb.name, sewn, mb.feature);
+                *slot = out;
             }
             // The others are now part of the first.
-            let gone: Vec<String> = idx.iter().skip(1).filter_map(|i| st.bodies.get(*i).map(|b| b.name.clone())).collect();
-            st.bodies.retain(|b| !gone.contains(&b.name));
+            let mut j = 0;
+            st.bodies.retain(|_| {
+                let keep = j == first || !consumed.get(j).copied().unwrap_or(false);
+                j += 1;
+                keep
+            });
             Ok(())
         }
         FeatureKind::Thicken { bodies, thickness, symmetric, operation, targets } => {
@@ -367,19 +403,36 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let (pieces, rest) = kernel::unstitch(&mb.body, &crate::plain(faces))?;
             let source = mb.traced();
             // The faces left keep the body's name; each face taken out is a new surface body.
-            match rest {
+            let insert_at = match rest {
                 Some(rest) => {
                     if let Some(slot) = st.bodies.get_mut(i) {
                         *slot = mb.remade(source.then(rest));
                     }
+                    i + 1
                 }
                 None => {
                     st.bodies.remove(i);
+                    i
                 }
-            }
+            };
+            let count = pieces.len();
             for (k, piece) in pieces.into_iter().enumerate() {
                 let name = new_name(st, f, k);
-                st.bodies.push(ModelBody::traced_new(name, source.then(piece), f.id));
+                // Keep each unstitched face in the source body's component and frame so
+                // unstitching (and re-stitching) doesn't pull a subcomponent body to root.
+                let mut out = ModelBody::traced_new(name, source.then(piece), f.id);
+                out.component = mb.component;
+                out.transferred = mb.transferred || mb.component != f.component;
+                out.source_transform = mb.source_transform;
+                st.bodies.push(out);
+            }
+            // Keep the unstitched pieces at the source body's slot so re-stitching them
+            // preserves the body's rank in `st.bodies`.
+            if count > 0
+                && let Some(tail) = st.bodies.get_mut(insert_at..)
+                && count <= tail.len()
+            {
+                tail.rotate_right(count);
             }
             Ok(())
         }
