@@ -605,21 +605,29 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         if qualify {
             let segment = mapped.first().and_then(|region| region.outer.segs.first()).ok_or_else(|| fail("empty profile"))?;
             let p = segment.point_at(0.5);
+            // On the wall face itself, between its angles and heights: a profile reaching a
+            // tangent plane can have this point past the seam, where a replay would not find the
+            // wall (#5358). A point inside is kept.
+            let inside = |v: f64, a: f64, b: f64| if v > a && v < b { v } else { v.clamp(a + 0.25 * (b - a), b - 0.25 * (b - a)) };
+            let p = Vec2::new(inside(p.x, alo * r, ahi * r), inside(p.y, lo, hi));
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
         // On a partial wall: whether the sector over every profile meets the rest of the body (a
         // first check, after which each profile's own solid is checked once it is built).
         let raised = depth > 0.0;
-        // The planes the profiles reach past the wall's seams (by their boxes: one that only
-        // seems to reach keeps its seam whole).
+        // The planes the profiles reach past the wall's seams: a segment crossing the seam line,
+        // or with an end on it or past it (one in contact is then refused as touching the seam).
+        let touch = tol * 100.0;
         let reached: Vec<flat::Flat> = flats
             .into_iter()
             .filter(|f| {
-                mapped.iter().flat_map(|m| m.loops()).flat_map(|l| &l.segs).any(|s| {
-                    let (l, h) = seg_box(s);
-                    if f.side > 0.0 { h.x > f.x } else { l.x < f.x }
-                })
+                let past = |x: f64| (x - f.x) * f.side > -touch;
+                mapped
+                    .iter()
+                    .flat_map(|m| m.loops())
+                    .flat_map(|l| &l.segs)
+                    .any(|s| past(s.start().x) || past(s.end().x) || !crossings(s, f.x).is_empty())
             })
             .collect();
         let mut broad = false;
@@ -642,6 +650,8 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             .flat_map(|l| &l.segs)
             .map(seg_box)
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(l.x), b.max(h.x)));
+        // Past the seams the footprint lies on the planes: the wall's own part is centred.
+        let (x_lo, x_hi) = if reached.is_empty() { (x_lo, x_hi) } else { (x_lo.max(alo * r), x_hi.min(ahi * r)) };
         let wall_form = wall_form.map(|w| w.centred(0.5 * (x_lo + x_hi), r));
         let cap_form = OnForm {
             delta: 0.0,
@@ -667,7 +677,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             spans: std::cell::Cell::new(MAX_TOTAL_SPANS),
         };
         if !reached.is_empty() {
-            let rebuilt = chain::Chain::new(&wall, reached, rr, depth).build(&mut asm, &selected, fi, &numbered, body, tol * 100.0)?;
+            let rebuilt = chain::Chain::new(&wall, reached, rr, depth).build(&mut asm, &selected, fi, &numbered, body, touch)?;
             let mut history: Vec<_> =
                 (0..rec.faces.len()).filter(|i| !rebuilt.removed.contains(i)).map(|i| crate::record::from_face(0, i, Change::Kept)).collect();
             for (f, h) in rebuilt.faces {
@@ -1922,6 +1932,13 @@ mod tests {
             let change = volume(&result) - before;
             assert!((change - want).abs() < 1e-6, "depth {depth} mirror {mirror}: {change} vs {want}");
         }
+        // A profile whose first edge lies wholly on the plane: the inferred pick is still on the
+        // wall face, and replaying it builds the emboss.
+        let wedge = Region2 { outer: Loop2::polygon(&[Vec2::new(14., 0.), Vec2::new(22., -3.), Vec2::new(22., 3.)]), holes: vec![] };
+        let (_, at) = infer_cylinder_emboss(&body, &on_round_end(), std::slice::from_ref(&wedge), 0.5).unwrap().unwrap();
+        assert!(at.x < 1e-9, "the pick {at:?} is on the round end");
+        let replayed = emboss_cylinder_at(&body, at, &on_round_end(), std::slice::from_ref(&wedge), 0.5);
+        assert!(replayed.is_ok(), "{:?}", replayed.map(|_| ()));
     }
 
     #[test]
@@ -2001,6 +2018,33 @@ mod tests {
         let want = (seam - 12.) * 6. * (rr * rr - 100.) / 20. + (20. - seam) * 6. * 0.5;
         let change = volume(&result) - before;
         assert!((change - want).abs() < 1e-6, "{change} vs {want}");
+        // A long plane: the footprint's middle lies turns round from the wall, and the wall's
+        // slanted edge, fitted on the wall's form, still lands on the wall.
+        // The wall a 120° sketch arc (its form two arcs of 60°, not on the quarter grid), with
+        // planes 60 long tangent to it either side.
+        let third = std::f64::consts::FRAC_PI_3;
+        let at = |t: f64| Vec2::new(10. * t.cos(), 10. * t.sin());
+        let (a0, a1) = (at(2. * third), at(4. * third));
+        let (b0, b1) = (a0 + Vec2::new(0.866_025_403_784_438_6, 0.5) * 60., a1 + Vec2::new(0.866_025_403_784_438_6, -0.5) * 60.);
+        let outline = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 10., start: 2. * third, sweep: 2. * third },
+                Seg2::Line { a: a1, b: b1 },
+                Seg2::Line { a: b1, b: b0 },
+                Seg2::Line { a: b0, b: a0 },
+            ],
+        };
+        let long = crate::extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0., 20.).unwrap().remove(0);
+        let before = volume(&long);
+        let seam = 10. * third;
+        let slanted =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(8., -3.), Vec2::new(66., -3.), Vec2::new(68., 3.), Vec2::new(10., 3.)]), holes: vec![] };
+        let result = emboss_cylinder(&long, &on_round_end(), std::slice::from_ref(&slanted), 0.5).unwrap();
+        assert!(result.validity().is_empty());
+        let on_wall = 6. * (seam - 9.);
+        let want = on_wall * (rr * rr - 100.) / 20. + (348. - on_wall) * 0.5;
+        let change = volume(&result) - before;
+        assert!((change - want).abs() < 1e-5 * 348., "{change} vs {want}");
     }
     #[test]
     fn inference_uses_finite_wall_footprint_and_an_interior_profile_anchor() {

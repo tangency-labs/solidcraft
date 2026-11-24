@@ -9,7 +9,7 @@ use solidcore_record::brep::{Brep, Curve, Loop};
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::prelude::*;
 
-use super::{angle, face_axial_bounds};
+use super::angle;
 
 /// A wall about `axis` through `o` of radius `r`, seen from the sketch: angles from `radial`
 /// towards `tangent`.
@@ -161,9 +161,11 @@ pub(super) fn tangent_flats(
         if !same(h0, heights.0) || !same(h1, heights.1) {
             continue;
         }
-        match face_axial_bounds(rec, *g, wall.o, wall.axis) {
-            Ok(Some((lo, hi))) if same(lo, heights.0) && same(hi, heights.1) => {}
-            _ => continue,
+        // The plane's own heights, from its edges' trimmed ends (every edge is straight).
+        let (lo, hi) =
+            ends.iter().flat_map(|(a, b)| [height(*a), height(*b)]).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), z| (l.min(z), h.max(z)));
+        if !same(lo, heights.0) || !same(hi, heights.1) {
+            continue;
         }
         out.push(Flat { face: *g, seam, x: end * wall.r, side, width, foot, dir, normal });
     }
