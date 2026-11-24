@@ -1681,7 +1681,7 @@ impl SolveApp {
         }
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
-            return Err(self.tr("prefs.plugin_busy").into());
+            return Err(plugins::busy_message(self));
         }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
@@ -1692,8 +1692,20 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
+        // Reading which designs are open is no file operation: it answers while one runs.
+        if id == "document.list" {
+            return documents::command(self, id, &params);
+        }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The window has the design tabs, which the engine does not: it shows the design asked for.
+        if id == "document.activate" {
+            return documents::command(self, id, &params);
+        }
+        // `new_tab`: the design opens in a tab of its own and the active one stays as it was.
+        if matches!(id, "file.new" | "doc.open") && documents::take_new_tab(&mut params) {
+            return documents::run_in_new_tab(self, id, params);
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
@@ -1791,7 +1803,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
+        let selection_changed =
+            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
@@ -1876,6 +1889,22 @@ impl SolveApp {
                 "sketch.insert_svg" | "sketch.insert_dxf" => {
                     if let Some(w) = v.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty()) {
                         self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
+                    }
+                }
+                "mesh.reduce" => {
+                    if let (Some(original), Some(target), Some(achieved)) = (
+                        v.get("original_triangles").and_then(Value::as_u64),
+                        v.get("target_triangles").and_then(Value::as_u64),
+                        v.get("achieved_triangles").and_then(Value::as_u64),
+                    ) {
+                        let key = if achieved > target { "ui.mesh_reduce_shortfall" } else { "ui.mesh_reduce_result" };
+                        self.set_status(
+                            solidcraft_ui_text::Locale::for_language(&self.preferences.language).format(
+                                key,
+                                &[("original", &original.to_string()), ("target", &target.to_string()), ("achieved", &achieved.to_string())],
+                            ),
+                            false,
+                        );
                     }
                 }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
@@ -3280,6 +3309,7 @@ impl SolveApp {
                         FeatureKind::Import { .. } => language.text("ui.feature_kind.import"),
                         FeatureKind::MeshImport { .. } => language.text("ui.feature_kind.mesh_import"),
                         FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
+                        FeatureKind::MeshReduce { .. } => language.text("ui.feature_kind.mesh_reduce"),
                         FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
                         FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
@@ -3604,21 +3634,46 @@ impl SolveApp {
         self.status_is_tool_hint = true;
     }
 
-    /// Tell the user when the open design came from a newer SolidCraft: the notice on the status
-    /// line, and what this version couldn't read in the messages.
+    /// Tell the user when a newer SolidCraft saved the design or one of its drawings.
+    /// The status line carries the first notice, and the messages name what could not be read.
     pub(crate) fn say_newer_file(&mut self) {
-        let Some(file) = self.session.doc.newer_file.clone() else { return };
-        for what in &file.not_understood {
-            let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
-            self.messages.push(&text, false, now_ms());
-        }
-        let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
-            let change = file.unknown_changes.first().map_or("", String::as_str);
-            solidcraft_ui_text::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
-        } else {
-            solidcraft_ui_text::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+        let notice = |format: u32, reads: u32, changes: &[String], drawing: Option<&str>| {
+            let change = changes.first().filter(|_| format <= reads);
+            let format = format.to_string();
+            match (drawing, change) {
+                (None, Some(change)) => solidcraft_ui_text::format("document.newer_file_change", &[("format", &format), ("change", change)]),
+                (None, None) => solidcraft_ui_text::format("document.newer_file", &[("format", &format), ("reads", &reads.to_string())]),
+                (Some(name), Some(change)) => {
+                    solidcraft_ui_text::format("document.newer_drawing_change", &[("drawing", name), ("format", &format), ("change", change)])
+                }
+                (Some(name), None) => {
+                    solidcraft_ui_text::format("document.newer_drawing", &[("drawing", name), ("format", &format), ("reads", &reads.to_string())])
+                }
+            }
         };
-        self.set_status(text, false);
+        let mut status = self.session.doc.newer_file.as_ref().map(|file| {
+            for what in &file.not_understood {
+                let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            notice(file.format, file.reads_up_to, &file.unknown_changes, None)
+        });
+        for drawing in &self.session.doc.drawings {
+            let Some(file) = &drawing.newer_file else { continue };
+            for what in &file.not_understood {
+                let text = solidcraft_ui_text::format("document.newer_drawing_not_read", &[("drawing", &drawing.name), ("what", what)]);
+                self.messages.push(&text, false, now_ms());
+            }
+            let text = notice(file.format, file.reads_up_to, &file.unknown_changes, Some(&drawing.name));
+            if status.is_some() {
+                self.messages.push(&text, false, now_ms());
+            } else {
+                status = Some(text);
+            }
+        }
+        if let Some(text) = status {
+            self.set_status(text, false);
+        }
     }
 
     /// Tell the user when the open design keeps data of a plugin that can't change it here: one
@@ -4831,7 +4886,7 @@ impl SolveApp {
                 }
                 continue;
             }
-            if (waits && control_job::changes_the_design(&req.method))
+            if (waits && control_job::changes_the_design(&req.method) && !control_job::lists_designs(&req))
                 || (self.file_picker_busy() && matches!(req.method.as_str(), "ui.file" | "ui.home"))
                 // A screenshot shows the whole design: it waits until an opened one is meshed.
                 || (open_meshing::active(self) && req.method == "ui.screenshot")
