@@ -23,9 +23,11 @@
 //! - another curve of the pair has an interval on A that is E whole: its middle is E and
 //!   its ends are E's own two vertices;
 //!
-//! and on face B every end of the run that is classified to an edge or a vertex of B is
-//! also an interval end of that other curve on B, with the same object (so dropping the
-//! run removes no split of B's topology that C1 does not make too).
+//! and on face B the run is not vertex/edge/vertex, its middle is classified as the other
+//! curve's interval there (same class and object; or to nothing, or unknown), and every
+//! end of it classified to an edge or a vertex of B is an end of that interval or of its
+//! two neighbours with the same object (so dropping the run removes no imprint or split of
+//! B that C1 does not make too). An interval already dropped never justifies a drop.
 //!
 //! Within the tolerance C2's run and C1 are then one intersection. ARGUED, not proven:
 //! the run's ends and middle are on E within the classification tolerance, and C1 is E
@@ -157,21 +159,33 @@ fn is_whole_edge<O: ClassObject>(
         )
 }
 
-/// Whether every end of `run` (an interval on face B) that is classified to an edge or a
-/// vertex is also an interval end of `whole` (another curve's classification on B) with
-/// the same class and object.
-fn ends_kept_by<O: ClassObject>(
+/// Whether dropping `run` (an interval on face B) loses nothing of B that interval `m` of
+/// `whole` (the curve that is the whole edge on A, here on B) does not make: `run`'s middle
+/// is classified as `whole`'s interval `m` (same class and object), or to nothing or
+/// is unknown (no imprint), and every end of `run` classified to an edge or a vertex is an
+/// end of interval `m - 1`, `m` or `m + 1` of `whole` with the same class and object.
+fn kept_by<O: ClassObject>(
     run: &CurveInterval<O>,
     whole: &CurveClassification<O>,
+    m: usize,
 ) -> Result<bool> {
+    let mate = whole.at(m)?;
+    let mid = run.mid.point_class();
+    let differs = mid != mate.mid.point_class() || run.mid.object() != mate.mid.object();
+    if differs && !matches!(mid, PointClassType::Nothing | PointClassType::Unknown) {
+        return Ok(false);
+    }
     for end in [&run.start, &run.end] {
         let class = end.point_class();
         if class != PointClassType::Edge && class != PointClassType::Vertex {
             continue;
         }
         let mut found = false;
-        for m in 0..whole.size() {
-            let w = whole.at(m)?;
+        for n in m.saturating_sub(1)..=m.saturating_add(1) {
+            if n >= whole.size() {
+                continue;
+            }
+            let w = whole.at(n)?;
             for b in [&w.start, &w.end] {
                 if b.point_class() == class && b.object() == end.object() {
                     found = true;
@@ -183,6 +197,13 @@ fn ends_kept_by<O: ClassObject>(
         }
     }
     Ok(true)
+}
+
+/// Whether `ivl` is vertex/edge/vertex: the whole of some edge.
+fn is_vertex_edge_vertex<O: ClassObject>(ivl: &CurveInterval<O>) -> bool {
+    ivl.start.point_class() == PointClassType::Vertex
+        && ivl.mid.point_class() == PointClassType::Edge
+        && ivl.end.point_class() == PointClassType::Vertex
 }
 
 /// Drops from each face pair that is not coincident every curve interval that runs along
@@ -222,6 +243,11 @@ pub(super) fn drop_duplicate_edge_runs<O: ClassObject>(
                 let (i1, i2) = (c1.at(ll)?, c2.at(ll)?);
                 let mut duplicate = false;
                 for (ivl, ivl_b, side) in [(i1, i2, 0), (i2, i1, 1)] {
+                    // (an interval that is a whole edge on the other face is kept: it may
+                    // be the only copy of that edge)
+                    if is_vertex_edge_vertex(ivl_b) {
+                        continue;
+                    }
                     let Some(ends) = partial_edge_run(g, ivl) else {
                         continue;
                     };
@@ -230,14 +256,14 @@ pub(super) fn drop_duplicate_edge_runs<O: ClassObject>(
                             continue;
                         }
                         let (other, other_b) = if side == 0 { (d1, d2) } else { (d2, d1) };
-                        let mut whole = false;
                         for m in 0..other.size() {
-                            if is_whole_edge(g, other.at(m)?, ends) {
-                                whole = true;
+                            // (never against an interval already dropped)
+                            if dropped.contains(&[pi, cj, m]) {
+                                continue;
                             }
-                        }
-                        if whole && ends_kept_by(ivl_b, other_b)? {
-                            duplicate = true;
+                            if is_whole_edge(g, other.at(m)?, ends) && kept_by(ivl_b, other_b, m)? {
+                                duplicate = true;
+                            }
                         }
                     }
                 }

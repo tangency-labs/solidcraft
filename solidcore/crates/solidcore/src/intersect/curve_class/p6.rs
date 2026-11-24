@@ -2355,6 +2355,52 @@ mod tests {
         assert_eq!(rest.end.point_class(), Pc::Unknown);
     }
 
+    /// WR-647: an F-F-F input over [0.25, 0.75] across the unclassified [0, 0.5] and
+    /// [0.5, 1] splits both at the input's ends and labels exactly [0.25, 0.75]; the outer
+    /// pieces keep their unknown middles and far ends. Upstream's combine labelled all of
+    /// [0, 1] as on face A.
+    #[test]
+    fn fff_input_inside_two_intervals_labels_only_its_extent() {
+        let k = Kernel::default();
+        let range = Extent1d::from_min_max(0.0, 1.0);
+        let g = Gf(Curve::from(Line::bounded(
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            &range,
+            &BoundedLineOptions::default(),
+        )));
+        let mut cc = CurveClassification::new(&k);
+        cc.set_curve(Some(Fc::A), false);
+        cc.set_size(&k, 2).unwrap();
+        cc.at_mut(0)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.0, 0.5));
+        cc.at_mut(1)
+            .unwrap()
+            .set_interval(&Extent1d::from_min_max(0.5, 1.0));
+        let mut input = CurveInterval::with_interval(&k, &Extent1d::from_min_max(0.25, 0.75), None);
+        input.start.set_class_object(Pc::Face, Some(Fc::A));
+        input.mid = input.start;
+        input.end = input.start;
+        cc.insert_curve_interval(&k, &g, &input).unwrap();
+        assert_eq!(cc.size(), 4);
+        let got: Vec<_> = (0..4).map(|n| *cc.at(n).unwrap()).collect();
+        let bounds: Vec<_> = got
+            .iter()
+            .map(|c| (c.interval.min(), c.interval.max()))
+            .collect();
+        assert_eq!(bounds, [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)]);
+        assert_eq!(got[0].start.point_class(), Pc::Unknown);
+        assert_eq!(got[0].mid.point_class(), Pc::Unknown);
+        for inner in &got[1..3] {
+            assert_eq!(inner.start.object(), Some(Fc::A));
+            assert_eq!(inner.mid.object(), Some(Fc::A));
+            assert_eq!(inner.end.object(), Some(Fc::A));
+        }
+        assert_eq!(got[3].mid.point_class(), Pc::Unknown);
+        assert_eq!(got[3].end.point_class(), Pc::Unknown);
+    }
+
     #[test]
     fn unclassified_merge_and_empty_homogenization_use_real_api() {
         let (k, g, mut cc) = setup();
