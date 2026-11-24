@@ -68,7 +68,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "point_class_gap_3d_propagates_no_drop_error",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
-    "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
     "ssi_proto_topology_statuses_pass_on",
     "ssi_tangent_curve_tracer",
